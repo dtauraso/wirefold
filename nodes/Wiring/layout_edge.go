@@ -13,11 +13,16 @@ type LayoutMsg struct {
 	IR         int
 	FromCenter vec3
 	// PropagatingKind names the node kind ALLOWED TO PROPAGATE (forward) this
-	// cascade — it is about who may SEND the message onward, NOT about who updates
-	// their position (every receiver still applies). Set once by the seed to the
+	// cascade — who may SEND the message onward. Set once by the seed to the
 	// dragged node's kind and carried unchanged through forwarding; a receiving
 	// node forwards only if its own kind equals this.
 	PropagatingKind string
+	// UpdateKinds is the SET of node kinds allowed to UPDATE (reposition) on
+	// receiving this cascade — who may UPDATE, a separate axis from who may send.
+	// Set by the propagating timer node when the message reaches it; for a timer
+	// cascade it is {timer, pulse}. A receiver applies only if its kind is in this
+	// set (constant-time lookup), so receiving alone no longer means "move me".
+	UpdateKinds map[string]bool
 	// Direct marks a DIRECT position set (SLICE 3: the drag origin's own new center,
 	// delivered by node_move.go RootMove/fanCenters via LayoutPort.InjectDirect) rather
 	// than a radius-cascade hop. A direct message is applied verbatim to THIS node
@@ -37,7 +42,21 @@ func (msg LayoutMsg) clone() LayoutMsg {
 	for k, val := range msg.Visited {
 		v[k] = val
 	}
-	return LayoutMsg{Visited: v, IR: msg.IR, FromCenter: msg.FromCenter, PropagatingKind: msg.PropagatingKind}
+	var uk map[string]bool
+	if msg.UpdateKinds != nil {
+		uk = make(map[string]bool, len(msg.UpdateKinds))
+		for kk, val := range msg.UpdateKinds {
+			uk[kk] = val
+		}
+	}
+	return LayoutMsg{Visited: v, IR: msg.IR, FromCenter: msg.FromCenter, PropagatingKind: msg.PropagatingKind, UpdateKinds: uk}
+}
+
+// timerUpdateKinds is the set of node kinds a timer (HoldNewSendOld) node marks
+// as allowed to UPDATE on its cascade: the timer kind itself plus Pulse. Constant
+// set, one place to change what a timer cascade repositions.
+func timerUpdateKinds(timerKind string) map[string]bool {
+	return map[string]bool{timerKind: true, "Pulse": true}
 }
 
 // LayoutPort is the per-node hidden-layout-graph plumbing: one inbound channel
@@ -223,18 +242,23 @@ func (p *LayoutPort) Handle(msg LayoutMsg) {
 		Theta: float64(p.iTheta) * stepTheta,
 		Phi:   float64(p.iPhi) * stepPhi,
 	}))
-	p.iR = newIR
-	if p.apply != nil {
-		p.apply(newCenter, newIR)
+	// Application (reposition) is gated by UpdateKinds: a receiver updates its own
+	// position ONLY if its kind is in the message's UpdateKinds set. This is what
+	// ends the blanket visit-and-apply — merely receiving the message no longer
+	// means "move me". For a timer-originated cascade the set is {timer, pulse}, so
+	// 1 (Input) receives but does NOT move, while 5 (timer) and 6 (Pulse) do.
+	if msg.UpdateKinds[p.kind] {
+		p.iR = newIR
+		if p.apply != nil {
+			p.apply(newCenter, newIR)
+		}
 	}
 
-	// Propagation is gated by PropagatingKind: only a node whose OWN kind matches
-	// the message's PropagatingKind is allowed to forward this cascade further.
-	// This gates who may SEND, not who updates — every receiver above still
-	// applied. The allowed kind is set once by the seed (the dragged node's kind)
-	// and carried unchanged through forwarding. So when 2 sends to {1,6,5}, all
-	// three receive/apply, but only 5 (kind == PropagatingKind == HoldNewSendOld)
-	// forwards; 1 (Input) and 6 (Pulse) do not.
+	// Propagation is gated by PropagatingKind (separate from UpdateKinds): only a
+	// node whose OWN kind matches the message's PropagatingKind may forward this
+	// cascade further — who may SEND, not who updates. Only timer nodes forward,
+	// and timer nodes are in UpdateKinds, so a forwarder always has a valid
+	// newCenter to hand on.
 	if p.kind != msg.PropagatingKind {
 		return
 	}
@@ -242,6 +266,9 @@ func (p *LayoutPort) Handle(msg LayoutMsg) {
 		fwd := msg.clone()
 		fwd.IR = newIR
 		fwd.FromCenter = newCenter
+		// The timer node sets the update kinds on the message it sends onward:
+		// timer + pulse.
+		fwd.UpdateKinds = timerUpdateKinds(p.kind)
 		select {
 		case out <- fwd:
 		default:

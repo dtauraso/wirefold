@@ -66,17 +66,24 @@ func init() {
 
 // writeCascadeTree builds a small tree topology on disk:
 //
-//	2 (HoldNewSendOld, root, radius-forwarding node)
-//	└─ 5 (HoldNewSendOld, reference=2, radius-forwarding node)
-//	   ├─ 7 (Hold, reference=5, NON-forwarding — cascade must stop here)
-//	   │  └─ 10 (Hold, reference=7 — must NOT receive the cascade at all)
-//	   └─ 8 (HoldNewSendOld, reference=5, radius-forwarding node — cascade continues)
-//	      └─ 9 (Hold, reference=8 — must receive the cascade, forwarded via 8)
+//	2 (LayoutTestTime, root, radius-forwarding node)
+//	└─ 5 (LayoutTestTime, reference=2, radius-forwarding node)
+//	   ├─ 7 (LayoutTestPlain, reference=5, NON-forwarding — cascade must stop here)
+//	   │  └─ 10 (LayoutTestPlain, reference=7 — must NOT receive the cascade at all)
+//	   └─ 8 (LayoutTestTime, reference=5, radius-forwarding node — cascade continues)
+//	      └─ 9 (LayoutTestPlain, reference=8 — must receive the cascade, forwarded via 8)
 //
 // Domain edges mirror 1:1 onto the hidden layout graph (loader.go buildLayoutEdges),
-// so dragging "5" (whose reference "2" is a radius-forwarding node) cascades a radius change to
-// 5's own reposition, then on to 7 and 8 (5 is a radius-forwarding node), then on to 9 (8 is a radius-forwarding
-// node) but NOT to 10 (7 is not a radius-forwarding node, so it does not forward).
+// so dragging "5" (whose reference "2" is a radius-forwarding node) forwards a radius
+// change to 7 and 8 (5 is a radius-forwarding node, its kind matches PropagatingKind),
+// then on to 9 (8 is a radius-forwarding node) but NOT to 10 (7 is not a
+// radius-forwarding node, so it does not forward). Forwarding (who relays the message)
+// is gated by LayoutMsg.PropagatingKind — only nodes whose own kind equals the dragged
+// node's kind ("LayoutTestTime") forward. Repositioning (who actually moves) is a
+// SEPARATE gate, LayoutMsg.UpdateKinds (timerUpdateKinds: the dragged node's own kind
+// plus "Pulse") — so among the forward-reached nodes, only "5" and "8" (kind
+// LayoutTestTime) reposition; "7" and "9" (kind LayoutTestPlain) receive/forward-gate
+// the message but do NOT move, same as "10" which never receives it at all.
 func writeCascadeTree(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
@@ -159,11 +166,14 @@ func readPersistedQuantIR(t *testing.T, root, id string, want int) {
 }
 
 // TestRadiusCascadePropagatesThroughForwardersOnly drives a live drag on node "5"
-// (whose reference "2" is a radius-forwarding node) and asserts: the cascade reaches 5, 7, 8, 9
-// (7 and 8 both children of 5; 9 a grandchild reached only because 8 is a radius-forwarding node),
-// their world centers land where the plain-local-polar formula predicts, the new iR is
-// persisted to each reached node's meta.json, and node 10 (child of the non-forwarding node 7)
-// never receives the cascade at all — its world center stays exactly where it loaded.
+// (whose reference "2" is a radius-forwarding node) and asserts the two-axis model:
+// the cascade is FORWARDED to 5, 7, 8, 9 (7 and 8 both children of 5; 9 a grandchild
+// reached only because 8 is a radius-forwarding node, gated by LayoutMsg.PropagatingKind),
+// but only 5 and 8 (kind LayoutTestTime, matching LayoutMsg.UpdateKinds) actually
+// REPOSITION to where the plain-local-polar formula predicts and persist the new iR to
+// meta.json; 7 and 9 (kind LayoutTestPlain) are reached/forward-gated but do NOT move —
+// their world centers stay exactly where they loaded, same as node 10 (child of the
+// non-forwarding node 7), which never receives the cascade at all.
 func TestRadiusCascadePropagatesThroughForwardersOnly(t *testing.T) {
 	root := writeCascadeTree(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -186,6 +196,14 @@ func TestRadiusCascadePropagatesThroughForwardersOnly(t *testing.T) {
 	tenBefore, ok := md.centerOfNode("10")
 	if !ok {
 		t.Fatal("10 has no center before drag")
+	}
+	sevenBefore, ok := md.centerOfNode("7")
+	if !ok {
+		t.Fatal("7 has no center before drag")
+	}
+	nineBefore, ok := md.centerOfNode("9")
+	if !ok {
+		t.Fatal("9 has no center before drag")
 	}
 
 	// Drag "5" to a NEW RADIUS along its EXISTING (iTheta=1, iPhi=0) direction about its
@@ -217,35 +235,48 @@ func TestRadiusCascadePropagatesThroughForwardersOnly(t *testing.T) {
 	}
 	newIR := newOff.iR
 
-	// 7 and 8: children of 5, both reached because 5 is a radius-forwarding node. Each computes its
-	// OWN new center as refCenter (5's new center) + polar2cart({R: newIR*stepR,
-	// Theta: its own iTheta*stepTheta, Phi: its own iPhi*stepPhi}) — the plain
-	// local-polar formula (layout_edge.go Handle), NOT the rotated forward-kinematics
-	// compose path.
-	want7 := want5.add(polar2cart(polar{R: float64(newIR) * stepR, Theta: 0 * stepTheta, Phi: 1 * stepPhi}))
+	// 8: child of 5, reached because 5 is a radius-forwarding node, AND repositions
+	// because its kind (LayoutTestTime) is in UpdateKinds ({dragged node's own kind,
+	// "Pulse"}). Its new center is refCenter (5's new center) + polar2cart({R:
+	// newIR*stepR, Theta: its own iTheta*stepTheta, Phi: its own iPhi*stepPhi}) — the
+	// plain local-polar formula (layout_edge.go Handle), NOT the rotated
+	// forward-kinematics compose path.
 	want8 := want5.add(polar2cart(polar{R: float64(newIR) * stepR, Theta: -1 * stepTheta, Phi: 0 * stepPhi}))
-	got7 := waitCenterClose(t, md, "7", want7, 1e-6)
-	got8 := waitCenterClose(t, md, "8", want8, 1e-6)
-	_ = got7
-	_ = got8
+	waitCenterClose(t, md, "8", want8, 1e-6)
 
-	// 9: grandchild of 5 via 8 — reached ONLY because 8 (not 7) is a radius-forwarding node and
-	// forwards past itself.
-	want9 := want8.add(polar2cart(polar{R: float64(newIR) * stepR, Theta: 0, Phi: 0}))
-	waitCenterClose(t, md, "9", want9, 1e-6)
-
-	// 10: grandchild of 5 via 7 — 7 is NOT a radius-forwarding node, so it re-places itself but does
-	// not forward; 10 never receives any LayoutMsg at all and its center is unchanged.
-	time.Sleep(300 * time.Millisecond) // give any (unwanted) propagation a chance to land
+	// 7: child of 5, reached (forwarded) because 5 is a radius-forwarding node, but its
+	// kind (LayoutTestPlain) is NOT in UpdateKinds — it receives/forward-gates the
+	// cascade (and does not itself forward, since its kind != PropagatingKind) but does
+	// NOT reposition. Its world center stays exactly where it loaded.
+	//
+	// 9: grandchild of 5 via 8 — forward-reached ONLY because 8 (not 7) is a
+	// radius-forwarding node and forwards past itself, but like 7 its kind
+	// (LayoutTestPlain) is not in UpdateKinds, so it also does not reposition.
+	//
+	// 10: grandchild of 5 via 7 — 7 is NOT a radius-forwarding node (its kind !=
+	// PropagatingKind), so it does not forward; 10 never receives any LayoutMsg at all.
+	//
+	// All three (7, 9, 10) are therefore expected to be unchanged from their loaded
+	// centers, so give any (unwanted) propagation/reposition a chance to land before
+	// checking.
+	time.Sleep(300 * time.Millisecond)
+	sevenAfter, _ := md.centerOfNode("7")
+	if sevenAfter.sub(sevenBefore).length() > 1e-9 {
+		t.Fatalf("7 moved even though its kind is not in the cascade's UpdateKinds: before=%v after=%v", sevenBefore, sevenAfter)
+	}
+	nineAfter, _ := md.centerOfNode("9")
+	if nineAfter.sub(nineBefore).length() > 1e-9 {
+		t.Fatalf("9 moved even though its kind is not in the cascade's UpdateKinds: before=%v after=%v", nineBefore, nineAfter)
+	}
 	tenAfter, _ := md.centerOfNode("10")
 	if tenAfter.sub(tenBefore).length() > 1e-9 {
 		t.Fatalf("10 moved even though its reference (7) is not a radius-forwarding node: before=%v after=%v", tenBefore, tenAfter)
 	}
 
-	// Persistence: the new iR lands on disk for every node the cascade actually
-	// reached, confirming applyLayoutCenter's schedule() call reached quantOffsetPersist.
+	// Persistence: the new iR lands on disk only for nodes that actually repositioned
+	// (5 and 8), confirming applyLayoutCenter's schedule() call reached
+	// quantOffsetPersist. 7 and 9 never call applyLayoutCenter (UpdateKinds gate),
+	// so their meta.json quantIR is never touched by this drag.
 	readPersistedQuantIR(t, root, "5", newIR)
-	readPersistedQuantIR(t, root, "7", newIR)
 	readPersistedQuantIR(t, root, "8", newIR)
-	readPersistedQuantIR(t, root, "9", newIR)
 }
