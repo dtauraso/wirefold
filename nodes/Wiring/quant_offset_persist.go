@@ -3,16 +3,15 @@ package Wiring
 // quant_offset_persist.go — the WRITE side of the quantized scalar triple (a,b,c) =
 // (iTheta,iPhi,iR) as file data.
 //
-// Under the flat absolute scene-polar model (quantized_layout.go measureScalars/
-// deriveCenters, node_move.go RootMove) a node's PERSISTED position is its integer
-// scalar triple about the scene center — every node is a root; there is no reference/
-// parent concept. This is the debounced read-modify-write mirror: RootMove calls
-// schedule() for the dragged node; this persister coalesces rapid updates (a drag)
-// into one write per node after motion settles, and writes
-// quantITheta/quantIPhi/quantIR to `<root>/nodes/<id>/meta.json`, preserving every
-// other field and DELETING the legacy scenePolarR/Theta/Phi fields (scalars are now
-// the sole persisted position source) and any leftover `reference` field from the
-// removed reference-tree model.
+// A node's PERSISTED position is its EXACT scene-polar (r,θ,φ) about the scene center —
+// lossless, so a dragged node reloads at exactly where it was dropped. The quantized
+// scalar triple (quantITheta/quantIPhi/quantIR + steps) rides along as a self-describing
+// cache of the drag-time snap cells, NOT the position source. This is the debounced
+// read-modify-write mirror: RootMove calls schedule() for the dragged (and equalized)
+// nodes; this persister coalesces rapid updates (a drag) into one write per node after
+// motion settles, writing scenePolarR/Theta/Phi + the quant cache to
+// `<root>/nodes/<id>/meta.json`, preserving every other field and dropping any leftover
+// `reference` field from the removed reference-tree model.
 //
 // Go owns persistence (MODEL.md): fire-and-forget, runs on the debounce timer's own
 // goroutine, logs on error, never blocks the gesture. Only the directory-tree form has
@@ -29,23 +28,32 @@ import (
 // direct children's re-measured triples) into a debounced read-modify-write of each
 // node's meta.json quantITheta/quantIPhi/quantIR + reference. Owned by MoveDispatch
 // (armed by EnableEditPersist). root == "" disables it (monolithic form / unarmed tests).
+// quantPersistEntry is one pending node write: the exact scene-polar position (the
+// LOSSLESS source of truth — where the node actually is) plus the quantized scalar
+// triple (kept as a self-describing cache/bookkeeping value, not the position source).
+type quantPersistEntry struct {
+	off   quantizedOffset
+	scene polar // exact (r,θ,φ) of the node's continuous position about the scene center
+}
+
 type quantOffsetPersister struct {
 	root     string // tree root; per-node meta.json lives at <root>/nodes/<id>/meta.json
 	debounce time.Duration
-	debouncedPersister[map[string]quantizedOffset]
+	debouncedPersister[map[string]quantPersistEntry]
 }
 
-// schedule records the latest scalar triple for a node and (re)arms the debounce timer.
-func (p *quantOffsetPersister) schedule(id string, off quantizedOffset) {
+// schedule records a node's exact position (scene) plus its quantized triple and
+// (re)arms the debounce timer. scene is the authoritative persisted position.
+func (p *quantOffsetPersister) schedule(id string, off quantizedOffset, scene polar) {
 	if p == nil || p.root == "" {
 		return
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.pending == nil {
-		p.pending = map[string]quantizedOffset{}
+		p.pending = map[string]quantPersistEntry{}
 	}
-	p.pending[id] = off
+	p.pending[id] = quantPersistEntry{off: off, scene: scene}
 	p.has = true
 	if p.timer == nil {
 		p.timer = time.AfterFunc(p.debounce, p.flush)
@@ -62,8 +70,8 @@ func (p *quantOffsetPersister) flush() {
 	if !has || len(pend) == 0 {
 		return
 	}
-	for id, off := range pend {
-		if err := writeQuantOffset(p.root, id, off); err != nil {
+	for id, e := range pend {
+		if err := writeQuantOffset(p.root, id, e.off, e.scene); err != nil {
 			logPersistErr("quant_offset_persist", id, err)
 		}
 	}
@@ -76,7 +84,7 @@ func (p *quantOffsetPersister) flush() {
 // reference-tree model (the scalar triple about the scene center is now the sole
 // persisted position source — see the package doc comment above). The file must
 // already exist.
-func writeQuantOffset(root, id string, off quantizedOffset) error {
+func writeQuantOffset(root, id string, off quantizedOffset, scene polar) error {
 	if !safeTreePathComponent(id) {
 		return fmt.Errorf("unsafe node id %q", id)
 	}
@@ -90,20 +98,22 @@ func writeQuantOffset(root, id string, off quantizedOffset) error {
 			b, _ := json.Marshal(v)
 			obj[key] = b
 		}
+		// The EXACT scene-polar position is the authoritative, LOSSLESS record of where
+		// the node actually is — the loader places the node here verbatim. Written on
+		// every drag so the exact dragged position always survives reload.
+		setFloat("scenePolarR", scene.R)
+		setFloat("scenePolarTheta", scene.Theta)
+		setFloat("scenePolarPhi", scene.Phi)
+		// The quantized triple + steps are kept as a self-describing cache (the drag-time
+		// snap cells), NOT the position source — the exact scenePolar above wins on load.
 		setInt("quantITheta", off.iTheta)
 		setInt("quantIPhi", off.iPhi)
 		setInt("quantIR", off.iR)
-		// Write the EFFECTIVE step constants (falling back to the global defaults) so
-		// the file is self-describing — a node's own constants, always present.
 		t, p, r := off.effectiveSteps()
 		setFloat("stepTheta", t)
 		setFloat("stepPhi", p)
 		setFloat("stepR", r)
 		delete(obj, "reference")
-		// Scene polar is no longer a stored source of truth — drop any legacy fields.
-		delete(obj, "scenePolarR")
-		delete(obj, "scenePolarTheta")
-		delete(obj, "scenePolarPhi")
 		// localPolars (layout_holder.go) is untouched here — entityReadModifyWrite only
 		// overwrites the keys this mutation sets, so any localPolars already on disk
 		// survives a position-drag write unchanged.

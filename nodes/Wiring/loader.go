@@ -402,7 +402,22 @@ func (b *buildCtx) computeQuantizedLayout() {
 
 	measured := measureScalars(b.centers, ids, b.sphere.Center, prior)
 	offsets := make(map[string]quantizedOffset, len(b.spec.Nodes))
+	// exact marks nodes whose EXACT position was persisted as scenePolar (r,θ,φ). For
+	// those, the loaded center (toNodeGeom placed it at exactly that polar) is the
+	// authoritative position — it is NOT overwritten by the quantized reconstruction
+	// below, so a dragged node reloads at exactly where it was dropped. The quantized
+	// triple for such a node is just measured bookkeeping.
+	exact := make(map[string]bool, len(b.spec.Nodes))
 	for _, n := range b.spec.Nodes {
+		if n.ScenePolarR != nil && n.ScenePolarTheta != nil && n.ScenePolarPhi != nil {
+			exact[n.ID] = true
+			if off, ok := measured[n.ID]; ok {
+				offsets[n.ID] = off
+			} else {
+				offsets[n.ID] = prior[n.ID]
+			}
+			continue
+		}
 		if n.QuantITheta != nil && n.QuantIPhi != nil && n.QuantIR != nil {
 			o := quantizedOffset{
 				iTheta: *n.QuantITheta,
@@ -429,10 +444,14 @@ func (b *buildCtx) computeQuantizedLayout() {
 	}
 	b.quantizedOffsets = offsets
 
-	// Recompute every node's world center directly about the scene center, overwriting
-	// the raw loaded centers/geoms so every later phase operates on the composed result.
+	// Reconstruct world centers from the quantized triple ONLY for nodes without an exact
+	// stored scenePolar (legacy / un-migrated). Nodes with an exact scenePolar keep the
+	// verbatim loaded center — their drag position round-trips losslessly.
 	derived := deriveCenters(offsets, b.sphere.Center)
 	for id, pos := range derived {
+		if exact[id] {
+			continue
+		}
 		b.centers[id] = pos
 		if g, ok := b.nodeGeoms[id]; ok {
 			setNodeWorld(&g, pos)

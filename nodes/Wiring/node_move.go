@@ -880,15 +880,13 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 	reach := reachRFromPolar(polars, edges)
 	md.fanCenters(emit, reach)
 
-	// The scalar triple (iTheta,iPhi,iR about the scene center) is the sole persisted
-	// position source under the flat polar model. Remeasure the dragged node's own
-	// triple from its new position and persist it — no other node's triple changes,
-	// since there is no reference relationship to propagate through.
+	// Persist the dragged node: the EXACT scene-polar position is the lossless source of
+	// truth (loaded verbatim on reload); the quantized triple rides along as a cache.
 	if md.quantizedLayout {
 		off := measureScalars(map[string]vec3{nodeID: newPos}, map[string]bool{nodeID: true}, md.sceneSphere.Center, md.quantizedOffsets)[nodeID]
 		md.quantizedOffsets[nodeID] = off
 		if md.quantOffsetPersist != nil {
-			md.quantOffsetPersist.schedule(nodeID, off)
+			md.quantOffsetPersist.schedule(nodeID, off, cart2polar(newPos.sub(md.sceneSphere.Center)))
 		}
 	}
 
@@ -977,7 +975,7 @@ func (md *MoveDispatch) equalizeNeighborDistances(dragged, source string, newPos
 			for id, off := range offs {
 				md.quantizedOffsets[id] = off
 				if md.quantOffsetPersist != nil {
-					md.quantOffsetPersist.schedule(id, off)
+					md.quantOffsetPersist.schedule(id, off, cart2polar(moved[id].sub(md.sceneSphere.Center)))
 				}
 			}
 		}
