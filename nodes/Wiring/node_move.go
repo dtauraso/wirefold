@@ -825,7 +825,7 @@ func (md *MoveDispatch) SeedLayoutCascade(nodeID string, newIR int) {
 	if p == nil {
 		return
 	}
-	p.SeedForward(LayoutMsg{IR: newIR, FromCenter: refCenter, Visited: map[string]bool{}})
+	p.SeedForward(LayoutMsg{IR: newIR, FromCenter: refCenter, Kind: md.NodeKind(nodeID), Visited: map[string]bool{}})
 }
 
 // heldCenters / heldEdges snapshot the movers' current geometry.

@@ -12,6 +12,12 @@ type LayoutMsg struct {
 	Visited    map[string]bool
 	IR         int
 	FromCenter vec3
+	// Kind is the node-kind name of the node propagating this cascade (the
+	// dragged time node at the seed, and each forwarding node thereafter). Added
+	// to the message so downstream propagation can key off the propagator's kind;
+	// carried through forwarding unchanged for now — it does not yet alter how the
+	// message is propagated or applied.
+	Kind string
 	// Direct marks a DIRECT position set (SLICE 3: the drag origin's own new center,
 	// delivered by node_move.go RootMove/fanCenters via LayoutPort.InjectDirect) rather
 	// than a radius-cascade hop. A direct message is applied verbatim to THIS node
@@ -31,7 +37,7 @@ func (msg LayoutMsg) clone() LayoutMsg {
 	for k, val := range msg.Visited {
 		v[k] = val
 	}
-	return LayoutMsg{Visited: v, IR: msg.IR, FromCenter: msg.FromCenter}
+	return LayoutMsg{Visited: v, IR: msg.IR, FromCenter: msg.FromCenter, Kind: msg.Kind}
 }
 
 // LayoutPort is the per-node hidden-layout-graph plumbing: one inbound channel
@@ -56,6 +62,10 @@ type LayoutPort struct {
 	// goroutine ever touches it (Handle runs exclusively on this node's own
 	// Update loop), so no lock is needed.
 	iR int
+	// kind is this node's kind name (e.g. "HoldNewSendOld"), loaded at build time.
+	// Stamped into a forwarded LayoutMsg's Kind field so the message carries the
+	// propagating node's kind.
+	kind string
 	// forwardsRadius marks a HoldNewSendOld node: only a radius-forwarding node forwards a
 	// cascade past itself (quantized_layout.go / layout-on-domain-network.md).
 	forwardsRadius bool
@@ -225,6 +235,7 @@ func (p *LayoutPort) Handle(msg LayoutMsg) {
 		fwd := msg.clone()
 		fwd.IR = newIR
 		fwd.FromCenter = newCenter
+		fwd.Kind = p.kind
 		select {
 		case out <- fwd:
 		default:

@@ -513,6 +513,7 @@ func (b *buildCtx) buildLayoutEdges() {
 		p.iPhi = off.iPhi
 		p.iR = off.iR
 		p.forwardsRadius = ForwardsRadius(n.Type)
+		p.kind = n.Type
 		if b.md != nil {
 			id := n.ID
 			ref := b.references[n.ID]
