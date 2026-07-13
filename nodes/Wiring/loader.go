@@ -512,14 +512,14 @@ func (b *buildCtx) buildLayoutEdges() {
 		p.iTheta = off.iTheta
 		p.iPhi = off.iPhi
 		p.iR = off.iR
-		p.forwardsRadius = ForwardsRadius(n.Type)
+		p.kind = n.Type
 		if b.md != nil {
 			id := n.ID
 			ref := b.references[n.ID]
 			iTheta, iPhi := off.iTheta, off.iPhi
 			md := b.md
-			p.apply = func(center vec3, iR int) {
-				md.applyLayoutCenter(id, center, iTheta, iPhi, iR, ref)
+			p.apply = func(iR int) {
+				md.applyLayoutCenter(id, iTheta, iPhi, iR, ref)
 			}
 			p.applyDirect = func(center vec3, reach float64) {
 				md.applyLayoutCenterDirect(id, center, reach)
