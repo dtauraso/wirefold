@@ -14,12 +14,12 @@
 // kind gets the UpdateLayout loop for free — satisfying the Node interface's
 // second method without per-kind boilerplate.
 //
-// UpdateLayout is the SAME loop shape as Update (a `for { select { ... } }`
-// parked on ctx.Done()) but is NOT gated by the play/pause clock: it does not
-// wait on WaitTick/SleepCycle, so it keeps running while beads are paused
-// (MODEL.md: the play/pause gate freezes tick advance, not goroutines). For
-// this slice it does no runtime mutation — it owns LocalPolars and idles;
-// drag-time recomputation is a later slice.
+// UpdateLayout parks on ctx.Done() the same way every node's Update loop exits
+// on cancellation, but is NOT gated by the play/pause clock: it does not wait
+// on WaitTick/SleepCycle, so it keeps running while beads are paused (MODEL.md:
+// the play/pause gate freezes tick advance, not goroutines). For this slice it
+// does no runtime mutation — it owns LocalPolars and idles; drag-time
+// recomputation is a later slice.
 package Wiring
 
 import "context"
@@ -66,18 +66,10 @@ type LayoutHolder struct {
 }
 
 // UpdateLayout runs this node's layout-update loop until ctx is cancelled. It is
-// NOT gated by the play/pause clock — it parks on ctx.Done() only, so it stays
-// live while the bead clock is halted. Same loop shape as a node's Update (a
-// `for { select { case <-ctx.Done(): return } }`); for this slice it performs no
-// runtime mutation of LocalPolars — later drag-time work fills the loop body in.
+// NOT gated by the play/pause clock — it parks on ctx.Done() only (the same
+// cancellation wait every node's Update loop uses to exit), so it stays live
+// while the bead clock is halted. For this slice it performs no runtime mutation
+// of LocalPolars — later drag-time work fills the loop body in.
 func (lh *LayoutHolder) UpdateLayout(ctx context.Context) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-		<-ctx.Done()
-		return
-	}
+	<-ctx.Done()
 }
