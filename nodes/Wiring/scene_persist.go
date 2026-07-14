@@ -145,9 +145,37 @@ func readEntityObjRequired(path string) (map[string]json.RawMessage, error) {
 	return obj, nil
 }
 
+// entityFileMus serializes read-modify-write cycles PER per-entity file path, so independent
+// writers of the SAME nodes/<id>/meta.json (WriteLocalPolars called synchronously during a
+// drag AND writeQuantOffset fired from the quant-offset debounce timer goroutine) never race:
+// without this, two concurrent read-modify-writes both write meta.json.tmp and the second
+// os.Rename fails with "no such file or directory" (the first already renamed the shared tmp),
+// AND a lost-update can drop one writer's fields. Analogous to sceneFileMu for scene.json but
+// keyed per path so different nodes still persist concurrently.
+var (
+	entityFileMuMu sync.Mutex
+	entityFileMus  = map[string]*sync.Mutex{}
+)
+
+func entityFileMu(path string) *sync.Mutex {
+	entityFileMuMu.Lock()
+	defer entityFileMuMu.Unlock()
+	mu, ok := entityFileMus[path]
+	if !ok {
+		mu = &sync.Mutex{}
+		entityFileMus[path] = mu
+	}
+	return mu
+}
+
 // entityReadModifyWrite reads a required per-entity JSON file, lets mutate edit it, then
-// atomically writes it back. Shared by the node-position and port-anchor writers.
+// atomically writes it back. Shared by the node-position and port-anchor writers. The whole
+// read→mutate→write is held under a per-path lock (entityFileMu) so concurrent writers of the
+// same file serialize instead of racing the shared meta.json.tmp rename.
 func entityReadModifyWrite(path string, mutate func(obj map[string]json.RawMessage)) error {
+	mu := entityFileMu(path)
+	mu.Lock()
+	defer mu.Unlock()
 	obj, err := readEntityObjRequired(path)
 	if err != nil {
 		return err
