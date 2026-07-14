@@ -1268,7 +1268,7 @@ func (md *MoveDispatch) commitNodeMove(nodeID string, newPos vec3) {
 // an unknown node.
 func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 	switch nodeID {
-	case "5", "2", "1":
+	case "5", "2":
 		return md.rootMoveViaMessages(nodeID, target)
 	}
 	return md.rootMove(nodeID, target, "", nil)
@@ -1344,6 +1344,8 @@ func (md *MoveDispatch) rootMove(nodeID string, target vec3, origin string, sour
 	// SCENE CENTER: the node follows the drag's bearing from the scene center, and its radius
 	// is solved so both edges come out equal. Neither neighbor is moved.
 	switch nodeID {
+	case "1":
+		newPos = md.placeEqualRadii(target, "2", "3", origin, sourceCenterOverride)
 	case "9":
 		newPos = md.placeEqualRadii(target, "3", "6", origin, sourceCenterOverride)
 	case "10":
@@ -1378,6 +1380,8 @@ func (md *MoveDispatch) rootMove(nodeID string, target vec3, origin string, sour
 	// makes its two edge c's come out equal at the shorter value without disturbing either
 	// fixed neighbor.
 	switch nodeID {
+	case "1":
+		md.equalizeEdgeCLocal("1", "2", "3", newPos, origin, sourceCenterOverride)
 	case "9":
 		md.equalizeEdgeCLocal("9", "3", "6", newPos, origin, sourceCenterOverride)
 	case "10":
@@ -1450,11 +1454,6 @@ func (md *MoveDispatch) rootMove(nodeID string, target vec3, origin string, sour
 				md.rootMove("1", oneCenter, nodeID, &fresh)
 			}
 		}
-	case "1":
-		// Node 1's own edges are kept equal: 1→3 is set to the 1↔2 distance (source "2"),
-		// node 3 repositioned along its current bearing from node 1. Driven by the node-2→1
-		// cascade above (node 1 itself never moves on a node-2 drag).
-		md.equalizeNeighborDistancesWithSourceCenter(nodeID, "2", newPos, sourceCenterOverride, origin)
 	case "6":
 		// Node 6 moved freely (handled by the normal path above, no equal-radii solve).
 		// It is the fixed ANCHOR: propagate the SHORTER of its two c-distances (to 9, to

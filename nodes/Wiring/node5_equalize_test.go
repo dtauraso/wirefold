@@ -494,7 +494,90 @@ func TestNode2DirectDragEmitsDecentralizedMessages(t *testing.T) {
 // through the same decentralized message system: node 1 is a LEAF rule-node (no
 // other node's ruleSource is "1"), so it self-triggers, equalizes its own follower
 // (3), and forwards to nobody. RED against the central case "1" (zero messages).
-func TestNode1DirectDragEmitsDecentralizedMessages(t *testing.T) {
+// TestNode1DragKeepsNeighbors23Fixed is the RED proof / anti-drift assertion for the
+// node-1-as-gate change: dragging node 1 directly must NOT move node 2 or node 3 at
+// all (unlike the old message-path behavior, which repositioned node 3 to equalize
+// 1's edges). Against the OLD message-path code, node 3 moves and this test fails.
+func TestNode1DragKeepsNeighbors23Fixed(t *testing.T) {
+	md := newFullChainDispatch()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	md.Start(ctx)
+
+	c2Before, _ := md.centerOfNode("2")
+	c3Before, _ := md.centerOfNode("3")
+
+	target := vec3{85, 10, -8}
+	if ok := md.RootMove("1", target); !ok {
+		t.Fatalf("RootMove(1, %v) = false", target)
+	}
+
+	const eps = 1e-6
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		c1, _ := md.centerOfNode("1")
+		c2, _ := md.centerOfNode("2")
+		c3, _ := md.centerOfNode("3")
+		d1to2 := cart2polar(c2.sub(c1)).R
+		d1to3 := cart2polar(c3.sub(c1)).R
+		if math.Abs(d1to3-d1to2) <= eps {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("node 1 drag did not converge to equal radii: d1to2=%v d1to3=%v", d1to2, d1to3)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	time.Sleep(20 * time.Millisecond)
+
+	c2After, _ := md.centerOfNode("2")
+	c3After, _ := md.centerOfNode("3")
+	if got := c2After.sub(c2Before).length(); got > eps {
+		t.Fatalf("node 2 moved: before=%v after=%v delta=%v", c2Before, c2After, got)
+	}
+	if got := c3After.sub(c3Before).length(); got > eps {
+		t.Fatalf("node 3 moved: before=%v after=%v delta=%v", c3Before, c3After, got)
+	}
+}
+
+// TestNode1DragEqualRadii verifies the gate-node equal-radii pattern (mirroring node
+// 9): after dragging node 1, dist(1,2) == dist(1,3) — node 1 lands equidistant from
+// its two neighbors, neither of which moves.
+func TestNode1DragEqualRadii(t *testing.T) {
+	md := newFullChainDispatch()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	md.Start(ctx)
+
+	target := vec3{85, 10, -8}
+	if ok := md.RootMove("1", target); !ok {
+		t.Fatalf("RootMove(1, %v) = false", target)
+	}
+
+	const eps = 1e-6
+	deadline := time.Now().Add(2 * time.Second)
+	var d1to2, d1to3 float64
+	for {
+		c1, _ := md.centerOfNode("1")
+		c2, _ := md.centerOfNode("2")
+		c3, _ := md.centerOfNode("3")
+		d1to2 = cart2polar(c2.sub(c1)).R
+		d1to3 = cart2polar(c3.sub(c1)).R
+		if math.Abs(d1to3-d1to2) <= eps {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("node 1 drag did not converge to equal radii: d1to2=%v d1to3=%v", d1to2, d1to3)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Logf("final: d1to2=%v d1to3=%v", d1to2, d1to3)
+}
+
+// TestNode1DragNoCascadeMessages proves node 1 is now central-gate-style, not
+// message-routed: a direct node-1 drag must emit NO Equalize/Trigger messages at all
+// (RootMove no longer routes "1" to rootMoveViaMessages).
+func TestNode1DragNoCascadeMessages(t *testing.T) {
 	md := newFullChainDispatch()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -529,7 +612,7 @@ func TestNode1DirectDragEmitsDecentralizedMessages(t *testing.T) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("node-1 drag did not converge: d1to2=%v d1to3=%v", d1to2, d1to3)
+			t.Fatalf("node 1 drag did not converge to equal radii: d1to2=%v d1to3=%v", d1to2, d1to3)
 		}
 		time.Sleep(time.Millisecond)
 	}
@@ -539,35 +622,8 @@ func TestNode1DirectDragEmitsDecentralizedMessages(t *testing.T) {
 	trace := append([]tappedMsg(nil), recorded...)
 	mu.Unlock()
 
-	t.Logf("recorded %d Equalize/Trigger messages:", len(trace))
-	for _, m := range trace {
-		t.Logf("  dest=%s kind=%s senderID=%q targetC=%v", m.destID, m.kind, m.senderID, m.targetC)
-	}
-
-	found1Trigger, found3Equalize := false, false
-	for _, m := range trace {
-		if m.destID == "1" && m.kind == moveMsgKindTrigger && m.senderID == "" {
-			found1Trigger = true
-		}
-		if m.destID == "3" && m.kind == moveMsgKindEqualize {
-			found3Equalize = true
-		}
-	}
-	if !found1Trigger {
-		t.Errorf("expected a self-initiated Trigger (SenderID==\"\") to node 1; got %+v", trace)
-	}
-	if !found3Equalize {
-		t.Errorf("expected Equalize routed to node 3; got %+v", trace)
-	}
-	for _, m := range trace {
-		if m.destID != "1" && m.destID != "3" {
-			t.Errorf("node 1 drag must forward to nobody (leaf rule-node); got extra message %+v", m)
-		}
-	}
-
-	const wantCount = 2
-	if len(trace) != wantCount {
-		t.Errorf("expected exactly %d Equalize/Trigger messages, got %d: %+v", wantCount, len(trace), trace)
+	if len(trace) != 0 {
+		t.Errorf("expected NO Equalize/Trigger messages for a direct node-1 drag (gate pattern, not message pattern); got %+v", trace)
 	}
 }
 
@@ -602,41 +658,6 @@ func TestNode2DirectDragBehaviorPreserved(t *testing.T) {
 	}
 }
 
-// TestNode1DirectDragBehaviorPreserved is the SAFETY NET for node 1: node 2 (the
-// source) doesn't move, and 1's follower 3 equalizes to dist(1,2).
-func TestNode1DirectDragBehaviorPreserved(t *testing.T) {
-	md := newFullChainDispatch()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	md.Start(ctx)
-
-	c2Before, _ := md.centerOfNode("2")
-
-	target := vec3{85, 10, -8}
-	if ok := md.RootMove("1", target); !ok {
-		t.Fatalf("RootMove(1, %v) = false", target)
-	}
-
-	const eps = 1e-6
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		c1, _ := md.centerOfNode("1")
-		c2, _ := md.centerOfNode("2")
-		c3, _ := md.centerOfNode("3")
-		d1to2 := cart2polar(c2.sub(c1)).R
-		d1to3 := cart2polar(c3.sub(c1)).R
-		if math.Abs(d1to3-d1to2) <= eps {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("node-1 drag did not converge")
-		}
-		time.Sleep(time.Millisecond)
-	}
-	time.Sleep(20 * time.Millisecond)
-
-	c2After, _ := md.centerOfNode("2")
-	if got := c2After.sub(c2Before).length(); got > eps {
-		t.Fatalf("source node 2 moved: before=%v after=%v delta=%v", c2Before, c2After, got)
-	}
-}
+// TestNode1DirectDragBehaviorPreserved (node 2/3-unmoved, equal-radii behavior) is
+// superseded by TestNode1DragKeepsNeighbors23Fixed and TestNode1DragEqualRadii above,
+// which assert the new gate-pattern behavior directly.
