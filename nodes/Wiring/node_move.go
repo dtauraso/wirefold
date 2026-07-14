@@ -62,6 +62,16 @@ const (
 	// land there and set both edge-c records to SnapC. SenderID names the anchor node
 	// (always "6").
 	moveMsgKindGatePlace = "gatePlace"
+	// moveMsgKindDrag is node 6's own-goroutine drag entry (node6-drag-decentralized.md):
+	// the drag itself is routed to node 6's OWN inbox instead of the stdin reader
+	// committing on node 6's behalf. The receiver (node 6) commits its OWN new
+	// position via the owner-goroutine commit path (commitNodeMoveLocal, which
+	// publishes its snap SYNCHRONOUSLY via applyCenter) and then runs its own
+	// self-trigger (handleTrigger) — apply-then-fan as two sequential statements on
+	// one goroutine, so the fan reads the freshly-applied center, never a stale one.
+	// Scoped to node 6 only: node 6 is a FREE move (not in gateNeighbors), so there is
+	// no equal-radii solve to run before committing.
+	moveMsgKindDrag = "drag"
 )
 
 // ruleSource maps a rule-node id to its designated SOURCE neighbor (node5-decentralized-
@@ -147,7 +157,11 @@ type moveMsg struct {
 	// SnapC (Kind == "gatePlace"): the propagated shortest c (whole ticks of localStepR)
 	// to write onto both of the receiver's edge-c records via moveNodeAndSetEdgeCs.
 	SnapC int
-	ack   chan struct{}
+	// Target (Kind == "drag"): the raw drag target world position for NodeID's
+	// owner-goroutine commit (node6-drag-decentralized.md). Node 6 is a free move,
+	// so this is committed as-is (no gate solve).
+	Target vec3
+	ack    chan struct{}
 }
 
 // setPortAnchorId sets the AnchorId on the named port within the given geom,
@@ -204,6 +218,16 @@ type nodeMover struct {
 	// md.commitNodeMove. Used by the follower Equalize handling so the receiver
 	// commits itself via the existing machinery rather than reimplementing it.
 	commit func(id string, newPos vec3)
+	// commitLocal is the OWNER-GOROUTINE variant of commit, bound to
+	// md.commitNodeMoveLocal (node6-drag-decentralized.md). It publishes this node's
+	// own snap SYNCHRONOUSLY via applyCenter instead of enqueuing an async self-send,
+	// so it is safe to call from THIS node's own handle() and immediately follow with
+	// handleTrigger in the same call — unlike commit, which is only safe to call from
+	// a DIFFERENT goroutine (the stdin reader) that then relies on this node's own
+	// inbox FIFO order to apply the center before any subsequently-queued trigger.
+	// Scoped to node 6 only (moveMsgKindDrag); nil in tests that build a bare
+	// nodeMover directly.
+	commitLocal func(id string, newPos vec3)
 	// gateEqualize runs a two-neighbor GATE node's OWN edge-c equalize
 	// (equalizeEdgeCLocal) using its CURRENT committed center, bound to
 	// md.gateEqualizeNode. Dispatched from handleTrigger's gate branch so the
@@ -298,6 +322,21 @@ func (m *nodeMover) handle(msg moveMsg) {
 	}
 	if msg.Kind == moveMsgKindTrigger {
 		m.handleTrigger(msg)
+		return
+	}
+	if msg.Kind == moveMsgKindDrag {
+		// Owner-goroutine drag entry (node6-drag-decentralized.md, node 6 only): commit
+		// this node's OWN new position via the local (synchronous-snap-publish) commit
+		// path, then run this node's own self-trigger — apply-then-fan as two
+		// sequential statements on this one goroutine, so handleTrigger's snap.Load()
+		// below reads the freshly-committed center, never a stale one.
+		if m.commitLocal != nil {
+			m.commitLocal(m.id, msg.Target)
+		}
+		if m.tr != nil {
+			m.tr.Breadcrumb("cascade.root", m.id, "", fmt.Sprintf("target=(%.4f,%.4f,%.4f)", msg.Target.X, msg.Target.Y, msg.Target.Z))
+		}
+		m.handleTrigger(moveMsg{Kind: moveMsgKindTrigger, NodeID: m.id, SenderID: ""})
 		return
 	}
 	if msg.Kind == moveMsgKindGatePlace {
@@ -862,6 +901,7 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 		nm.sendMove = md.sendMove
 		nm.centerOf = md.centerOfNode
 		nm.commit = md.commitNodeMove
+		nm.commitLocal = md.commitNodeMoveLocal
 		nm.gateEqualize = md.gateEqualizeNode
 		nm.gatePlace = md.gatePlaceNode
 		md.nodeMovers[id] = nm
@@ -1074,13 +1114,31 @@ func (md *MoveDispatch) fanCenters(newCenters map[string]vec3, reach map[string]
 	// own nodeMover inbox as a moveMsgKindCenter message carrying Center — nodeMover's
 	// handle applies it via applyCenter, making that node's own mover goroutine the
 	// sole writer of its position. One per moved node.
+	//
+	// This self-send is the CENTRAL-design artifact: the calling goroutine (stdin
+	// reader) cannot write the moved node's snap itself, so it messages the node's
+	// own mover to do it. When the commit instead ORIGINATES on the moved node's own
+	// goroutine (node6-drag-decentralized.md), this self-send must NOT be used — the
+	// message would sit unread in this node's own inbox until this very handler
+	// returns, so anything read immediately after (e.g. handleTrigger's snap.Load())
+	// would observe the STALE pre-move center. See commitNodeMoveLocal, which calls
+	// applyCenter directly instead and then calls fanEdgesAndPartners for the rest.
 	for id, c := range newCenters {
 		if ch, ok := md.dispatch[id]; ok {
 			cc := c
 			ch <- moveMsg{Kind: moveMsgKindCenter, NodeID: id, Center: &cc, ReachR: reach[id]}
 		}
 	}
+	md.fanEdgesAndPartners(newCenters)
+}
 
+// fanEdgesAndPartners is the cross-goroutine half of fanCenters: it messages every
+// incident edge's mover (batched per-edge Centers) and every aimed-port partner
+// (pure re-emit), for the given already-applied set of moved node centers. It never
+// writes the moved node's OWN snap — that responsibility belongs to whichever caller
+// applied the moved node's own center (either fanCenters' self-send above, for a
+// central caller, or applyCenter called directly, for an owner-goroutine caller).
+func (md *MoveDispatch) fanEdgesAndPartners(newCenters map[string]vec3) {
 	// Per-edge: send ONE batched message carrying every moved endpoint of that edge,
 	// so an edge whose both endpoints moved this frame recomputes/emits exactly once.
 	for edgeID, em := range md.edgeMovers {
@@ -1324,12 +1382,42 @@ func (md *MoveDispatch) moveNodeAndSetEdgeCs(nodeID string, newPos vec3, edgeA, 
 // (gate-node equal-radii solve, mirror cascades, etc.) — callers that need those still go
 // through rootMove.
 func (md *MoveDispatch) commitNodeMove(nodeID string, newPos vec3) {
+	md.commitNodeMoveCommon(nodeID, newPos, func(reach map[string]float64) {
+		md.fanCenters(map[string]vec3{nodeID: newPos}, reach)
+	})
+}
+
+// commitNodeMoveLocal is the OWNER-GOROUTINE variant of commitNodeMove
+// (node6-drag-decentralized.md): used when the commit originates on nodeID's OWN
+// mover goroutine (its own inbox handler for a moveMsgKindDrag), rather than on the
+// stdin reader's goroutine. It publishes nodeID's OWN snap SYNCHRONOUSLY via
+// applyCenter — safe and correct here because applyCenter's doc contract is "called
+// only from this nodeMover's own inbox-drain goroutine", which this is — instead of
+// enqueuing the async moveMsgKindCenter self-message commitNodeMove uses (that
+// self-send would sit unread in nodeID's own inbox until the calling handler
+// returns, so an immediate handleTrigger right after would read a stale snap).
+// Everything else (incident-edge Centers messages, aimed-port partner re-emits,
+// quantized-offset persist, local-polar requantize) is unchanged and still crosses
+// goroutines via message, exactly as commitNodeMove does.
+func (md *MoveDispatch) commitNodeMoveLocal(nodeID string, newPos vec3) {
+	md.commitNodeMoveCommon(nodeID, newPos, func(reach map[string]float64) {
+		if nm, ok := md.nodeMovers[nodeID]; ok {
+			nm.applyCenter(newPos, reach[nodeID])
+		}
+		md.fanEdgesAndPartners(map[string]vec3{nodeID: newPos})
+	})
+}
+
+// commitNodeMoveCommon holds the logic shared by commitNodeMove and
+// commitNodeMoveLocal: compute the fresh reach map, apply the caller-selected center-
+// delivery strategy (async self-send vs. direct applyCenter), then run the
+// quantized-offset persist and local-polar requantize identically for both.
+func (md *MoveDispatch) commitNodeMoveCommon(nodeID string, newPos vec3, deliverCenter func(reach map[string]float64)) {
 	edges := md.heldEdges()
-	emit := map[string]vec3{nodeID: newPos}
 	polars := md.heldPolar()
 	polars[nodeID] = cart2polar(newPos.sub(md.sceneSphere.Center))
 	reach := reachRFromPolar(polars, edges)
-	md.fanCenters(emit, reach)
+	deliverCenter(reach)
 
 	if md.quantizedLayout {
 		off := measureScalars(map[string]vec3{nodeID: newPos}, map[string]bool{nodeID: true}, md.sceneSphere.Center, md.quantizedOffsets)[nodeID]
@@ -1447,6 +1535,14 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 func (md *MoveDispatch) rootMoveViaMessages(nodeID string, target vec3) bool {
 	if _, ok := md.nodeMovers[nodeID]; !ok {
 		return false
+	}
+	if nodeID == "6" {
+		// node6-drag-decentralized.md: route the drag itself to node 6's OWN inbox
+		// instead of committing on the stdin reader's goroutine. Node 6's own
+		// moveMsgKindDrag handler commits (synchronous local snap publish) and
+		// self-triggers, both on its own goroutine — no central commit call here.
+		md.sendMove(nodeID, moveMsg{Kind: moveMsgKindDrag, NodeID: nodeID, Target: target})
+		return true
 	}
 	newPos := target
 	if nb, ok := gateNeighbors[nodeID]; ok {

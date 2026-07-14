@@ -1042,15 +1042,17 @@ func TestNode6DragPlaces9And10AndMoves5(t *testing.T) {
 	t.Logf("final: d=%v dist9To3=%v dist10To6=%v d2to5=%v d2to6=%v", d, dist9To3, dist10To6, d2to5, d2to6)
 }
 
-// TestNode6DragEmitsDecentralizedMessages is the TRACE proof (node6-decentralized.md):
-// a node-6 drag must route a self-initiated Trigger (SenderID=="") to node 6's own
-// inbox, a GatePlace message to BOTH node 9 and node 10, and a forwarded Trigger
-// (SenderID=="6") to node 2 — all via sendMove — and must never send an
-// Equalize/Trigger/GatePlace message that MOVES node 2 or node 6 itself (node 2 only
-// receives the forwarded Trigger, which repositions its peer 5, not node 2). Against
-// the CURRENT central rootMove path (case "6" runs synchronously on the drag call
-// stack, never touching sendMove for these kinds), this test is RED: zero messages
-// are tapped.
+// TestNode6DragEmitsDecentralizedMessages is the TRACE proof (node6-decentralized.md,
+// widened by node6-drag-decentralized.md): a node-6 drag must route the drag ITSELF
+// (moveMsgKindDrag, SenderID=="") to node 6's own inbox — replacing the old central
+// commit + separate self-initiated Trigger send, now that node 6 commits AND
+// self-triggers on its own goroutine in one handler (handleTrigger is called
+// directly, not re-routed through sendMove, since it's already running on node 6's
+// own goroutine) — plus a GatePlace message to BOTH node 9 and node 10, and a
+// forwarded Trigger (SenderID=="6") to node 2 — all via sendMove — and must never
+// send an Equalize/Trigger/GatePlace/Drag message that MOVES node 2 or node 6 itself
+// beyond that one initiating Drag (node 2 only receives the forwarded Trigger, which
+// repositions its peer 5, not node 2).
 func TestNode6DragEmitsDecentralizedMessages(t *testing.T) {
 	md := newFullChainDispatch()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1060,7 +1062,7 @@ func TestNode6DragEmitsDecentralizedMessages(t *testing.T) {
 	var mu sync.Mutex
 	var recorded []tappedMsg
 	md.SetMsgTap(func(destID string, msg moveMsg) {
-		if msg.Kind != moveMsgKindEqualize && msg.Kind != moveMsgKindTrigger && msg.Kind != moveMsgKindGatePlace {
+		if msg.Kind != moveMsgKindEqualize && msg.Kind != moveMsgKindTrigger && msg.Kind != moveMsgKindGatePlace && msg.Kind != moveMsgKindDrag {
 			return
 		}
 		mu.Lock()
@@ -1094,8 +1096,8 @@ func TestNode6DragEmitsDecentralizedMessages(t *testing.T) {
 		return false
 	}
 
-	if !has("6", moveMsgKindTrigger, "") {
-		t.Errorf("expected a self-initiated Trigger (SenderID==\"\") to node 6; got %+v", trace)
+	if !has("6", moveMsgKindDrag, "") {
+		t.Errorf("expected a self-routed Drag (SenderID==\"\") to node 6; got %+v", trace)
 	}
 	if !has("9", moveMsgKindGatePlace, "6") {
 		t.Errorf("expected a GatePlace message (senderID=6) to node 9; got %+v", trace)
@@ -1111,7 +1113,7 @@ func TestNode6DragEmitsDecentralizedMessages(t *testing.T) {
 	}
 
 	for _, m := range trace {
-		if m.destID == "6" && m.kind != moveMsgKindTrigger {
+		if m.destID == "6" && m.kind != moveMsgKindDrag {
 			t.Errorf("node 6 must never be moved by another node's message; got %+v", m)
 		}
 		if m.destID == "2" && m.kind != moveMsgKindTrigger {
