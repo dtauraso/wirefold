@@ -648,12 +648,21 @@ func (b *buildCtx) buildMoveDispatch() {
 		md.sceneSphere = b.sphere
 	}
 
-	// The quantized layout is authoritative by default — md.quantizedOffsets was already
+	// The quantized layout is authoritative by default — b.quantizedOffsets was already
 	// resolved (stored offset, or measured from the pre-quantized center) by
 	// computeQuantizedLayout, which also overwrote b.nodeGeoms so the nodeMovers newMoveDispatch
-	// just built above are already seeded from the composed centers.
+	// just built above are already seeded from the composed centers. Seed each node's OWN
+	// mover field (nodeMover.quantOffset) from it here — there is no shared md.quantizedOffsets
+	// map anymore (that map, read/written by multiple mover goroutines for different keys,
+	// was the "concurrent map read and map write" fatal fixed by node6-drag-decentralized.md's
+	// per-node ownership). A node missing an entry in b.quantizedOffsets keeps its
+	// nodeMover's zero-value quantOffset, matching the old map's zero-value-on-miss read.
 	md.quantizedLayout = true
-	md.quantizedOffsets = b.quantizedOffsets
+	for id, off := range b.quantizedOffsets {
+		if nm, ok := md.nodeMovers[id]; ok {
+			nm.quantOffset = off
+		}
+	}
 	b.md = md
 }
 
