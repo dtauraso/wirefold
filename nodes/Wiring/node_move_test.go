@@ -958,3 +958,151 @@ func TestRootMoveNode2CascadeKeepsNode1EdgesEqual(t *testing.T) {
 			gotBearing3.Theta, gotBearing3.Phi, wantBearing3.Theta, wantBearing3.Phi)
 	}
 }
+
+// TestRootMoveNode9DragKeepsRadiiEqual verifies node 9's current drag behavior: node 9
+// is NOT placed at the raw drag target. Instead rootMove constrains it, via
+// placeNode9EqualRadii, to the point — about the scene center — where node 9's bearing
+// from the scene center matches the drag's bearing (S -> target) but its RADIUS along
+// that bearing is solved so its distances to the two FIXED neighbors 3 and 6 come out
+// EQUAL. Node 3 and node 6 never move. node9DragEqualizeLocalC still runs afterward as
+// node 9's own local-polar requantize (equalizing its two edge-c records to each other),
+// unaffected by this change. Built via newMoveDispatch directly (mirroring
+// TestRootMoveNode2CascadeKeepsNode1EdgesEqual), NOT via LoadTopology.
+func TestRootMoveNode9DragKeepsRadiiEqual(t *testing.T) {
+	geoms := map[string]nodeGeom{
+		"9": {Kind: "WindowAndInhibitLeftGate", HasPos: true, ScenePolar: cart2polar(vec3{0, 0, 0}), Outputs: []portGeom{{Name: "out3"}, {Name: "out6"}}},
+		"3": {Kind: "Pulse", HasPos: true, ScenePolar: cart2polar(vec3{10, 0, 0}), Inputs: []portGeom{{Name: "in"}}},
+		"6": {Kind: "HoldNewSendOld", HasPos: true, ScenePolar: cart2polar(vec3{0, 0, 20}), Inputs: []portGeom{{Name: "in"}}},
+	}
+	edges := map[string]EdgeEndpoints{
+		"9To3": {Source: "9", Target: "3", SourceHandle: "out3", TargetHandle: "in"},
+		"9To6": {Source: "9", Target: "6", SourceHandle: "out6", TargetHandle: "in"},
+	}
+	md := newMoveDispatch(geoms, edges, nil)
+	md.layoutHolders = map[string]*LayoutHolder{
+		"9": {}, "3": {}, "6": {},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	md.Start(ctx)
+
+	lh9 := md.layoutHolders["9"]
+
+	nineBefore, ok := md.centerOfNode("9")
+	if !ok {
+		t.Fatal("centerOfNode(9) missing before move")
+	}
+	threeCenterBefore, ok := md.centerOfNode("3")
+	if !ok {
+		t.Fatal("centerOfNode(3) missing before move")
+	}
+	sixCenterBefore, ok := md.centerOfNode("6")
+	if !ok {
+		t.Fatal("centerOfNode(6) missing before move")
+	}
+
+	// Drag target whose bearing from the scene center (origin, the default
+	// md.sceneSphere.Center) is NOT parallel to the 3-6 axis, so placeNode9EqualRadii
+	// solves a genuine point rather than falling back to target.
+	target := vec3{X: 5, Y: 5, Z: 5}
+
+	// Independently compute the expected landing with the same formula
+	// placeNode9EqualRadii uses: p = S + t*u, t solved so |p-a| == |p-b|.
+	s := vec3{0, 0, 0} // md.sceneSphere.Center's zero-value default
+	u := target.sub(s).normalize()
+	ba := sixCenterBefore.sub(threeCenterBefore)
+	denom := u.dot(ba)
+	if denom == 0 {
+		t.Fatal("test fixture bearing is parallel to the 3-6 axis — adjust positions/target")
+	}
+	tSolved := (sixCenterBefore.dot(sixCenterBefore)/2 - threeCenterBefore.dot(threeCenterBefore)/2 - s.dot(ba)) / denom
+	if tSolved <= 0 {
+		t.Fatal("test fixture solves a t <= 0 (behind scene center) — adjust positions/target")
+	}
+	expected := s.add(u.scale(tSolved))
+	if expected == target {
+		t.Fatal("test fixture's expected landing coincides with the raw target — adjust geometry to exercise the real solve")
+	}
+
+	if !md.RootMove("9", target) {
+		t.Fatal("RootMove returned false for known node")
+	}
+
+	const eps = 1e-6
+	deadline := time.Now().Add(2 * time.Second)
+	converged := func() bool {
+		c, ok := md.centerOfNode("9")
+		return ok && math.Abs(c.X-expected.X) <= eps && math.Abs(c.Y-expected.Y) <= eps && math.Abs(c.Z-expected.Z) <= eps
+	}
+	for !converged() {
+		if time.Now().After(deadline) {
+			t.Fatal("node 9 drag never converged to the equal-radii point")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	// Give any trailing re-emit messages a moment to settle.
+	time.Sleep(20 * time.Millisecond)
+
+	nineAfter, ok := md.centerOfNode("9")
+	if !ok {
+		t.Fatal("centerOfNode(9) missing after move")
+	}
+
+	// (a) node 9 moved from its start.
+	if nineAfter == nineBefore {
+		t.Fatal("node 9 did not move")
+	}
+
+	// (c) node 9 landed exactly at placeNode9EqualRadii(target), independently computed.
+	if math.Abs(nineAfter.X-expected.X) > eps || math.Abs(nineAfter.Y-expected.Y) > eps || math.Abs(nineAfter.Z-expected.Z) > eps {
+		t.Fatalf("node 9 landing = %+v, want equal-radii solve %+v", nineAfter, expected)
+	}
+	if nineAfter == target {
+		t.Fatalf("node 9 landed at the raw target %+v; expected the constrained equal-radii point %+v", target, expected)
+	}
+
+	// (d) node 3 and node 6 never moved.
+	threeCenterAfter, ok := md.centerOfNode("3")
+	if !ok {
+		t.Fatal("centerOfNode(3) missing after move")
+	}
+	if threeCenterAfter != threeCenterBefore {
+		t.Fatalf("node 3 moved: got %+v, want unchanged %+v", threeCenterAfter, threeCenterBefore)
+	}
+	sixCenterAfter, ok := md.centerOfNode("6")
+	if !ok {
+		t.Fatal("centerOfNode(6) missing after move")
+	}
+	if sixCenterAfter != sixCenterBefore {
+		t.Fatalf("node 6 moved: got %+v, want unchanged %+v", sixCenterAfter, sixCenterBefore)
+	}
+
+	// (b) THE KEY ASSERTION: node 9's two radii, to the fixed neighbors 3 and 6, are equal.
+	dist3 := cart2polar(nineAfter.sub(threeCenterAfter)).R
+	dist6 := cart2polar(nineAfter.sub(sixCenterAfter)).R
+	if math.Abs(dist3-dist6) > eps {
+		t.Fatalf("node 9's radii to 3 and 6 are not equal: dist(9,3)=%v, dist(9,6)=%v", dist3, dist6)
+	}
+
+	// (e) node 9's two edge-c records (LocalPolar QuantIR to 3 and to 6) are equal to
+	// each other — the node9DragEqualizeLocalC requantize step.
+	var got3, got6 *LocalPolar
+	for _, lp := range lh9.LocalPolarsSnapshot() {
+		cp := lp
+		switch lp.To {
+		case "3":
+			got3 = &cp
+		case "6":
+			got6 = &cp
+		}
+	}
+	if got3 == nil {
+		t.Fatal("node 9 has no local polar entry for 3 after RootMove")
+	}
+	if got6 == nil {
+		t.Fatal("node 9 has no local polar entry for 6 after RootMove")
+	}
+	if got3.QuantIR != got6.QuantIR {
+		t.Fatalf("node9's two entries have different QuantIR: to3=%d to6=%d, want equal (shorter c)", got3.QuantIR, got6.QuantIR)
+	}
+}
