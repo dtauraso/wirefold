@@ -947,6 +947,112 @@ func (md *MoveDispatch) equalizeEdgeCLocal(nodeID, aID, bID string, newPos vec3,
 	return true
 }
 
+// propagateShortestCFrom6 is node 6's cascade: node 6 is a FIXED anchor (it just moved
+// freely to newPos6, no equal-radii re-solve). Its two gate neighbors, 9 (other edge to
+// "3") and 10 (other edge to "8"), each get repositioned along their CURRENT bearing from
+// node 6 to the SHORTER of node 6's two c-distances (6→9, 6→10) — a one-way propagation,
+// never a re-solve of node 6 itself, so it cannot feed back into a jitter loop. Skips a
+// neighbor gracefully if its center is unknown.
+func (md *MoveDispatch) propagateShortestCFrom6(newPos6 vec3) {
+	step := localStepR
+
+	c9center, ok9 := md.centerOfNode("9")
+	c10center, ok10 := md.centerOfNode("10")
+	if !ok9 && !ok10 {
+		return
+	}
+
+	var cTo9, cTo10 float64
+	if ok9 {
+		cTo9 = math.Round(c9center.sub(newPos6).length() / step)
+	}
+	if ok10 {
+		cTo10 = math.Round(c10center.sub(newPos6).length() / step)
+	}
+
+	var shortest float64
+	switch {
+	case ok9 && ok10:
+		shortest = math.Min(cTo9, cTo10)
+	case ok9:
+		shortest = cTo9
+	default:
+		shortest = cTo10
+	}
+	d := shortest * step
+
+	if ok9 {
+		dir := c9center.sub(newPos6)
+		if dir.length() != 0 {
+			newPos9 := newPos6.add(dir.normalize().scale(d))
+			md.placeNeighborFrom6("9", newPos9, "3", "6", int(shortest))
+		}
+	}
+	if ok10 {
+		dir := c10center.sub(newPos6)
+		if dir.length() != 0 {
+			newPos10 := newPos6.add(dir.normalize().scale(d))
+			md.placeNeighborFrom6("10", newPos10, "8", "6", int(shortest))
+		}
+	}
+}
+
+// placeNeighborFrom6 moves ONE of node 6's gate neighbors (nbrID, "9" or "10") to
+// newNbrPos — the point at distance c*localStepR from node 6 along the neighbor's
+// current bearing from node 6 — exactly as rootMove applies any single dragged node's
+// move (fan + scalar-triple remeasure/persist), then sets the neighbor's two edge-c
+// records (to otherEdgeID and to anchorEdgeID, i.e. "6") to c, preserving each record's
+// own stored bearing (quantITheta/quantIPhi) and step constants.
+func (md *MoveDispatch) placeNeighborFrom6(nbrID string, newNbrPos vec3, otherEdgeID, anchorEdgeID string, c int) {
+	// Move the neighbor node on screen — mirrors rootMove's fan block for a single
+	// moved node.
+	edges := md.heldEdges()
+	emit := map[string]vec3{nbrID: newNbrPos}
+	polars := md.heldPolar()
+	polars[nbrID] = cart2polar(newNbrPos.sub(md.sceneSphere.Center))
+	reach := reachRFromPolar(polars, edges)
+	md.fanCenters(emit, reach)
+
+	if md.quantizedLayout {
+		off := measureScalars(map[string]vec3{nbrID: newNbrPos}, map[string]bool{nbrID: true}, md.sceneSphere.Center, md.quantizedOffsets)[nbrID]
+		md.quantizedOffsets[nbrID] = off
+		if md.quantOffsetPersist != nil {
+			md.quantOffsetPersist.schedule(nbrID, off, cart2polar(newNbrPos.sub(md.sceneSphere.Center)))
+		}
+	}
+
+	// Set the neighbor's two edge-c records (to otherEdgeID and to anchorEdgeID) to c,
+	// keeping each record's own bearing/step constants — mirrors equalizeEdgeCLocal's
+	// local() closure but forces QuantIR to the propagated c instead of re-deriving it.
+	lh, ok := md.layoutHolders[nbrID]
+	if !ok {
+		return
+	}
+	setRecord := func(to string) {
+		other, ok := md.centerOfNode(to)
+		if !ok {
+			return
+		}
+		st, sp, sr := lh.localPolarSteps(to)
+		pol := cart2polar(other.sub(newNbrPos))
+		lh.SetLocalPolar(to,
+			int(math.Round(pol.Theta/st)),
+			int(math.Round(pol.Phi/sp)),
+			c,
+			st, sp, sr)
+	}
+	setRecord(otherEdgeID)
+	setRecord(anchorEdgeID)
+
+	if md.quantOffsetPersist != nil {
+		if root := md.quantOffsetPersist.root; root != "" {
+			if err := WriteLocalPolars(root, nbrID, lh.LocalPolarsSnapshot()); err != nil {
+				logPersistErr("local_polar_persist", nbrID, err)
+			}
+		}
+	}
+}
+
 // RootMove handles a node-drag under the flat absolute scene-polar layout: every node
 // is positioned independently about the scene sphere center — there is no reference/
 // parent concept, so dragging moves ONLY the dragged node (no cascade). The dragged
@@ -1011,12 +1117,11 @@ func (md *MoveDispatch) rootMove(nodeID string, target vec3, origin string, sour
 		newPos = md.placeEqualRadii(target, "3", "6", origin, sourceCenterOverride)
 	case "10":
 		newPos = md.placeEqualRadii(target, "6", "8", origin, sourceCenterOverride)
-	case "6":
-		// Node 6 lands equidistant from its gate neighbors 9 and 10 (6→9 == 6→10),
-		// placed against their CURRENT positions. Node 6 is then held fixed while the
-		// case-"6" cascade below moves 9 and 10 (3/6/8 stay put during that re-solve),
-		// so 6→9 == 6→10 holds at placement; it may drift after 9/10 re-solve.
-		newPos = md.placeEqualRadii(target, "9", "10", origin, sourceCenterOverride)
+		// Node 6 is a FREE move: it is not geometrically re-solved against 9/10 (that
+		// created a circular equal-radii feedback loop between 6/9/10 that jittered
+		// violently). Node 6 falls through to newPos = target below; its cascade
+		// (see the case "6" in the cascade switch) instead propagates its shortest
+		// c-distance to 9 and 10.
 	}
 
 	emit := map[string]vec3{nodeID: newPos}
@@ -1108,25 +1213,11 @@ func (md *MoveDispatch) rootMove(nodeID string, target vec3, origin string, sour
 		// cascade above (node 1 itself never moves on a node-2 drag).
 		md.equalizeNeighborDistancesWithSourceCenter(nodeID, "2", newPos, sourceCenterOverride)
 	case "6":
-		// Node 6 moves freely (handled by the normal path above). Since node 6 is the FIXED
-		// neighbor that gate nodes 9 (3,6) and 10 (6,8) solve their equal radii against, a
-		// node-6 move breaks their equal-radii; re-trigger each to re-solve in place. Re-run
-		// node 9's / node 10's own rootMove at their CURRENT (unchanged) centers — so their
-		// bearing is preserved and only their radius re-solves — passing node 6's just-computed
-		// newPos as the sourceCenterOverride (origin "6") so their placeEqualRadii/equalize
-		// read node 6's FRESH center rather than its async-lagged snapshot. Cases 9/10 do not
-		// cascade further, so this terminates (no recursion). Skipped when 9/10 is the origin.
-		fresh := newPos
-		if origin != "9" {
-			if c9, ok := md.centerOfNode("9"); ok {
-				md.rootMove("9", c9, nodeID, &fresh)
-			}
-		}
-		if origin != "10" {
-			if c10, ok := md.centerOfNode("10"); ok {
-				md.rootMove("10", c10, nodeID, &fresh)
-			}
-		}
+		// Node 6 moved freely (handled by the normal path above, no equal-radii solve).
+		// It is the fixed ANCHOR: propagate the SHORTER of its two c-distances (to 9, to
+		// 10) to both neighbors, repositioning each radially along its current bearing
+		// from node 6 — no re-solve against node 6's position, so no circular feedback.
+		md.propagateShortestCFrom6(newPos)
 	}
 	return true
 }

@@ -1253,16 +1253,16 @@ func TestRootMoveNode10DragKeepsRadiiEqual(t *testing.T) {
 	}
 }
 
-// TestRootMoveNode6DragResolves9And10 verifies node 6's current drag behavior: node 6
-// is NO LONGER a free move. It is placed, via placeEqualRadii, equidistant from its
-// gate neighbors 9 and 10 (6→9 == 6→10) — computed against 9 and 10's CURRENT
-// (pre-drag) positions, about the scene center, following the drag's bearing. Node 6
-// is then held fixed while the existing case-"6" cascade re-solves nodes 9 (vs fixed
-// 3 and node 6's NEW position) and 10 (vs node 6's NEW position and fixed 8). Node 3
-// and node 8 — the other fixed neighbors of 9 and 10 respectively — never move. Note:
-// 6→9 == 6→10 holds only at PLACEMENT time (against the pre-drag 9/10 positions); it
-// is not asserted in the final state, since 9 and 10 move during their own re-solve.
-func TestRootMoveNode6DragResolves9And10(t *testing.T) {
+// TestRootMoveNode6PropagatesShortestC verifies node 6's NEW c-propagation drag
+// behavior (replacing the old geometric equal-radii cascade, which created a circular
+// feedback loop between 6/9/10 that jittered violently). Node 6 is a FREE move — it
+// lands exactly at the raw drag target, no re-solve. It is then held FIXED while its
+// cascade computes the SHORTER of its two c-distances (6→9, 6→10, each rounded to a
+// whole tick of localStepR against 9/10's PRE-drag centers) and propagates that single
+// shortest c to both neighbors: each is repositioned along its OWN current bearing from
+// node 6 to radius shortest*localStepR, and both of its edge-c records (local-polar
+// QuantIR) are set to the shortest value. Nodes 3, 6, and 8 are never moved.
+func TestRootMoveNode6PropagatesShortestC(t *testing.T) {
 	geoms := map[string]nodeGeom{
 		"6":  {Kind: "HoldNewSendOld", HasPos: true, ScenePolar: cart2polar(vec3{0, 0, 0}), Inputs: []portGeom{{Name: "in"}, {Name: "in2"}}},
 		"9":  {Kind: "WindowAndInhibitLeftGate", HasPos: true, ScenePolar: cart2polar(vec3{5, 5, 0}), Outputs: []portGeom{{Name: "out3"}, {Name: "out6"}}},
@@ -1292,8 +1292,8 @@ func TestRootMoveNode6DragResolves9And10(t *testing.T) {
 	if !ok {
 		t.Fatal("centerOfNode(8) missing before move")
 	}
-	// c9old, c10old: node 9 and node 10's centers BEFORE the drag — node 6 is placed
-	// equidistant from THESE (not their post-cascade positions).
+	// c9old, c10old: node 9 and node 10's centers BEFORE the drag — node 6's cascade
+	// computes cTo9/cTo10 (and the preserved bearing) against THESE.
 	c9old, ok := md.centerOfNode("9")
 	if !ok {
 		t.Fatal("centerOfNode(9) missing before move")
@@ -1303,31 +1303,23 @@ func TestRootMoveNode6DragResolves9And10(t *testing.T) {
 		t.Fatal("centerOfNode(10) missing before move")
 	}
 
-	// Drag target for node 6, whose bearing from the scene center is not parallel to
-	// the 9-10 equal-distance plane (node 6's own placement solve) nor the 3-9-6 or
-	// 6-10-8 planes (the cascade's re-solves), so every solve below is genuine (t>0).
+	// Drag target for node 6: non-degenerate directions to both 9 and 10, and cTo9 !=
+	// cTo10 so "shortest" is a meaningful, non-trivial choice.
 	target6 := vec3{X: 3, Y: 4, Z: 5}
 
-	// Independently compute node 6's expected landing with the same formula
-	// placeEqualRadii uses: p = S + t*u, t solved so |p-c9old| == |p-c10old|.
-	s := md.sceneSphere.Center
-	u := target6.sub(s)
-	if u.length() == 0 {
-		t.Fatal("test fixture target coincides with scene center — adjust target")
+	const step = localStepR
+	cTo9 := math.Round(c9old.sub(target6).length() / step)
+	cTo10 := math.Round(c10old.sub(target6).length() / step)
+	if cTo9 == cTo10 {
+		t.Fatal("test fixture's cTo9 == cTo10 — adjust geometry so shortest is a meaningful choice")
 	}
-	u = u.normalize()
-	ba := c10old.sub(c9old)
-	denom := u.dot(ba)
-	if denom == 0 {
-		t.Fatal("test fixture bearing is parallel to the 9-10 axis — adjust positions/target")
-	}
-	tSolved := (c10old.dot(c10old)/2 - c9old.dot(c9old)/2 - s.dot(ba)) / denom
-	if tSolved <= 0 {
-		t.Fatal("test fixture solves a t <= 0 (behind scene center) — adjust positions/target")
-	}
-	expected6 := s.add(u.scale(tSolved))
-	if expected6 == target6 {
-		t.Fatal("test fixture's expected node-6 landing coincides with the raw target — adjust geometry")
+	shortest := math.Min(cTo9, cTo10)
+	d := shortest * step
+
+	dir9 := c9old.sub(target6)
+	dir10 := c10old.sub(target6)
+	if dir9.length() == 0 || dir10.length() == 0 {
+		t.Fatal("test fixture's target coincides with node 9 or node 10's pre-drag center — adjust")
 	}
 
 	if !md.RootMove("6", target6) {
@@ -1338,83 +1330,120 @@ func TestRootMoveNode6DragResolves9And10(t *testing.T) {
 	deadline := time.Now().Add(2 * time.Second)
 	converged := func() bool {
 		c6, ok6 := md.centerOfNode("6")
-		if !ok6 || math.Abs(c6.X-expected6.X) > eps || math.Abs(c6.Y-expected6.Y) > eps || math.Abs(c6.Z-expected6.Z) > eps {
+		if !ok6 || math.Abs(c6.X-target6.X) > eps || math.Abs(c6.Y-target6.Y) > eps || math.Abs(c6.Z-target6.Z) > eps {
 			return false
 		}
 		c9, ok9 := md.centerOfNode("9")
-		c3, ok3 := md.centerOfNode("3")
 		c10, ok10 := md.centerOfNode("10")
-		c8, ok8 := md.centerOfNode("8")
-		if !ok9 || !ok3 || !ok10 || !ok8 {
+		if !ok9 || !ok10 {
 			return false
 		}
-		dist93 := cart2polar(c9.sub(c3)).R
-		dist96 := cart2polar(c9.sub(c6)).R
-		dist106 := cart2polar(c10.sub(c6)).R
-		dist108 := cart2polar(c10.sub(c8)).R
-		return math.Abs(dist93-dist96) <= eps && math.Abs(dist106-dist108) <= eps
+		dist9 := cart2polar(c9.sub(c6)).R
+		dist10 := cart2polar(c10.sub(c6)).R
+		return math.Abs(dist9-d) <= eps && math.Abs(dist10-d) <= eps
 	}
 	for !converged() {
 		if time.Now().After(deadline) {
-			t.Fatal("node 6 drag never converged (node 6 at its equal-radii landing AND node 9/10 equal-radii)")
+			t.Fatal("node 6 drag never converged (node 6 at raw target AND node 9/10 at radius d)")
 		}
 		time.Sleep(time.Millisecond)
 	}
 	// Give any trailing re-emit messages a moment to settle.
 	time.Sleep(20 * time.Millisecond)
 
-	// (a) node 6 landed at the equal-radii solve, NOT the raw drag target.
+	// (a) node 6 landed at the RAW target — a free move, no re-solve.
 	sixAfter, ok := md.centerOfNode("6")
 	if !ok {
 		t.Fatal("centerOfNode(6) missing after move")
 	}
-	if math.Abs(sixAfter.X-expected6.X) > eps || math.Abs(sixAfter.Y-expected6.Y) > eps || math.Abs(sixAfter.Z-expected6.Z) > eps {
-		t.Fatalf("node 6 landing = %+v, want equal-radii solve %+v", sixAfter, expected6)
-	}
-	if sixAfter == target6 {
-		t.Fatalf("node 6 landed at the raw target %+v; expected the constrained equal-radii point %+v", target6, expected6)
-	}
-
-	// (b) node 6 is equidistant from the ORIGINAL (pre-drag) 9/10 positions — the
-	// placement-time 6→9 == 6→10 constraint.
-	distTo9old := cart2polar(sixAfter.sub(c9old)).R
-	distTo10old := cart2polar(sixAfter.sub(c10old)).R
-	if math.Abs(distTo9old-distTo10old) > eps {
-		t.Fatalf("node 6 is not equidistant from the original 9/10 positions: dist(6,c9old)=%v, dist(6,c10old)=%v", distTo9old, distTo10old)
+	if math.Abs(sixAfter.X-target6.X) > eps || math.Abs(sixAfter.Y-target6.Y) > eps || math.Abs(sixAfter.Z-target6.Z) > eps {
+		t.Fatalf("node 6 landing = %+v, want raw target %+v (free move)", sixAfter, target6)
 	}
 
 	nineAfter, ok := md.centerOfNode("9")
 	if !ok {
 		t.Fatal("centerOfNode(9) missing after move")
 	}
-	threeCenterAfter, ok := md.centerOfNode("3")
-	if !ok {
-		t.Fatal("centerOfNode(3) missing after move")
-	}
 	tenAfter, ok := md.centerOfNode("10")
 	if !ok {
 		t.Fatal("centerOfNode(10) missing after move")
+	}
+
+	// (b) node 9 and node 10 are both now at distance d = shortest*localStepR from node
+	// 6 (equal to each other and to shortest*stepR).
+	dist9 := cart2polar(nineAfter.sub(sixAfter)).R
+	dist10 := cart2polar(tenAfter.sub(sixAfter)).R
+	if math.Abs(dist9-d) > eps {
+		t.Fatalf("node 9 distance to node 6 = %v, want shortest*localStepR = %v", dist9, d)
+	}
+	if math.Abs(dist10-d) > eps {
+		t.Fatalf("node 10 distance to node 6 = %v, want shortest*localStepR = %v", dist10, d)
+	}
+	if math.Abs(dist9-dist10) > eps {
+		t.Fatalf("node 9 and node 10 radii from node 6 differ: dist9=%v, dist10=%v", dist9, dist10)
+	}
+
+	// (c) node 9's edge-c records (to "3" and to "6") and node 10's (to "6" and "8")
+	// both == int(shortest).
+	lh9 := md.layoutHolders["9"]
+	var got9To3, got9To6 *LocalPolar
+	for _, lp := range lh9.LocalPolarsSnapshot() {
+		cp := lp
+		switch lp.To {
+		case "3":
+			got9To3 = &cp
+		case "6":
+			got9To6 = &cp
+		}
+	}
+	if got9To3 == nil || got9To6 == nil {
+		t.Fatal("node 9 missing an edge-c record after node-6 cascade")
+	}
+	if got9To3.QuantIR != int(shortest) || got9To6.QuantIR != int(shortest) {
+		t.Fatalf("node 9's edge-c records not both == shortest: to3=%d to6=%d, want %d", got9To3.QuantIR, got9To6.QuantIR, int(shortest))
+	}
+
+	lh10 := md.layoutHolders["10"]
+	var got10To6, got10To8 *LocalPolar
+	for _, lp := range lh10.LocalPolarsSnapshot() {
+		cp := lp
+		switch lp.To {
+		case "6":
+			got10To6 = &cp
+		case "8":
+			got10To8 = &cp
+		}
+	}
+	if got10To6 == nil || got10To8 == nil {
+		t.Fatal("node 10 missing an edge-c record after node-6 cascade")
+	}
+	if got10To6.QuantIR != int(shortest) || got10To8.QuantIR != int(shortest) {
+		t.Fatalf("node 10's edge-c records not both == shortest: to6=%d to8=%d, want %d", got10To6.QuantIR, got10To8.QuantIR, int(shortest))
+	}
+
+	// (d) node 9 and node 10 preserved their DIRECTION from node 6 (only distance
+	// changed): unit vector centerOf(nbr)-target is parallel to the old unit vector
+	// oldCenter(nbr)-target.
+	u9After := nineAfter.sub(sixAfter).normalize()
+	u9Before := c9old.sub(target6).normalize()
+	if math.Abs(u9After.X-u9Before.X) > eps || math.Abs(u9After.Y-u9Before.Y) > eps || math.Abs(u9After.Z-u9Before.Z) > eps {
+		t.Fatalf("node 9 did not preserve its bearing from node 6: before=%+v after=%+v", u9Before, u9After)
+	}
+	u10After := tenAfter.sub(sixAfter).normalize()
+	u10Before := c10old.sub(target6).normalize()
+	if math.Abs(u10After.X-u10Before.X) > eps || math.Abs(u10After.Y-u10Before.Y) > eps || math.Abs(u10After.Z-u10Before.Z) > eps {
+		t.Fatalf("node 10 did not preserve its bearing from node 6: before=%+v after=%+v", u10Before, u10After)
+	}
+
+	// (e) node 3 and node 8 unchanged.
+	threeCenterAfter, ok := md.centerOfNode("3")
+	if !ok {
+		t.Fatal("centerOfNode(3) missing after move")
 	}
 	eightCenterAfter, ok := md.centerOfNode("8")
 	if !ok {
 		t.Fatal("centerOfNode(8) missing after move")
 	}
-
-	// (c) KEY: node 9's radii to 3 and to 6 (node 6's NEW center) are equal.
-	dist93 := cart2polar(nineAfter.sub(threeCenterAfter)).R
-	dist96 := cart2polar(nineAfter.sub(sixAfter)).R
-	if math.Abs(dist93-dist96) > eps {
-		t.Fatalf("node 9's radii to 3 and 6 are not equal after node-6 cascade: dist(9,3)=%v, dist(9,6)=%v", dist93, dist96)
-	}
-
-	// (d) KEY: node 10's radii to 6 (node 6's NEW center) and to 8 are equal.
-	dist106 := cart2polar(tenAfter.sub(sixAfter)).R
-	dist108 := cart2polar(tenAfter.sub(eightCenterAfter)).R
-	if math.Abs(dist106-dist108) > eps {
-		t.Fatalf("node 10's radii to 6 and 8 are not equal after node-6 cascade: dist(10,6)=%v, dist(10,8)=%v", dist106, dist108)
-	}
-
-	// (e) node 3 and node 8 centers unchanged.
 	if threeCenterAfter != threeCenterBefore {
 		t.Fatalf("node 3 moved: got %+v, want unchanged %+v", threeCenterAfter, threeCenterBefore)
 	}
