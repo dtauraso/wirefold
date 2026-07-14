@@ -771,3 +771,113 @@ func TestNode9DragEqualRadiiNeighborsFixed(t *testing.T) {
 	}
 	t.Logf("final: d9to3=%v d9to6=%v", d9to3, d9to6)
 }
+
+// pollNode10EqualRadii waits until dist(10,6)==dist(10,8) within eps and returns both.
+func pollNode10EqualRadii(t *testing.T, md *MoveDispatch) (d10to6, d10to8 float64) {
+	t.Helper()
+	const eps = 1e-6
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		c10, _ := md.centerOfNode("10")
+		c6, _ := md.centerOfNode("6")
+		c8, _ := md.centerOfNode("8")
+		d10to6 = cart2polar(c6.sub(c10)).R
+		d10to8 = cart2polar(c8.sub(c10)).R
+		if math.Abs(d10to6-d10to8) <= eps {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("node 10 did not converge to equal radii: d10to6=%v d10to8=%v", d10to6, d10to8)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// TestNode10DragEmitsSelfTrigger is the RED proof for routing node 10's DIRECT drag
+// through the decentralized goroutine-message path (mirroring
+// TestNode9DragEmitsSelfTrigger / node9-decentralized-gate.md): a node-10 drag must
+// route a self-initiated Trigger (SenderID=="") to node 10's OWN inbox via sendMove,
+// and must NOT send any Equalize/Trigger message to any OTHER node (in particular
+// neighbors 6 and 8, which must never move or receive a message). Against the CURRENT
+// central rootMove path (case "10" runs synchronously on the drag call stack, never
+// touching sendMove for Equalize/Trigger kinds), this test is RED: zero messages are
+// tapped, so found10Trigger stays false.
+func TestNode10DragEmitsSelfTrigger(t *testing.T) {
+	md := newFullChainDispatch()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	md.Start(ctx)
+
+	var mu sync.Mutex
+	var recorded []tappedMsg
+	md.SetMsgTap(func(destID string, msg moveMsg) {
+		if msg.Kind != moveMsgKindEqualize && msg.Kind != moveMsgKindTrigger {
+			return
+		}
+		mu.Lock()
+		recorded = append(recorded, tappedMsg{destID: destID, kind: msg.Kind, senderID: msg.SenderID, targetC: msg.TargetC})
+		mu.Unlock()
+	})
+	defer md.SetMsgTap(nil)
+
+	target := vec3{-30, 45, 5}
+	if ok := md.RootMove("10", target); !ok {
+		t.Fatalf("RootMove(10, %v) = false", target)
+	}
+	pollNode10EqualRadii(t, md)
+	time.Sleep(20 * time.Millisecond)
+
+	mu.Lock()
+	trace := append([]tappedMsg(nil), recorded...)
+	mu.Unlock()
+
+	t.Logf("recorded %d Equalize/Trigger messages:", len(trace))
+	for _, m := range trace {
+		t.Logf("  dest=%s kind=%s senderID=%q targetC=%v", m.destID, m.kind, m.senderID, m.targetC)
+	}
+
+	found10Trigger := false
+	for _, m := range trace {
+		if m.destID == "10" && m.kind == moveMsgKindTrigger && m.senderID == "" {
+			found10Trigger = true
+		}
+		if m.destID == "6" || m.destID == "8" {
+			t.Errorf("neighbor %s must never receive an Equalize/Trigger message; got %+v", m.destID, m)
+		}
+	}
+	if !found10Trigger {
+		t.Errorf("expected a self-initiated Trigger (SenderID==\"\") to node 10; got %+v", trace)
+	}
+}
+
+// TestNode10DragEqualRadiiNeighborsFixed is the behavior-preserving safety net: after
+// dragging node 10, dist(10,6)==dist(10,8) within eps, and neighbors 6 and 8 do not
+// move. Holds both before and after routing node 10's drag through the decentralized
+// message path.
+func TestNode10DragEqualRadiiNeighborsFixed(t *testing.T) {
+	md := newFullChainDispatch()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	md.Start(ctx)
+
+	c6Before, _ := md.centerOfNode("6")
+	c8Before, _ := md.centerOfNode("8")
+
+	target := vec3{-30, 45, 5}
+	if ok := md.RootMove("10", target); !ok {
+		t.Fatalf("RootMove(10, %v) = false", target)
+	}
+	d10to6, d10to8 := pollNode10EqualRadii(t, md)
+	time.Sleep(20 * time.Millisecond)
+
+	const eps = 1e-6
+	c6After, _ := md.centerOfNode("6")
+	c8After, _ := md.centerOfNode("8")
+	if got := c6After.sub(c6Before).length(); got > eps {
+		t.Fatalf("node 6 moved: before=%v after=%v delta=%v", c6Before, c6After, got)
+	}
+	if got := c8After.sub(c8Before).length(); got > eps {
+		t.Fatalf("node 8 moved: before=%v after=%v delta=%v", c8Before, c8After, got)
+	}
+	t.Logf("final: d10to6=%v d10to8=%v", d10to6, d10to8)
+}

@@ -79,9 +79,10 @@ var ruleFollowers = map[string][]string{
 // is NOT a ruleSource/follower node: on a direct drag it solves its own equal-radii
 // landing position, commits itself, and self-triggers its OWN goroutine to run its
 // own edge-c equalize (equalizeEdgeCLocal) — no forward, no neighbor move. Scoped to
-// node 9 only; node 10 stays on the old central rootMove path.
+// nodes 9 and 10 (node10-decentralized-gate.md, mirroring node9's widening).
 var gateNeighbors = map[string][2]string{
-	"9": {"3", "6"},
+	"9":  {"3", "6"},
+	"10": {"6", "8"},
 }
 
 // centerSnap is an immutable snapshot of a node's position published by the nodeMover
@@ -1316,7 +1317,7 @@ func (md *MoveDispatch) gateEqualizeNode(nodeID string) {
 // an unknown node.
 func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 	switch nodeID {
-	case "5", "2", "9":
+	case "5", "2", "9", "10":
 		return md.rootMoveViaMessages(nodeID, target)
 	}
 	return md.rootMove(nodeID, target, "", nil)
@@ -1334,13 +1335,13 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 // central call stack. handleTrigger (generic, keyed off ruleSource/ruleFollowers by id)
 // needs no per-node change to support this: node 2's trigger forwards to BOTH 5 and 1
 // (both have ruleSource == "2"); node 1 is a leaf (nothing has ruleSource == "1") so it
-// forwards to nobody. Nodes 6, 10 still go through the old central rootMove when
-// directly dragged — node 6's drag continues to cascade into node 2 CENTRALLY (rootMove's
-// case "6" calling rootMove("2", ..., origin: "6")); that path is unchanged. Node 9
-// (widened by node9-decentralized-gate.md) is a GATE node, not a rule-node: its
-// position is first solved to the equal-radii locus against its FIXED neighbors
-// (gateNeighbors) before committing, and its self-trigger dispatches to
-// handleTrigger's gate branch (its own edge-c equalize only — no forward, no
+// forwards to nobody. Node 6 still goes through the old central rootMove when directly
+// dragged — node 6's drag continues to cascade into node 2 CENTRALLY (rootMove's case
+// "6" calling rootMove("2", ..., origin: "6")); that path is unchanged. Nodes 9 and 10
+// (widened by node9-decentralized-gate.md, node10-decentralized-gate.md) are GATE nodes,
+// not rule-nodes: each node's position is first solved to the equal-radii locus against
+// its FIXED neighbors (gateNeighbors) before committing, and its self-trigger dispatches
+// to handleTrigger's gate branch (its own edge-c equalize only — no forward, no
 // follower, no neighbor move).
 func (md *MoveDispatch) rootMoveViaMessages(nodeID string, target vec3) bool {
 	if _, ok := md.nodeMovers[nodeID]; !ok {
@@ -1395,26 +1396,19 @@ func (md *MoveDispatch) rootMove(nodeID string, target vec3, origin string, sour
 	// position itself never is.
 	newPos := target
 
-	// Gate node 1 (neighbors 2,3) and gate node 10 (neighbors 6,8) keep their two radii
-	// EQUAL. With the neighbors held in place, that is only possible where the node is
-	// the same distance from both, so the drag is constrained to that equal-distance
-	// locus — computed ABOUT THE SCENE CENTER: the node follows the drag's bearing from
-	// the scene center, and its radius is solved so both edges come out equal. Neither
-	// neighbor is moved. Node 9 (the same gate pattern) is no longer reached here for a
-	// direct drag — RootMove routes it to rootMoveViaMessages (node9-decentralized-
-	// gate.md); this switch is unreachable for "9" but the case is intentionally removed
-	// (not left as dead code) since node 6's cascade reaches 9 via
+	// Gate node 1 (neighbors 2,3) keeps its two radii EQUAL. With the neighbors held in
+	// place, that is only possible where the node is the same distance from both, so the
+	// drag is constrained to that equal-distance locus — computed ABOUT THE SCENE CENTER:
+	// the node follows the drag's bearing from the scene center, and its radius is solved
+	// so both edges come out equal. Neither neighbor is moved. Nodes 9 and 10 (the same
+	// gate pattern) are no longer reached here for a direct drag — RootMove routes them to
+	// rootMoveViaMessages (node9-decentralized-gate.md, node10-decentralized-gate.md);
+	// this switch is unreachable for "9"/"10" but the cases are intentionally removed
+	// (not left as dead code) since node 6's cascade reaches 9 and 10 via
 	// propagateShortestCFrom6, never via this rootMove case.
 	switch nodeID {
 	case "1":
 		newPos = md.placeEqualRadii(target, "2", "3", origin, sourceCenterOverride)
-	case "10":
-		newPos = md.placeEqualRadii(target, "6", "8", origin, sourceCenterOverride)
-		// Node 6 is a FREE move: it is not geometrically re-solved against 9/10 (that
-		// created a circular equal-radii feedback loop between 6/9/10 that jittered
-		// violently). Node 6 falls through to newPos = target below; its cascade
-		// (see the case "6" in the cascade switch) instead propagates its shortest
-		// c-distance to 9 and 10.
 	}
 
 	emit := map[string]vec3{nodeID: newPos}
@@ -1433,19 +1427,17 @@ func (md *MoveDispatch) rootMove(nodeID string, target vec3, origin string, sour
 		}
 	}
 
-	// Gate nodes 1 and 10 requantize their OWN two edge c's only, equalized to the
-	// shorter, and never write their neighbors' records — every other node uses the
-	// generic double-link requantize. The node itself still moved through the normal
-	// path above (fan + scene c), so it repositions on screen exactly like any dragged
-	// node; this step just makes its two edge c's come out equal at the shorter value
-	// without disturbing either fixed neighbor. Node 9 runs the same equalizeEdgeCLocal
-	// call but via gateEqualizeNode on its own goroutine (node9-decentralized-gate.md),
-	// not through this central switch.
+	// Gate node 1 requantizes its OWN two edge c's only, equalized to the shorter, and
+	// never writes its neighbors' records — every other node uses the generic double-link
+	// requantize. The node itself still moved through the normal path above (fan + scene
+	// c), so it repositions on screen exactly like any dragged node; this step just makes
+	// its two edge c's come out equal at the shorter value without disturbing either fixed
+	// neighbor. Nodes 9 and 10 run the same equalizeEdgeCLocal call but via
+	// gateEqualizeNode on their own goroutines (node9-decentralized-gate.md,
+	// node10-decentralized-gate.md), not through this central switch.
 	switch nodeID {
 	case "1":
 		md.equalizeEdgeCLocal("1", "2", "3", newPos, origin, sourceCenterOverride)
-	case "10":
-		md.equalizeEdgeCLocal("10", "6", "8", newPos, origin, sourceCenterOverride)
 	default:
 		md.requantizeLocalPolars(nodeID, newPos)
 	}
