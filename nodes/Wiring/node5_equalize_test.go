@@ -881,3 +881,231 @@ func TestNode10DragEqualRadiiNeighborsFixed(t *testing.T) {
 	}
 	t.Logf("final: d10to6=%v d10to8=%v", d10to6, d10to8)
 }
+
+// pollNode6CascadeConverged waits until a node-6 drag's full cascade has settled: node 6
+// at target, node 9 equidistant from 3 and 6, node 10 equidistant from 6 and 8, and node 5
+// equidistant (from node 2) to node 2's distance to node 6.
+func pollNode6CascadeConverged(t *testing.T, md *MoveDispatch, target vec3) {
+	t.Helper()
+	const eps = 1e-6
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		c6, ok6 := md.centerOfNode("6")
+		c9, _ := md.centerOfNode("9")
+		c10, _ := md.centerOfNode("10")
+		c3, _ := md.centerOfNode("3")
+		c8, _ := md.centerOfNode("8")
+		c2, _ := md.centerOfNode("2")
+		c5, _ := md.centerOfNode("5")
+		if ok6 && math.Abs(c6.X-target.X) <= eps && math.Abs(c6.Y-target.Y) <= eps && math.Abs(c6.Z-target.Z) <= eps {
+			d9to3 := cart2polar(c3.sub(c9)).R
+			d9to6 := cart2polar(c6.sub(c9)).R
+			d10to6 := cart2polar(c6.sub(c10)).R
+			d10to8 := cart2polar(c8.sub(c10)).R
+			d2to5 := cart2polar(c5.sub(c2)).R
+			d2to6 := cart2polar(c6.sub(c2)).R
+			if math.Abs(d9to3-d9to6) <= eps && math.Abs(d10to6-d10to8) <= eps && math.Abs(d2to5-d2to6) <= eps {
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("node 6 cascade did not converge: c6=%v target=%v", c6, target)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// placeAtDistanceFromBothRef is an independent reimplementation of
+// MoveDispatch.placeAtDistanceFromBoth used by the tests below to derive the EXPECTED
+// landing point for node 9/10, without calling the package's own internal helper.
+func placeAtDistanceFromBothRef(cur, a, b vec3, d float64) vec3 {
+	ab := b.sub(a)
+	half := ab.length() / 2
+	if d < half {
+		d = half
+	}
+	m := a.add(b).scale(0.5)
+	nhat := ab.scale(1 / (2 * half))
+	q := cur.sub(nhat.scale(cur.sub(m).dot(nhat)))
+	dir := q.sub(m)
+	rho := math.Sqrt(math.Max(0, d*d-half*half))
+	if dir.length() == 0 {
+		return m
+	}
+	return m.add(dir.normalize().scale(rho))
+}
+
+// TestNode6DragPlaces9And10AndMoves5 is the BEHAVIOR-PRESERVING SAFETY NET for node 6's
+// drag cascade: it must hold both before AND after converting node 6's drag to the
+// decentralized goroutine-message path. Node 6 lands at the raw drag target (free move,
+// no re-solve). Its two gate neighbors 9 and 10 each land at the shortest of node 6's two
+// c-distances (to 9, to 10) from BOTH their fixed neighbors, making all four edges
+// (9-3, 9-6, 6-10, 10-8) equal. Node 2 (untouched directly) re-equalizes its remaining
+// peer, node 5, to the fresh dist(2,6) — node 2 itself, node 1, and node 3 do not move.
+func TestNode6DragPlaces9And10AndMoves5(t *testing.T) {
+	md := newFullChainDispatch()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	md.Start(ctx)
+
+	c3Before, _ := md.centerOfNode("3")
+	c8Before, _ := md.centerOfNode("8")
+	c9Before, _ := md.centerOfNode("9")
+	c10Before, _ := md.centerOfNode("10")
+	c2Before, _ := md.centerOfNode("2")
+	c1Before, _ := md.centerOfNode("1")
+
+	target6 := vec3{X: -36.872596156504756, Y: -4.348074526720876, Z: -24.181828865130925}
+
+	const step = localStepR
+	cTo9 := math.Round(c9Before.sub(target6).length() / step)
+	cTo10 := math.Round(c10Before.sub(target6).length() / step)
+	shortest := math.Min(cTo9, cTo10)
+	d := shortest * step
+
+	expected9 := placeAtDistanceFromBothRef(c9Before, c3Before, target6, d)
+	expected10 := placeAtDistanceFromBothRef(c10Before, target6, c8Before, d)
+
+	if !md.RootMove("6", target6) {
+		t.Fatal("RootMove returned false for known node")
+	}
+	pollNode6CascadeConverged(t, md, target6)
+	time.Sleep(20 * time.Millisecond)
+
+	const eps = 1e-6
+	c6After, _ := md.centerOfNode("6")
+	c9After, _ := md.centerOfNode("9")
+	c10After, _ := md.centerOfNode("10")
+	c3After, _ := md.centerOfNode("3")
+	c8After, _ := md.centerOfNode("8")
+	c2After, _ := md.centerOfNode("2")
+	c5After, _ := md.centerOfNode("5")
+	c1After, _ := md.centerOfNode("1")
+
+	if got := c9After.sub(expected9).length(); got > eps {
+		t.Fatalf("node 9 landing = %+v, want equal-distance-circle solve %+v (delta=%v)", c9After, expected9, got)
+	}
+	if got := c10After.sub(expected10).length(); got > eps {
+		t.Fatalf("node 10 landing = %+v, want equal-distance-circle solve %+v (delta=%v)", c10After, expected10, got)
+	}
+
+	dist9To3 := c9After.sub(c3After).length()
+	dist9To6 := c9After.sub(c6After).length()
+	dist10To6 := c10After.sub(c6After).length()
+	dist10To8 := c10After.sub(c8After).length()
+	if math.Abs(dist9To3-dist9To6) > eps {
+		t.Fatalf("node 9's radii to 3 and 6 not equal: %v vs %v", dist9To3, dist9To6)
+	}
+	if math.Abs(dist10To6-dist10To8) > eps {
+		t.Fatalf("node 10's radii to 6 and 8 not equal: %v vs %v", dist10To6, dist10To8)
+	}
+	if math.Abs(dist9To3-dist10To8) > eps {
+		t.Fatalf("dist(9,3)=%v != dist(10,8)=%v, want all four edges equal", dist9To3, dist10To8)
+	}
+	if math.Abs(dist9To3-d) > eps {
+		t.Fatalf("dist(9,3)=%v, want shortest-c distance d=%v", dist9To3, d)
+	}
+
+	if got := c3After.sub(c3Before).length(); got > eps {
+		t.Fatalf("node 3 moved: before=%v after=%v delta=%v", c3Before, c3After, got)
+	}
+	if got := c8After.sub(c8Before).length(); got > eps {
+		t.Fatalf("node 8 moved: before=%v after=%v delta=%v", c8Before, c8After, got)
+	}
+	if got := c2After.sub(c2Before).length(); got > eps {
+		t.Fatalf("node 2 moved: before=%v after=%v delta=%v", c2Before, c2After, got)
+	}
+	if got := c1After.sub(c1Before).length(); got > eps {
+		t.Fatalf("node 1 moved: before=%v after=%v delta=%v", c1Before, c1After, got)
+	}
+
+	d2to5 := cart2polar(c5After.sub(c2After)).R
+	d2to6 := cart2polar(c6After.sub(c2After)).R
+	if math.Abs(d2to5-d2to6) > eps {
+		t.Fatalf("node 5 not at dist(2,6): d2to5=%v d2to6=%v", d2to5, d2to6)
+	}
+	t.Logf("final: d=%v dist9To3=%v dist10To6=%v d2to5=%v d2to6=%v", d, dist9To3, dist10To6, d2to5, d2to6)
+}
+
+// TestNode6DragEmitsDecentralizedMessages is the TRACE proof (node6-decentralized.md):
+// a node-6 drag must route a self-initiated Trigger (SenderID=="") to node 6's own
+// inbox, a GatePlace message to BOTH node 9 and node 10, and a forwarded Trigger
+// (SenderID=="6") to node 2 — all via sendMove — and must never send an
+// Equalize/Trigger/GatePlace message that MOVES node 2 or node 6 itself (node 2 only
+// receives the forwarded Trigger, which repositions its peer 5, not node 2). Against
+// the CURRENT central rootMove path (case "6" runs synchronously on the drag call
+// stack, never touching sendMove for these kinds), this test is RED: zero messages
+// are tapped.
+func TestNode6DragEmitsDecentralizedMessages(t *testing.T) {
+	md := newFullChainDispatch()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	md.Start(ctx)
+
+	var mu sync.Mutex
+	var recorded []tappedMsg
+	md.SetMsgTap(func(destID string, msg moveMsg) {
+		if msg.Kind != moveMsgKindEqualize && msg.Kind != moveMsgKindTrigger && msg.Kind != moveMsgKindGatePlace {
+			return
+		}
+		mu.Lock()
+		recorded = append(recorded, tappedMsg{destID: destID, kind: msg.Kind, senderID: msg.SenderID, targetC: msg.TargetC})
+		mu.Unlock()
+	})
+	defer md.SetMsgTap(nil)
+
+	target6 := vec3{X: 45, Y: 20, Z: -5}
+	if ok := md.RootMove("6", target6); !ok {
+		t.Fatalf("RootMove(6, %v) = false", target6)
+	}
+	pollNode6CascadeConverged(t, md, target6)
+	time.Sleep(20 * time.Millisecond)
+
+	mu.Lock()
+	trace := append([]tappedMsg(nil), recorded...)
+	mu.Unlock()
+
+	t.Logf("recorded %d Equalize/Trigger/GatePlace messages:", len(trace))
+	for _, m := range trace {
+		t.Logf("  dest=%s kind=%s senderID=%q targetC=%v", m.destID, m.kind, m.senderID, m.targetC)
+	}
+
+	has := func(dest, kind, senderID string) bool {
+		for _, m := range trace {
+			if m.destID == dest && m.kind == kind && m.senderID == senderID {
+				return true
+			}
+		}
+		return false
+	}
+
+	if !has("6", moveMsgKindTrigger, "") {
+		t.Errorf("expected a self-initiated Trigger (SenderID==\"\") to node 6; got %+v", trace)
+	}
+	if !has("9", moveMsgKindGatePlace, "6") {
+		t.Errorf("expected a GatePlace message (senderID=6) to node 9; got %+v", trace)
+	}
+	if !has("10", moveMsgKindGatePlace, "6") {
+		t.Errorf("expected a GatePlace message (senderID=6) to node 10; got %+v", trace)
+	}
+	if !has("2", moveMsgKindTrigger, "6") {
+		t.Errorf("expected a Trigger forwarded to node 2 (senderID=6); got %+v", trace)
+	}
+	if !has("5", moveMsgKindEqualize, "") {
+		t.Errorf("expected an Equalize routed to node 5; got %+v", trace)
+	}
+
+	for _, m := range trace {
+		if m.destID == "6" && m.kind != moveMsgKindTrigger {
+			t.Errorf("node 6 must never be moved by another node's message; got %+v", m)
+		}
+		if m.destID == "2" && m.kind != moveMsgKindTrigger {
+			t.Errorf("node 2 must never be moved (only re-triggered); got %+v", m)
+		}
+	}
+
+	const wantCount = 5
+	if len(trace) != wantCount {
+		t.Errorf("expected exactly %d messages, got %d: %+v", wantCount, len(trace), trace)
+	}
+}
