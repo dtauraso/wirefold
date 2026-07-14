@@ -856,19 +856,19 @@ func (md *MoveDispatch) fanCenters(newCenters map[string]vec3, reach map[string]
 	}
 }
 
-// placeNode9EqualRadii returns node 9's landing point for a drag to target, constrained so
-// node 9's two radii — to the FIXED neighbors 3 and 6 — are EQUAL. It is computed about the
-// SCENE CENTER: node 9 keeps the bearing the drag points at (the ray from the scene center S
-// through target) and its radius t along that ray is solved so |p−3| == |p−6|. Neither
-// neighbor moves.
+// placeEqualRadii returns a two-neighbor gate node's landing point for a drag to target,
+// constrained so its two radii — to the FIXED neighbors aID and bID — are EQUAL. It is
+// computed about the SCENE CENTER: the node keeps the bearing the drag points at (the ray
+// from the scene center S through target) and its radius t along that ray is solved so
+// |p−a| == |p−b|. Neither neighbor moves. Used by nodes 9 (neighbors 3,6) and 10 (6,8).
 //
-// Solve: equal distance ⇔ p·(b−a) = (|b|²−|a|²)/2 (a=center of 3, b=center of 6). With
-// p = S + t·u (u the unit drag bearing from S), t = ((|b|²−|a|²)/2 − S·(b−a)) / (u·(b−a)).
-// Falls back to the raw target when the neighbors' centers are unknown, when the drag bearing
-// is parallel to the equal-distance plane (no solution), or when the solution is behind S.
-func (md *MoveDispatch) placeNode9EqualRadii(target vec3) vec3 {
-	a, oka := md.centerOfNode("3")
-	b, okb := md.centerOfNode("6")
+// Solve: equal distance ⇔ p·(b−a) = (|b|²−|a|²)/2. With p = S + t·u (u the unit drag bearing
+// from S), t = ((|b|²−|a|²)/2 − S·(b−a)) / (u·(b−a)). Falls back to the raw target when a
+// neighbor's center is unknown, when the drag bearing is parallel to the equal-distance plane
+// (no solution), or when the solution is behind S.
+func (md *MoveDispatch) placeEqualRadii(target vec3, aID, bID string) vec3 {
+	a, oka := md.centerOfNode(aID)
+	b, okb := md.centerOfNode(bID)
 	if !oka || !okb {
 		return target
 	}
@@ -890,42 +890,43 @@ func (md *MoveDispatch) placeNode9EqualRadii(target vec3) vec3 {
 	return s.add(u.scale(t))
 }
 
-// node9DragEqualizeLocalC is node 9's edge-c requantize step — the node-9-only replacement
-// for requantizeLocalPolars, called from rootMove AFTER node 9 has already moved through the
-// normal path (fan + scene→9 c refresh, so node 9 repositions on screen like any dragged
-// node). It mutates ONLY node 9's own LayoutHolder: its local polar to node 3 and to node 6
-// (each in node 9's own frame). It computes the two candidate c's (quantIR) node 9's new
-// position implies for those two edges, keeps the SHORTER as the new c, and writes it onto
-// BOTH records — leaving each edge's own bearing (quantITheta/quantIPhi) and step constants
-// untouched. Node 3 and node 6 are NEVER written (unlike the generic double-link requantize,
-// which updates both ends). Returns false only when node 9 has no LayoutHolder.
-func (md *MoveDispatch) node9DragEqualizeLocalC(target vec3) bool {
-	lh, ok := md.layoutHolders["9"]
+// equalizeEdgeCLocal is a two-neighbor gate node's edge-c requantize step — the per-node
+// replacement for requantizeLocalPolars, called from rootMove AFTER the node has already
+// moved through the normal path (fan + scene c refresh, so it repositions on screen like any
+// dragged node). It mutates ONLY the node's own LayoutHolder: its local polar to aID and to
+// bID (each in the node's own frame). It computes the two candidate c's (quantIR) the node's
+// new position implies for those two edges, keeps the SHORTER as the new c, and writes it
+// onto BOTH records — leaving each edge's own bearing (quantITheta/quantIPhi) and step
+// constants untouched. The two neighbors are NEVER written (unlike the generic double-link
+// requantize, which updates both ends). Used by nodes 9 (3,6) and 10 (6,8). Returns false
+// only when the node has no LayoutHolder.
+func (md *MoveDispatch) equalizeEdgeCLocal(nodeID, aID, bID string, newPos vec3) bool {
+	lh, ok := md.layoutHolders[nodeID]
 	if !ok {
 		return false
 	}
-	// node 9's local polar (own frame) to a fixed neighbor, as the drag implies it.
+	// the node's local polar (own frame) to a fixed neighbor, as the drag implies it.
 	local := func(to string) (qt, qp, qr int, st, sp, sr float64, ok bool) {
 		c, okc := md.centerOfNode(to)
 		if !okc {
 			return 0, 0, 0, 0, 0, 0, false
 		}
 		st, sp, sr = lh.localPolarSteps(to)
-		pol := cart2polar(c.sub(target))
+		pol := cart2polar(c.sub(newPos))
 		return int(math.Round(pol.Theta / st)), int(math.Round(pol.Phi / sp)), int(math.Round(pol.R / sr)), st, sp, sr, true
 	}
-	qt3, qp3, qr3, st3, sp3, sr3, ok3 := local("3")
-	qt6, qp6, qr6, st6, sp6, sr6, ok6 := local("6")
-	if !ok3 || !ok6 {
+	qtA, qpA, qrA, stA, spA, srA, okA := local(aID)
+	qtB, qpB, qrB, stB, spB, srB, okB := local(bID)
+	if !okA || !okB {
 		return false
 	}
-	cNew := min(qr3, qr6)
-	lh.SetLocalPolar("3", qt3, qp3, cNew, st3, sp3, sr3)
-	lh.SetLocalPolar("6", qt6, qp6, cNew, st6, sp6, sr6)
+	cNew := min(qrA, qrB)
+	lh.SetLocalPolar(aID, qtA, qpA, cNew, stA, spA, srA)
+	lh.SetLocalPolar(bID, qtB, qpB, cNew, stB, spB, srB)
 	if md.quantOffsetPersist != nil {
 		if root := md.quantOffsetPersist.root; root != "" {
-			if err := WriteLocalPolars(root, "9", lh.LocalPolarsSnapshot()); err != nil {
-				logPersistErr("local_polar_persist", "9", err)
+			if err := WriteLocalPolars(root, nodeID, lh.LocalPolarsSnapshot()); err != nil {
+				logPersistErr("local_polar_persist", nodeID, err)
 			}
 		}
 	}
@@ -986,13 +987,16 @@ func (md *MoveDispatch) rootMove(nodeID string, target vec3, origin string, sour
 	// position itself never is.
 	newPos := target
 
-	// Node 9's two radii (to the FIXED neighbors 3 and 6) must stay EQUAL. With 3 and 6
-	// held in place, that is only possible where node 9 is the same distance from both, so
-	// node 9's drag is constrained to that equal-distance locus — computed ABOUT THE SCENE
-	// CENTER: node 9 follows the drag's bearing from the scene center, and its radius is
-	// solved so both edges come out equal. Neither neighbor is moved.
-	if nodeID == "9" {
-		newPos = md.placeNode9EqualRadii(target)
+	// Gate nodes 9 (neighbors 3,6) and 10 (neighbors 6,8) keep their two radii EQUAL. With
+	// the neighbors held in place, that is only possible where the node is the same distance
+	// from both, so the drag is constrained to that equal-distance locus — computed ABOUT THE
+	// SCENE CENTER: the node follows the drag's bearing from the scene center, and its radius
+	// is solved so both edges come out equal. Neither neighbor is moved.
+	switch nodeID {
+	case "9":
+		newPos = md.placeEqualRadii(target, "3", "6")
+	case "10":
+		newPos = md.placeEqualRadii(target, "6", "8")
 	}
 
 	emit := map[string]vec3{nodeID: newPos}
@@ -1011,14 +1015,18 @@ func (md *MoveDispatch) rootMove(nodeID string, target vec3, origin string, sour
 		}
 	}
 
-	// Node 9 requantizes its OWN two edge c's only, equalized to the shorter, and never
-	// writes node 3's or node 6's records — every other node uses the generic double-link
-	// requantize. Node 9 itself still moved through the normal path above (fan + scene→9 c),
-	// so it repositions on screen exactly like any dragged node; this step just makes its
-	// two edge c's come out equal at the shorter value without disturbing 3 or 6.
-	if nodeID == "9" {
-		md.node9DragEqualizeLocalC(newPos)
-	} else {
+	// Gate nodes 9 and 10 requantize their OWN two edge c's only, equalized to the shorter,
+	// and never write their neighbors' records — every other node uses the generic
+	// double-link requantize. The node itself still moved through the normal path above (fan
+	// + scene c), so it repositions on screen exactly like any dragged node; this step just
+	// makes its two edge c's come out equal at the shorter value without disturbing either
+	// fixed neighbor.
+	switch nodeID {
+	case "9":
+		md.equalizeEdgeCLocal("9", "3", "6", newPos)
+	case "10":
+		md.equalizeEdgeCLocal("10", "6", "8", newPos)
+	default:
 		md.requantizeLocalPolars(nodeID, newPos)
 	}
 
