@@ -856,6 +856,40 @@ func (md *MoveDispatch) fanCenters(newCenters map[string]vec3, reach map[string]
 	}
 }
 
+// placeNode9EqualRadii returns node 9's landing point for a drag to target, constrained so
+// node 9's two radii — to the FIXED neighbors 3 and 6 — are EQUAL. It is computed about the
+// SCENE CENTER: node 9 keeps the bearing the drag points at (the ray from the scene center S
+// through target) and its radius t along that ray is solved so |p−3| == |p−6|. Neither
+// neighbor moves.
+//
+// Solve: equal distance ⇔ p·(b−a) = (|b|²−|a|²)/2 (a=center of 3, b=center of 6). With
+// p = S + t·u (u the unit drag bearing from S), t = ((|b|²−|a|²)/2 − S·(b−a)) / (u·(b−a)).
+// Falls back to the raw target when the neighbors' centers are unknown, when the drag bearing
+// is parallel to the equal-distance plane (no solution), or when the solution is behind S.
+func (md *MoveDispatch) placeNode9EqualRadii(target vec3) vec3 {
+	a, oka := md.centerOfNode("3")
+	b, okb := md.centerOfNode("6")
+	if !oka || !okb {
+		return target
+	}
+	s := md.sceneSphere.Center
+	u := target.sub(s)
+	if u.length() == 0 {
+		return target
+	}
+	u = u.normalize()
+	ba := b.sub(a)
+	denom := u.dot(ba)
+	if denom == 0 {
+		return target
+	}
+	t := (b.dot(b)/2 - a.dot(a)/2 - s.dot(ba)) / denom
+	if t <= 0 {
+		return target
+	}
+	return s.add(u.scale(t))
+}
+
 // node9DragEqualizeLocalC is node 9's edge-c requantize step — the node-9-only replacement
 // for requantizeLocalPolars, called from rootMove AFTER node 9 has already moved through the
 // normal path (fan + scene→9 c refresh, so node 9 repositions on screen like any dragged
@@ -951,6 +985,15 @@ func (md *MoveDispatch) rootMove(nodeID string, target vec3, origin string, sour
 	// each neighbor's local polar (requantizeLocalPolars) are quantized; the
 	// position itself never is.
 	newPos := target
+
+	// Node 9's two radii (to the FIXED neighbors 3 and 6) must stay EQUAL. With 3 and 6
+	// held in place, that is only possible where node 9 is the same distance from both, so
+	// node 9's drag is constrained to that equal-distance locus — computed ABOUT THE SCENE
+	// CENTER: node 9 follows the drag's bearing from the scene center, and its radius is
+	// solved so both edges come out equal. Neither neighbor is moved.
+	if nodeID == "9" {
+		newPos = md.placeNode9EqualRadii(target)
+	}
 
 	emit := map[string]vec3{nodeID: newPos}
 	polars := md.heldPolar()

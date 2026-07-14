@@ -17,7 +17,6 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -960,16 +959,16 @@ func TestRootMoveNode2CascadeKeepsNode1EdgesEqual(t *testing.T) {
 	}
 }
 
-// TestRootMoveNode9MovesAndEqualizesShorterC verifies node 9's current drag behavior:
-// node 9 flows through the normal move path (fanCenters + scene-triple quantize) and
-// REPOSITIONS on screen to the drag target like any other dragged node; the only
-// node-9-special step is that its local-polar requantize is node9DragEqualizeLocalC
-// instead of the generic requantizeLocalPolars — its local polar to "3" and to "6"
-// each get the SAME QuantIR, forced to the shorter of the two independently-implied
-// candidates, bearings preserved — while node 3's and node 6's LayoutHolders are never
-// written (no double-link write-back). Built via newMoveDispatch directly (mirroring
-// TestRootMoveNode2CascadesToSource), NOT via LoadTopology.
-func TestRootMoveNode9MovesAndEqualizesShorterC(t *testing.T) {
+// TestRootMoveNode9DragKeepsRadiiEqual verifies node 9's current drag behavior: node 9
+// is NOT placed at the raw drag target. Instead rootMove constrains it, via
+// placeNode9EqualRadii, to the point — about the scene center — where node 9's bearing
+// from the scene center matches the drag's bearing (S -> target) but its RADIUS along
+// that bearing is solved so its distances to the two FIXED neighbors 3 and 6 come out
+// EQUAL. Node 3 and node 6 never move. node9DragEqualizeLocalC still runs afterward as
+// node 9's own local-polar requantize (equalizing its two edge-c records to each other),
+// unaffected by this change. Built via newMoveDispatch directly (mirroring
+// TestRootMoveNode2CascadeKeepsNode1EdgesEqual), NOT via LoadTopology.
+func TestRootMoveNode9DragKeepsRadiiEqual(t *testing.T) {
 	geoms := map[string]nodeGeom{
 		"9": {Kind: "WindowAndInhibitLeftGate", HasPos: true, ScenePolar: cart2polar(vec3{0, 0, 0}), Outputs: []portGeom{{Name: "out3"}, {Name: "out6"}}},
 		"3": {Kind: "Pulse", HasPos: true, ScenePolar: cart2polar(vec3{10, 0, 0}), Inputs: []portGeom{{Name: "in"}}},
@@ -988,36 +987,41 @@ func TestRootMoveNode9MovesAndEqualizesShorterC(t *testing.T) {
 	md.Start(ctx)
 
 	lh9 := md.layoutHolders["9"]
-	lh3 := md.layoutHolders["3"]
-	lh6 := md.layoutHolders["6"]
 
-	threeBefore := lh3.LocalPolarsSnapshot()
-	sixBefore := lh6.LocalPolarsSnapshot()
-
-	threeCenter, ok := md.centerOfNode("3")
+	nineBefore, ok := md.centerOfNode("9")
+	if !ok {
+		t.Fatal("centerOfNode(9) missing before move")
+	}
+	threeCenterBefore, ok := md.centerOfNode("3")
 	if !ok {
 		t.Fatal("centerOfNode(3) missing before move")
 	}
-	sixCenter, ok := md.centerOfNode("6")
+	sixCenterBefore, ok := md.centerOfNode("6")
 	if !ok {
 		t.Fatal("centerOfNode(6) missing before move")
 	}
 
-	// Drag target deliberately closer to 3 than to 6, so qr3 != qr6.
+	// Drag target whose bearing from the scene center (origin, the default
+	// md.sceneSphere.Center) is NOT parallel to the 3-6 axis, so placeNode9EqualRadii
+	// solves a genuine point rather than falling back to target.
 	target := vec3{X: 5, Y: 5, Z: 5}
 
-	st, sp, sr := lh9.localPolarSteps("3") // node 9's own default local-polar steps
-	pol3 := cart2polar(threeCenter.sub(target))
-	pol6 := cart2polar(sixCenter.sub(target))
-	wantQt3 := int(math.Round(pol3.Theta / st))
-	wantQp3 := int(math.Round(pol3.Phi / sp))
-	wantQr3 := int(math.Round(pol3.R / sr))
-	wantQt6 := int(math.Round(pol6.Theta / st))
-	wantQp6 := int(math.Round(pol6.Phi / sp))
-	wantQr6 := int(math.Round(pol6.R / sr))
-	wantCNew := min(wantQr3, wantQr6)
-	if wantQr3 == wantQr6 {
-		t.Fatalf("test fixture must produce distinct qr3/qr6, got equal %d — adjust positions", wantQr3)
+	// Independently compute the expected landing with the same formula
+	// placeNode9EqualRadii uses: p = S + t*u, t solved so |p-a| == |p-b|.
+	s := vec3{0, 0, 0} // md.sceneSphere.Center's zero-value default
+	u := target.sub(s).normalize()
+	ba := sixCenterBefore.sub(threeCenterBefore)
+	denom := u.dot(ba)
+	if denom == 0 {
+		t.Fatal("test fixture bearing is parallel to the 3-6 axis — adjust positions/target")
+	}
+	tSolved := (sixCenterBefore.dot(sixCenterBefore)/2 - threeCenterBefore.dot(threeCenterBefore)/2 - s.dot(ba)) / denom
+	if tSolved <= 0 {
+		t.Fatal("test fixture solves a t <= 0 (behind scene center) — adjust positions/target")
+	}
+	expected := s.add(u.scale(tSolved))
+	if expected == target {
+		t.Fatal("test fixture's expected landing coincides with the raw target — adjust geometry to exercise the real solve")
 	}
 
 	if !md.RootMove("9", target) {
@@ -1028,28 +1032,60 @@ func TestRootMoveNode9MovesAndEqualizesShorterC(t *testing.T) {
 	deadline := time.Now().Add(2 * time.Second)
 	converged := func() bool {
 		c, ok := md.centerOfNode("9")
-		return ok && math.Abs(c.X-target.X) <= eps && math.Abs(c.Y-target.Y) <= eps && math.Abs(c.Z-target.Z) <= eps
+		return ok && math.Abs(c.X-expected.X) <= eps && math.Abs(c.Y-expected.Y) <= eps && math.Abs(c.Z-expected.Z) <= eps
 	}
 	for !converged() {
 		if time.Now().After(deadline) {
-			t.Fatal("node 9 drag never converged to target")
+			t.Fatal("node 9 drag never converged to the equal-radii point")
 		}
 		time.Sleep(time.Millisecond)
 	}
 	// Give any trailing re-emit messages a moment to settle.
 	time.Sleep(20 * time.Millisecond)
 
-	// (0) node 9 itself moved to the drag target (normal move path, not an early return).
 	nineAfter, ok := md.centerOfNode("9")
 	if !ok {
 		t.Fatal("centerOfNode(9) missing after move")
 	}
-	if math.Abs(nineAfter.X-target.X) > eps || math.Abs(nineAfter.Y-target.Y) > eps || math.Abs(nineAfter.Z-target.Z) > eps {
-		t.Fatalf("node 9 did not move to drag target: got %+v, want %+v", nineAfter, target)
+
+	// (a) node 9 moved from its start.
+	if nineAfter == nineBefore {
+		t.Fatal("node 9 did not move")
 	}
 
-	// (a) node 9's own LayoutHolder carries both entries, both forced to the SAME
-	// (shorter) QuantIR, while each entry's own bearing (theta/phi) is preserved.
+	// (c) node 9 landed exactly at placeNode9EqualRadii(target), independently computed.
+	if math.Abs(nineAfter.X-expected.X) > eps || math.Abs(nineAfter.Y-expected.Y) > eps || math.Abs(nineAfter.Z-expected.Z) > eps {
+		t.Fatalf("node 9 landing = %+v, want equal-radii solve %+v", nineAfter, expected)
+	}
+	if nineAfter == target {
+		t.Fatalf("node 9 landed at the raw target %+v; expected the constrained equal-radii point %+v", target, expected)
+	}
+
+	// (d) node 3 and node 6 never moved.
+	threeCenterAfter, ok := md.centerOfNode("3")
+	if !ok {
+		t.Fatal("centerOfNode(3) missing after move")
+	}
+	if threeCenterAfter != threeCenterBefore {
+		t.Fatalf("node 3 moved: got %+v, want unchanged %+v", threeCenterAfter, threeCenterBefore)
+	}
+	sixCenterAfter, ok := md.centerOfNode("6")
+	if !ok {
+		t.Fatal("centerOfNode(6) missing after move")
+	}
+	if sixCenterAfter != sixCenterBefore {
+		t.Fatalf("node 6 moved: got %+v, want unchanged %+v", sixCenterAfter, sixCenterBefore)
+	}
+
+	// (b) THE KEY ASSERTION: node 9's two radii, to the fixed neighbors 3 and 6, are equal.
+	dist3 := cart2polar(nineAfter.sub(threeCenterAfter)).R
+	dist6 := cart2polar(nineAfter.sub(sixCenterAfter)).R
+	if math.Abs(dist3-dist6) > eps {
+		t.Fatalf("node 9's radii to 3 and 6 are not equal: dist(9,3)=%v, dist(9,6)=%v", dist3, dist6)
+	}
+
+	// (e) node 9's two edge-c records (LocalPolar QuantIR to 3 and to 6) are equal to
+	// each other — the node9DragEqualizeLocalC requantize step.
 	var got3, got6 *LocalPolar
 	for _, lp := range lh9.LocalPolarsSnapshot() {
 		cp := lp
@@ -1066,31 +1102,7 @@ func TestRootMoveNode9MovesAndEqualizesShorterC(t *testing.T) {
 	if got6 == nil {
 		t.Fatal("node 9 has no local polar entry for 6 after RootMove")
 	}
-	if got3.QuantIR != wantCNew {
-		t.Fatalf("node9.localPolar[3].QuantIR = %d, want cNew=min(%d,%d)=%d", got3.QuantIR, wantQr3, wantQr6, wantCNew)
-	}
-	if got6.QuantIR != wantCNew {
-		t.Fatalf("node9.localPolar[6].QuantIR = %d, want cNew=min(%d,%d)=%d", got6.QuantIR, wantQr3, wantQr6, wantCNew)
-	}
 	if got3.QuantIR != got6.QuantIR {
 		t.Fatalf("node9's two entries have different QuantIR: to3=%d to6=%d, want equal (shorter c)", got3.QuantIR, got6.QuantIR)
-	}
-	if got3.QuantITheta != wantQt3 || got3.QuantIPhi != wantQp3 {
-		t.Fatalf("node9.localPolar[3] bearing = (theta=%d,phi=%d), want unmodified (theta=%d,phi=%d)", got3.QuantITheta, got3.QuantIPhi, wantQt3, wantQp3)
-	}
-	if got6.QuantITheta != wantQt6 || got6.QuantIPhi != wantQp6 {
-		t.Fatalf("node9.localPolar[6] bearing = (theta=%d,phi=%d), want unmodified (theta=%d,phi=%d)", got6.QuantITheta, got6.QuantIPhi, wantQt6, wantQp6)
-	}
-
-	// (b) node 3's LayoutHolder is untouched — no double-link write-back.
-	threeAfter := lh3.LocalPolarsSnapshot()
-	if !reflect.DeepEqual(threeBefore, threeAfter) {
-		t.Fatalf("node 3's LayoutHolder LocalPolars changed: before=%+v, after=%+v", threeBefore, threeAfter)
-	}
-
-	// (c) node 6's LayoutHolder is untouched — no double-link write-back.
-	sixAfter := lh6.LocalPolarsSnapshot()
-	if !reflect.DeepEqual(sixBefore, sixAfter) {
-		t.Fatalf("node 6's LayoutHolder LocalPolars changed: before=%+v, after=%+v", sixBefore, sixAfter)
 	}
 }
