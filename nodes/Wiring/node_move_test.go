@@ -960,14 +960,16 @@ func TestRootMoveNode2CascadeKeepsNode1EdgesEqual(t *testing.T) {
 	}
 }
 
-// TestRootMoveNode9LocalEqualizesShorterC verifies node 9's hardcoded local-only drag
-// rule (node9DragEqualizeLocalC): dragging node "9" (a WindowAndInhibitLeftGate node)
-// mutates ONLY node 9's own LayoutHolder — its local polar to "3" and to "6" each get
-// the SAME QuantIR, forced to the shorter of the two independently-implied candidates —
-// while node 3's and node 6's LayoutHolders are never written (no fan/world reposition,
-// no double-link write-back). Built via newMoveDispatch directly (mirroring
+// TestRootMoveNode9MovesAndEqualizesShorterC verifies node 9's current drag behavior:
+// node 9 flows through the normal move path (fanCenters + scene-triple quantize) and
+// REPOSITIONS on screen to the drag target like any other dragged node; the only
+// node-9-special step is that its local-polar requantize is node9DragEqualizeLocalC
+// instead of the generic requantizeLocalPolars — its local polar to "3" and to "6"
+// each get the SAME QuantIR, forced to the shorter of the two independently-implied
+// candidates, bearings preserved — while node 3's and node 6's LayoutHolders are never
+// written (no double-link write-back). Built via newMoveDispatch directly (mirroring
 // TestRootMoveNode2CascadesToSource), NOT via LoadTopology.
-func TestRootMoveNode9LocalEqualizesShorterC(t *testing.T) {
+func TestRootMoveNode9MovesAndEqualizesShorterC(t *testing.T) {
 	geoms := map[string]nodeGeom{
 		"9": {Kind: "WindowAndInhibitLeftGate", HasPos: true, ScenePolar: cart2polar(vec3{0, 0, 0}), Outputs: []portGeom{{Name: "out3"}, {Name: "out6"}}},
 		"3": {Kind: "Pulse", HasPos: true, ScenePolar: cart2polar(vec3{10, 0, 0}), Inputs: []portGeom{{Name: "in"}}},
@@ -1020,6 +1022,30 @@ func TestRootMoveNode9LocalEqualizesShorterC(t *testing.T) {
 
 	if !md.RootMove("9", target) {
 		t.Fatal("RootMove returned false for known node")
+	}
+
+	const eps = 1e-6
+	deadline := time.Now().Add(2 * time.Second)
+	converged := func() bool {
+		c, ok := md.centerOfNode("9")
+		return ok && math.Abs(c.X-target.X) <= eps && math.Abs(c.Y-target.Y) <= eps && math.Abs(c.Z-target.Z) <= eps
+	}
+	for !converged() {
+		if time.Now().After(deadline) {
+			t.Fatal("node 9 drag never converged to target")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	// Give any trailing re-emit messages a moment to settle.
+	time.Sleep(20 * time.Millisecond)
+
+	// (0) node 9 itself moved to the drag target (normal move path, not an early return).
+	nineAfter, ok := md.centerOfNode("9")
+	if !ok {
+		t.Fatal("centerOfNode(9) missing after move")
+	}
+	if math.Abs(nineAfter.X-target.X) > eps || math.Abs(nineAfter.Y-target.Y) > eps || math.Abs(nineAfter.Z-target.Z) > eps {
+		t.Fatalf("node 9 did not move to drag target: got %+v, want %+v", nineAfter, target)
 	}
 
 	// (a) node 9's own LayoutHolder carries both entries, both forced to the SAME

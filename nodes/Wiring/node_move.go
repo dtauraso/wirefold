@@ -856,13 +856,15 @@ func (md *MoveDispatch) fanCenters(newCenters map[string]vec3, reach map[string]
 	}
 }
 
-// node9DragEqualizeLocalC applies node 9's local-only drag rule. It mutates ONLY node 9's
-// own LayoutHolder: node 9's local polar to node 3 and to node 6 (each in node 9's own
-// frame). It computes the two candidate c's (quantIR) the drag implies for those two edges,
-// keeps the SHORTER as the new c, and writes it onto BOTH records — leaving each edge's own
-// bearing (quantITheta/quantIPhi) and step constants untouched. Node 3 and node 6 are never
-// read for a write and never mutated; no scene-center fan, reach, or scalar-triple persist
-// runs. Returns false only when node 9 has no LayoutHolder.
+// node9DragEqualizeLocalC is node 9's edge-c requantize step — the node-9-only replacement
+// for requantizeLocalPolars, called from rootMove AFTER node 9 has already moved through the
+// normal path (fan + scene→9 c refresh, so node 9 repositions on screen like any dragged
+// node). It mutates ONLY node 9's own LayoutHolder: its local polar to node 3 and to node 6
+// (each in node 9's own frame). It computes the two candidate c's (quantIR) node 9's new
+// position implies for those two edges, keeps the SHORTER as the new c, and writes it onto
+// BOTH records — leaving each edge's own bearing (quantITheta/quantIPhi) and step constants
+// untouched. Node 3 and node 6 are NEVER written (unlike the generic double-link requantize,
+// which updates both ends). Returns false only when node 9 has no LayoutHolder.
 func (md *MoveDispatch) node9DragEqualizeLocalC(target vec3) bool {
 	lh, ok := md.layoutHolders["9"]
 	if !ok {
@@ -942,17 +944,6 @@ func (md *MoveDispatch) rootMove(nodeID string, target vec3, origin string, sour
 		return false
 	}
 
-	// Node 9 is handled PURELY LOCALLY, between 9/3/6 only: no scene-center fan, no
-	// world reposition, and node 3 and node 6 are never touched. Node 9 holds two
-	// local-polar edge records — its c (quantIR) to 3 and to 6, each in node 9's own
-	// frame. The drag yields two candidate c's; the SHORTER becomes the new c and BOTH
-	// records are set to it (9→3 and 9→6 carry equal length). Only node 9's own
-	// LayoutHolder is mutated and persisted. Returns before any of RootMove's global
-	// machinery runs.
-	if nodeID == "9" {
-		return md.node9DragEqualizeLocalC(target)
-	}
-
 	edges := md.heldEdges()
 
 	// The dragged node's new world position is the drag target — continuous, no
@@ -977,7 +968,16 @@ func (md *MoveDispatch) rootMove(nodeID string, target vec3, origin string, sour
 		}
 	}
 
-	md.requantizeLocalPolars(nodeID, newPos)
+	// Node 9 requantizes its OWN two edge c's only, equalized to the shorter, and never
+	// writes node 3's or node 6's records — every other node uses the generic double-link
+	// requantize. Node 9 itself still moved through the normal path above (fan + scene→9 c),
+	// so it repositions on screen exactly like any dragged node; this step just makes its
+	// two edge c's come out equal at the shorter value without disturbing 3 or 6.
+	if nodeID == "9" {
+		md.node9DragEqualizeLocalC(newPos)
+	} else {
+		md.requantizeLocalPolars(nodeID, newPos)
+	}
 
 	// Scoped to nodes 5, 2 and 1 by request: a peer-frame local-polar-radial equalization,
 	// NOT a parent/child cascade. The dragged node's double-link distances to its other
