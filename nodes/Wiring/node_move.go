@@ -857,15 +857,14 @@ func (md *MoveDispatch) fanCenters(newCenters map[string]vec3, reach map[string]
 }
 
 // placeEqualRadii returns a two-neighbor gate node's landing point for a drag to target,
-// constrained so its two radii — to the FIXED neighbors aID and bID — are EQUAL. It is
-// computed about the SCENE CENTER: the node keeps the bearing the drag points at (the ray
-// from the scene center S through target) and its radius t along that ray is solved so
-// |p−a| == |p−b|. Neither neighbor moves. Used by nodes 9 (neighbors 3,6) and 10 (6,8).
-//
-// Solve: equal distance ⇔ p·(b−a) = (|b|²−|a|²)/2. With p = S + t·u (u the unit drag bearing
-// from S), t = ((|b|²−|a|²)/2 − S·(b−a)) / (u·(b−a)). Falls back to the raw target when a
-// neighbor's center is unknown, when the drag bearing is parallel to the equal-distance plane
-// (no solution), or when the solution is behind S.
+// constrained so its two radii — to the FIXED neighbors aID and bID — are EQUAL. The landing
+// is the NEAREST point to target on the perpendicular-bisector plane of a–b (the set of points
+// equidistant from a and b): p = target − ((target−mid)·n̂) n̂, with n̂ = normalize(b−a) and
+// mid = (a+b)/2. This orthogonal projection is finite and continuous for EVERY target — unlike
+// the earlier scene-center-ray solve, which ran to infinity / flipped sign when the bearing
+// grazed the plane (the node-9 far-mouse blow-up and the node-10 runaway under node 6's
+// cascade). Neither neighbor moves. Used by nodes 9 (neighbors 3,6) and 10 (6,8). Falls back to
+// the raw target only when a neighbor's center is unknown or a and b coincide (no plane).
 // centerOfNodeOr returns overrideCenter when id == overrideID (and overrideCenter != nil),
 // otherwise md.centerOfNode(id). Lets a cascade hand a helper the moved node's fresh center
 // instead of its async-lagged published snapshot (see rootMove's sourceCenterOverride note).
@@ -886,22 +885,15 @@ func (md *MoveDispatch) placeEqualRadii(target vec3, aID, bID, overrideID string
 	if !oka || !okb {
 		return target
 	}
-	s := md.sceneSphere.Center
-	u := target.sub(s)
-	if u.length() == 0 {
+	n := b.sub(a)
+	if n.length() == 0 {
 		return target
 	}
-	u = u.normalize()
-	ba := b.sub(a)
-	denom := u.dot(ba)
-	if denom == 0 {
-		return target
-	}
-	t := (b.dot(b)/2 - a.dot(a)/2 - s.dot(ba)) / denom
-	if t <= 0 {
-		return target
-	}
-	return s.add(u.scale(t))
+	nhat := n.normalize()
+	mid := a.add(b).scale(0.5)
+	// Nearest point on the perpendicular-bisector plane of a–b to target: subtract target's
+	// component along the plane normal. Finite for every target — no ray, no singularity.
+	return target.sub(nhat.scale(target.sub(mid).dot(nhat)))
 }
 
 // equalizeEdgeCLocal is a two-neighbor gate node's edge-c requantize step — the per-node
@@ -981,76 +973,118 @@ func (md *MoveDispatch) propagateShortestCFrom6(newPos6 vec3) {
 	}
 	d := shortest * step
 
+	// 9 and 10 ACT LIKE THEY WERE DRAGGED to the c node 6 sends them, so ALL of 9→3, 9→6,
+	// 6→10, 10→8 become that shortest c: node 9 is placed at distance d = shortest*step from
+	// BOTH its neighbors 3 and 6 (→ 9→3 == 9→6 == d), node 10 at distance d from BOTH 6 and 8.
+	// With node 6's radii already d (both neighbors sit at d from it), the four edges are equal.
+	// The placement is a fixed function of the two FIXED neighbors + d (nearest point on the
+	// equal-distance circle to the node's current spot), so it is stable — no self-reference,
+	// no drift. node 6's fresh center (newPos6) is used directly.
 	if ok9 {
-		dir := c9center.sub(newPos6)
-		if dir.length() != 0 {
-			newPos9 := newPos6.add(dir.normalize().scale(d))
-			md.placeNeighborFrom6("9", newPos9, "3", "6", int(shortest))
+		if a3, oka := md.centerOfNode("3"); oka {
+			if p9, okp := md.placeAtDistanceFromBoth("9", a3, newPos6, d); okp {
+				md.moveNodeAndSetEdgeCs("9", p9, "3", "6", int(shortest))
+			}
 		}
 	}
 	if ok10 {
-		dir := c10center.sub(newPos6)
-		if dir.length() != 0 {
-			newPos10 := newPos6.add(dir.normalize().scale(d))
-			md.placeNeighborFrom6("10", newPos10, "8", "6", int(shortest))
+		if a8, oka := md.centerOfNode("8"); oka {
+			if p10, okp := md.placeAtDistanceFromBoth("10", newPos6, a8, d); okp {
+				md.moveNodeAndSetEdgeCs("10", p10, "6", "8", int(shortest))
+			}
 		}
 	}
 }
 
-// placeNeighborFrom6 moves ONE of node 6's gate neighbors (nbrID, "9" or "10") to
-// newNbrPos — the point at distance c*localStepR from node 6 along the neighbor's
-// current bearing from node 6 — exactly as rootMove applies any single dragged node's
-// move (fan + scalar-triple remeasure/persist), then sets the neighbor's two edge-c
-// records (to otherEdgeID and to anchorEdgeID, i.e. "6") to c, preserving each record's
-// own stored bearing (quantITheta/quantIPhi) and step constants.
-func (md *MoveDispatch) placeNeighborFrom6(nbrID string, newNbrPos vec3, otherEdgeID, anchorEdgeID string, c int) {
-	// Move the neighbor node on screen — mirrors rootMove's fan block for a single
-	// moved node.
-	edges := md.heldEdges()
-	emit := map[string]vec3{nbrID: newNbrPos}
-	polars := md.heldPolar()
-	polars[nbrID] = cart2polar(newNbrPos.sub(md.sceneSphere.Center))
-	reach := reachRFromPolar(polars, edges)
-	md.fanCenters(emit, reach)
+// placeAtDistanceFromBoth returns the point at distance d from BOTH fixed anchors a and b,
+// nearest to nodeID's current position — so the node's two radii (to a and to b) both equal d.
+// The equal-distance locus is the circle where the two spheres (radius d, centers a and b)
+// meet: it lies in the perpendicular-bisector plane of a–b, centered at the midpoint m, with
+// radius ρ = sqrt(d² − |a−b|²/4). The nearest circle point to the node's current spot is
+// m + ρ·normalize(proj(cur)−m), proj = orthogonal projection of cur onto that plane. d is
+// floored at |a−b|/2 (below it the spheres don't meet; the node lands at the midpoint).
+// Stable: once on the circle the nearest point is itself, so it is a fixed point (no drift).
+func (md *MoveDispatch) placeAtDistanceFromBoth(nodeID string, a, b vec3, d float64) (vec3, bool) {
+	cur, ok := md.centerOfNode(nodeID)
+	if !ok {
+		return vec3{}, false
+	}
+	ab := b.sub(a)
+	half := ab.length() / 2
+	if half == 0 {
+		return vec3{}, false
+	}
+	if d < half {
+		d = half
+	}
+	m := a.add(b).scale(0.5)
+	nhat := ab.scale(1 / (2 * half))
+	q := cur.sub(nhat.scale(cur.sub(m).dot(nhat))) // project current pos onto bisector plane
+	dir := q.sub(m)
+	rho := math.Sqrt(math.Max(0, d*d-half*half))
+	if dir.length() == 0 {
+		return m, true // current projects onto the axis; land at midpoint (equidistant)
+	}
+	return m.add(dir.normalize().scale(rho)), true
+}
 
+// moveNodeAndSetEdgeCs moves nodeID to newPos (the same fan + scalar-triple persist rootMove
+// applies to any single dragged node, so it repositions on screen), then sets nodeID's two
+// edge-c records (to edgeA and edgeB) to c, preserving each record's own bearing/step
+// constants. Only nodeID's own LayoutHolder is written — the edge neighbors are never moved.
+func (md *MoveDispatch) moveNodeAndSetEdgeCs(nodeID string, newPos vec3, edgeA, edgeB string, c int) {
+	edges := md.heldEdges()
+	emit := map[string]vec3{nodeID: newPos}
+	polars := md.heldPolar()
+	polars[nodeID] = cart2polar(newPos.sub(md.sceneSphere.Center))
+	md.fanCenters(emit, reachRFromPolar(polars, edges))
 	if md.quantizedLayout {
-		off := measureScalars(map[string]vec3{nbrID: newNbrPos}, map[string]bool{nbrID: true}, md.sceneSphere.Center, md.quantizedOffsets)[nbrID]
-		md.quantizedOffsets[nbrID] = off
+		off := measureScalars(map[string]vec3{nodeID: newPos}, map[string]bool{nodeID: true}, md.sceneSphere.Center, md.quantizedOffsets)[nodeID]
+		md.quantizedOffsets[nodeID] = off
 		if md.quantOffsetPersist != nil {
-			md.quantOffsetPersist.schedule(nbrID, off, cart2polar(newNbrPos.sub(md.sceneSphere.Center)))
+			md.quantOffsetPersist.schedule(nodeID, off, cart2polar(newPos.sub(md.sceneSphere.Center)))
 		}
 	}
-
-	// Set the neighbor's two edge-c records (to otherEdgeID and to anchorEdgeID) to c,
-	// keeping each record's own bearing/step constants — mirrors equalizeEdgeCLocal's
-	// local() closure but forces QuantIR to the propagated c instead of re-deriving it.
-	lh, ok := md.layoutHolders[nbrID]
+	lh, ok := md.layoutHolders[nodeID]
 	if !ok {
 		return
 	}
-	setRecord := func(to string) {
-		other, ok := md.centerOfNode(to)
+	root := ""
+	if md.quantOffsetPersist != nil {
+		root = md.quantOffsetPersist.root
+	}
+	persist := func(id string, holder *LayoutHolder) {
+		if root == "" {
+			return
+		}
+		if err := WriteLocalPolars(root, id, holder.LocalPolarsSnapshot()); err != nil {
+			logPersistErr("local_polar_persist", id, err)
+		}
+	}
+	// Set BOTH ends of each edge to c so the double-link agrees: nodeID's record to the
+	// neighbor AND the neighbor's back-reference to nodeID. Each end quantizes its own
+	// bearing on its own step grid but shares the propagated c. Persists both holders — the
+	// far neighbor does not MOVE, only its edge-length record to nodeID is refreshed.
+	setBothEnds := func(far string) {
+		fc, ok := md.centerOfNode(far)
 		if !ok {
 			return
 		}
-		st, sp, sr := lh.localPolarSteps(to)
-		pol := cart2polar(other.sub(newNbrPos))
-		lh.SetLocalPolar(to,
-			int(math.Round(pol.Theta/st)),
-			int(math.Round(pol.Phi/sp)),
-			c,
-			st, sp, sr)
-	}
-	setRecord(otherEdgeID)
-	setRecord(anchorEdgeID)
-
-	if md.quantOffsetPersist != nil {
-		if root := md.quantOffsetPersist.root; root != "" {
-			if err := WriteLocalPolars(root, nbrID, lh.LocalPolarsSnapshot()); err != nil {
-				logPersistErr("local_polar_persist", nbrID, err)
-			}
+		st, sp, sr := lh.localPolarSteps(far)
+		near := cart2polar(fc.sub(newPos))
+		lh.SetLocalPolar(far, int(math.Round(near.Theta/st)), int(math.Round(near.Phi/sp)), c, st, sp, sr)
+		flh, ok := md.layoutHolders[far]
+		if !ok {
+			return
 		}
+		fst, fsp, fsr := flh.localPolarSteps(nodeID)
+		back := cart2polar(newPos.sub(fc))
+		flh.SetLocalPolar(nodeID, int(math.Round(back.Theta/fst)), int(math.Round(back.Phi/fsp)), c, fst, fsp, fsr)
+		persist(far, flh)
 	}
+	setBothEnds(edgeA)
+	setBothEnds(edgeB)
+	persist(nodeID, lh)
 }
 
 // RootMove handles a node-drag under the flat absolute scene-polar layout: every node
@@ -1165,7 +1199,7 @@ func (md *MoveDispatch) rootMove(nodeID string, target vec3, origin string, sour
 	// keeping node 1's own 1→3 edge equal to the organic post-drag 1↔2 distance.
 	switch nodeID {
 	case "5":
-		md.equalizeNeighborDistancesWithSourceCenter(nodeID, "2", newPos, sourceCenterOverride)
+		md.equalizeNeighborDistancesWithSourceCenter(nodeID, "2", newPos, sourceCenterOverride, origin)
 		// Mirror of case "2"'s cascade into 5: a node-5 drag makes node 2 "act like it
 		// was dragged" too, so node 2 re-equalizes its OWN peers (node 6) against the new
 		// 5↔2 distance and fans onward to node 1. Re-run node 2's rootMove at 2's CURRENT
@@ -1180,7 +1214,19 @@ func (md *MoveDispatch) rootMove(nodeID string, target vec3, origin string, sour
 			}
 		}
 	case "2":
-		md.equalizeNeighborDistancesWithSourceCenter(nodeID, "5", newPos, sourceCenterOverride)
+		// Direct node-2 drag sources its equalize on node 5. But when node 6 TRIGGERED this
+		// (origin "6"), node 2 instead sources on the new 6↔2 distance (node 6, via the fresh
+		// sourceCenterOverride): it repositions only node 5 to that length (node 1 stays
+		// excluded, node 6 is the source so it is untouched → 2→6 not changed), and does NOT
+		// fan onward to 5/1 (the minimal "set only 2→5 to 6↔2" rule).
+		src := "5"
+		if origin == "6" {
+			src = "6"
+		}
+		md.equalizeNeighborDistancesWithSourceCenter(nodeID, src, newPos, sourceCenterOverride, origin)
+		if origin == "6" {
+			break
+		}
 		// Cascade: have source node 5 act like it was dragged too, so ITS other peer
 		// distances (5↔7 / 5↔8) recompute against the new 2↔5 distance. Re-run node 5's
 		// own rootMove at 5's CURRENT (unchanged) position, passing node 2's just-computed
@@ -1211,13 +1257,24 @@ func (md *MoveDispatch) rootMove(nodeID string, target vec3, origin string, sour
 		// Node 1's own edges are kept equal: 1→3 is set to the 1↔2 distance (source "2"),
 		// node 3 repositioned along its current bearing from node 1. Driven by the node-2→1
 		// cascade above (node 1 itself never moves on a node-2 drag).
-		md.equalizeNeighborDistancesWithSourceCenter(nodeID, "2", newPos, sourceCenterOverride)
+		md.equalizeNeighborDistancesWithSourceCenter(nodeID, "2", newPos, sourceCenterOverride, origin)
 	case "6":
 		// Node 6 moved freely (handled by the normal path above, no equal-radii solve).
 		// It is the fixed ANCHOR: propagate the SHORTER of its two c-distances (to 9, to
 		// 10) to both neighbors, repositioning each radially along its current bearing
 		// from node 6 — no re-solve against node 6's position, so no circular feedback.
 		md.propagateShortestCFrom6(newPos)
+		// Node 6 also triggers node 2's drag: 6↔2 changed, so node 2 "acts as if it was
+		// dragged" — re-runs its own rootMove at its CURRENT (unchanged) position, sourcing
+		// its equalize on node 5 and cascading onward to 5/1. origin "6" makes node 2's
+		// equalize EXCLUDE node 6 from its peer set, so node 2 does NOT update 2→6 (the edge
+		// the cascade arrived on) nor move node 6. Skipped if node 2 is the chain origin.
+		if origin != "2" {
+			if twoCenter, ok := md.centerOfNode("2"); ok {
+				fresh := newPos
+				md.rootMove("2", twoCenter, "6", &fresh)
+			}
+		}
 	}
 	return true
 }
@@ -1235,7 +1292,11 @@ func (md *MoveDispatch) rootMove(nodeID string, target vec3, origin string, sour
 // md.centerOfNode(source). See rootMove's doc comment for why this matters — it lets the
 // one-level node-2→5 cascade hand the source's equalize a just-computed fresh center instead
 // of racing fanCenters' async inbox publication.
-func (md *MoveDispatch) equalizeNeighborDistancesWithSourceCenter(dragged, source string, newPos vec3, sourceCenterOverride *vec3) {
+// excludeOrigin, when non-empty, drops that neighbor from the repositioned peer set — used
+// when this equalize runs as a CASCADE from that neighbor (e.g. a node-6→2 cascade passes
+// excludeOrigin="6"), so the dragged node does not update the edge the cascade arrived on
+// ("2 must not update 2→6 because the cascade came from 6") nor move the origin node.
+func (md *MoveDispatch) equalizeNeighborDistancesWithSourceCenter(dragged, source string, newPos vec3, sourceCenterOverride *vec3, excludeOrigin string) {
 	var sourceCenter vec3
 	if sourceCenterOverride != nil {
 		sourceCenter = *sourceCenterOverride
@@ -1267,6 +1328,9 @@ func (md *MoveDispatch) equalizeNeighborDistancesWithSourceCenter(dragged, sourc
 		// position and instead self-equalizes 1→3 to the new (organic) 1↔2 distance via
 		// the node-2→1 cascade below (see rootMove's case "2").
 		if dragged == "2" && other == "1" {
+			continue
+		}
+		if excludeOrigin != "" && other == excludeOrigin {
 			continue
 		}
 		peers[other] = true
