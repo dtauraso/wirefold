@@ -866,9 +866,23 @@ func (md *MoveDispatch) fanCenters(newCenters map[string]vec3, reach map[string]
 // from S), t = ((|b|²−|a|²)/2 − S·(b−a)) / (u·(b−a)). Falls back to the raw target when a
 // neighbor's center is unknown, when the drag bearing is parallel to the equal-distance plane
 // (no solution), or when the solution is behind S.
-func (md *MoveDispatch) placeEqualRadii(target vec3, aID, bID string) vec3 {
-	a, oka := md.centerOfNode(aID)
-	b, okb := md.centerOfNode(bID)
+// centerOfNodeOr returns overrideCenter when id == overrideID (and overrideCenter != nil),
+// otherwise md.centerOfNode(id). Lets a cascade hand a helper the moved node's fresh center
+// instead of its async-lagged published snapshot (see rootMove's sourceCenterOverride note).
+func (md *MoveDispatch) centerOfNodeOr(id, overrideID string, overrideCenter *vec3) (vec3, bool) {
+	if overrideCenter != nil && id == overrideID {
+		return *overrideCenter, true
+	}
+	return md.centerOfNode(id)
+}
+
+// overrideID/overrideCenter let a cascaded re-solve substitute a neighbor's FRESH center for
+// the async-lagged md.centerOfNode snapshot: when a neighbor's id equals overrideID, that
+// center is used instead. Direct drags pass ("", nil). Used by the node-6 cascade so nodes 9
+// and 10 re-solve against node 6's just-computed position rather than its stale snapshot.
+func (md *MoveDispatch) placeEqualRadii(target vec3, aID, bID, overrideID string, overrideCenter *vec3) vec3 {
+	a, oka := md.centerOfNodeOr(aID, overrideID, overrideCenter)
+	b, okb := md.centerOfNodeOr(bID, overrideID, overrideCenter)
 	if !oka || !okb {
 		return target
 	}
@@ -900,14 +914,14 @@ func (md *MoveDispatch) placeEqualRadii(target vec3, aID, bID string) vec3 {
 // constants untouched. The two neighbors are NEVER written (unlike the generic double-link
 // requantize, which updates both ends). Used by nodes 9 (3,6) and 10 (6,8). Returns false
 // only when the node has no LayoutHolder.
-func (md *MoveDispatch) equalizeEdgeCLocal(nodeID, aID, bID string, newPos vec3) bool {
+func (md *MoveDispatch) equalizeEdgeCLocal(nodeID, aID, bID string, newPos vec3, overrideID string, overrideCenter *vec3) bool {
 	lh, ok := md.layoutHolders[nodeID]
 	if !ok {
 		return false
 	}
 	// the node's local polar (own frame) to a fixed neighbor, as the drag implies it.
 	local := func(to string) (qt, qp, qr int, st, sp, sr float64, ok bool) {
-		c, okc := md.centerOfNode(to)
+		c, okc := md.centerOfNodeOr(to, overrideID, overrideCenter)
 		if !okc {
 			return 0, 0, 0, 0, 0, 0, false
 		}
@@ -994,9 +1008,9 @@ func (md *MoveDispatch) rootMove(nodeID string, target vec3, origin string, sour
 	// is solved so both edges come out equal. Neither neighbor is moved.
 	switch nodeID {
 	case "9":
-		newPos = md.placeEqualRadii(target, "3", "6")
+		newPos = md.placeEqualRadii(target, "3", "6", origin, sourceCenterOverride)
 	case "10":
-		newPos = md.placeEqualRadii(target, "6", "8")
+		newPos = md.placeEqualRadii(target, "6", "8", origin, sourceCenterOverride)
 	}
 
 	emit := map[string]vec3{nodeID: newPos}
@@ -1023,9 +1037,9 @@ func (md *MoveDispatch) rootMove(nodeID string, target vec3, origin string, sour
 	// fixed neighbor.
 	switch nodeID {
 	case "9":
-		md.equalizeEdgeCLocal("9", "3", "6", newPos)
+		md.equalizeEdgeCLocal("9", "3", "6", newPos, origin, sourceCenterOverride)
 	case "10":
-		md.equalizeEdgeCLocal("10", "6", "8", newPos)
+		md.equalizeEdgeCLocal("10", "6", "8", newPos, origin, sourceCenterOverride)
 	default:
 		md.requantizeLocalPolars(nodeID, newPos)
 	}
@@ -1087,6 +1101,26 @@ func (md *MoveDispatch) rootMove(nodeID string, target vec3, origin string, sour
 		// node 3 repositioned along its current bearing from node 1. Driven by the node-2→1
 		// cascade above (node 1 itself never moves on a node-2 drag).
 		md.equalizeNeighborDistancesWithSourceCenter(nodeID, "2", newPos, sourceCenterOverride)
+	case "6":
+		// Node 6 moves freely (handled by the normal path above). Since node 6 is the FIXED
+		// neighbor that gate nodes 9 (3,6) and 10 (6,8) solve their equal radii against, a
+		// node-6 move breaks their equal-radii; re-trigger each to re-solve in place. Re-run
+		// node 9's / node 10's own rootMove at their CURRENT (unchanged) centers — so their
+		// bearing is preserved and only their radius re-solves — passing node 6's just-computed
+		// newPos as the sourceCenterOverride (origin "6") so their placeEqualRadii/equalize
+		// read node 6's FRESH center rather than its async-lagged snapshot. Cases 9/10 do not
+		// cascade further, so this terminates (no recursion). Skipped when 9/10 is the origin.
+		fresh := newPos
+		if origin != "9" {
+			if c9, ok := md.centerOfNode("9"); ok {
+				md.rootMove("9", c9, nodeID, &fresh)
+			}
+		}
+		if origin != "10" {
+			if c10, ok := md.centerOfNode("10"); ok {
+				md.rootMove("10", c10, nodeID, &fresh)
+			}
+		}
 	}
 	return true
 }
