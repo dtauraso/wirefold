@@ -72,12 +72,23 @@ Node exclusion of 1 from node 2's peer set + separate cascade (current `if dragg
 && other=="1"`) unifies into: 1 is a rule-neighbor of 2, not a follower — notified only
 when edge 1↔2 changes.
 
-## Build order
+## Scope: node 5 only (DONE)
 
-1. Node-5 chain (5 → 2 → 6/1) over edge messages, delta-gated. Prove positions match the
-   current `node5_equalize_test.go` + a headless drag.
-2. Then port gate nodes 9/10 (equal-radii local solve is the node's own rule) and node 6.
-3. Retire `origin`/`excludeOrigin` params and the central recursion in `rootMove`.
+This branch converts **node 5's** cascade and nothing else. Delivered:
+- Node-5 chain (5 → 2 → followers 7/8/6) over `sendMove` messages between movers; stops
+  before node 1 because that edge did not change. Final positions identical to the old
+  central path (`node5_equalize_test.go` + `TestNode5DragCascadesToNode2Follower6AndStopsBeforeNode1`).
+- Anti-drift `TestNode5DragEmitsDecentralizedMessages`: asserts the exact message trace via
+  a test-only `msgTap`; a reversion to central recursion emits zero `cascade` messages and
+  fails hard.
+- Sparse `cascade.*` breadcrumbs (`.probe/go-debug.jsonl`) at each cascade decision.
+
+The `SenderID==""` termination is COMPLETE for node 5, not a placeholder: node 5 is the
+only node that moves in its chain, so a forwarded trigger provably carries no change.
+
+NOT part of this branch (other nodes' cascades — separate tasks if ever wanted): porting
+gate nodes 9/10 or node 6, and retiring the `origin`/`excludeOrigin` params, which still
+serve the OLD central path that nodes 2/1/6/9/10 use when directly dragged.
 
 Reuse (do NOT reinvent): `fanCenters` (one-node map commits a single node's center +
 persist + reachR), `centerOfNode`/`heldPolar`/`heldEdges`, `cart2polar`,
