@@ -299,7 +299,7 @@ func (m *nodeMover) handleTrigger(msg moveMsg) {
 	// whoever just triggered us (no bounce). This node's own center only changes
 	// between this handler's calls when THIS message is the top-level self-trigger
 	// issued right after a direct drag committed this node's new position
-	// (SenderID == "", see rootMoveNode5) — a message forwarded FROM another rule-
+	// (SenderID == "", see rootMoveViaMessages) — a message forwarded FROM another rule-
 	// node (SenderID != "") never carries a change to this node's own position, so
 	// this node's edge to any Y is provably unchanged and there is nothing to
 	// forward (the spec's "no message to 1" termination case). Scoped to the
@@ -1267,28 +1267,35 @@ func (md *MoveDispatch) commitNodeMove(nodeID string, newPos vec3) {
 // affected double-link's local polars are re-quantized on BOTH ends. Returns false for
 // an unknown node.
 func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
-	if nodeID == "5" {
-		return md.rootMoveNode5(target)
+	switch nodeID {
+	case "5", "2", "1":
+		return md.rootMoveViaMessages(nodeID, target)
 	}
 	return md.rootMove(nodeID, target, "", nil)
 }
 
-// rootMoveNode5 is STEP 1 of node5-decentralized-cascade.md: dragging node 5 no longer
-// runs the central recursive cascade (rootMove's case "5"/"2"/"1") — it commits node 5's
-// own new position through the shared single-node commit path (identical to what rootMove
-// did for node 5 before this change: fan + persist + requantize, no per-node case switch
-// applies to node 5 itself) and then routes a moveMsgKindTrigger to node 5's OWN inbox so
-// the rest of the chain (5's followers 7/8, then rule-neighbor 2 and its follower 6, then
-// the delta-gated stop before node 1) runs as node-to-node messages on the movers' own
-// goroutines rather than a central call stack. Scoped to node 5 only — nodes 2, 1, 6, 9,
-// 10 still go through the old central rootMove when directly dragged (step 2/3 widen this).
-func (md *MoveDispatch) rootMoveNode5(target vec3) bool {
-	if _, ok := md.nodeMovers["5"]; !ok {
+// rootMoveViaMessages is STEP 1 (now widened to nodes 5, 2, and 1) of
+// node5-decentralized-cascade.md: dragging a rule-node directly no longer runs the
+// central recursive cascade (rootMove's case "5"/"2"/"1") — it commits the node's own
+// new position through the shared single-node commit path (identical to what rootMove
+// did for that node before this change: fan + persist + requantize, no per-node case
+// switch applies to the dragged node itself) and then routes a moveMsgKindTrigger to the
+// dragged node's OWN inbox so the rest of its chain (its own ruleFollowers, then any
+// rule-neighbor whose ruleSource is this node, delta-gated so the chain fans outward and
+// terminates) runs as node-to-node messages on the movers' own goroutines rather than a
+// central call stack. handleTrigger (generic, keyed off ruleSource/ruleFollowers by id)
+// needs no per-node change to support this: node 2's trigger forwards to BOTH 5 and 1
+// (both have ruleSource == "2"); node 1 is a leaf (nothing has ruleSource == "1") so it
+// forwards to nobody. Nodes 6, 9, 10 still go through the old central rootMove when
+// directly dragged — node 6's drag continues to cascade into node 2 CENTRALLY (rootMove's
+// case "6" calling rootMove("2", ..., origin: "6")); that path is unchanged.
+func (md *MoveDispatch) rootMoveViaMessages(nodeID string, target vec3) bool {
+	if _, ok := md.nodeMovers[nodeID]; !ok {
 		return false
 	}
-	md.commitNodeMove("5", target)
-	md.tr.Breadcrumb("cascade.root", "5", "", fmt.Sprintf("target=(%.4f,%.4f,%.4f)", target.X, target.Y, target.Z))
-	md.sendMove("5", moveMsg{Kind: moveMsgKindTrigger, NodeID: "5", SenderID: ""})
+	md.commitNodeMove(nodeID, target)
+	md.tr.Breadcrumb("cascade.root", nodeID, "", fmt.Sprintf("target=(%.4f,%.4f,%.4f)", target.X, target.Y, target.Z))
+	md.sendMove(nodeID, moveMsg{Kind: moveMsgKindTrigger, NodeID: nodeID, SenderID: ""})
 	return true
 }
 
