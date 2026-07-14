@@ -1253,14 +1253,15 @@ func TestRootMoveNode10DragKeepsRadiiEqual(t *testing.T) {
 	}
 }
 
-// TestRootMoveNode6DragResolves9And10 verifies node 6's new cascade: node 6 moves
-// FREELY (the normal path — no equal-radii constraint on node 6 itself), landing
-// exactly at the raw drag target. Because node 6 is the FIXED neighbor gate nodes 9
-// (3,6) and 10 (6,8) solve their equal radii against, rootMove's case "6" cascades
-// into 9 and 10 (each re-run at its own CURRENT center, with node 6's just-computed
-// newPos as the sourceCenterOverride so their placeEqualRadii/equalizeEdgeCLocal read
-// node 6's FRESH center instead of its async-lagged snapshot). Node 3 and node 8 —
-// the other fixed neighbors of 9 and 10 respectively — never move.
+// TestRootMoveNode6DragResolves9And10 verifies node 6's current drag behavior: node 6
+// is NO LONGER a free move. It is placed, via placeEqualRadii, equidistant from its
+// gate neighbors 9 and 10 (6→9 == 6→10) — computed against 9 and 10's CURRENT
+// (pre-drag) positions, about the scene center, following the drag's bearing. Node 6
+// is then held fixed while the existing case-"6" cascade re-solves nodes 9 (vs fixed
+// 3 and node 6's NEW position) and 10 (vs node 6's NEW position and fixed 8). Node 3
+// and node 8 — the other fixed neighbors of 9 and 10 respectively — never move. Note:
+// 6→9 == 6→10 holds only at PLACEMENT time (against the pre-drag 9/10 positions); it
+// is not asserted in the final state, since 9 and 10 move during their own re-solve.
 func TestRootMoveNode6DragResolves9And10(t *testing.T) {
 	geoms := map[string]nodeGeom{
 		"6":  {Kind: "HoldNewSendOld", HasPos: true, ScenePolar: cart2polar(vec3{0, 0, 0}), Inputs: []portGeom{{Name: "in"}, {Name: "in2"}}},
@@ -1291,10 +1292,43 @@ func TestRootMoveNode6DragResolves9And10(t *testing.T) {
 	if !ok {
 		t.Fatal("centerOfNode(8) missing before move")
 	}
+	// c9old, c10old: node 9 and node 10's centers BEFORE the drag — node 6 is placed
+	// equidistant from THESE (not their post-cascade positions).
+	c9old, ok := md.centerOfNode("9")
+	if !ok {
+		t.Fatal("centerOfNode(9) missing before move")
+	}
+	c10old, ok := md.centerOfNode("10")
+	if !ok {
+		t.Fatal("centerOfNode(10) missing before move")
+	}
 
 	// Drag target for node 6, whose bearing from the scene center is not parallel to
-	// either the 3-9-6 or the 6-10-8 equal-distance planes, so both gate solves are genuine.
+	// the 9-10 equal-distance plane (node 6's own placement solve) nor the 3-9-6 or
+	// 6-10-8 planes (the cascade's re-solves), so every solve below is genuine (t>0).
 	target6 := vec3{X: 3, Y: 4, Z: 5}
+
+	// Independently compute node 6's expected landing with the same formula
+	// placeEqualRadii uses: p = S + t*u, t solved so |p-c9old| == |p-c10old|.
+	s := md.sceneSphere.Center
+	u := target6.sub(s)
+	if u.length() == 0 {
+		t.Fatal("test fixture target coincides with scene center — adjust target")
+	}
+	u = u.normalize()
+	ba := c10old.sub(c9old)
+	denom := u.dot(ba)
+	if denom == 0 {
+		t.Fatal("test fixture bearing is parallel to the 9-10 axis — adjust positions/target")
+	}
+	tSolved := (c10old.dot(c10old)/2 - c9old.dot(c9old)/2 - s.dot(ba)) / denom
+	if tSolved <= 0 {
+		t.Fatal("test fixture solves a t <= 0 (behind scene center) — adjust positions/target")
+	}
+	expected6 := s.add(u.scale(tSolved))
+	if expected6 == target6 {
+		t.Fatal("test fixture's expected node-6 landing coincides with the raw target — adjust geometry")
+	}
 
 	if !md.RootMove("6", target6) {
 		t.Fatal("RootMove returned false for known node")
@@ -1304,7 +1338,7 @@ func TestRootMoveNode6DragResolves9And10(t *testing.T) {
 	deadline := time.Now().Add(2 * time.Second)
 	converged := func() bool {
 		c6, ok6 := md.centerOfNode("6")
-		if !ok6 || math.Abs(c6.X-target6.X) > eps || math.Abs(c6.Y-target6.Y) > eps || math.Abs(c6.Z-target6.Z) > eps {
+		if !ok6 || math.Abs(c6.X-expected6.X) > eps || math.Abs(c6.Y-expected6.Y) > eps || math.Abs(c6.Z-expected6.Z) > eps {
 			return false
 		}
 		c9, ok9 := md.centerOfNode("9")
@@ -1322,20 +1356,31 @@ func TestRootMoveNode6DragResolves9And10(t *testing.T) {
 	}
 	for !converged() {
 		if time.Now().After(deadline) {
-			t.Fatal("node 6 drag never converged (node 6 at target AND node 9/10 equal-radii)")
+			t.Fatal("node 6 drag never converged (node 6 at its equal-radii landing AND node 9/10 equal-radii)")
 		}
 		time.Sleep(time.Millisecond)
 	}
 	// Give any trailing re-emit messages a moment to settle.
 	time.Sleep(20 * time.Millisecond)
 
-	// (a) node 6 moved FREELY to the raw drag target — no equal-radii constraint on node 6 itself.
+	// (a) node 6 landed at the equal-radii solve, NOT the raw drag target.
 	sixAfter, ok := md.centerOfNode("6")
 	if !ok {
 		t.Fatal("centerOfNode(6) missing after move")
 	}
-	if math.Abs(sixAfter.X-target6.X) > eps || math.Abs(sixAfter.Y-target6.Y) > eps || math.Abs(sixAfter.Z-target6.Z) > eps {
-		t.Fatalf("node 6 landing = %+v, want raw target %+v", sixAfter, target6)
+	if math.Abs(sixAfter.X-expected6.X) > eps || math.Abs(sixAfter.Y-expected6.Y) > eps || math.Abs(sixAfter.Z-expected6.Z) > eps {
+		t.Fatalf("node 6 landing = %+v, want equal-radii solve %+v", sixAfter, expected6)
+	}
+	if sixAfter == target6 {
+		t.Fatalf("node 6 landed at the raw target %+v; expected the constrained equal-radii point %+v", target6, expected6)
+	}
+
+	// (b) node 6 is equidistant from the ORIGINAL (pre-drag) 9/10 positions — the
+	// placement-time 6→9 == 6→10 constraint.
+	distTo9old := cart2polar(sixAfter.sub(c9old)).R
+	distTo10old := cart2polar(sixAfter.sub(c10old)).R
+	if math.Abs(distTo9old-distTo10old) > eps {
+		t.Fatalf("node 6 is not equidistant from the original 9/10 positions: dist(6,c9old)=%v, dist(6,c10old)=%v", distTo9old, distTo10old)
 	}
 
 	nineAfter, ok := md.centerOfNode("9")
@@ -1355,21 +1400,21 @@ func TestRootMoveNode6DragResolves9And10(t *testing.T) {
 		t.Fatal("centerOfNode(8) missing after move")
 	}
 
-	// (b) KEY: node 9's radii to 3 and to 6 (node 6's NEW center) are equal.
+	// (c) KEY: node 9's radii to 3 and to 6 (node 6's NEW center) are equal.
 	dist93 := cart2polar(nineAfter.sub(threeCenterAfter)).R
 	dist96 := cart2polar(nineAfter.sub(sixAfter)).R
 	if math.Abs(dist93-dist96) > eps {
 		t.Fatalf("node 9's radii to 3 and 6 are not equal after node-6 cascade: dist(9,3)=%v, dist(9,6)=%v", dist93, dist96)
 	}
 
-	// (c) KEY: node 10's radii to 6 (node 6's NEW center) and to 8 are equal.
+	// (d) KEY: node 10's radii to 6 (node 6's NEW center) and to 8 are equal.
 	dist106 := cart2polar(tenAfter.sub(sixAfter)).R
 	dist108 := cart2polar(tenAfter.sub(eightCenterAfter)).R
 	if math.Abs(dist106-dist108) > eps {
 		t.Fatalf("node 10's radii to 6 and 8 are not equal after node-6 cascade: dist(10,6)=%v, dist(10,8)=%v", dist106, dist108)
 	}
 
-	// (d) node 3 and node 8 centers unchanged.
+	// (e) node 3 and node 8 centers unchanged.
 	if threeCenterAfter != threeCenterBefore {
 		t.Fatalf("node 3 moved: got %+v, want unchanged %+v", threeCenterAfter, threeCenterBefore)
 	}

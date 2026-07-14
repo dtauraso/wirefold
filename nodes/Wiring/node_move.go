@@ -1011,6 +1011,12 @@ func (md *MoveDispatch) rootMove(nodeID string, target vec3, origin string, sour
 		newPos = md.placeEqualRadii(target, "3", "6", origin, sourceCenterOverride)
 	case "10":
 		newPos = md.placeEqualRadii(target, "6", "8", origin, sourceCenterOverride)
+	case "6":
+		// Node 6 lands equidistant from its gate neighbors 9 and 10 (6→9 == 6→10),
+		// placed against their CURRENT positions. Node 6 is then held fixed while the
+		// case-"6" cascade below moves 9 and 10 (3/6/8 stay put during that re-solve),
+		// so 6→9 == 6→10 holds at placement; it may drift after 9/10 re-solve.
+		newPos = md.placeEqualRadii(target, "9", "10", origin, sourceCenterOverride)
 	}
 
 	emit := map[string]vec3{nodeID: newPos}
