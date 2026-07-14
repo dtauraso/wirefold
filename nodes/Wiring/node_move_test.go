@@ -775,6 +775,99 @@ func TestRootMoveNode2CascadesToSource(t *testing.T) {
 	}
 }
 
+// TestRootMoveNode5DragCascadesToNode6 verifies the mirror direction of the node-2/
+// node-5 cascade: dragging node "5" (source "2") must, after equalizing 5's own peers
+// (7,8), make node 2 "act like it was dragged" too — re-running node 2's OWN
+// hardcoded nodeID=="2" equalize (source "5") at 2's current (unchanged) position, so
+// node 2's OTHER peer "6" (previously untouched by a node-5 drag, back when the
+// cascade was one-directional) repositions to the new 2<->5 distance along its
+// current bearing from node 2. Node 2 itself stays put (only its peer set is
+// re-equalized), and node 1/node 3 are not reached (this test omits them; the
+// node-2-origin path to node 1 is covered by TestRootMoveNode2CascadeKeepsNode1EdgesEqual).
+// Built via newMoveDispatch directly, mirroring TestRootMoveNode2CascadesToSource.
+func TestRootMoveNode5DragCascadesToNode6(t *testing.T) {
+	geoms := map[string]nodeGeom{
+		"5": {Kind: "HoldNewSendOld", HasPos: true, ScenePolar: cart2polar(vec3{0, 0, 0}), Inputs: []portGeom{{Name: "inT"}}, Outputs: []portGeom{{Name: "out7"}, {Name: "out8"}}},
+		"2": {Kind: "HoldNewSendOld", HasPos: true, ScenePolar: cart2polar(vec3{40, 0, 0}), Outputs: []portGeom{{Name: "outT"}, {Name: "out6"}}},
+		"7": {Kind: "Hold", HasPos: true, ScenePolar: cart2polar(vec3{0, 30, 20}), Inputs: []portGeom{{Name: "in"}}},
+		"8": {Kind: "Hold", HasPos: true, ScenePolar: cart2polar(vec3{-25, -10, 15}), Inputs: []portGeom{{Name: "in"}}},
+		"6": {Kind: "Hold", HasPos: true, ScenePolar: cart2polar(vec3{60, 15, -10}), Inputs: []portGeom{{Name: "in"}}},
+	}
+	edges := map[string]EdgeEndpoints{
+		"5To7": {Source: "5", Target: "7", SourceHandle: "out7", TargetHandle: "in"},
+		"5To8": {Source: "5", Target: "8", SourceHandle: "out8", TargetHandle: "in"},
+		"2To5": {Source: "2", Target: "5", SourceHandle: "outT", TargetHandle: "inT"},
+		"2To6": {Source: "2", Target: "6", SourceHandle: "out6", TargetHandle: "in"},
+	}
+	md := newMoveDispatch(geoms, edges, nil)
+	md.layoutHolders = map[string]*LayoutHolder{
+		"5": {}, "2": {}, "7": {}, "8": {}, "6": {},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	md.Start(ctx)
+
+	twoCenter, ok := md.centerOfNode("2")
+	if !ok {
+		t.Fatal("centerOfNode(2) missing before move")
+	}
+	sixCenterBefore, ok := md.centerOfNode("6")
+	if !ok {
+		t.Fatal("centerOfNode(6) missing before move")
+	}
+
+	target := vec3{X: 5, Y: 5, Z: 5}
+	if !md.RootMove("5", target) {
+		t.Fatal("RootMove returned false for known node")
+	}
+
+	const eps = 1e-6
+	deadline := time.Now().Add(2 * time.Second)
+	converged := func() bool {
+		c, ok := md.centerOfNode("5")
+		if !ok || math.Abs(c.X-target.X) > eps || math.Abs(c.Y-target.Y) > eps || math.Abs(c.Z-target.Z) > eps {
+			return false
+		}
+		c6, ok6 := md.centerOfNode("6")
+		return ok6 && c6 != sixCenterBefore
+	}
+	for !converged() {
+		if time.Now().After(deadline) {
+			t.Fatal("drag + cascade never converged")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	// Give any trailing re-emit messages a moment to settle.
+	time.Sleep(20 * time.Millisecond)
+
+	// Node 2 (the source / cascade target) itself stays put — only its peer (6)
+	// repositions.
+	twoCenterAfter, ok := md.centerOfNode("2")
+	if !ok {
+		t.Fatal("centerOfNode(2) missing after move")
+	}
+	if twoCenterAfter != twoCenter {
+		t.Fatalf("source node '2' moved: got %+v, want unchanged %+v", twoCenterAfter, twoCenter)
+	}
+
+	wantDist := cart2polar(target.sub(twoCenterAfter)).R
+
+	sixCenterAfter, ok := md.centerOfNode("6")
+	if !ok {
+		t.Fatal("centerOfNode(6) missing after move")
+	}
+	gotDist6 := cart2polar(sixCenterAfter.sub(twoCenterAfter)).R
+	if math.Abs(gotDist6-wantDist) > eps {
+		t.Fatalf("dist(2,6) after cascade = %v, want dist(2,5) = %v", gotDist6, wantDist)
+	}
+	wantBearing6 := cart2polar(sixCenterBefore.sub(twoCenter))
+	gotBearing6 := cart2polar(sixCenterAfter.sub(twoCenterAfter))
+	if math.Abs(gotBearing6.Theta-wantBearing6.Theta) > eps || math.Abs(gotBearing6.Phi-wantBearing6.Phi) > eps {
+		t.Fatalf("6's bearing from 2 changed: got (theta=%v,phi=%v), want (theta=%v,phi=%v)",
+			gotBearing6.Theta, gotBearing6.Phi, wantBearing6.Theta, wantBearing6.Phi)
+	}
+}
+
 // TestRootMoveNode2CascadeKeepsNode1EdgesEqual verifies the node-1 side of the same
 // drag cascade: node "1" is EXCLUDED from node 2's own equalize peer set (node 1
 // ignores node 2's r update and stays put at its pre-drag position), but rootMove's
