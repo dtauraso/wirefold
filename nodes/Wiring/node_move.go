@@ -54,6 +54,14 @@ const (
 	// below for the (currently hardcoded, 5-chain-scoped) per-node rule tables.
 	moveMsgKindEqualize = "equalize" // follower move: receiver moves ITSELF to length TargetC from FromCenter, then stops (no rule, no forward)
 	moveMsgKindTrigger  = "trigger"  // rule-node trigger: receiver's source edge changed; receiver re-derives L, equalizes its own followers, and (delta-gated) forwards to any further rule-neighbor
+	// moveMsgKindGatePlace is node 6's cascade (node6-decentralized.md), decentralized: node
+	// 6 sends its two gate neighbors (9, 10) the anchor center (node 6's own fresh center)
+	// and the shortest c-distance d (TargetC) it computed to them; the receiver (9 or 10,
+	// via gateNeighbors) runs placeAtDistanceFromBoth against ITS two fixed neighbors
+	// (the anchor + its OTHER neighbor) on its OWN goroutine, then moveNodeAndSetEdgeCs to
+	// land there and set both edge-c records to SnapC. SenderID names the anchor node
+	// (always "6").
+	moveMsgKindGatePlace = "gatePlace"
 )
 
 // ruleSource maps a rule-node id to its designated SOURCE neighbor (node5-decentralized-
@@ -132,8 +140,13 @@ type moveMsg struct {
 	TargetC    float64
 	// SenderID (Kind == "trigger"): the id that sent this trigger, so the receiving
 	// rule-node does not forward the trigger back to whoever just triggered it.
+	// Also used, overloaded, by Kind == "gatePlace" to name the ANCHOR node (always "6")
+	// so the receiver (9 or 10) can find its OTHER fixed neighbor via gateNeighbors.
 	SenderID string
-	ack      chan struct{}
+	// SnapC (Kind == "gatePlace"): the propagated shortest c (whole ticks of localStepR)
+	// to write onto both of the receiver's edge-c records via moveNodeAndSetEdgeCs.
+	SnapC int
+	ack   chan struct{}
 }
 
 // setPortAnchorId sets the AnchorId on the named port within the given geom,
@@ -197,6 +210,14 @@ type nodeMover struct {
 	// instead of synchronously on the drag call stack — the node9-decentralized-
 	// gate.md decentralization. nil in tests that build a bare nodeMover directly.
 	gateEqualize func(id string)
+	// gatePlace runs a gate node's (9 or 10) placeAtDistanceFromBoth + moveNodeAndSetEdgeCs
+	// re-solve against an anchor node's fresh center, bound to md.gatePlaceNode. Dispatched
+	// from handleTrigger's moveMsgKindGatePlace case so node 6's cascade repositions 9/10 on
+	// THEIR OWN goroutines (node6-decentralized.md) instead of synchronously on node 6's
+	// drag call stack. Args: (this node's id, anchor node's id, anchor's fresh center,
+	// target distance d, propagated shortest-c integer). nil in tests that build a bare
+	// nodeMover directly.
+	gatePlace func(id, anchorID string, anchorCenter vec3, d float64, snapC int)
 	// partnerCenter resolves, per (port,isInput) on this node, the CURRENT world center of
 	// the single partner node connected via one edge (aimed-port model, port_geometry.go
 	// portWorldPosAimed / builders.go partnerCenterFn). Wired by newMoveDispatch from
@@ -278,6 +299,17 @@ func (m *nodeMover) handle(msg moveMsg) {
 		m.handleTrigger(msg)
 		return
 	}
+	if msg.Kind == moveMsgKindGatePlace {
+		// Node 6's cascade (node6-decentralized.md): run this gate node's OWN
+		// placeAtDistanceFromBoth + moveNodeAndSetEdgeCs on this node's OWN goroutine,
+		// against the anchor's fresh center (msg.FromCenter) and its OTHER fixed
+		// neighbor (via gateNeighbors).
+		if m.gatePlace != nil {
+			m.gatePlace(m.id, msg.SenderID, msg.FromCenter, msg.TargetC, msg.SnapC)
+			m.tr.Breadcrumb("cascade.gateplace", m.id, "", fmt.Sprintf("anchor=%q d=%.4f", msg.SenderID, msg.TargetC))
+		}
+		return
+	}
 	if m.tr != nil {
 		m.emitGeometry()
 	}
@@ -291,6 +323,82 @@ func (m *nodeMover) handle(msg moveMsg) {
 // only the source moved (or, for the top-level drag, the dragged node called this via
 // triggerSelf below, having already committed its own new position).
 func (m *nodeMover) handleTrigger(msg moveMsg) {
+	if m.id == "6" {
+		// Node 6 is neither a ruleSource/ruleFollowers rule-node nor a gateNeighbors
+		// gate node: it is the FIXED ANCHOR of its own cascade (node6-decentralized.md,
+		// propagateShortestCFrom6's decentralized replacement). It moved freely (no
+		// equal-radii solve) to its new committed position; this self-trigger computes
+		// the SHORTER of its two c-distances (to 9, to 10, each rounded to a whole tick
+		// of localStepR against their CURRENT centers) and sends each gate neighbor a
+		// GatePlace message carrying its own fresh center + that shortest distance, so 9
+		// and 10 each re-solve placeAtDistanceFromBoth on their OWN goroutines. It also
+		// forwards a Trigger (SenderID=="6") to node 2, whose handleTrigger special-cases
+		// SenderID=="6" below to re-equalize ITS remaining peer (node 5) against the
+		// fresh 2<->6 distance — mirroring the old central case "6"'s cascade into node 2.
+		if m.centerOf == nil || m.sendMove == nil {
+			return
+		}
+		s := m.snap.Load()
+		if s == nil {
+			return
+		}
+		selfCenter := s.c
+		step := localStepR
+		c9, ok9 := m.centerOf("9")
+		c10, ok10 := m.centerOf("10")
+		if !ok9 && !ok10 {
+			return
+		}
+		var cTo9, cTo10 float64
+		if ok9 {
+			cTo9 = math.Round(c9.sub(selfCenter).length() / step)
+		}
+		if ok10 {
+			cTo10 = math.Round(c10.sub(selfCenter).length() / step)
+		}
+		var shortest float64
+		switch {
+		case ok9 && ok10:
+			shortest = math.Min(cTo9, cTo10)
+		case ok9:
+			shortest = cTo9
+		default:
+			shortest = cTo10
+		}
+		d := shortest * step
+		m.tr.Breadcrumb("cascade.node6.trigger", m.id, "", fmt.Sprintf("d=%.4f", d))
+		if ok9 {
+			m.sendMove("9", moveMsg{Kind: moveMsgKindGatePlace, NodeID: "9", SenderID: "6", FromCenter: selfCenter, TargetC: d, SnapC: int(shortest)})
+		}
+		if ok10 {
+			m.sendMove("10", moveMsg{Kind: moveMsgKindGatePlace, NodeID: "10", SenderID: "6", FromCenter: selfCenter, TargetC: d, SnapC: int(shortest)})
+		}
+		m.sendMove("2", moveMsg{Kind: moveMsgKindTrigger, NodeID: "2", SenderID: "6"})
+		return
+	}
+	if m.id == "2" && msg.SenderID == "6" {
+		// Node 2 was NOT dragged — node 6's cascade re-triggered it (its 2<->6 distance
+		// changed). Mirrors the old central case "2" origin=="6" branch: source on node
+		// 6 (not node 2's normal ruleSource, node 5) and reposition ONLY the remaining
+		// peer (node 5 — node 1 is permanently excluded from node 2's peer set, node 6
+		// is the source so it is untouched), then STOP — no forward to 5 or 1's own
+		// cascades (the old code `break`s before that tail).
+		if m.centerOf == nil || m.sendMove == nil {
+			return
+		}
+		s := m.snap.Load()
+		if s == nil {
+			return
+		}
+		sourceCenter, ok := m.centerOf("6")
+		if !ok {
+			return
+		}
+		L := sourceCenter.sub(s.c).length()
+		m.sendMove("5", moveMsg{Kind: moveMsgKindEqualize, NodeID: "5", FromCenter: s.c, TargetC: L})
+		m.tr.Breadcrumb("cascade.node2.from6", "5", "", fmt.Sprintf("targetC=%.4f", L))
+		return
+	}
 	if _, isGate := gateNeighbors[m.id]; isGate {
 		// Gate node: run this node's OWN edge-c equalize on this node's OWN
 		// goroutine. No ruleSource/ruleFollowers logic applies, no forward, no
@@ -750,6 +858,7 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 		nm.centerOf = md.centerOfNode
 		nm.commit = md.commitNodeMove
 		nm.gateEqualize = md.gateEqualizeNode
+		nm.gatePlace = md.gatePlaceNode
 		md.nodeMovers[id] = nm
 		md.dispatch[id] = nm.inbox
 	}
@@ -1110,63 +1219,6 @@ func (md *MoveDispatch) equalizeEdgeCLocal(nodeID, aID, bID string, newPos vec3,
 	return true
 }
 
-// propagateShortestCFrom6 is node 6's cascade: node 6 is a FIXED anchor (it just moved
-// freely to newPos6, no equal-radii re-solve). Its two gate neighbors, 9 (other edge to
-// "3") and 10 (other edge to "8"), each get repositioned along their CURRENT bearing from
-// node 6 to the SHORTER of node 6's two c-distances (6→9, 6→10) — a one-way propagation,
-// never a re-solve of node 6 itself, so it cannot feed back into a jitter loop. Skips a
-// neighbor gracefully if its center is unknown.
-func (md *MoveDispatch) propagateShortestCFrom6(newPos6 vec3) {
-	step := localStepR
-
-	c9center, ok9 := md.centerOfNode("9")
-	c10center, ok10 := md.centerOfNode("10")
-	if !ok9 && !ok10 {
-		return
-	}
-
-	var cTo9, cTo10 float64
-	if ok9 {
-		cTo9 = math.Round(c9center.sub(newPos6).length() / step)
-	}
-	if ok10 {
-		cTo10 = math.Round(c10center.sub(newPos6).length() / step)
-	}
-
-	var shortest float64
-	switch {
-	case ok9 && ok10:
-		shortest = math.Min(cTo9, cTo10)
-	case ok9:
-		shortest = cTo9
-	default:
-		shortest = cTo10
-	}
-	d := shortest * step
-
-	// 9 and 10 ACT LIKE THEY WERE DRAGGED to the c node 6 sends them, so ALL of 9→3, 9→6,
-	// 6→10, 10→8 become that shortest c: node 9 is placed at distance d = shortest*step from
-	// BOTH its neighbors 3 and 6 (→ 9→3 == 9→6 == d), node 10 at distance d from BOTH 6 and 8.
-	// With node 6's radii already d (both neighbors sit at d from it), the four edges are equal.
-	// The placement is a fixed function of the two FIXED neighbors + d (nearest point on the
-	// equal-distance circle to the node's current spot), so it is stable — no self-reference,
-	// no drift. node 6's fresh center (newPos6) is used directly.
-	if ok9 {
-		if a3, oka := md.centerOfNode("3"); oka {
-			if p9, okp := md.placeAtDistanceFromBoth("9", a3, newPos6, d); okp {
-				md.moveNodeAndSetEdgeCs("9", p9, "3", "6", int(shortest))
-			}
-		}
-	}
-	if ok10 {
-		if a8, oka := md.centerOfNode("8"); oka {
-			if p10, okp := md.placeAtDistanceFromBoth("10", newPos6, a8, d); okp {
-				md.moveNodeAndSetEdgeCs("10", p10, "6", "8", int(shortest))
-			}
-		}
-	}
-}
-
 // placeAtDistanceFromBoth returns the point at distance d from BOTH fixed anchors a and b,
 // nearest to nodeID's current position — so the node's two radii (to a and to b) both equal d.
 // The equal-distance locus is the circle where the two spheres (radius d, centers a and b)
@@ -1304,6 +1356,44 @@ func (md *MoveDispatch) gateEqualizeNode(nodeID string) {
 	md.equalizeEdgeCLocal(nodeID, nb[0], nb[1], c, "", nil)
 }
 
+// gatePlaceNode runs a gate node's (9 or 10) placeAtDistanceFromBoth + moveNodeAndSetEdgeCs
+// re-solve against anchorID's fresh center (node 6's cascade, node6-decentralized.md —
+// propagateShortestCFrom6's decentralized replacement). anchorID identifies which of the
+// node's two gateNeighbors is the anchor (always "6" in practice); the OTHER neighbor is
+// resolved via gateNeighbors and read via its CURRENT published center. The two anchor
+// args to placeAtDistanceFromBoth are ordered to match propagateShortestCFrom6's original
+// central calls exactly (node 9: (otherNeighbor, anchor) == (3, 6); node 10: (anchor,
+// otherNeighbor) == (6, 8)) so behavior is bit-for-bit identical. No-op for an unknown
+// gate id, an anchorID that isn't one of its two gateNeighbors, or an unresolved center.
+func (md *MoveDispatch) gatePlaceNode(nodeID, anchorID string, anchorCenter vec3, d float64, snapC int) {
+	nb, ok := gateNeighbors[nodeID]
+	if !ok {
+		return
+	}
+	var a, b vec3
+	switch anchorID {
+	case nb[0]:
+		other, okc := md.centerOfNode(nb[1])
+		if !okc {
+			return
+		}
+		a, b = anchorCenter, other
+	case nb[1]:
+		other, okc := md.centerOfNode(nb[0])
+		if !okc {
+			return
+		}
+		a, b = other, anchorCenter
+	default:
+		return
+	}
+	newPos, ok := md.placeAtDistanceFromBoth(nodeID, a, b, d)
+	if !ok {
+		return
+	}
+	md.moveNodeAndSetEdgeCs(nodeID, newPos, nb[0], nb[1], snapC)
+}
+
 // RootMove handles a node-drag under the flat absolute scene-polar layout: every node
 // is positioned independently about the scene sphere center — there is no reference/
 // parent concept, so dragging moves ONLY the dragged node (no cascade). The dragged
@@ -1317,32 +1407,37 @@ func (md *MoveDispatch) gateEqualizeNode(nodeID string) {
 // an unknown node.
 func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 	switch nodeID {
-	case "5", "2", "9", "10":
+	case "5", "2", "9", "10", "6":
 		return md.rootMoveViaMessages(nodeID, target)
 	}
 	return md.rootMove(nodeID, target, "", nil)
 }
 
-// rootMoveViaMessages is STEP 1 (now widened to nodes 5, 2, and 1) of
-// node5-decentralized-cascade.md: dragging a rule-node directly no longer runs the
-// central recursive cascade (rootMove's case "5"/"2"/"1") — it commits the node's own
-// new position through the shared single-node commit path (identical to what rootMove
-// did for that node before this change: fan + persist + requantize, no per-node case
-// switch applies to the dragged node itself) and then routes a moveMsgKindTrigger to the
-// dragged node's OWN inbox so the rest of its chain (its own ruleFollowers, then any
-// rule-neighbor whose ruleSource is this node, delta-gated so the chain fans outward and
-// terminates) runs as node-to-node messages on the movers' own goroutines rather than a
-// central call stack. handleTrigger (generic, keyed off ruleSource/ruleFollowers by id)
-// needs no per-node change to support this: node 2's trigger forwards to BOTH 5 and 1
-// (both have ruleSource == "2"); node 1 is a leaf (nothing has ruleSource == "1") so it
-// forwards to nobody. Node 6 still goes through the old central rootMove when directly
-// dragged — node 6's drag continues to cascade into node 2 CENTRALLY (rootMove's case
-// "6" calling rootMove("2", ..., origin: "6")); that path is unchanged. Nodes 9 and 10
-// (widened by node9-decentralized-gate.md, node10-decentralized-gate.md) are GATE nodes,
-// not rule-nodes: each node's position is first solved to the equal-radii locus against
-// its FIXED neighbors (gateNeighbors) before committing, and its self-trigger dispatches
-// to handleTrigger's gate branch (its own edge-c equalize only — no forward, no
-// follower, no neighbor move).
+// rootMoveViaMessages is STEP 1 (now widened to nodes 5, 2, 1, and 6) of
+// node5-decentralized-cascade.md / node6-decentralized.md: dragging a rule-node directly
+// no longer runs the central recursive cascade (rootMove's old case "5"/"2"/"1"/"6") — it
+// commits the node's own new position through the shared single-node commit path
+// (identical to what rootMove did for that node before this change: fan + persist +
+// requantize, no per-node case switch applies to the dragged node itself) and then routes
+// a moveMsgKindTrigger to the dragged node's OWN inbox so the rest of its chain (its own
+// ruleFollowers, then any rule-neighbor whose ruleSource is this node, delta-gated so the
+// chain fans outward and terminates) runs as node-to-node messages on the movers' own
+// goroutines rather than a central call stack. handleTrigger (generic, keyed off
+// ruleSource/ruleFollowers by id, plus special-cased branches for node 6 — the FIXED
+// anchor of its own gate-place cascade — and node 2's SenderID=="6" re-trigger) needs no
+// further per-node change to support this: node 2's normal trigger forwards to BOTH 5 and
+// 1 (both have ruleSource == "2"); node 1 is a leaf (nothing has ruleSource == "1") so it
+// forwards to nobody; node 6 is neither a ruleSource/ruleFollowers node nor a gateNeighbors
+// node, so its self-trigger runs its own dedicated branch (computes the shortest c to 9/10,
+// sends each a GatePlace message, then forwards a Trigger to node 2 with SenderID=="6").
+// Nodes 9 and 10 (widened by node9-decentralized-gate.md, node10-decentralized-gate.md)
+// are GATE nodes, not rule-nodes: each node's position is first solved to the equal-radii
+// locus against its FIXED neighbors (gateNeighbors) before committing, and its self-trigger
+// dispatches to handleTrigger's gate branch (its own edge-c equalize only — no forward, no
+// follower, no neighbor move) UNLESS the trigger is actually a GatePlace message (node 6's
+// cascade), which runs the gatePlace branch in `handle` instead of handleTrigger. Node 6
+// itself is a FREE move under rootMoveViaMessages (it is not in gateNeighbors), matching
+// its old central behavior exactly (no equal-radii re-solve).
 func (md *MoveDispatch) rootMoveViaMessages(nodeID string, target vec3) bool {
 	if _, ok := md.nodeMovers[nodeID]; !ok {
 		return false
@@ -1404,8 +1499,8 @@ func (md *MoveDispatch) rootMove(nodeID string, target vec3, origin string, sour
 	// gate pattern) are no longer reached here for a direct drag — RootMove routes them to
 	// rootMoveViaMessages (node9-decentralized-gate.md, node10-decentralized-gate.md);
 	// this switch is unreachable for "9"/"10" but the cases are intentionally removed
-	// (not left as dead code) since node 6's cascade reaches 9 and 10 via
-	// propagateShortestCFrom6, never via this rootMove case.
+	// (not left as dead code) since node 6's cascade reaches 9 and 10 via a decentralized
+	// GatePlace message (node6-decentralized.md gatePlaceNode), never via this rootMove case.
 	switch nodeID {
 	case "1":
 		newPos = md.placeEqualRadii(target, "2", "3", origin, sourceCenterOverride)
@@ -1442,201 +1537,15 @@ func (md *MoveDispatch) rootMove(nodeID string, target vec3, origin string, sour
 		md.requantizeLocalPolars(nodeID, newPos)
 	}
 
-	// Scoped to nodes 5, 2 and 1 by request: a peer-frame local-polar-radial equalization,
-	// NOT a parent/child cascade. The dragged node's double-link distances to its other
-	// peers are set equal to its double-link distance to the named source peer (all
-	// measured in the dragged node's own frame, dragged node as center); the source peer
-	// stays put. Nodes 5 and 2 are mirror sources for each other (5's source is 2, 2's
-	// source is 5) and both are HoldNewSendOld — same kind, same all-peers rule. Node 1's
-	// source is 2: a node-2 drag cascades into node 1 (which ignored node 2's r update),
-	// keeping node 1's own 1→3 edge equal to the organic post-drag 1↔2 distance.
-	switch nodeID {
-	case "5":
-		md.equalizeNeighborDistancesWithSourceCenter(nodeID, "2", newPos, sourceCenterOverride, origin)
-		// Mirror of case "2"'s cascade into 5: a node-5 drag makes node 2 "act like it
-		// was dragged" too, so node 2 re-equalizes its OWN peers (node 6) against the new
-		// 5↔2 distance and fans onward to node 1. Re-run node 2's rootMove at 2's CURRENT
-		// (unchanged) position, passing node 5's just-computed newPos as the source
-		// override so node 2's nested equalize reads the FRESH node-5 center. Skipped when
-		// node 2 is the chain origin (a 2-initiated cascade already drove node 5 — do not
-		// bounce back).
-		if origin != "2" {
-			if twoCenter, ok := md.centerOfNode("2"); ok {
-				fresh := newPos
-				md.rootMove("2", twoCenter, nodeID, &fresh)
-			}
-		}
-	case "2":
-		// Direct node-2 drag sources its equalize on node 5. But when node 6 TRIGGERED this
-		// (origin "6"), node 2 instead sources on the new 6↔2 distance (node 6, via the fresh
-		// sourceCenterOverride): it repositions only node 5 to that length (node 1 stays
-		// excluded, node 6 is the source so it is untouched → 2→6 not changed), and does NOT
-		// fan onward to 5/1 (the minimal "set only 2→5 to 6↔2" rule).
-		src := "5"
-		if origin == "6" {
-			src = "6"
-		}
-		md.equalizeNeighborDistancesWithSourceCenter(nodeID, src, newPos, sourceCenterOverride, origin)
-		if origin == "6" {
-			break
-		}
-		// Cascade: have source node 5 act like it was dragged too, so ITS other peer
-		// distances (5↔7 / 5↔8) recompute against the new 2↔5 distance. Re-run node 5's
-		// own rootMove at 5's CURRENT (unchanged) position, passing node 2's just-computed
-		// newPos as the sourceCenterOverride so 5's nested equalize reads the FRESH node-2
-		// center rather than racing fanCenters' async publication (see rootMove's doc
-		// comment). Skipped when node 5 is the chain origin (a 5-initiated cascade — do
-		// not bounce back into node 5).
-		if origin != "5" {
-			if srcCenter, ok := md.centerOfNode("5"); ok {
-				fresh := newPos
-				md.rootMove("5", srcCenter, nodeID, &fresh)
-			}
-		}
-		// Cascade to node 1: node 1 ignored node 2's r update (excluded from node 2's
-		// peer set above), so node 1 stays put and 1↔2 is the organic post-drag distance.
-		// Re-run node 1's OWN equalize at 1's CURRENT (unchanged) position, passing node
-		// 2's fresh newPos as the sourceCenterOverride so node 1's nested equalize (source
-		// "2") measures dist(1,2) against the FRESH node-2 center and repositions node 3
-		// to keep 1→3 == 1→2. Reached on both a direct node-2 drag and a node-5-initiated
-		// cascade (origin "5" != "1"); skipped only if node 1 itself is the origin.
-		if origin != "1" {
-			if oneCenter, ok := md.centerOfNode("1"); ok {
-				fresh := newPos
-				md.rootMove("1", oneCenter, nodeID, &fresh)
-			}
-		}
-	case "6":
-		// Node 6 moved freely (handled by the normal path above, no equal-radii solve).
-		// It is the fixed ANCHOR: propagate the SHORTER of its two c-distances (to 9, to
-		// 10) to both neighbors, repositioning each radially along its current bearing
-		// from node 6 — no re-solve against node 6's position, so no circular feedback.
-		md.propagateShortestCFrom6(newPos)
-		// Node 6 also triggers node 2's drag: 6↔2 changed, so node 2 "acts as if it was
-		// dragged" — re-runs its own rootMove at its CURRENT (unchanged) position, sourcing
-		// its equalize on node 5 and cascading onward to 5/1. origin "6" makes node 2's
-		// equalize EXCLUDE node 6 from its peer set, so node 2 does NOT update 2→6 (the edge
-		// the cascade arrived on) nor move node 6. Skipped if node 2 is the chain origin.
-		if origin != "2" {
-			if twoCenter, ok := md.centerOfNode("2"); ok {
-				fresh := newPos
-				md.rootMove("2", twoCenter, "6", &fresh)
-			}
-		}
-	}
+	// Nodes 5, 2, and 6's peer-frame local-polar-radial equalization/cascade used to run
+	// here (rootMove's old case "5"/"2"/"6", calling equalizeNeighborDistancesWithSourceCenter
+	// / propagateShortestCFrom6 and recursing into each other + node 1). All three are now
+	// decentralized (node5-decentralized-cascade.md, node6-decentralized.md): RootMove
+	// routes "5"/"2"/"6" to rootMoveViaMessages, whose self-trigger drives handleTrigger's
+	// generic ruleSource/ruleFollowers logic plus the node-6 and node-2-SenderID=="6"
+	// special-case branches — this rootMove function (and the "1" case above) is reached
+	// ONLY for node 1's direct drag (a pure gate node, no rule-node peer cascade) now.
 	return true
-}
-
-// equalizeNeighborDistancesWithSourceCenter sets the dragged node's double-link distance to
-// every OTHER domain peer (derived from md.edgeMovers, excluding source) equal to its
-// double-link distance to the named source peer — a peer operation in the dragged node's own
-// local-polar frame, not a parent/child cascade. Each other peer repositions to that distance
-// along its CURRENT bearing from the dragged node (direction preserved, radius changed);
-// the source peer is left untouched. Each repositioned peer's move is applied exactly as
-// RootMove applies the dragged node's own move: fanCenters (recompute reach over the
-// affected set), the scalar-triple remeasure + quantOffsetPersist schedule, and
-// requantizeLocalPolars for that peer.
-// sourceCenterOverride, when non-nil, is used as the source peer's center INSTEAD of reading
-// md.centerOfNode(source). See rootMove's doc comment for why this matters — it lets the
-// one-level node-2→5 cascade hand the source's equalize a just-computed fresh center instead
-// of racing fanCenters' async inbox publication.
-// excludeOrigin, when non-empty, drops that neighbor from the repositioned peer set — used
-// when this equalize runs as a CASCADE from that neighbor (e.g. a node-6→2 cascade passes
-// excludeOrigin="6"), so the dragged node does not update the edge the cascade arrived on
-// ("2 must not update 2→6 because the cascade came from 6") nor move the origin node.
-func (md *MoveDispatch) equalizeNeighborDistancesWithSourceCenter(dragged, source string, newPos vec3, sourceCenterOverride *vec3, excludeOrigin string) {
-	var sourceCenter vec3
-	if sourceCenterOverride != nil {
-		sourceCenter = *sourceCenterOverride
-	} else {
-		c, ok := md.centerOfNode(source)
-		if !ok {
-			return
-		}
-		sourceCenter = c
-	}
-	dist := cart2polar(sourceCenter.sub(newPos)).R
-
-	peers := map[string]bool{}
-	for _, em := range md.edgeMovers {
-		var other string
-		switch dragged {
-		case em.srcID:
-			other = em.dstID
-		case em.dstID:
-			other = em.srcID
-		default:
-			continue
-		}
-		if other == "" || other == source {
-			continue
-		}
-		// Node 1 ignores node 2's r update: when node 2 is the dragged node, node 1 is
-		// deliberately excluded from node 2's equalize peer set. Node 1 keeps its own
-		// position and instead self-equalizes 1→3 to the new (organic) 1↔2 distance via
-		// the node-2→1 cascade below (see rootMove's case "2").
-		if dragged == "2" && other == "1" {
-			continue
-		}
-		if excludeOrigin != "" && other == excludeOrigin {
-			continue
-		}
-		peers[other] = true
-	}
-	if len(peers) == 0 {
-		return
-	}
-
-	moved := map[string]vec3{dragged: newPos}
-	for p := range peers {
-		center, ok := md.centerOfNode(p)
-		if !ok {
-			continue
-		}
-		delta := center.sub(newPos)
-		if delta.length() == 0 {
-			continue
-		}
-		dir := delta.normalize()
-		moved[p] = newPos.add(dir.scale(dist))
-	}
-	if len(moved) <= 1 {
-		return
-	}
-
-	edges := md.heldEdges()
-	polars := md.heldPolar()
-	for id, c := range moved {
-		polars[id] = cart2polar(c.sub(md.sceneSphere.Center))
-	}
-	reach := reachRFromPolar(polars, edges)
-	md.fanCenters(moved, reach)
-
-	if md.quantizedLayout {
-		ids := map[string]bool{}
-		for id := range moved {
-			if id == dragged {
-				continue
-			}
-			ids[id] = true
-		}
-		if len(ids) > 0 {
-			offs := measureScalars(moved, ids, md.sceneSphere.Center, md.quantizedOffsets)
-			for id, off := range offs {
-				md.quantizedOffsets[id] = off
-				if md.quantOffsetPersist != nil {
-					md.quantOffsetPersist.schedule(id, off, cart2polar(moved[id].sub(md.sceneSphere.Center)))
-				}
-			}
-		}
-	}
-
-	for id, c := range moved {
-		if id == dragged {
-			continue
-		}
-		md.requantizeLocalPolars(id, c)
-	}
 }
 
 // requantizeLocalPolars implements the double-link local-polar model on a drag: the
