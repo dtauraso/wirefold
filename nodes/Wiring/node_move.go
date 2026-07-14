@@ -30,6 +30,7 @@ package Wiring
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -47,7 +48,31 @@ const (
 	moveMsgKindCenter  = "center"  // polar-layout re-propagated world center for one node
 	moveMsgKindCenters = "centers" // batched centers for an edge: update both endpoints, recompute ONCE
 	moveMsgKindResend  = "resend"  // re-emit this mover's held geometry on its own goroutine
+	// moveMsgKindEqualize and moveMsgKindTrigger implement the STEP 1 decentralized
+	// node-5 cascade (node5-decentralized-cascade.md): node-to-node messages routed via
+	// sendMove instead of a central recursive rootMove. See ruleFollowers/ruleSource
+	// below for the (currently hardcoded, 5-chain-scoped) per-node rule tables.
+	moveMsgKindEqualize = "equalize" // follower move: receiver moves ITSELF to length TargetC from FromCenter, then stops (no rule, no forward)
+	moveMsgKindTrigger  = "trigger"  // rule-node trigger: receiver's source edge changed; receiver re-derives L, equalizes its own followers, and (delta-gated) forwards to any further rule-neighbor
 )
+
+// ruleSource maps a rule-node id to its designated SOURCE neighbor (node5-decentralized-
+// cascade.md "Per-node rule"). Hardcoded and scoped to the node-5 chain (STEP 1); step 2
+// widens this to nodes 6/9/10 and step 3 retires the old central rootMove cascade.
+var ruleSource = map[string]string{
+	"5": "2",
+	"2": "5",
+	"1": "2",
+}
+
+// ruleFollowers maps a rule-node id to the FOLLOWER neighbors it repositions (via an
+// Equalize message) whenever it is triggered. Followers have no rule of their own — they
+// move themselves to the new length and stop.
+var ruleFollowers = map[string][]string{
+	"5": {"7", "8"},
+	"2": {"6"},
+	"1": {"3"},
+}
 
 // centerSnap is an immutable snapshot of a node's position published by the nodeMover
 // via an atomic.Pointer so readers on other goroutines (stdin reader, etc.) can observe
@@ -88,7 +113,16 @@ type moveMsg struct {
 	// distance to a surface child under the new centers). The nodeMover writes it onto its
 	// held geom so the re-emitted node-geometry streams the correct sphereR during a drag.
 	ReachR float64
-	ack    chan struct{}
+	// FromCenter / TargetC (Kind == "equalize"): the follower's neighbor's new world
+	// center and the c-length to hold. The receiver moves ITSELF to
+	// FromCenter + unit(self_old - FromCenter) * TargetC — receiver-computes, per
+	// node5-decentralized-cascade.md.
+	FromCenter vec3
+	TargetC    float64
+	// SenderID (Kind == "trigger"): the id that sent this trigger, so the receiving
+	// rule-node does not forward the trigger back to whoever just triggered it.
+	SenderID string
+	ack      chan struct{}
 }
 
 // setPortAnchorId sets the AnchorId on the named port within the given geom,
@@ -135,6 +169,16 @@ type nodeMover struct {
 	// read-only directory after construction — no queue, no shared mutable state).
 	sendMove func(id string, msg moveMsg)
 	edgeIDs  []string
+	// centerOf resolves another node's current world center, bound to
+	// md.centerOfNode. Used by the decentralized rule-node trigger handling
+	// (moveMsgKindTrigger) to read its source/rule-neighbor centers without a
+	// central coordinator computing them.
+	centerOf func(id string) (vec3, bool)
+	// commit applies this node's own new position through the same single-node
+	// commit path a central drag uses (fan + persist + requantize), bound to
+	// md.commitNodeMove. Used by the follower Equalize handling so the receiver
+	// commits itself via the existing machinery rather than reimplementing it.
+	commit func(id string, newPos vec3)
 	// partnerCenter resolves, per (port,isInput) on this node, the CURRENT world center of
 	// the single partner node connected via one edge (aimed-port model, port_geometry.go
 	// portWorldPosAimed / builders.go partnerCenterFn). Wired by newMoveDispatch from
@@ -197,8 +241,80 @@ func (m *nodeMover) handle(msg moveMsg) {
 		}
 		return
 	}
+	if msg.Kind == moveMsgKindEqualize {
+		// Follower move (receiver-computes, node5-decentralized-cascade.md): move
+		// SELF to FromCenter + unit(self_old - FromCenter) * TargetC, then commit
+		// through the existing single-node commit path and STOP — no rule, no
+		// forward.
+		if s := m.snap.Load(); s != nil && m.commit != nil {
+			dir := s.c.sub(msg.FromCenter)
+			if dir.length() != 0 {
+				newPos := msg.FromCenter.add(dir.normalize().scale(msg.TargetC))
+				m.commit(m.id, newPos)
+				m.tr.Breadcrumb("cascade.follower.move", m.id, "", fmt.Sprintf("targetC=%.4f", msg.TargetC))
+			}
+		}
+		return
+	}
+	if msg.Kind == moveMsgKindTrigger {
+		m.handleTrigger(msg)
+		return
+	}
 	if m.tr != nil {
 		m.emitGeometry()
+	}
+}
+
+// handleTrigger runs this rule-node's OWN rule (node5-decentralized-cascade.md "Per-node
+// rule") on receiving a moveMsgKindTrigger: its source edge changed, so it re-derives L =
+// dist(self, source), sends each of its followers an Equalize to L, and — delta-gated —
+// forwards the trigger to any further node whose OWN source is this node (excluding
+// whoever just sent this trigger, to avoid bouncing back). This node does NOT move itself;
+// only the source moved (or, for the top-level drag, the dragged node called this via
+// triggerSelf below, having already committed its own new position).
+func (m *nodeMover) handleTrigger(msg moveMsg) {
+	if m.centerOf == nil || m.sendMove == nil {
+		return
+	}
+	s := m.snap.Load()
+	if s == nil {
+		return
+	}
+	selfCenter := s.c
+	sourceID, ok := ruleSource[m.id]
+	if !ok {
+		return
+	}
+	sourceCenter, ok := m.centerOf(sourceID)
+	if !ok {
+		return
+	}
+	L := sourceCenter.sub(selfCenter).length()
+	m.tr.Breadcrumb("cascade.trigger", m.id, "", fmt.Sprintf("source=%s L=%.4f senderID=%q", sourceID, L, msg.SenderID))
+	for _, f := range ruleFollowers[m.id] {
+		m.sendMove(f, moveMsg{Kind: moveMsgKindEqualize, NodeID: f, FromCenter: selfCenter, TargetC: L})
+		m.tr.Breadcrumb("cascade.equalize", f, "", fmt.Sprintf("targetC=%.4f", L))
+	}
+	// Delta-gated forward: notify any Y whose OWN source is this node, unless Y is
+	// whoever just triggered us (no bounce). This node's own center only changes
+	// between this handler's calls when THIS message is the top-level self-trigger
+	// issued right after a direct drag committed this node's new position
+	// (SenderID == "", see rootMoveNode5) — a message forwarded FROM another rule-
+	// node (SenderID != "") never carries a change to this node's own position, so
+	// this node's edge to any Y is provably unchanged and there is nothing to
+	// forward (the spec's "no message to 1" termination case). Scoped to the
+	// node-5 chain (step 1): only node 5 currently self-triggers.
+	selfMoved := msg.SenderID == ""
+	for y, src := range ruleSource {
+		if src != m.id || y == msg.SenderID {
+			continue
+		}
+		if !selfMoved {
+			m.tr.Breadcrumb("cascade.stop", m.id, "", fmt.Sprintf("target=%s reason=no-change senderID=%q", y, msg.SenderID))
+			continue
+		}
+		m.sendMove(y, moveMsg{Kind: moveMsgKindTrigger, NodeID: y, SenderID: m.id})
+		m.tr.Breadcrumb("cascade.forward", m.id, "", fmt.Sprintf("target=%s", y))
 	}
 }
 
@@ -525,6 +641,26 @@ type MoveDispatch struct {
 	// path (RootMove) to each node's own LayoutHolder; MoveDispatch does not own
 	// or copy LocalPolars itself, it just routes the update to the owning node.
 	layoutHolders map[string]*LayoutHolder
+	// msgTap is a TEST-ONLY observability seam: when non-nil, sendMove invokes it with
+	// every (destID, msg) it routes, BEFORE the send. nil in production — production code
+	// never calls SetMsgTap, so msgTap.Load() is always nil there (one atomic load, no
+	// lock, no allocation). This exists only so tests can assert the decentralized node-5
+	// cascade (node5-decentralized-cascade.md) is actually exchanging moveMsgKindEqualize/
+	// moveMsgKindTrigger messages between movers, rather than being satisfiable by the old
+	// central rootMove recursion. It is pure observation — it never authors domain state
+	// or changes routing. Stored as an atomic.Pointer (not a plain field) because sendMove
+	// is the one chokepoint every mover goroutine calls concurrently.
+	msgTap atomic.Pointer[func(destID string, msg moveMsg)]
+}
+
+// SetMsgTap installs (or clears, with nil) the test-only message-trace hook. Test-only —
+// production code never calls this.
+func (md *MoveDispatch) SetMsgTap(tap func(destID string, msg moveMsg)) {
+	if tap == nil {
+		md.msgTap.Store(nil)
+		return
+	}
+	md.msgTap.Store(&tap)
 }
 
 // NodeRowResolver maps a numeric buffer NODE-ROW index to its node id. Implemented by
@@ -582,6 +718,8 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 	for id, g := range geoms {
 		nm := newNodeMover(id, g, tr)
 		nm.sendMove = md.sendMove
+		nm.centerOf = md.centerOfNode
+		nm.commit = md.commitNodeMove
 		md.nodeMovers[id] = nm
 		md.dispatch[id] = nm.inbox
 	}
@@ -735,6 +873,9 @@ func (md *MoveDispatch) centerOfNode(id string) (vec3, bool) {
 // to its own lock-neighbors without any central worklist — the dispatch map is the
 // only "directory" involved, and it's read-only lookup, not a queue.
 func (md *MoveDispatch) sendMove(id string, msg moveMsg) {
+	if tap := md.msgTap.Load(); tap != nil {
+		(*tap)(id, msg)
+	}
 	if ch, ok := md.dispatch[id]; ok {
 		ch <- msg
 	}
@@ -1087,6 +1228,33 @@ func (md *MoveDispatch) moveNodeAndSetEdgeCs(nodeID string, newPos vec3, edgeA, 
 	persist(nodeID, lh)
 }
 
+// commitNodeMove applies nodeID's own new position through the same single-node commit
+// path a central drag uses: fan the new center (+ recomputed reach) out to nodeID's own
+// mover and every incident edge's mover, persist the scalar-triple cache, and requantize
+// nodeID's local-polar double-links against its (unmoved) neighbors. This is the "single-
+// node commit path" node5-decentralized-cascade.md's Equalize handling reuses — the ONLY
+// difference from rootMove's dragged-node commit is that this has no per-node case switch
+// (gate-node equal-radii solve, mirror cascades, etc.) — callers that need those still go
+// through rootMove.
+func (md *MoveDispatch) commitNodeMove(nodeID string, newPos vec3) {
+	edges := md.heldEdges()
+	emit := map[string]vec3{nodeID: newPos}
+	polars := md.heldPolar()
+	polars[nodeID] = cart2polar(newPos.sub(md.sceneSphere.Center))
+	reach := reachRFromPolar(polars, edges)
+	md.fanCenters(emit, reach)
+
+	if md.quantizedLayout {
+		off := measureScalars(map[string]vec3{nodeID: newPos}, map[string]bool{nodeID: true}, md.sceneSphere.Center, md.quantizedOffsets)[nodeID]
+		md.quantizedOffsets[nodeID] = off
+		if md.quantOffsetPersist != nil {
+			md.quantOffsetPersist.schedule(nodeID, off, cart2polar(newPos.sub(md.sceneSphere.Center)))
+		}
+	}
+
+	md.requantizeLocalPolars(nodeID, newPos)
+}
+
 // RootMove handles a node-drag under the flat absolute scene-polar layout: every node
 // is positioned independently about the scene sphere center — there is no reference/
 // parent concept, so dragging moves ONLY the dragged node (no cascade). The dragged
@@ -1099,7 +1267,29 @@ func (md *MoveDispatch) moveNodeAndSetEdgeCs(nodeID string, newPos vec3, edgeA, 
 // affected double-link's local polars are re-quantized on BOTH ends. Returns false for
 // an unknown node.
 func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
+	if nodeID == "5" {
+		return md.rootMoveNode5(target)
+	}
 	return md.rootMove(nodeID, target, "", nil)
+}
+
+// rootMoveNode5 is STEP 1 of node5-decentralized-cascade.md: dragging node 5 no longer
+// runs the central recursive cascade (rootMove's case "5"/"2"/"1") — it commits node 5's
+// own new position through the shared single-node commit path (identical to what rootMove
+// did for node 5 before this change: fan + persist + requantize, no per-node case switch
+// applies to node 5 itself) and then routes a moveMsgKindTrigger to node 5's OWN inbox so
+// the rest of the chain (5's followers 7/8, then rule-neighbor 2 and its follower 6, then
+// the delta-gated stop before node 1) runs as node-to-node messages on the movers' own
+// goroutines rather than a central call stack. Scoped to node 5 only — nodes 2, 1, 6, 9,
+// 10 still go through the old central rootMove when directly dragged (step 2/3 widen this).
+func (md *MoveDispatch) rootMoveNode5(target vec3) bool {
+	if _, ok := md.nodeMovers["5"]; !ok {
+		return false
+	}
+	md.commitNodeMove("5", target)
+	md.tr.Breadcrumb("cascade.root", "5", "", fmt.Sprintf("target=(%.4f,%.4f,%.4f)", target.X, target.Y, target.Z))
+	md.sendMove("5", moveMsg{Kind: moveMsgKindTrigger, NodeID: "5", SenderID: ""})
+	return true
 }
 
 // rootMove is RootMove's internal implementation, parameterized by:
