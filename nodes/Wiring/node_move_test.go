@@ -17,6 +17,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -956,5 +957,114 @@ func TestRootMoveNode2CascadeKeepsNode1EdgesEqual(t *testing.T) {
 	if math.Abs(gotBearing3.Theta-wantBearing3.Theta) > eps || math.Abs(gotBearing3.Phi-wantBearing3.Phi) > eps {
 		t.Fatalf("3's bearing from 1 changed: got (theta=%v,phi=%v), want (theta=%v,phi=%v)",
 			gotBearing3.Theta, gotBearing3.Phi, wantBearing3.Theta, wantBearing3.Phi)
+	}
+}
+
+// TestRootMoveNode9LocalEqualizesShorterC verifies node 9's hardcoded local-only drag
+// rule (node9DragEqualizeLocalC): dragging node "9" (a WindowAndInhibitLeftGate node)
+// mutates ONLY node 9's own LayoutHolder — its local polar to "3" and to "6" each get
+// the SAME QuantIR, forced to the shorter of the two independently-implied candidates —
+// while node 3's and node 6's LayoutHolders are never written (no fan/world reposition,
+// no double-link write-back). Built via newMoveDispatch directly (mirroring
+// TestRootMoveNode2CascadesToSource), NOT via LoadTopology.
+func TestRootMoveNode9LocalEqualizesShorterC(t *testing.T) {
+	geoms := map[string]nodeGeom{
+		"9": {Kind: "WindowAndInhibitLeftGate", HasPos: true, ScenePolar: cart2polar(vec3{0, 0, 0}), Outputs: []portGeom{{Name: "out3"}, {Name: "out6"}}},
+		"3": {Kind: "Pulse", HasPos: true, ScenePolar: cart2polar(vec3{10, 0, 0}), Inputs: []portGeom{{Name: "in"}}},
+		"6": {Kind: "HoldNewSendOld", HasPos: true, ScenePolar: cart2polar(vec3{0, 0, 20}), Inputs: []portGeom{{Name: "in"}}},
+	}
+	edges := map[string]EdgeEndpoints{
+		"9To3": {Source: "9", Target: "3", SourceHandle: "out3", TargetHandle: "in"},
+		"9To6": {Source: "9", Target: "6", SourceHandle: "out6", TargetHandle: "in"},
+	}
+	md := newMoveDispatch(geoms, edges, nil)
+	md.layoutHolders = map[string]*LayoutHolder{
+		"9": {}, "3": {}, "6": {},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	md.Start(ctx)
+
+	lh9 := md.layoutHolders["9"]
+	lh3 := md.layoutHolders["3"]
+	lh6 := md.layoutHolders["6"]
+
+	threeBefore := lh3.LocalPolarsSnapshot()
+	sixBefore := lh6.LocalPolarsSnapshot()
+
+	threeCenter, ok := md.centerOfNode("3")
+	if !ok {
+		t.Fatal("centerOfNode(3) missing before move")
+	}
+	sixCenter, ok := md.centerOfNode("6")
+	if !ok {
+		t.Fatal("centerOfNode(6) missing before move")
+	}
+
+	// Drag target deliberately closer to 3 than to 6, so qr3 != qr6.
+	target := vec3{X: 5, Y: 5, Z: 5}
+
+	st, sp, sr := lh9.localPolarSteps("3") // node 9's own default local-polar steps
+	pol3 := cart2polar(threeCenter.sub(target))
+	pol6 := cart2polar(sixCenter.sub(target))
+	wantQt3 := int(math.Round(pol3.Theta / st))
+	wantQp3 := int(math.Round(pol3.Phi / sp))
+	wantQr3 := int(math.Round(pol3.R / sr))
+	wantQt6 := int(math.Round(pol6.Theta / st))
+	wantQp6 := int(math.Round(pol6.Phi / sp))
+	wantQr6 := int(math.Round(pol6.R / sr))
+	wantCNew := min(wantQr3, wantQr6)
+	if wantQr3 == wantQr6 {
+		t.Fatalf("test fixture must produce distinct qr3/qr6, got equal %d — adjust positions", wantQr3)
+	}
+
+	if !md.RootMove("9", target) {
+		t.Fatal("RootMove returned false for known node")
+	}
+
+	// (a) node 9's own LayoutHolder carries both entries, both forced to the SAME
+	// (shorter) QuantIR, while each entry's own bearing (theta/phi) is preserved.
+	var got3, got6 *LocalPolar
+	for _, lp := range lh9.LocalPolarsSnapshot() {
+		cp := lp
+		switch lp.To {
+		case "3":
+			got3 = &cp
+		case "6":
+			got6 = &cp
+		}
+	}
+	if got3 == nil {
+		t.Fatal("node 9 has no local polar entry for 3 after RootMove")
+	}
+	if got6 == nil {
+		t.Fatal("node 9 has no local polar entry for 6 after RootMove")
+	}
+	if got3.QuantIR != wantCNew {
+		t.Fatalf("node9.localPolar[3].QuantIR = %d, want cNew=min(%d,%d)=%d", got3.QuantIR, wantQr3, wantQr6, wantCNew)
+	}
+	if got6.QuantIR != wantCNew {
+		t.Fatalf("node9.localPolar[6].QuantIR = %d, want cNew=min(%d,%d)=%d", got6.QuantIR, wantQr3, wantQr6, wantCNew)
+	}
+	if got3.QuantIR != got6.QuantIR {
+		t.Fatalf("node9's two entries have different QuantIR: to3=%d to6=%d, want equal (shorter c)", got3.QuantIR, got6.QuantIR)
+	}
+	if got3.QuantITheta != wantQt3 || got3.QuantIPhi != wantQp3 {
+		t.Fatalf("node9.localPolar[3] bearing = (theta=%d,phi=%d), want unmodified (theta=%d,phi=%d)", got3.QuantITheta, got3.QuantIPhi, wantQt3, wantQp3)
+	}
+	if got6.QuantITheta != wantQt6 || got6.QuantIPhi != wantQp6 {
+		t.Fatalf("node9.localPolar[6] bearing = (theta=%d,phi=%d), want unmodified (theta=%d,phi=%d)", got6.QuantITheta, got6.QuantIPhi, wantQt6, wantQp6)
+	}
+
+	// (b) node 3's LayoutHolder is untouched — no double-link write-back.
+	threeAfter := lh3.LocalPolarsSnapshot()
+	if !reflect.DeepEqual(threeBefore, threeAfter) {
+		t.Fatalf("node 3's LayoutHolder LocalPolars changed: before=%+v, after=%+v", threeBefore, threeAfter)
+	}
+
+	// (c) node 6's LayoutHolder is untouched — no double-link write-back.
+	sixAfter := lh6.LocalPolarsSnapshot()
+	if !reflect.DeepEqual(sixBefore, sixAfter) {
+		t.Fatalf("node 6's LayoutHolder LocalPolars changed: before=%+v, after=%+v", sixBefore, sixAfter)
 	}
 }

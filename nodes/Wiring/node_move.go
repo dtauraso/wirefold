@@ -856,6 +856,46 @@ func (md *MoveDispatch) fanCenters(newCenters map[string]vec3, reach map[string]
 	}
 }
 
+// node9DragEqualizeLocalC applies node 9's local-only drag rule. It mutates ONLY node 9's
+// own LayoutHolder: node 9's local polar to node 3 and to node 6 (each in node 9's own
+// frame). It computes the two candidate c's (quantIR) the drag implies for those two edges,
+// keeps the SHORTER as the new c, and writes it onto BOTH records — leaving each edge's own
+// bearing (quantITheta/quantIPhi) and step constants untouched. Node 3 and node 6 are never
+// read for a write and never mutated; no scene-center fan, reach, or scalar-triple persist
+// runs. Returns false only when node 9 has no LayoutHolder.
+func (md *MoveDispatch) node9DragEqualizeLocalC(target vec3) bool {
+	lh, ok := md.layoutHolders["9"]
+	if !ok {
+		return false
+	}
+	// node 9's local polar (own frame) to a fixed neighbor, as the drag implies it.
+	local := func(to string) (qt, qp, qr int, st, sp, sr float64, ok bool) {
+		c, okc := md.centerOfNode(to)
+		if !okc {
+			return 0, 0, 0, 0, 0, 0, false
+		}
+		st, sp, sr = lh.localPolarSteps(to)
+		pol := cart2polar(c.sub(target))
+		return int(math.Round(pol.Theta / st)), int(math.Round(pol.Phi / sp)), int(math.Round(pol.R / sr)), st, sp, sr, true
+	}
+	qt3, qp3, qr3, st3, sp3, sr3, ok3 := local("3")
+	qt6, qp6, qr6, st6, sp6, sr6, ok6 := local("6")
+	if !ok3 || !ok6 {
+		return false
+	}
+	cNew := min(qr3, qr6)
+	lh.SetLocalPolar("3", qt3, qp3, cNew, st3, sp3, sr3)
+	lh.SetLocalPolar("6", qt6, qp6, cNew, st6, sp6, sr6)
+	if md.quantOffsetPersist != nil {
+		if root := md.quantOffsetPersist.root; root != "" {
+			if err := WriteLocalPolars(root, "9", lh.LocalPolarsSnapshot()); err != nil {
+				logPersistErr("local_polar_persist", "9", err)
+			}
+		}
+	}
+	return true
+}
+
 // RootMove handles a node-drag under the flat absolute scene-polar layout: every node
 // is positioned independently about the scene sphere center — there is no reference/
 // parent concept, so dragging moves ONLY the dragged node (no cascade). The dragged
@@ -901,6 +941,18 @@ func (md *MoveDispatch) rootMove(nodeID string, target vec3, origin string, sour
 	if _, ok := md.nodeMovers[nodeID]; !ok {
 		return false
 	}
+
+	// Node 9 is handled PURELY LOCALLY, between 9/3/6 only: no scene-center fan, no
+	// world reposition, and node 3 and node 6 are never touched. Node 9 holds two
+	// local-polar edge records — its c (quantIR) to 3 and to 6, each in node 9's own
+	// frame. The drag yields two candidate c's; the SHORTER becomes the new c and BOTH
+	// records are set to it (9→3 and 9→6 carry equal length). Only node 9's own
+	// LayoutHolder is mutated and persisted. Returns before any of RootMove's global
+	// machinery runs.
+	if nodeID == "9" {
+		return md.node9DragEqualizeLocalC(target)
+	}
+
 	edges := md.heldEdges()
 
 	// The dragged node's new world position is the drag target — continuous, no
