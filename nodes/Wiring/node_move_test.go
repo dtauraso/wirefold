@@ -1642,3 +1642,67 @@ func TestRootMoveNode6TriggersNode2MovesNode5(t *testing.T) {
 		t.Fatalf("node 1 moved: got %+v, want unchanged %+v (no onward 6->2->1 cascade)", oneCenterAfter, oneCenterBefore)
 	}
 }
+
+// TestNode6DragNoDataRace reproduces the "concurrent map read and map write" fatal that
+// used to hit measureScalars(...,md.quantizedOffsets) when a node-6 drag's cascade fanned
+// out GatePlace messages to nodes 9 and 10, whose gatePlaceNode -> moveNodeAndSetEdgeCs then
+// ran CONCURRENTLY on their own two mover goroutines and both read/wrote the single shared
+// md.quantizedOffsets map (a plain, unsynchronized Go map) — fatal even though each commit
+// touched a DIFFERENT key, because Go's runtime detects concurrent map access on the map
+// OBJECT, not per key. The fix (node6-drag-decentralized.md's generalization) gives every
+// nodeMover its own quantOffset field, mutated only by that node's own goroutine, so 9 and
+// 10's concurrent commits never touch a shared map. This test must be run with `-race` (as
+// `go test -race ./nodes/Wiring/...` does) to catch a regression — without -race a data race
+// on a map only *sometimes* fatals. Driving many drags maximizes the chance nodes 9 and 10's
+// GatePlace handling actually overlaps in time.
+func TestNode6DragNoDataRace(t *testing.T) {
+	geoms := map[string]nodeGeom{
+		"6":  {Kind: "HoldNewSendOld", HasPos: true, ScenePolar: cart2polar(vec3{0, 0, 0}), Inputs: []portGeom{{Name: "in"}, {Name: "in2"}}},
+		"9":  {Kind: "WindowAndInhibitLeftGate", HasPos: true, ScenePolar: cart2polar(vec3{8.1, 2, 2}), Outputs: []portGeom{{Name: "out3"}, {Name: "out6"}}},
+		"3":  {Kind: "Pulse", HasPos: true, ScenePolar: cart2polar(vec3{4, 0, 0}), Inputs: []portGeom{{Name: "in"}}},
+		"10": {Kind: "WindowAndInhibitRightGate", HasPos: true, ScenePolar: cart2polar(vec3{2, 6.1, 2}), Outputs: []portGeom{{Name: "out6"}, {Name: "out8"}}},
+		"8":  {Kind: "Hold", HasPos: true, ScenePolar: cart2polar(vec3{0, 0, 4}), Inputs: []portGeom{{Name: "in"}}},
+	}
+	edges := map[string]EdgeEndpoints{
+		"9To3":  {Source: "9", Target: "3", SourceHandle: "out3", TargetHandle: "in"},
+		"9To6":  {Source: "9", Target: "6", SourceHandle: "out6", TargetHandle: "in"},
+		"10To6": {Source: "10", Target: "6", SourceHandle: "out6", TargetHandle: "in2"},
+		"10To8": {Source: "10", Target: "8", SourceHandle: "out8", TargetHandle: "in"},
+	}
+	md := newMoveDispatch(geoms, edges, nil)
+	md.layoutHolders = map[string]*LayoutHolder{
+		"6": {}, "9": {}, "3": {}, "10": {}, "8": {},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	md.Start(ctx)
+
+	// Drive many rounds of node-6 drags, each waiting for node 6 to settle at its own
+	// target before the next round fires — this still dispatches a fresh GatePlace to
+	// BOTH 9 and 10 every round (so their concurrent commits repeatedly overlap, giving
+	// -race many chances to catch a regression) without flooding any mover's bounded
+	// inbox (capacity 8) faster than it can drain, which would deadlock the test
+	// itself rather than exercise the race.
+	const rounds = 50
+	const eps = 1e-6
+	for i := 0; i < rounds; i++ {
+		target := vec3{X: float64(2 + i%5), Y: float64(2 + (i*3)%7), Z: float64(2 + (i*5)%11)}
+		if !md.RootMove("6", target) {
+			t.Fatalf("round %d: RootMove returned false for known node", i)
+		}
+		deadline := time.Now().Add(2 * time.Second)
+		for {
+			c6, ok := md.centerOfNode("6")
+			if ok && math.Abs(c6.X-target.X) <= eps && math.Abs(c6.Y-target.Y) <= eps && math.Abs(c6.Z-target.Z) <= eps {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("round %d: node 6 never converged to target %+v", i, target)
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}
+	// Give any trailing GatePlace/Trigger messages from the final round a moment to
+	// settle so the race detector observes the tail of the cascade too.
+	time.Sleep(50 * time.Millisecond)
+}

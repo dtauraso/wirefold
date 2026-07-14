@@ -209,7 +209,7 @@ func TestNode5DragEmitsDecentralizedMessages(t *testing.T) {
 	var mu sync.Mutex
 	var recorded []tappedMsg
 	md.SetMsgTap(func(destID string, msg moveMsg) {
-		if msg.Kind != moveMsgKindEqualize && msg.Kind != moveMsgKindTrigger {
+		if msg.Kind != moveMsgKindEqualize && msg.Kind != moveMsgKindTrigger && msg.Kind != moveMsgKindDrag {
 			return // ignore Center/Resend/etc. fanCenters noise
 		}
 		mu.Lock()
@@ -256,15 +256,18 @@ func TestNode5DragEmitsDecentralizedMessages(t *testing.T) {
 		t.Logf("  dest=%s kind=%s senderID=%q targetC=%v", m.destID, m.kind, m.senderID, m.targetC)
 	}
 
-	// 1. Node 5 receives a self-initiated Trigger (SenderID == "").
+	// 1. Node 5 receives a self-routed Drag (SenderID == "") — the entry point that
+	// commits node 5's own new position and then self-triggers (handleTrigger, called
+	// directly on node 5's own goroutine, not via sendMove — so it never itself
+	// appears in this tap trace, mirroring node 6's Drag entry).
 	found5Trigger := false
 	for _, m := range trace {
-		if m.destID == "5" && m.kind == moveMsgKindTrigger && m.senderID == "" {
+		if m.destID == "5" && m.kind == moveMsgKindDrag && m.senderID == "" {
 			found5Trigger = true
 		}
 	}
 	if !found5Trigger {
-		t.Errorf("expected a self-initiated Trigger (SenderID==\"\") to node 5; got %+v", trace)
+		t.Errorf("expected a self-routed Drag (SenderID==\"\") to node 5; got %+v", trace)
 	}
 
 	// 2. Equalize routed to followers 7 AND 8, with TargetC ~= dist(5,2).
@@ -421,7 +424,7 @@ func TestNode2DirectDragEmitsDecentralizedMessages(t *testing.T) {
 	var mu sync.Mutex
 	var recorded []tappedMsg
 	md.SetMsgTap(func(destID string, msg moveMsg) {
-		if msg.Kind != moveMsgKindEqualize && msg.Kind != moveMsgKindTrigger {
+		if msg.Kind != moveMsgKindEqualize && msg.Kind != moveMsgKindTrigger && msg.Kind != moveMsgKindDrag {
 			return
 		}
 		mu.Lock()
@@ -456,8 +459,8 @@ func TestNode2DirectDragEmitsDecentralizedMessages(t *testing.T) {
 		return false
 	}
 
-	if !has("2", moveMsgKindTrigger, "") {
-		t.Errorf("expected a self-initiated Trigger (SenderID==\"\") to node 2; got %+v", trace)
+	if !has("2", moveMsgKindDrag, "") {
+		t.Errorf("expected a self-routed Drag (SenderID==\"\") to node 2; got %+v", trace)
 	}
 	if !has("6", moveMsgKindEqualize, "") {
 		t.Errorf("expected Equalize routed to node 6; got %+v", trace)
@@ -508,7 +511,7 @@ func TestNode1DragEmitsSelfTrigger(t *testing.T) {
 	var mu sync.Mutex
 	var recorded []tappedMsg
 	md.SetMsgTap(func(destID string, msg moveMsg) {
-		if msg.Kind != moveMsgKindEqualize && msg.Kind != moveMsgKindTrigger {
+		if msg.Kind != moveMsgKindEqualize && msg.Kind != moveMsgKindTrigger && msg.Kind != moveMsgKindDrag {
 			return
 		}
 		mu.Lock()
@@ -551,7 +554,7 @@ func TestNode1DragEmitsSelfTrigger(t *testing.T) {
 
 	found1Trigger := false
 	for _, m := range trace {
-		if m.destID == "1" && m.kind == moveMsgKindTrigger && m.senderID == "" {
+		if m.destID == "1" && m.kind == moveMsgKindDrag && m.senderID == "" {
 			found1Trigger = true
 		}
 		if m.destID == "2" || m.destID == "3" {
@@ -559,7 +562,7 @@ func TestNode1DragEmitsSelfTrigger(t *testing.T) {
 		}
 	}
 	if !found1Trigger {
-		t.Errorf("expected a self-initiated Trigger (SenderID==\"\") to node 1; got %+v", trace)
+		t.Errorf("expected a self-routed Drag (SenderID==\"\") to node 1; got %+v", trace)
 	}
 }
 
@@ -716,7 +719,7 @@ func TestNode9DragEmitsSelfTrigger(t *testing.T) {
 	var mu sync.Mutex
 	var recorded []tappedMsg
 	md.SetMsgTap(func(destID string, msg moveMsg) {
-		if msg.Kind != moveMsgKindEqualize && msg.Kind != moveMsgKindTrigger {
+		if msg.Kind != moveMsgKindEqualize && msg.Kind != moveMsgKindTrigger && msg.Kind != moveMsgKindDrag {
 			return
 		}
 		mu.Lock()
@@ -743,7 +746,7 @@ func TestNode9DragEmitsSelfTrigger(t *testing.T) {
 
 	found9Trigger := false
 	for _, m := range trace {
-		if m.destID == "9" && m.kind == moveMsgKindTrigger && m.senderID == "" {
+		if m.destID == "9" && m.kind == moveMsgKindDrag && m.senderID == "" {
 			found9Trigger = true
 		}
 		if m.destID == "3" || m.destID == "6" {
@@ -751,7 +754,7 @@ func TestNode9DragEmitsSelfTrigger(t *testing.T) {
 		}
 	}
 	if !found9Trigger {
-		t.Errorf("expected a self-initiated Trigger (SenderID==\"\") to node 9; got %+v", trace)
+		t.Errorf("expected a self-routed Drag (SenderID==\"\") to node 9; got %+v", trace)
 	}
 }
 
@@ -826,7 +829,7 @@ func TestNode10DragEmitsSelfTrigger(t *testing.T) {
 	var mu sync.Mutex
 	var recorded []tappedMsg
 	md.SetMsgTap(func(destID string, msg moveMsg) {
-		if msg.Kind != moveMsgKindEqualize && msg.Kind != moveMsgKindTrigger {
+		if msg.Kind != moveMsgKindEqualize && msg.Kind != moveMsgKindTrigger && msg.Kind != moveMsgKindDrag {
 			return
 		}
 		mu.Lock()
@@ -853,7 +856,7 @@ func TestNode10DragEmitsSelfTrigger(t *testing.T) {
 
 	found10Trigger := false
 	for _, m := range trace {
-		if m.destID == "10" && m.kind == moveMsgKindTrigger && m.senderID == "" {
+		if m.destID == "10" && m.kind == moveMsgKindDrag && m.senderID == "" {
 			found10Trigger = true
 		}
 		if m.destID == "6" || m.destID == "8" {
@@ -861,7 +864,7 @@ func TestNode10DragEmitsSelfTrigger(t *testing.T) {
 		}
 	}
 	if !found10Trigger {
-		t.Errorf("expected a self-initiated Trigger (SenderID==\"\") to node 10; got %+v", trace)
+		t.Errorf("expected a self-routed Drag (SenderID==\"\") to node 10; got %+v", trace)
 	}
 }
 

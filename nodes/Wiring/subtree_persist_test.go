@@ -1,11 +1,36 @@
 package Wiring
 
 import (
+	"context"
 	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
+
+// pollDragConverged waits until the named node's committed center matches target — a
+// drag now always runs asynchronously on the node's OWN mover goroutine (moveMsgKindDrag,
+// node6-drag-decentralized.md generalized to every node), so RootMove returning true only
+// means the message was ENQUEUED, not that commitLocal (and its quantOffsetPersist.schedule
+// call) has run yet. Tests that read persisted state right after RootMove must wait for
+// this convergence first, exactly as the node_move_test.go cascade tests already do.
+func pollDragConverged(t *testing.T, md *MoveDispatch, nodeID string, target vec3) {
+	t.Helper()
+	const eps = 1e-6
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		c, ok := md.centerOfNode(nodeID)
+		if ok && math.Abs(c.X-target.X) <= eps && math.Abs(c.Y-target.Y) <= eps && math.Abs(c.Z-target.Z) <= eps {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("node %s drag never converged to target %+v", nodeID, target)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
 
 // Individual snapping: dragging a node moves and persists ONLY that node (its grid-snapped
 // scalar triple, quantITheta/quantIPhi/quantIR — the sole persisted position source under
@@ -14,12 +39,20 @@ func TestIndividualSnap_OnlyDraggedNodePersists(t *testing.T) {
 	root := writeTree(t)
 	md := loadTreeMD(t, root)
 	md.EnableEditPersist(root)
+	// Every drag (moveMsgKindDrag, node6-drag-decentralized.md generalized to every
+	// node) commits on the dragged node's OWN mover goroutine — Start the movers so
+	// something drains dst's inbox.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	md.Start(ctx)
 
 	srcBefore, _ := os.ReadFile(filepath.Join(root, "nodes", "src", "meta.json"))
 
-	if !md.RootMove("dst", vec3{X: 60, Y: 20, Z: -10}) {
+	dstTarget := vec3{X: 60, Y: 20, Z: -10}
+	if !md.RootMove("dst", dstTarget) {
 		t.Fatal("RootMove(dst) returned false")
 	}
+	pollDragConverged(t, md, "dst", dstTarget)
 	md.quantOffsetPersist.flush()
 
 	// dst's meta got its EXACT scene-polar position (the lossless source of truth loaded
@@ -77,11 +110,17 @@ func TestDragPositionRoundTripsExactly(t *testing.T) {
 	root := writeTree(t)
 	md := loadTreeMD(t, root)
 	md.EnableEditPersist(root)
+	// Every drag commits on the dragged node's OWN mover goroutine — Start the movers
+	// so something drains dst's inbox (node6-drag-decentralized.md, generalized).
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	md.Start(ctx)
 
 	target := vec3{X: 63.7, Y: -21.3, Z: 44.9}
 	if !md.RootMove("dst", target) {
 		t.Fatal("RootMove(dst) returned false")
 	}
+	pollDragConverged(t, md, "dst", target)
 	md.quantOffsetPersist.flush()
 
 	// Reload from disk into a fresh MoveDispatch and read dst's center back.
