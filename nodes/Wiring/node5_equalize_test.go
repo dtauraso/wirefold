@@ -490,14 +490,82 @@ func TestNode2DirectDragEmitsDecentralizedMessages(t *testing.T) {
 	}
 }
 
-// TestNode1DirectDragEmitsDecentralizedMessages proves a DIRECT node-1 drag routes
-// through the same decentralized message system: node 1 is a LEAF rule-node (no
-// other node's ruleSource is "1"), so it self-triggers, equalizes its own follower
-// (3), and forwards to nobody. RED against the central case "1" (zero messages).
-// TestNode1DragKeepsNeighbors23Fixed is the RED proof / anti-drift assertion for the
-// node-1-as-gate change: dragging node 1 directly must NOT move node 2 or node 3 at
-// all (unlike the old message-path behavior, which repositioned node 3 to equalize
-// 1's edges). Against the OLD message-path code, node 3 moves and this test fails.
+// TestNode1DragEmitsSelfTrigger is the RED proof for routing node 1's DIRECT drag
+// through the decentralized goroutine-message path (mirroring
+// TestNode9DragEmitsSelfTrigger / node9-decentralized-gate.md, widened to node 1 per
+// retire-central-rootmove STEP 1): a node-1 drag must route a self-initiated Trigger
+// (SenderID=="") to node 1's OWN inbox via sendMove, and must NOT send any
+// Equalize/Trigger message to any OTHER node (in particular neighbors 2 and 3, which
+// must never move or receive a message from a DIRECT node-1 drag). Against the
+// CURRENT central rootMove path (case "1" runs synchronously on the drag call stack,
+// never touching sendMove), this test is RED: zero messages are tapped.
+func TestNode1DragEmitsSelfTrigger(t *testing.T) {
+	md := newFullChainDispatch()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	md.Start(ctx)
+
+	var mu sync.Mutex
+	var recorded []tappedMsg
+	md.SetMsgTap(func(destID string, msg moveMsg) {
+		if msg.Kind != moveMsgKindEqualize && msg.Kind != moveMsgKindTrigger {
+			return
+		}
+		mu.Lock()
+		recorded = append(recorded, tappedMsg{destID: destID, kind: msg.Kind, senderID: msg.SenderID, targetC: msg.TargetC})
+		mu.Unlock()
+	})
+	defer md.SetMsgTap(nil)
+
+	target := vec3{85, 10, -8}
+	if ok := md.RootMove("1", target); !ok {
+		t.Fatalf("RootMove(1, %v) = false", target)
+	}
+
+	const eps = 1e-6
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		c1, _ := md.centerOfNode("1")
+		c2, _ := md.centerOfNode("2")
+		c3, _ := md.centerOfNode("3")
+		d1to2 := cart2polar(c2.sub(c1)).R
+		d1to3 := cart2polar(c3.sub(c1)).R
+		if math.Abs(d1to3-d1to2) <= eps {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("node 1 drag did not converge to equal radii: d1to2=%v d1to3=%v", d1to2, d1to3)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	time.Sleep(20 * time.Millisecond)
+
+	mu.Lock()
+	trace := append([]tappedMsg(nil), recorded...)
+	mu.Unlock()
+
+	t.Logf("recorded %d Equalize/Trigger messages:", len(trace))
+	for _, m := range trace {
+		t.Logf("  dest=%s kind=%s senderID=%q targetC=%v", m.destID, m.kind, m.senderID, m.targetC)
+	}
+
+	found1Trigger := false
+	for _, m := range trace {
+		if m.destID == "1" && m.kind == moveMsgKindTrigger && m.senderID == "" {
+			found1Trigger = true
+		}
+		if m.destID == "2" || m.destID == "3" {
+			t.Errorf("neighbor %s must never receive an Equalize/Trigger message from a DIRECT node-1 drag; got %+v", m.destID, m)
+		}
+	}
+	if !found1Trigger {
+		t.Errorf("expected a self-initiated Trigger (SenderID==\"\") to node 1; got %+v", trace)
+	}
+}
+
+// TestNode1DragKeepsNeighbors23Fixed is the behavior-preserving safety net (mirroring
+// TestNode9DragEqualRadiiNeighborsFixed): dragging node 1 directly must NOT move node
+// 2 or node 3 at all.
 func TestNode1DragKeepsNeighbors23Fixed(t *testing.T) {
 	md := newFullChainDispatch()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -572,59 +640,6 @@ func TestNode1DragEqualRadii(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 	t.Logf("final: d1to2=%v d1to3=%v", d1to2, d1to3)
-}
-
-// TestNode1DragNoCascadeMessages proves node 1 is now central-gate-style, not
-// message-routed: a direct node-1 drag must emit NO Equalize/Trigger messages at all
-// (RootMove no longer routes "1" to rootMoveViaMessages).
-func TestNode1DragNoCascadeMessages(t *testing.T) {
-	md := newFullChainDispatch()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	md.Start(ctx)
-
-	var mu sync.Mutex
-	var recorded []tappedMsg
-	md.SetMsgTap(func(destID string, msg moveMsg) {
-		if msg.Kind != moveMsgKindEqualize && msg.Kind != moveMsgKindTrigger {
-			return
-		}
-		mu.Lock()
-		recorded = append(recorded, tappedMsg{destID: destID, kind: msg.Kind, senderID: msg.SenderID, targetC: msg.TargetC})
-		mu.Unlock()
-	})
-	defer md.SetMsgTap(nil)
-
-	target := vec3{85, 10, -8}
-	if ok := md.RootMove("1", target); !ok {
-		t.Fatalf("RootMove(1, %v) = false", target)
-	}
-
-	const eps = 1e-6
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		c1, _ := md.centerOfNode("1")
-		c2, _ := md.centerOfNode("2")
-		c3, _ := md.centerOfNode("3")
-		d1to2 := cart2polar(c2.sub(c1)).R
-		d1to3 := cart2polar(c3.sub(c1)).R
-		if math.Abs(d1to3-d1to2) <= eps {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("node 1 drag did not converge to equal radii: d1to2=%v d1to3=%v", d1to2, d1to3)
-		}
-		time.Sleep(time.Millisecond)
-	}
-	time.Sleep(20 * time.Millisecond)
-
-	mu.Lock()
-	trace := append([]tappedMsg(nil), recorded...)
-	mu.Unlock()
-
-	if len(trace) != 0 {
-		t.Errorf("expected NO Equalize/Trigger messages for a direct node-1 drag (gate pattern, not message pattern); got %+v", trace)
-	}
 }
 
 // TestNode2DirectDragBehaviorPreserved is the SAFETY NET: it holds both before and
