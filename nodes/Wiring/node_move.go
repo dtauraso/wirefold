@@ -30,6 +30,7 @@ package Wiring
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -250,6 +251,7 @@ func (m *nodeMover) handle(msg moveMsg) {
 			if dir.length() != 0 {
 				newPos := msg.FromCenter.add(dir.normalize().scale(msg.TargetC))
 				m.commit(m.id, newPos)
+				m.tr.Breadcrumb("cascade.follower.move", m.id, "", fmt.Sprintf("targetC=%.4f", msg.TargetC))
 			}
 		}
 		return
@@ -288,8 +290,10 @@ func (m *nodeMover) handleTrigger(msg moveMsg) {
 		return
 	}
 	L := sourceCenter.sub(selfCenter).length()
+	m.tr.Breadcrumb("cascade.trigger", m.id, "", fmt.Sprintf("source=%s L=%.4f senderID=%q", sourceID, L, msg.SenderID))
 	for _, f := range ruleFollowers[m.id] {
 		m.sendMove(f, moveMsg{Kind: moveMsgKindEqualize, NodeID: f, FromCenter: selfCenter, TargetC: L})
+		m.tr.Breadcrumb("cascade.equalize", f, "", fmt.Sprintf("targetC=%.4f", L))
 	}
 	// Delta-gated forward: notify any Y whose OWN source is this node, unless Y is
 	// whoever just triggered us (no bounce). This node's own center only changes
@@ -306,9 +310,11 @@ func (m *nodeMover) handleTrigger(msg moveMsg) {
 			continue
 		}
 		if !selfMoved {
+			m.tr.Breadcrumb("cascade.stop", m.id, "", fmt.Sprintf("target=%s reason=no-change senderID=%q", y, msg.SenderID))
 			continue
 		}
 		m.sendMove(y, moveMsg{Kind: moveMsgKindTrigger, NodeID: y, SenderID: m.id})
+		m.tr.Breadcrumb("cascade.forward", m.id, "", fmt.Sprintf("target=%s", y))
 	}
 }
 
@@ -1281,6 +1287,7 @@ func (md *MoveDispatch) rootMoveNode5(target vec3) bool {
 		return false
 	}
 	md.commitNodeMove("5", target)
+	md.tr.Breadcrumb("cascade.root", "5", "", fmt.Sprintf("target=(%.4f,%.4f,%.4f)", target.X, target.Y, target.Z))
 	md.sendMove("5", moveMsg{Kind: moveMsgKindTrigger, NodeID: "5", SenderID: ""})
 	return true
 }
