@@ -661,3 +661,113 @@ func TestNode2DirectDragBehaviorPreserved(t *testing.T) {
 // TestNode1DirectDragBehaviorPreserved (node 2/3-unmoved, equal-radii behavior) is
 // superseded by TestNode1DragKeepsNeighbors23Fixed and TestNode1DragEqualRadii above,
 // which assert the new gate-pattern behavior directly.
+
+// pollNode9EqualRadii waits until dist(9,3)==dist(9,6) within eps and returns both.
+func pollNode9EqualRadii(t *testing.T, md *MoveDispatch) (d9to3, d9to6 float64) {
+	t.Helper()
+	const eps = 1e-6
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		c9, _ := md.centerOfNode("9")
+		c3, _ := md.centerOfNode("3")
+		c6, _ := md.centerOfNode("6")
+		d9to3 = cart2polar(c3.sub(c9)).R
+		d9to6 = cart2polar(c6.sub(c9)).R
+		if math.Abs(d9to3-d9to6) <= eps {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("node 9 did not converge to equal radii: d9to3=%v d9to6=%v", d9to3, d9to6)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// TestNode9DragEmitsSelfTrigger is the RED proof for routing node 9's DIRECT drag
+// through the decentralized goroutine-message path (node9-decentralized-gate.md,
+// mirroring node5-decentralized-cascade.md's rootMoveViaMessages for nodes 5/2): a
+// node-9 drag must route a self-initiated Trigger (SenderID=="") to node 9's OWN
+// inbox via sendMove, and must NOT send any Equalize/Trigger message to any OTHER
+// node (in particular neighbors 3 and 6, which must never move or receive a
+// message). Against the CURRENT central rootMove path (case "9" runs synchronously
+// on the drag call stack, never touching sendMove for Equalize/Trigger kinds), this
+// test is RED: zero messages are tapped, so found9Trigger stays false.
+func TestNode9DragEmitsSelfTrigger(t *testing.T) {
+	md := newFullChainDispatch()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	md.Start(ctx)
+
+	var mu sync.Mutex
+	var recorded []tappedMsg
+	md.SetMsgTap(func(destID string, msg moveMsg) {
+		if msg.Kind != moveMsgKindEqualize && msg.Kind != moveMsgKindTrigger {
+			return
+		}
+		mu.Lock()
+		recorded = append(recorded, tappedMsg{destID: destID, kind: msg.Kind, senderID: msg.SenderID, targetC: msg.TargetC})
+		mu.Unlock()
+	})
+	defer md.SetMsgTap(nil)
+
+	target := vec3{55, 30, -5}
+	if ok := md.RootMove("9", target); !ok {
+		t.Fatalf("RootMove(9, %v) = false", target)
+	}
+	pollNode9EqualRadii(t, md)
+	time.Sleep(20 * time.Millisecond)
+
+	mu.Lock()
+	trace := append([]tappedMsg(nil), recorded...)
+	mu.Unlock()
+
+	t.Logf("recorded %d Equalize/Trigger messages:", len(trace))
+	for _, m := range trace {
+		t.Logf("  dest=%s kind=%s senderID=%q targetC=%v", m.destID, m.kind, m.senderID, m.targetC)
+	}
+
+	found9Trigger := false
+	for _, m := range trace {
+		if m.destID == "9" && m.kind == moveMsgKindTrigger && m.senderID == "" {
+			found9Trigger = true
+		}
+		if m.destID == "3" || m.destID == "6" {
+			t.Errorf("neighbor %s must never receive an Equalize/Trigger message; got %+v", m.destID, m)
+		}
+	}
+	if !found9Trigger {
+		t.Errorf("expected a self-initiated Trigger (SenderID==\"\") to node 9; got %+v", trace)
+	}
+}
+
+// TestNode9DragEqualRadiiNeighborsFixed is the behavior-preserving safety net: after
+// dragging node 9, dist(9,3)==dist(9,6) within eps, and neighbors 3 and 6 do not
+// move. Holds both before and after routing node 9's drag through the decentralized
+// message path.
+func TestNode9DragEqualRadiiNeighborsFixed(t *testing.T) {
+	md := newFullChainDispatch()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	md.Start(ctx)
+
+	c3Before, _ := md.centerOfNode("3")
+	c6Before, _ := md.centerOfNode("6")
+
+	target := vec3{55, 30, -5}
+	if ok := md.RootMove("9", target); !ok {
+		t.Fatalf("RootMove(9, %v) = false", target)
+	}
+	d9to3, d9to6 := pollNode9EqualRadii(t, md)
+	time.Sleep(20 * time.Millisecond)
+
+	const eps = 1e-6
+	c3After, _ := md.centerOfNode("3")
+	c6After, _ := md.centerOfNode("6")
+	if got := c3After.sub(c3Before).length(); got > eps {
+		t.Fatalf("node 3 moved: before=%v after=%v delta=%v", c3Before, c3After, got)
+	}
+	if got := c6After.sub(c6Before).length(); got > eps {
+		t.Fatalf("node 6 moved: before=%v after=%v delta=%v", c6Before, c6After, got)
+	}
+	t.Logf("final: d9to3=%v d9to6=%v", d9to3, d9to6)
+}
