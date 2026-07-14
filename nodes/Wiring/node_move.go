@@ -925,12 +925,14 @@ func (md *MoveDispatch) rootMove(nodeID string, target vec3, cascadeToSource boo
 
 	md.requantizeLocalPolars(nodeID, newPos)
 
-	// Scoped to nodes 5 and 2 by request: a peer-frame local-polar-radial equalization,
+	// Scoped to nodes 5, 2 and 1 by request: a peer-frame local-polar-radial equalization,
 	// NOT a parent/child cascade. The dragged node's double-link distances to its other
 	// peers are set equal to its double-link distance to the named source peer (all
 	// measured in the dragged node's own frame, dragged node as center); the source peer
 	// stays put. Nodes 5 and 2 are mirror sources for each other (5's source is 2, 2's
-	// source is 5) and both are HoldNewSendOld — same kind, same all-peers rule.
+	// source is 5) and both are HoldNewSendOld — same kind, same all-peers rule. Node 1's
+	// source is 2: a node-2 drag cascades into node 1 (which ignored node 2's r update),
+	// keeping node 1's own 1→3 edge equal to the organic post-drag 1↔2 distance.
 	switch nodeID {
 	case "5":
 		md.equalizeNeighborDistancesWithSourceCenter(nodeID, "2", newPos, sourceCenterOverride)
@@ -947,7 +949,22 @@ func (md *MoveDispatch) rootMove(nodeID string, target vec3, cascadeToSource boo
 				fresh := newPos
 				md.rootMove("5", srcCenter, false, &fresh)
 			}
+			// Cascade to node 1: node 1 ignored node 2's r update (excluded from node 2's
+			// peer set above), so node 1 stays put and 1↔2 is now the organic post-drag
+			// distance. Re-run node 1's OWN equalize at 1's CURRENT (unchanged) position,
+			// passing node 2's fresh newPos as the sourceCenterOverride so node 1's nested
+			// equalize (source "2") measures dist(1,2) against the FRESH node-2 center and
+			// repositions node 3 to keep 1→3 == 1→2. One level only.
+			if oneCenter, ok := md.centerOfNode("1"); ok {
+				fresh := newPos
+				md.rootMove("1", oneCenter, false, &fresh)
+			}
 		}
+	case "1":
+		// Node 1's own edges are kept equal: 1→3 is set to the 1↔2 distance (source "2"),
+		// node 3 repositioned along its current bearing from node 1. Driven by the node-2→1
+		// cascade above (node 1 itself never moves on a node-2 drag).
+		md.equalizeNeighborDistancesWithSourceCenter(nodeID, "2", newPos, sourceCenterOverride)
 	}
 	return true
 }
@@ -990,6 +1007,13 @@ func (md *MoveDispatch) equalizeNeighborDistancesWithSourceCenter(dragged, sourc
 			continue
 		}
 		if other == "" || other == source {
+			continue
+		}
+		// Node 1 ignores node 2's r update: when node 2 is the dragged node, node 1 is
+		// deliberately excluded from node 2's equalize peer set. Node 1 keeps its own
+		// position and instead self-equalizes 1→3 to the new (organic) 1↔2 distance via
+		// the node-2→1 cascade below (see rootMove's case "2").
+		if dragged == "2" && other == "1" {
 			continue
 		}
 		peers[other] = true

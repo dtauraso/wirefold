@@ -774,3 +774,94 @@ func TestRootMoveNode2CascadesToSource(t *testing.T) {
 			gotBearing8.Theta, gotBearing8.Phi, wantBearing8.Theta, wantBearing8.Phi)
 	}
 }
+
+// TestRootMoveNode2CascadeKeepsNode1EdgesEqual verifies the node-1 side of the same
+// drag cascade: node "1" is EXCLUDED from node 2's own equalize peer set (node 1
+// ignores node 2's r update and stays put at its pre-drag position), but rootMove's
+// case "2" cascades into node 1's OWN hardcoded nodeID=="1" equalize (source "2"),
+// which repositions node 1's other peer "3" along its current bearing from node 1 so
+// that dist(1,3) == the new organic dist(1,2). Built via newMoveDispatch directly
+// (mirroring TestRootMoveNode2CascadesToSource), NOT via LoadTopology.
+func TestRootMoveNode2CascadeKeepsNode1EdgesEqual(t *testing.T) {
+	geoms := map[string]nodeGeom{
+		"1": {Kind: "Input", HasPos: true, ScenePolar: cart2polar(vec3{10, 5, -8}), Inputs: []portGeom{{Name: "inT"}}, Outputs: []portGeom{{Name: "out3"}}},
+		"2": {Kind: "HoldNewSendOld", HasPos: true, ScenePolar: cart2polar(vec3{0, 0, 0}), Inputs: []portGeom{{Name: "in1"}}, Outputs: []portGeom{{Name: "out5"}}},
+		"3": {Kind: "Pulse", HasPos: true, ScenePolar: cart2polar(vec3{35, 20, 12}), Inputs: []portGeom{{Name: "in"}}},
+		"5": {Kind: "HoldNewSendOld", HasPos: true, ScenePolar: cart2polar(vec3{40, 0, 0}), Inputs: []portGeom{{Name: "in"}}},
+	}
+	edges := map[string]EdgeEndpoints{
+		"2To1": {Source: "2", Target: "1", SourceHandle: "out5", TargetHandle: "inT"},
+		"1To3": {Source: "1", Target: "3", SourceHandle: "out3", TargetHandle: "in"},
+		"2To5": {Source: "2", Target: "5", SourceHandle: "out5", TargetHandle: "in"},
+	}
+	md := newMoveDispatch(geoms, edges, nil)
+	md.layoutHolders = map[string]*LayoutHolder{
+		"1": {}, "2": {}, "3": {}, "5": {},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	md.Start(ctx)
+
+	oneCenter, ok := md.centerOfNode("1")
+	if !ok {
+		t.Fatal("centerOfNode(1) missing before move")
+	}
+	threeCenterBefore, ok := md.centerOfNode("3")
+	if !ok {
+		t.Fatal("centerOfNode(3) missing before move")
+	}
+
+	target := vec3{X: 5, Y: 5, Z: 5}
+	if !md.RootMove("2", target) {
+		t.Fatal("RootMove returned false for known node")
+	}
+
+	const eps = 1e-6
+	deadline := time.Now().Add(2 * time.Second)
+	converged := func() bool {
+		c, ok := md.centerOfNode("2")
+		if !ok || math.Abs(c.X-target.X) > eps || math.Abs(c.Y-target.Y) > eps || math.Abs(c.Z-target.Z) > eps {
+			return false
+		}
+		c3, ok3 := md.centerOfNode("3")
+		return ok3 && c3 != threeCenterBefore
+	}
+	for !converged() {
+		if time.Now().After(deadline) {
+			t.Fatal("drag + cascade never converged")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	// Give any trailing re-emit messages a moment to settle.
+	time.Sleep(20 * time.Millisecond)
+
+	// Node 1 ignored node 2's r update: it stays put.
+	oneCenterAfter, ok := md.centerOfNode("1")
+	if !ok {
+		t.Fatal("centerOfNode(1) missing after move")
+	}
+	if oneCenterAfter != oneCenter {
+		t.Fatalf("node '1' moved: got %+v, want unchanged %+v", oneCenterAfter, oneCenter)
+	}
+
+	threeCenterAfter, ok := md.centerOfNode("3")
+	if !ok {
+		t.Fatal("centerOfNode(3) missing after move")
+	}
+	if threeCenterAfter == threeCenterBefore {
+		t.Fatal("node '3' did not move after node-1 cascade")
+	}
+
+	gotDist13 := cart2polar(threeCenterAfter.sub(oneCenterAfter)).R
+	gotDist12 := cart2polar(target.sub(oneCenterAfter)).R
+	if math.Abs(gotDist13-gotDist12) > eps {
+		t.Fatalf("dist(1,3) after cascade = %v, want dist(1,2) = %v", gotDist13, gotDist12)
+	}
+
+	wantBearing3 := cart2polar(threeCenterBefore.sub(oneCenter))
+	gotBearing3 := cart2polar(threeCenterAfter.sub(oneCenterAfter))
+	if math.Abs(gotBearing3.Theta-wantBearing3.Theta) > eps || math.Abs(gotBearing3.Phi-wantBearing3.Phi) > eps {
+		t.Fatalf("3's bearing from 1 changed: got (theta=%v,phi=%v), want (theta=%v,phi=%v)",
+			gotBearing3.Theta, gotBearing3.Phi, wantBearing3.Theta, wantBearing3.Phi)
+	}
+}
