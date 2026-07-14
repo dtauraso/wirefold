@@ -868,17 +868,19 @@ func (md *MoveDispatch) fanCenters(newCenters map[string]vec3, reach map[string]
 // affected double-link's local polars are re-quantized on BOTH ends. Returns false for
 // an unknown node.
 func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
-	return md.rootMove(nodeID, target, true, nil)
+	return md.rootMove(nodeID, target, "", nil)
 }
 
 // rootMove is RootMove's internal implementation, parameterized by:
 //
-//   - cascadeToSource: when true and nodeID is node "2", after equalizing node 2's
-//     OWN peers, rootMove also re-runs the equalize on its source node "5" at 5's
-//     CURRENT (unchanged) position — "5 acts like it was dragged" so 5's own peer
-//     distances (5↔7 / 5↔8) recompute against the NEW 2↔5 distance. The cascade
-//     call passes cascadeToSource=false so node 5's own equalize does not itself
-//     cascade back — one level only, no infinite recursion.
+//   - origin: the node that STARTED this cascade chain — "" for the top-level user
+//     drag, or the id of the node whose cascade re-drove this one. Nodes 2 and 5 are
+//     mirror sources (a node-2 drag makes node 5 "act dragged" and vice-versa), so a
+//     naive cascade would bounce 2→5→2→… forever. Each cascade hop into node X is
+//     therefore taken only when X != origin: the chain fans OUTWARD but never back to
+//     where it came from. A node-2 drag (origin "") cascades to 5 AND 1; a node-5 drag
+//     (origin "") cascades to 2, whose own cascade then reaches 1 but SKIPS 5 (origin
+//     is "5"). Every cascade call passes origin=nodeID so the next hop knows its caller.
 //   - sourceCenterOverride: when non-nil, equalizeNeighborDistances uses this
 //     value as the equalize SOURCE's center instead of reading it back off
 //     md.centerOfNode(source). This matters ONLY for the cascade call: fanCenters
@@ -895,7 +897,7 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 //     override generalizes that same "pass the fresh value, don't read it back"
 //     rule to the one-hop cascade, where the fresh value belongs to a node OTHER
 //     than the one rootMove is currently dragging.
-func (md *MoveDispatch) rootMove(nodeID string, target vec3, cascadeToSource bool, sourceCenterOverride *vec3) bool {
+func (md *MoveDispatch) rootMove(nodeID string, target vec3, origin string, sourceCenterOverride *vec3) bool {
 	if _, ok := md.nodeMovers[nodeID]; !ok {
 		return false
 	}
@@ -936,28 +938,45 @@ func (md *MoveDispatch) rootMove(nodeID string, target vec3, cascadeToSource boo
 	switch nodeID {
 	case "5":
 		md.equalizeNeighborDistancesWithSourceCenter(nodeID, "2", newPos, sourceCenterOverride)
+		// Mirror of case "2"'s cascade into 5: a node-5 drag makes node 2 "act like it
+		// was dragged" too, so node 2 re-equalizes its OWN peers (node 6) against the new
+		// 5↔2 distance and fans onward to node 1. Re-run node 2's rootMove at 2's CURRENT
+		// (unchanged) position, passing node 5's just-computed newPos as the source
+		// override so node 2's nested equalize reads the FRESH node-5 center. Skipped when
+		// node 2 is the chain origin (a 2-initiated cascade already drove node 5 — do not
+		// bounce back).
+		if origin != "2" {
+			if twoCenter, ok := md.centerOfNode("2"); ok {
+				fresh := newPos
+				md.rootMove("2", twoCenter, nodeID, &fresh)
+			}
+		}
 	case "2":
 		md.equalizeNeighborDistancesWithSourceCenter(nodeID, "5", newPos, sourceCenterOverride)
-		// Cascade: have the source node 5 act like it was dragged too, so ITS other peer
+		// Cascade: have source node 5 act like it was dragged too, so ITS other peer
 		// distances (5↔7 / 5↔8) recompute against the new 2↔5 distance. Re-run node 5's
 		// own rootMove at 5's CURRENT (unchanged) position, passing node 2's just-computed
 		// newPos as the sourceCenterOverride so 5's nested equalize reads the FRESH node-2
 		// center rather than racing fanCenters' async publication (see rootMove's doc
-		// comment). One level only (cascadeToSource=false on the nested call).
-		if cascadeToSource {
+		// comment). Skipped when node 5 is the chain origin (a 5-initiated cascade — do
+		// not bounce back into node 5).
+		if origin != "5" {
 			if srcCenter, ok := md.centerOfNode("5"); ok {
 				fresh := newPos
-				md.rootMove("5", srcCenter, false, &fresh)
+				md.rootMove("5", srcCenter, nodeID, &fresh)
 			}
-			// Cascade to node 1: node 1 ignored node 2's r update (excluded from node 2's
-			// peer set above), so node 1 stays put and 1↔2 is now the organic post-drag
-			// distance. Re-run node 1's OWN equalize at 1's CURRENT (unchanged) position,
-			// passing node 2's fresh newPos as the sourceCenterOverride so node 1's nested
-			// equalize (source "2") measures dist(1,2) against the FRESH node-2 center and
-			// repositions node 3 to keep 1→3 == 1→2. One level only.
+		}
+		// Cascade to node 1: node 1 ignored node 2's r update (excluded from node 2's
+		// peer set above), so node 1 stays put and 1↔2 is the organic post-drag distance.
+		// Re-run node 1's OWN equalize at 1's CURRENT (unchanged) position, passing node
+		// 2's fresh newPos as the sourceCenterOverride so node 1's nested equalize (source
+		// "2") measures dist(1,2) against the FRESH node-2 center and repositions node 3
+		// to keep 1→3 == 1→2. Reached on both a direct node-2 drag and a node-5-initiated
+		// cascade (origin "5" != "1"); skipped only if node 1 itself is the origin.
+		if origin != "1" {
 			if oneCenter, ok := md.centerOfNode("1"); ok {
 				fresh := newPos
-				md.rootMove("1", oneCenter, false, &fresh)
+				md.rootMove("1", oneCenter, nodeID, &fresh)
 			}
 		}
 	case "1":
