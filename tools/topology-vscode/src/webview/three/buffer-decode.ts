@@ -85,6 +85,18 @@ export interface DecodedSnapshot {
   edgeLabelBytes: Uint8Array;
 }
 
+// Single-entry memo keyed on the ArrayBuffer's OBJECT IDENTITY (not its contents — the
+// buffer's bytes never mutate in place, a new ArrayBuffer arrives per snapshot). Every
+// per-block renderer (BeadInstances, NodeInstances, PortInstances, EdgeTube, SphereRings,
+// SelectionHighlight ×2, BufferCamera, BufferLabelProjector, InteriorBeadInstances,
+// NavGuides, ThreeView ×2 — ~14 call sites) independently decodes the SAME snapshot every
+// frame; without this cache each one builds its own ~10 DataViews, ~140 short-lived
+// DataViews/frame at 60fps under a ~430-700 snapshot/sec stream. This shares one decode
+// per frame across all consumers. It moves no ownership — the memo just skips redoing
+// pure arithmetic on unchanged input, exactly what memoization is for.
+let lastBuf: ArrayBuffer | null = null;
+let lastDecoded: DecodedSnapshot | null = null;
+
 /**
  * Decode a snapshot ArrayBuffer into typed block views.
  *
@@ -92,9 +104,19 @@ export interface DecodedSnapshot {
  * (guards against partial frames or empty buffers).
  *
  * This is a PURE function — no side effects, no store reads/writes.
- * All views alias the original buffer (zero-copy).
+ * All views alias the original buffer (zero-copy). Memoized on `buf`'s identity (see
+ * lastBuf/lastDecoded above) so N consumers decoding the same snapshot in one frame share
+ * a single decode.
  */
 export function decodeSnapshot(buf: ArrayBuffer): DecodedSnapshot | null {
+  if (buf === lastBuf) return lastDecoded;
+  const decoded = decodeSnapshotUncached(buf);
+  lastBuf = buf;
+  lastDecoded = decoded;
+  return decoded;
+}
+
+function decodeSnapshotUncached(buf: ArrayBuffer): DecodedSnapshot | null {
   if (buf.byteLength < BUF_HEADER_SIZE) return null;
 
   const hdr = new DataView(buf, 0, BUF_HEADER_SIZE);
