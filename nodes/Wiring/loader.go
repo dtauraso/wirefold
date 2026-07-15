@@ -108,17 +108,17 @@ func (n specNode) label() string {
 // toNodeGeom builds the geometry descriptor for arc-length computation,
 // resolving the port lists from the spec node (falling back to the kind's
 // registry ports with default sides when the spec omits inputs/outputs).
-func (n specNode) toNodeGeom(sceneCenter vec3, hasScene bool) nodeGeom {
+func (n specNode) toNodeGeom(sceneCenter vec3) nodeGeom {
 	// Position is POLAR (polar-frame-rewrite.md). The stored ScenePolar (r,θ,φ about the scene
 	// sphere center) is the ONLY stored position and is adopted directly — there is no cartesian
 	// x/y/z load path. When it is absent the node has no position (HasPos false → nodeWorldPos
-	// returns origin).
+	// returns origin). Scene presence does not gate polar adoption: the stored polar is
+	// authoritative regardless.
 	g := nodeGeom{Kind: n.Type, Label: n.label(), R: n.R, SceneCenter: sceneCenter}
 	if n.ScenePolarR != nil && n.ScenePolarTheta != nil && n.ScenePolarPhi != nil {
 		g.ScenePolar = polar{R: *n.ScenePolarR, Theta: *n.ScenePolarTheta, Phi: *n.ScenePolarPhi}
 		g.HasPos = true
 	}
-	_ = hasScene // scene presence no longer gates polar adoption; the stored polar is authoritative.
 	g.Inputs = specPortsToGeom(n.Inputs)
 	g.Outputs = specPortsToGeom(n.Outputs)
 	// Fallback to registry ports when the spec omits the lists (keeps geometry
@@ -349,7 +349,7 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock, s
 func (b *buildCtx) computeNodeGeometry() {
 	nodeGeoms := map[string]nodeGeom{}
 	for _, n := range b.spec.Nodes {
-		nodeGeoms[n.ID] = n.toNodeGeom(b.sphere.Center, b.hasScene)
+		nodeGeoms[n.ID] = n.toNodeGeom(b.sphere.Center)
 	}
 	b.nodeGeoms = nodeGeoms
 
