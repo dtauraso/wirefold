@@ -2,7 +2,6 @@ package Wiring
 
 import (
 	"math"
-	"strings"
 
 	T "github.com/dtauraso/wirefold/Trace"
 )
@@ -615,32 +614,23 @@ func setToSlice(set map[string]bool) []string {
 	return out
 }
 
-// nodeFromHit resolves a node hit to its node id. On the new-system path a node hit carries
-// only a numeric buffer NODE-ROW index (the node InstancedMesh instanceId == its buffer node
-// row); Go maps it back through its own node-row table (nodeRows), since Go owns the topology
-// and wrote the Node block in that same row order. When no resolver is wired (old path / unit
-// tests) it falls back to the hit's Id string.
+// nodeFromHit resolves a node hit to its node id. A node hit carries only a numeric buffer
+// NODE-ROW index (the node InstancedMesh instanceId == its buffer node row); Go maps it back
+// through its own node-row table (nodeRows), since Go owns the topology and wrote the Node
+// block in that same row order.
 func (md *MoveDispatch) nodeFromHit(h rawHit) (node string, ok bool) {
 	if md.nodeRows != nil && h.NodeRow >= 0 {
 		return md.nodeRows.LookupNodeRow(h.NodeRow)
 	}
-	if h.Id != "" {
-		return h.Id, true
-	}
 	return "", false
 }
 
-// edgeFromHit resolves an edge hit to its edge label. On the new-system path an edge hit
-// carries only a numeric buffer EDGE-ROW index (no label string); Go maps it back through
-// its own edge-row table (edgeRows), since Go owns the topology and wrote the Edge block in
-// that same row order. When no resolver is wired (old path / unit tests) it falls back to
-// the hit's Id string.
+// edgeFromHit resolves an edge hit to its edge label. An edge hit carries only a numeric
+// buffer EDGE-ROW index (no label string); Go maps it back through its own edge-row table
+// (edgeRows), since Go owns the topology and wrote the Edge block in that same row order.
 func (md *MoveDispatch) edgeFromHit(h rawHit) (label string, ok bool) {
 	if md.edgeRows != nil && h.EdgeRow >= 0 {
 		return md.edgeRows.LookupEdgeRow(h.EdgeRow)
-	}
-	if h.Id != "" {
-		return h.Id, true
 	}
 	return "", false
 }
@@ -762,31 +752,12 @@ func (md *MoveDispatch) portConnected(node, port string, isInput bool) bool {
 }
 
 // portFromHit resolves a port hit to its (node, port, isInput) identity. On the new-system
-// path a port hit carries only a numeric buffer PORT-ROW index (no name string); Go maps it
+// A port hit carries only a numeric buffer PORT-ROW index (no name string); Go maps it
 // back through its own port-row table (portRows), since Go owns the topology and wrote the
-// Port block in that same row order. When no resolver is wired (old path / unit tests) it
-// falls back to parsing the legacy "nodeId:in|out:portName" id string.
+// Port block in that same row order.
 func (md *MoveDispatch) portFromHit(h rawHit) (node, port string, isInput, ok bool) {
 	if md.portRows != nil && h.PortRow >= 0 {
 		return md.portRows.LookupPortRow(h.PortRow)
 	}
-	return parseGesturePortId(h.Id)
-}
-
-// parseGesturePortId splits a port id of the form "nodeId:in:portName" / "nodeId:out:portName"
-// (mirrors interaction-handlers.ts parsePortId). Returns ok=false on a malformed id.
-func parseGesturePortId(pid string) (node, port string, isInput, ok bool) {
-	i := strings.IndexByte(pid, ':')
-	if i < 0 {
-		return "", "", false, false
-	}
-	node = pid[:i]
-	rest := pid[i+1:]
-	j := strings.IndexByte(rest, ':')
-	if j < 0 {
-		return "", "", false, false
-	}
-	dir := rest[:j]
-	port = rest[j+1:]
-	return node, port, dir == "in", true
+	return "", "", false, false
 }

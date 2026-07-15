@@ -125,28 +125,24 @@ type rawInputMsg struct {
 }
 
 // rawHit is the classified raycast hit: which rendered entity is under the pointer and its
-// world point. Kind ∈ port|handhold|node|empty; Id is the entity id (node id, or
-// "nodeId:in|out:portName" for a port). Topology facts (e.g. connected?) are NOT carried —
-// Go's FSM decides those from its own held state.
+// world point. Kind ∈ port|handhold|node|edge|torus|empty. Topology facts (e.g. connected?)
+// are NOT carried — Go's FSM decides those from its own held state.
 type rawHit struct {
 	Kind string
-	Id   string
-	// PortRow is the numeric buffer PORT-ROW index for a new-system port hit (the port
-	// InstancedMesh instanceId == its buffer port row). -1 (or absent) on the old path, whose
-	// port identity rides the Id string ("nodeId:in|out:portName") instead. Go resolves this
-	// row → (node, port) via its own port-row table (portFromHit); no port name crosses the
-	// bridge.
+	// PortRow is the numeric buffer PORT-ROW index for a port hit (the port InstancedMesh
+	// instanceId == its buffer port row). -1 (or absent) when not a port hit. Go resolves
+	// this row → (node, port) via its own port-row table (portFromHit); no port name crosses
+	// the bridge.
 	PortRow int
-	// EdgeRow is the numeric buffer EDGE-ROW index for a new-system edge hit (the edge's
-	// pick-halo carries its buffer edge row). -1 (or absent) when not an edge hit. Go
-	// resolves this row → edge label via its own edge-row table (edgeFromHit); no edge
-	// label crosses the bridge.
+	// EdgeRow is the numeric buffer EDGE-ROW index for an edge hit (the edge's pick-halo
+	// carries its buffer edge row). -1 (or absent) when not an edge hit. Go resolves this
+	// row → edge label via its own edge-row table (edgeFromHit); no edge label crosses the
+	// bridge.
 	EdgeRow int
-	// NodeRow is the numeric buffer NODE-ROW index for a new-system node hit (the node
-	// InstancedMesh instanceId == its buffer node row). -1 (or absent) on the old path /
-	// unit tests, which carry the node id in the Id string instead. Go resolves this row →
-	// node id via its own node-row table (nodeFromHit); no node id crosses the bridge on the
-	// new-system path.
+	// NodeRow is the numeric buffer NODE-ROW index for a node hit (the node InstancedMesh
+	// instanceId == its buffer node row). -1 (or absent) when not a node hit. Go resolves
+	// this row → node id via its own node-row table (nodeFromHit); no node id crosses the
+	// bridge.
 	NodeRow int
 	// HandholdTerm is the term-id for a handhold hit (+θ=0, +φ=1, -θ=2, -φ=3; see
 	// NavGuides.tsx HANDHOLD_TERM_TAG); -1 (or absent) when not a handhold hit. Decoded into

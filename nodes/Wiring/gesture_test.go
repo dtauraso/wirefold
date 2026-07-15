@@ -104,11 +104,12 @@ func TestGestureWheelStrafesCamera(t *testing.T) {
 // hits was the real bug; this guards the Go contract the fix relies on).
 func TestGestureWheelPansOverNodeAndEdgeHit(t *testing.T) {
 	for _, h := range []rawHit{
-		{Kind: "node", Id: "N7"},
+		{Kind: "node", NodeRow: 0},
 		{Kind: "edge", EdgeRow: 0},
 		{Kind: "port", PortRow: 0},
 	} {
 		md := newGestureMD(canonicalViewpoint())
+		md.SetNodeRowResolver(stubNodeRows{"N7"})
 		before := md.vp.pivot
 		ev := rawEvent("wheel", 400, 300)
 		ev.DeltaX = 10
@@ -147,6 +148,10 @@ func TestGestureCtrlWheelZoomsToCursor(t *testing.T) {
 // wire — the same effect as an op=create edit.
 func TestGestureWireCreatesEdgeViaExistingCreatePath(t *testing.T) {
 	md := newGestureMD(canonicalViewpoint())
+	md.SetPortRowResolver(stubPortRows{
+		{Node: "A", Port: "out", IsInput: false},
+		{Node: "B", Port: "in", IsInput: true},
+	})
 	// A silenced (deleted) wire at dest slot B.in — as if the edge had been deleted.
 	pw := NewPacedWire(10, 1)
 	pw.Target, pw.TargetHandle = "B", "in"
@@ -154,7 +159,7 @@ func TestGestureWireCreatesEdgeViaExistingCreatePath(t *testing.T) {
 	slotReg := SlotRegistry{"B.in": pw}
 
 	down := rawEvent("pointerdown", 400, 300)
-	down.Hit = rawHit{Kind: "port", Id: "A:out:out", IsInput: false}
+	down.Hit = rawHit{Kind: "port", PortRow: 0, IsInput: false}
 	md.HandleRawInput(down, slotReg, nil)
 	if md.gest.wireNode != "A" || md.gest.wirePort != "out" || md.gest.wireInput {
 		t.Fatalf("after port down: wireNode=%q wirePort=%q wireInput=%v", md.gest.wireNode, md.gest.wirePort, md.gest.wireInput)
@@ -166,7 +171,7 @@ func TestGestureWireCreatesEdgeViaExistingCreatePath(t *testing.T) {
 	}
 	// Drop on B's IN port → create-edge (Restore) on B.in.
 	up := rawEvent("pointerup", 460, 300)
-	up.Hit = rawHit{Kind: "port", Id: "B:in:in", IsInput: true}
+	up.Hit = rawHit{Kind: "port", PortRow: 1, IsInput: true}
 	md.HandleRawInput(up, slotReg, nil)
 	if pw.deleted {
 		t.Fatalf("wire B.in still deleted; create-edge path did not Restore it")
@@ -174,6 +179,18 @@ func TestGestureWireCreatesEdgeViaExistingCreatePath(t *testing.T) {
 	if md.gest.phase != gestIdle {
 		t.Fatalf("after wire up phase=%v want idle", md.gest.phase)
 	}
+}
+
+// stubNodeRows is a fixed node-row table for the new-system node-hit resolution tests: it
+// maps a numeric buffer NODE-ROW index → node id, mirroring Buffer's
+// SnapshotState.LookupNodeRow without pulling in the Buffer package.
+type stubNodeRows []string
+
+func (t stubNodeRows) LookupNodeRow(row int) (nodeID string, ok bool) {
+	if row < 0 || row >= len(t) {
+		return "", false
+	}
+	return t[row], true
 }
 
 // stubPortRows is a fixed port-row table for the new-system port-hit resolution tests: it
@@ -215,13 +232,14 @@ func (t stubEdgeRows) LookupEdgeRow(row int) (label string, ok bool) {
 func TestGestureClickSelectsEdgeGoOwned(t *testing.T) {
 	md := newGestureMD(canonicalViewpoint())
 	md.SetEdgeRowResolver(stubEdgeRows{"e0", "e1"})
+	md.SetNodeRowResolver(stubNodeRows{"N7"})
 
 	// First select a node so we can prove edge-select clears it.
 	nd := rawEvent("pointerdown", 400, 300)
-	nd.Hit = rawHit{Kind: "node", Id: "N7"}
+	nd.Hit = rawHit{Kind: "node", NodeRow: 0}
 	md.HandleRawInput(nd, nil, nil)
 	nu := rawEvent("pointerup", 400, 300)
-	nu.Hit = rawHit{Kind: "node", Id: "N7"}
+	nu.Hit = rawHit{Kind: "node", NodeRow: 0}
 	md.HandleRawInput(nu, nil, nil)
 	if md.selected != "N7" {
 		t.Fatalf("pre: selected=%q want N7", md.selected)
@@ -243,10 +261,10 @@ func TestGestureClickSelectsEdgeGoOwned(t *testing.T) {
 
 	// Selecting a node clears the edge selection (exclusive both ways).
 	nd2 := rawEvent("pointerdown", 400, 300)
-	nd2.Hit = rawHit{Kind: "node", Id: "N7"}
+	nd2.Hit = rawHit{Kind: "node", NodeRow: 0}
 	md.HandleRawInput(nd2, nil, nil)
 	nu2 := rawEvent("pointerup", 400, 300)
-	nu2.Hit = rawHit{Kind: "node", Id: "N7"}
+	nu2.Hit = rawHit{Kind: "node", NodeRow: 0}
 	md.HandleRawInput(nu2, nil, nil)
 	if md.selectedEdge != "" {
 		t.Fatalf("selectedEdge=%q want empty after node select", md.selectedEdge)
@@ -304,13 +322,14 @@ func TestGestureWireFromPortRows(t *testing.T) {
 // empty space clears it. (No camera change — covered by TestGestureClickNoCameraChange.)
 func TestGestureClickSelectsNodeGoOwned(t *testing.T) {
 	md := newGestureMD(canonicalViewpoint())
+	md.SetNodeRowResolver(stubNodeRows{"N7"})
 
 	down := rawEvent("pointerdown", 400, 300)
-	down.Hit = rawHit{Kind: "node", Id: "N7"}
+	down.Hit = rawHit{Kind: "node", NodeRow: 0}
 	md.HandleRawInput(down, nil, nil)
 	md.HandleRawInput(func() rawInputMsg {
 		e := rawEvent("pointerup", 401, 300)
-		e.Hit = rawHit{Kind: "node", Id: "N7"}
+		e.Hit = rawHit{Kind: "node", NodeRow: 0}
 		return e
 	}(), nil, nil)
 	if md.selected != "N7" {
@@ -336,10 +355,11 @@ func TestGestureClickSelectsNodeGoOwned(t *testing.T) {
 func TestGestureHoverTracksNodeAndPort(t *testing.T) {
 	md := newGestureMD(canonicalViewpoint())
 	md.SetPortRowResolver(stubPortRows{{Node: "A", Port: "in", IsInput: true}})
+	md.SetNodeRowResolver(stubNodeRows{"N7"})
 
 	// Move over node N7's torus ring → hovered node.
 	mv := rawEvent("pointermove", 400, 300)
-	mv.Hit = rawHit{Kind: "torus", Id: "N7"}
+	mv.Hit = rawHit{Kind: "torus", NodeRow: 0}
 	md.HandleRawInput(mv, nil, nil)
 	if md.hoverNode != "N7" || md.hoverPort != "" {
 		t.Fatalf("torus hover: hoverNode=%q hoverPort=%q want N7,''", md.hoverNode, md.hoverPort)
@@ -347,7 +367,7 @@ func TestGestureHoverTracksNodeAndPort(t *testing.T) {
 
 	// Move over the node BODY (kind "node") → hover clears (body does not light the ring).
 	bodyMv := rawEvent("pointermove", 402, 300)
-	bodyMv.Hit = rawHit{Kind: "node", Id: "N7"}
+	bodyMv.Hit = rawHit{Kind: "node", NodeRow: 0}
 	md.HandleRawInput(bodyMv, nil, nil)
 	if md.hoverNode != "" || md.hoverPort != "" {
 		t.Fatalf("body hover: hoverNode=%q hoverPort=%q want '',''", md.hoverNode, md.hoverPort)
@@ -374,11 +394,12 @@ func TestGestureHoverTracksNodeAndPort(t *testing.T) {
 // still resolve to a node select on pointer-up. Empty-space two-finger tap preserves selection.
 func TestGestureSecondaryTapSelectsThroughDrift(t *testing.T) {
 	md := newGestureMD(canonicalViewpoint())
+	md.SetNodeRowResolver(stubNodeRows{"N7"})
 
 	// Two-finger tap ON a node, with drift well past gestureMoveSlopPx between down and up.
 	down := rawEvent("pointerdown", 400, 300)
 	down.Button = 2
-	down.Hit = rawHit{Kind: "node", Id: "N7"}
+	down.Hit = rawHit{Kind: "node", NodeRow: 0}
 	md.HandleRawInput(down, nil, nil)
 	if !md.gest.secondary || md.gest.phase != gestPending {
 		t.Fatalf("after secondary down: secondary=%v phase=%v", md.gest.secondary, md.gest.phase)
@@ -386,14 +407,14 @@ func TestGestureSecondaryTapSelectsThroughDrift(t *testing.T) {
 	// Finger drift past the slop must NOT convert to drag/rotate — it stays a tap-select.
 	drift := rawEvent("pointermove", 400+gestureMoveSlopPx+10, 300)
 	drift.Button = 2
-	drift.Hit = rawHit{Kind: "node", Id: "N7"}
+	drift.Hit = rawHit{Kind: "node", NodeRow: 0}
 	md.HandleRawInput(drift, nil, nil)
 	if md.gest.phase != gestPending {
 		t.Fatalf("secondary tap converted out of pending: phase=%v", md.gest.phase)
 	}
 	up := rawEvent("pointerup", 400+gestureMoveSlopPx+10, 300)
 	up.Button = 2
-	up.Hit = rawHit{Kind: "node", Id: "N7"}
+	up.Hit = rawHit{Kind: "node", NodeRow: 0}
 	md.HandleRawInput(up, nil, nil)
 	if md.selected != "N7" {
 		t.Fatalf("selected=%q want N7 after secondary tap-select through drift", md.selected)
@@ -419,7 +440,7 @@ func TestGestureSecondaryTapSelectsThroughDrift(t *testing.T) {
 func TestGestureHandholdOrbits(t *testing.T) {
 	md := newGestureMD(canonicalViewpoint())
 	down := rawEvent("pointerdown", 400, 300)
-	down.Hit = rawHit{Kind: "handhold", Id: "handhold-x"}
+	down.Hit = rawHit{Kind: "handhold"}
 	md.HandleRawInput(down, nil, nil)
 	if !md.gest.handholdDown || md.gest.phase != gestPending {
 		t.Fatalf("after handhold down: handholdDown=%v phase=%v", md.gest.handholdDown, md.gest.phase)
@@ -458,10 +479,11 @@ func TestGestureConnectedPortRingMove(t *testing.T) {
 	}
 	md := newMoveDispatch(geoms, edges, nil)
 	md.vp.viewpoint = canonicalViewpoint()
+	md.SetPortRowResolver(stubPortRows{{Node: "N1", Port: "out", IsInput: false}})
 
 	// Grab the CONNECTED out-port of N1.
 	down := rawEvent("pointerdown", 400, 300)
-	down.Hit = rawHit{Kind: "port", Id: "N1:out:out", IsInput: false}
+	down.Hit = rawHit{Kind: "port", PortRow: 0, IsInput: false}
 	md.HandleRawInput(down, nil, nil)
 	if md.gest.portMoveNode != "N1" {
 		t.Fatalf("connected-port down: portMoveNode=%q want N1 (phase=%v)", md.gest.portMoveNode, md.gest.phase)
@@ -505,12 +527,13 @@ func TestGestureClickNoCameraChange(t *testing.T) {
 func TestGestureSelectModeOffStillHighlights(t *testing.T) {
 	md := newGestureMD(canonicalViewpoint())
 	md.ov.selSpherePolesVisible = false
+	md.SetNodeRowResolver(stubNodeRows{"A"})
 
 	down := rawEvent("pointerdown", 400, 300)
-	down.Hit = rawHit{Kind: "node", Id: "A"}
+	down.Hit = rawHit{Kind: "node", NodeRow: 0}
 	md.HandleRawInput(down, nil, nil)
 	up := rawEvent("pointerup", 401, 300)
-	up.Hit = rawHit{Kind: "node", Id: "A"}
+	up.Hit = rawHit{Kind: "node", NodeRow: 0}
 	md.HandleRawInput(up, nil, nil)
 
 	if md.selected != "A" {
