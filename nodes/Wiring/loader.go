@@ -816,4 +816,3 @@ func (b *buildCtx) buildNodes() error {
 func (b *buildCtx) bindDispatch() {
 	b.md.Bind(b.outSink, SlotRegistry(b.destWire))
 }
-
