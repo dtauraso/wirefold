@@ -48,6 +48,13 @@ const (
 type LocalPolar struct {
 	To string // neighbor node id
 
+	// Role names this neighbor's part in the decentralized cascade rule
+	// (node_move.go): "source" is the ONE neighbor this node measures its
+	// reference length L against; "follower" is a neighbor this node
+	// repositions (via an Equalize message) to L. "" (absent) is neither —
+	// authored in the spec (meta.json localPolars[].role), never computed.
+	Role string
+
 	QuantITheta int
 	QuantIPhi   int
 	QuantIR     int

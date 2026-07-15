@@ -134,6 +134,7 @@ func WriteLocalPolars(root, id string, lps []LocalPolar) error {
 	return entityReadModifyWrite(path, func(obj map[string]json.RawMessage) {
 		type localPolarJSON struct {
 			To          string  `json:"to"`
+			Role        string  `json:"role,omitempty"`
 			QuantITheta int     `json:"quantITheta"`
 			QuantIPhi   int     `json:"quantIPhi"`
 			QuantIR     int     `json:"quantIR"`
@@ -145,7 +146,7 @@ func WriteLocalPolars(root, id string, lps []LocalPolar) error {
 		for _, lp := range lps {
 			t, p, r := lp.effectiveSteps()
 			out = append(out, localPolarJSON{
-				To: lp.To, QuantITheta: lp.QuantITheta, QuantIPhi: lp.QuantIPhi, QuantIR: lp.QuantIR,
+				To: lp.To, Role: lp.Role, QuantITheta: lp.QuantITheta, QuantIPhi: lp.QuantIPhi, QuantIR: lp.QuantIR,
 				StepTheta: t, StepPhi: p, StepR: r,
 			})
 		}
