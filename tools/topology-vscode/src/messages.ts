@@ -207,7 +207,6 @@ export type TraceEvent =
 export type HostToWebviewMsg =
   | { type: "load"; text: string; sceneText?: string }
   | { type: "run-status"; state: RunStatus["state"]; message?: string }
-  | { type: "save-error"; message: string }
   | { type: "trace-event"; event: TraceEvent }
   // Phase 3: binary snapshot from Go's fd3 side channel.
   // The ArrayBuffer is transferred zero-copy (postMessage transferable).
@@ -227,7 +226,7 @@ export const WEBVIEW_TO_HOST_TYPES: ReadonlySet<WebviewToHostMsg["type"]> = new 
 ]);
 
 const HOST_TO_WEBVIEW_TYPES: ReadonlySet<HostToWebviewMsg["type"]> = new Set([
-  "load", "run-status", "save-error", "trace-event", "buffer-snapshot",
+  "load", "run-status", "trace-event", "buffer-snapshot",
 ]);
 
 // The editor→Go payload validators (parseEdit / parseUpdate / parseRawInput) were removed
@@ -293,9 +292,6 @@ export function parseHostToWebview(raw: unknown): HostToWebviewMsg | undefined {
       if (typeof m.state !== "string" || !RUN_STATUS_STATES.has(m.state)) return undefined;
       if (m.message !== undefined && typeof m.message !== "string") return undefined;
       return m as unknown as HostToWebviewMsg;
-    case "save-error":
-      // message is the error text — required string.
-      return typeof m.message === "string" ? (m as unknown as HostToWebviewMsg) : undefined;
     case "trace-event": {
       // Minimal envelope the consumer relies on: event is a non-null object carrying a
       // numeric step and a string kind. Per-kind fields are validated downstream.

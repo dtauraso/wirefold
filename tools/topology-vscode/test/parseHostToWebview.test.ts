@@ -54,8 +54,8 @@ describe("parseHostToWebview", () => {
     expect(parseHostToWebview({ type: "run-status", state: "bogus" })).toBeUndefined();
   });
 
-  it("rejects save-error without a message string", () => {
-    expect(parseHostToWebview({ type: "save-error" })).toBeUndefined();
+  it("rejects the removed save-error type (nothing posts it; Go persists its own scene state)", () => {
+    expect(parseHostToWebview({ type: "save-error", message: "x" })).toBeUndefined();
   });
 
   it("rejects the removed flush type (Go persists its own scene state; nothing to flush)", () => {
