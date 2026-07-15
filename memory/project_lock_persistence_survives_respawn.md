@@ -5,8 +5,14 @@ metadata:
   type: project
 ---
 
-Polar node-node locks (`eqNodeNode` in `nodes/Wiring/locks.go`) are enforced ONLY
-in each mover's held geometry during a drag cascade originated from `RootMove`.
+SUPERSEDED: this describes an older `RootMove`/`eqNodeNode` cascade model; the code
+has since moved to the decentralized `moveMsgKindEqualize`/`moveMsgKindTrigger` model
+in `nodes/Wiring/node_move.go` (see [[project_lock_propagation_decentralized]]).
+`eqNodeNode`, `RootMove`, and `nodes/Wiring/locks.go` no longer exist — kept here as
+historical record of the persistence bug and its original fix, not as a current map.
+
+Polar node-node locks (formerly `eqNodeNode`) were enforced ONLY
+in each mover's held geometry during a drag cascade originated from the old `RootMove`.
 Nothing re-runs the cascade at load: `LoadPolarEqs` reinstalls the equations but
 re-emits only port-torus geometry. And clicking **run respawns Go**, which reloads
 every node's `scenePolar` fresh from disk (`buildFromSpec`).

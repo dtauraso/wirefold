@@ -60,7 +60,7 @@ removed sidecar message is rejected; do not reintroduce one.)
 
 - **Addressed edits** — a single geometry-CRUD `edit` message with **exactly three ops**
   (create / update / delete) (see `nodes/Wiring/stdin_reader.go` `applyEdit`, fenced by
-  `EDIT_OPS_START`/`EDIT_OPS_END`, and `src/messages.ts` `EditMsg`). create/delete add or
+  `EDIT_OPS_START`/`EDIT_OPS_END`, and `tools/topology-vscode/src/messages.ts` `EditMsg`). create/delete add or
   remove an edge; **`update` sets an ATTRIBUTE on a typed entity** (`kind` = node / edge /
   camera / overlays / scene) — there is no per-feature op. New *addressed* capability is a
   new entity kind or attribute, NOT a new op.
@@ -74,7 +74,7 @@ removed sidecar message is rejected; do not reintroduce one.)
 
 Keep all of it in parity across `messages.ts`, `stdin_reader.go`, and `handle-message.ts`
 (guards: `tools/check-edit-op-parity.sh`, `tools/check-message-kind-parity.sh`, and the
-`INPUT_LAYOUT_FINGERPRINT` in `input_codec.go` / `schema/input-layout.ts`). The
+`INPUT_LAYOUT_FINGERPRINT` in `input_codec.go` / `tools/topology-vscode/src/schema/input-layout.ts`). The
 TS → Go send is **fire-and-forget** — no `await`, no Promise chain, no request/response,
 no delivery signal (guard: `tools/check-no-await-on-bridge.sh`).
 
