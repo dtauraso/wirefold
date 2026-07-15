@@ -1,7 +1,0 @@
-{
-  "nodes": [
-    { "id": "a", "type": "Input", "x": 100, "y": 100 },
-    { "id": "b", "type": "HoldNewSendOld", "x": 300, "y": 100 }
-  ],
-  "edges": []
-}
