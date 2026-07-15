@@ -43,13 +43,11 @@ type PortSpec struct {
 	Required bool // true for PortIn ports; output ports are never required
 }
 
-// PortBindings holds resolved channels or PacedWires keyed by port name.
-// For PortOutMulti ports, use AppendMulti / OutSlice.
-// Paced variants (SetSinglePaced / AppendMultiPacedWithHandle) take precedence over
-// chan variants when both are set; in practice the loader uses only one mode.
+// PortBindings holds resolved PacedWires keyed by port name.
+// For PortOutMulti ports, use AppendMultiPacedWithHandle.
+// A port name with no paced binding resolves to a dead-end chan wrapper
+// (deadEndIn/deadEndOut/deadEndOutSlice) that neither sends nor receives.
 type PortBindings struct {
-	single map[string]chan int
-	multi  map[string][]chan int
 	// singlePaced holds the resolved paced binding for each single In/Out port.
 	// multiPaced holds the per-element bindings for each OutMulti fan-out port.
 	// Consolidating the formerly-parallel per-edge maps into one struct keeps
@@ -95,8 +93,6 @@ type multiBinding struct {
 
 func newPortBindings() PortBindings {
 	return PortBindings{
-		single:      map[string]chan int{},
-		multi:       map[string][]chan int{},
 		singlePaced: map[string]singleBinding{},
 		multiPaced:  map[string][]multiBinding{},
 	}
@@ -124,29 +120,23 @@ func (pb *PortBindings) AppendMultiPacedWithHandle(name, handle string, pw *Pace
 	})
 }
 
-func (pb *PortBindings) In(name string) <-chan int {
-	ch := pb.single[name]
-	if ch == nil {
-		ch = make(chan int, 1) // chan-name-ok: local placeholder accessor; wire identity is the port `name` (map key)
-	}
-	return ch
+// deadEndIn returns a fresh unbuffered-in-effect receive-only chan for a port
+// name with no paced binding. It is never fed a value; it exists only so an
+// unwired In field has a non-nil channel to hold.
+func (pb *PortBindings) deadEndIn(name string) <-chan int {
+	return make(chan int, 1) // chan-name-ok: dead-end placeholder; wire identity is the port `name` (map key)
 }
 
-func (pb *PortBindings) Out(name string) chan<- int {
-	ch := pb.single[name]
-	if ch == nil {
-		ch = make(chan int, 1) // chan-name-ok: local placeholder accessor; wire identity is the port `name` (map key)
-	}
-	return ch
+// deadEndOut is deadEndIn's send-only counterpart for an unwired Out field.
+func (pb *PortBindings) deadEndOut(name string) chan<- int {
+	return make(chan int, 1) // chan-name-ok: dead-end placeholder; wire identity is the port `name` (map key)
 }
 
-func (pb *PortBindings) OutSlice(name string) []chan<- int {
-	chs := pb.multi[name]
-	result := make([]chan<- int, len(chs))
-	for i, c := range chs {
-		result[i] = c
-	}
-	return result
+// deadEndOutSlice is deadEndOut's counterpart for an unwired OutMulti field:
+// there is no fan-out recorded for this port name, so it resolves to an empty
+// slice of dead-end sends.
+func (pb *PortBindings) deadEndOutSlice(name string) []chan<- int {
+	return nil
 }
 
 var (
@@ -368,7 +358,7 @@ func wireInPort(f reflect.Value, portName string, ctx context.Context, name stri
 	if b := pb.singlePaced[portName]; b.pw != nil {
 		f.Set(reflect.ValueOf(NewInPaced(b.pw, ctx, name, portName, tr)))
 	} else {
-		ch := pb.In(portName)
+		ch := pb.deadEndIn(portName)
 		f.Set(reflect.ValueOf(&In{ch: ch, node: name, port: portName, trace: tr}))
 	}
 }
@@ -387,7 +377,7 @@ func wireOutPort(f reflect.Value, portName string, ctx context.Context, name str
 		}
 		f.Set(reflect.ValueOf(o))
 	} else {
-		ch := pb.Out(portName)
+		ch := pb.deadEndOut(portName)
 		f.Set(reflect.ValueOf(&Out{ch: ch, node: name, port: portName, trace: tr}))
 	}
 }
@@ -409,7 +399,7 @@ func wireOutMultiPort(f reflect.Value, portName string, ctx context.Context, nam
 		}
 		f.Set(reflect.ValueOf(outs))
 	} else {
-		chs := pb.OutSlice(portName)
+		chs := pb.deadEndOutSlice(portName)
 		outs := make(OutMulti, len(chs))
 		for i, c := range chs {
 			outs[i] = &Out{ch: c, node: name, port: portName, trace: tr}
