@@ -59,6 +59,51 @@ func TestSceneSphereDefaultsFromContentFit(t *testing.T) {
 	}
 }
 
+// TestSceneSphereContentFitSurvivesReloadAfterMove pins the invariant the content-fit
+// persist exists for: the scene center must NOT be re-derived from moved nodes.
+//
+// Every node position is a scene polar measured about this center, so a center that shifts
+// between runs silently reinterprets the whole diagram. Load 1 content-fits S1 and the user
+// drags; load 2 must still see S1. If the fallback is not persisted, load 2 content-fits
+// over the NEW centers, gets S2 != S1, and every position drifts.
+//
+// A plain "does it write the file" assertion would NOT catch that — it passes while the
+// second load still recomputes. Drive two real loads across a move instead.
+func TestSceneSphereContentFitSurvivesReloadAfterMove(t *testing.T) {
+	dir := t.TempDir()
+
+	newMD := func(bx float64) *MoveDispatch {
+		md := &MoveDispatch{}
+		md.nodeMovers = map[string]*nodeMover{
+			"a": {id: "a", geom: nodeGeom{HasPos: true, ScenePolar: cart2polar(vec3{X: 0, Y: 0, Z: 0})}},
+			"b": {id: "b", geom: nodeGeom{HasPos: true, ScenePolar: cart2polar(vec3{X: bx, Y: 0, Z: 0})}},
+		}
+		for _, nm := range md.nodeMovers {
+			nm.snap.Store(&centerSnap{c: nodeWorldPos(nm.geom)})
+		}
+		return md
+	}
+
+	// Load 1: no scene.json → content-fit S1, which must be persisted.
+	md1 := newMD(100)
+	md1.LoadSceneSphere(dir)
+	s1 := md1.sceneSphere
+	if s1.Radius <= 0 {
+		t.Fatalf("load 1: content-fit sphere has non-positive radius: %+v", s1)
+	}
+
+	// The user drags node b far away. Its scene polar was measured about S1.
+	// Load 2: a NEW process over the MOVED tree. It must read S1 back, not re-fit.
+	md2 := newMD(900)
+	md2.LoadSceneSphere(dir)
+	s2 := md2.sceneSphere
+
+	if s2.Center != s1.Center || s2.Radius != s1.Radius {
+		t.Fatalf("scene sphere drifted across reload after a move:\n  load 1: %+v\n  load 2: %+v\n"+
+			"every node's scenePolar is measured about this center, so the diagram would shift.", s1, s2)
+	}
+}
+
 func TestSceneSpherePersisterFlushNow(t *testing.T) {
 	dir := t.TempDir()
 	p := &sceneSpherePersister{path: sceneCameraPath(dir), debounce: time.Hour}

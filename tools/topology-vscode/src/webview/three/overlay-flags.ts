@@ -24,9 +24,9 @@ import {
   readOverlayOverlaysVis,
 } from "../../schema/buffer-layout";
 
-// Keyed by OverlayFlag. Polarity is MIXED, matching the ViewerState key names in
-// state/viewer/types.ts so the toggle-cfg active/label/title/payload logic reads the same
-// at every use site:
+// Keyed by OverlayFlag. Polarity is MIXED — a historical wart worth stating plainly, since
+// the ViewerState key names it mirrored are gone (that state island was deleted once Go
+// owned scene persistence):
 //   • most flags are visible-sense (true = shown) — <x>Visible
 //   • labelsGlobal / badgesGlobal are HIDDEN-sense (true = hidden) —
 //     labelsGlobalHidden / badgesHidden. The buffer stores visible-sense, so we

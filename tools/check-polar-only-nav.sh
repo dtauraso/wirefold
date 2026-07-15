@@ -16,11 +16,19 @@
 set -euo pipefail
 
 # Only check the nav handler file(s) — NOT polar.ts (it is the quarantine).
-# The hook lives in interaction-controls.ts; the handler bodies live in
-# interaction-handlers.ts. ALL interaction-*.ts files must stay polar-only —
-# glob the family so a future split (e.g. interaction-gestures.ts) is covered
-# automatically instead of silently escaping the guard.
-NAV_DIR="tools/topology-vscode/src/webview/three"
+# ALL interaction-*.ts files must stay polar-only — glob the family so a future split
+# (e.g. interaction-gestures.ts) is covered automatically instead of silently escaping
+# the guard. Today that family is interaction-controls.ts alone; interaction-handlers.ts
+# was erased with the old render path (bf9eab27) and its logic now lives in Go's gesture FSM.
+#
+# Resolve relative to the repo root (this script lives in tools/) so a standalone invocation
+# from any cwd scans the real tree instead of silently finding nothing and reporting a false
+# clean — the same reasoning check-no-camera-roundtrip.sh documents and this file claims to
+# mirror. It previously used a bare relative path and was saved only by the count check
+# below plus stop-checks happening to cd first.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+NAV_DIR="$REPO_ROOT/tools/topology-vscode/src/webview/three"
 # Nullglob so a no-match expands to empty (caught by the count check below)
 # rather than leaving the literal pattern in the array.
 shopt -s nullglob

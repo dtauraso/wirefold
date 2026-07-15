@@ -46,10 +46,24 @@ for f in "$STDIN_READER" "$MESSAGES_TS" "$HANDLE_MSG" "$OVERLAY_FLAGS_TS"; do
   fi
 done
 
-# Extract the lines of FILE between sentinel comments START and END (exclusive of
-# neither matters — the literals live strictly inside).
-between() { # file start end
-  awk -v s="$1" -v e="$2" 'index($0,s){p=1;next} index($0,e){p=0} p' "$3"
+# Extract the lines of FILE strictly between the sentinel comment lines START and END.
+#
+# Markers are matched ANCHORED: a comment line containing the marker and NOTHING else.
+# The previous `index($0,s)` was an unanchored substring match, and that is a trap — the
+# moment any prose in the scanned file names the sentinel (e.g. a header saying "the op
+# switch is fenced by EDIT_OPS_START/END", which is exactly the style stdin_reader.go and
+# CLAUDE.md already use), the fence opens on that prose line and the extracted set becomes
+# silently WRONG. It was armed but unexploded here.
+#
+# assert_nonempty does NOT protect against this: an unanchored match yields a non-empty,
+# wrong set rather than an empty one. Vacuous-pass refusal is orthogonal to fence
+# correctness. Same fix as check-message-kind-parity.sh, which cites this file as its model.
+between() { # start end file
+  awk -v s="$1" -v e="$2" '
+    $0 ~ "^[ \t]*(//|#)[ \t]*" s "[ \t]*$" { p=1; next }
+    $0 ~ "^[ \t]*(//|#)[ \t]*" e "[ \t]*$" { p=0 }
+    p
+  ' "$3"
 }
 
 # Double-quoted literal values from a stream.

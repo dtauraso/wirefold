@@ -35,15 +35,12 @@
     "watch": "npm run gen:node-defs && node esbuild.mjs --watch",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test",
-    "test:tier4": "PLAYWRIGHT_TIER4=1 playwright test --project=tier4-latency",
     "lint": "eslint src",
     "knip": "knip",
     "package": "vsce package"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
-    "@playwright/test": "^1.59.1",
     "@types/node": "^20.0.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",

@@ -1,6 +1,0 @@
-{
-  "nodes": [
-    { "id": "p0", "type": "Partition", "x": 200, "y": 200 }
-  ],
-  "edges": []
-}

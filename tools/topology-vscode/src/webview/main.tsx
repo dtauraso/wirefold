@@ -8,32 +8,20 @@ import { createRoot } from "react-dom/client";
 import { useEffect, useState } from "react";
 import "./webview.css";
 import { ThreeView } from "./three/ThreeView";
-import { flushViewSave } from "./save";
 import { parseHostToWebview } from "../messages";
 import { setRunStatusImperative, registerRunStatusSetter, RunStatusCtx } from "./state/run-status";
 import type { RunStatusUI } from "./state/run-status";
 import { ErrorBoundary } from "./log/ErrorBoundary";
 import { CrashListeners } from "./log/CrashListeners";
 import { RunButton } from "./three/RunButton";
-import { SaveLifecycle } from "./SaveLifecycle";
 import { setLatestSnapshot } from "./snapshot-buffer";
-
-// Test-only hook for the Playwright e2e harness. The harness stub of
-// acquireVsCodeApi populates window.__wirefold_sent with every postMessage
-// call from the webview, so a test can assert both the live spec and that a
-// save was posted.
-(window as unknown as { __wirefold_test: unknown }).__wirefold_test = {
-  getSent: () =>
-    (window as unknown as { __wirefold_sent?: unknown[] }).__wirefold_sent ?? [],
-};
 
 function Root() {
   const [runStatus, setRunStatus] = useState<RunStatusUI>({ state: "idle" });
   useEffect(() => { registerRunStatusSetter(setRunStatus); }, []);
   return (
     <RunStatusCtx.Provider value={runStatus}>
-      {/* SaveLifecycle and RunButton are mounted once here for all views. */}
-      <SaveLifecycle />
+      {/* RunButton is mounted once here for all views. */}
       <RunButton />
       <ThreeView />
     </RunStatusCtx.Provider>
@@ -76,10 +64,6 @@ window.addEventListener("message", (e) => {
       : { state: (RUN_STATES as readonly string[]).includes(msg.state)
             ? msg.state
             : "idle" });
-  } else if (msg.type === "flush") {
-    // Host requests immediate flush of any pending debounced saves (panel
-    // becoming hidden / about to dispose).
-    flushViewSave();
   } else if (msg.type === "load") {
     // Fully Go/buffer-driven: NO spec store, NO pump. Everything the render needs arrives via
     // buffer-snapshot ALONE — node labels ride the buffer node block (LabelOff/LabelLen),
