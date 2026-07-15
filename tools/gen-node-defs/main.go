@@ -1526,10 +1526,10 @@ type overlayOverride struct {
 }
 
 var overlayOverrides = map[string]overlayOverride{
-	"tori":        {field: "sceneToriVisible", method: "SceneTori"},
-	"scenePoles":  {breadcrumb: "scene"},
-	"nodePoles":   {breadcrumb: "nodes"},
-	"overlays":    {method: "OverlaysVis"},
+	"tori":       {field: "sceneToriVisible", method: "SceneTori"},
+	"scenePoles": {breadcrumb: "scene"},
+	"nodePoles":  {breadcrumb: "nodes"},
+	"overlays":   {method: "OverlaysVis"},
 }
 
 // parseOverlayFlags reads the OVERLAY_FLAG_NAMES const in messages.ts (bounded by the
