@@ -489,6 +489,48 @@ func TestSelectMode(t *testing.T) {
 	}
 }
 
+// TestClockBlockHalted verifies that KindHalted events (Trace.Halted, emitted from
+// RealClock's Halt()/Resume() transition guards) land in the Clock block's Halted column:
+// true -> 1, false -> 0. Closes the trace-event -> buffer-column gap for the clock's
+// running-vs-paused bit (see clockSnapState / writeClockBlock).
+func TestClockBlockHalted(t *testing.T) {
+	s := NewSnapshotState(nil)
+	s.Update(T.Event{Kind: T.KindNodeGeometry, Node: "n0", Radius: 1})
+
+	clockHalted := func() byte {
+		snap := s.BuildSnapshot()
+		beadCount := int(readU32(snap, 4))
+		nodeCount := int(readU32(snap, 8))
+		edgeCount := int(readU32(snap, 12))
+		portCount := int(readU32(snap, 16))
+		clockOff := BufHeaderSize +
+			beadCount*BufBeadStride +
+			nodeCount*BufNodeStride +
+			nodeCount*BufInteriorSlotsPerNode*BufInteriorStride +
+			edgeCount*BufEdgeStride +
+			portCount*BufPortStride +
+			BufCameraStride +
+			BufOverlayStride +
+			BufSceneStride
+		return snap[clockOff]
+	}
+
+	// Zero-value before any KindHalted event: running (0), per clockSnapState's doc comment.
+	if got := clockHalted(); got != 0 {
+		t.Errorf("before any KindHalted: got %d, want 0 (running)", got)
+	}
+
+	s.Update(T.Event{Kind: T.KindHalted, Visible: true})
+	if got := clockHalted(); got != 1 {
+		t.Errorf("after KindHalted(true): got %d, want 1 (halted)", got)
+	}
+
+	s.Update(T.Event{Kind: T.KindHalted, Visible: false})
+	if got := clockHalted(); got != 0 {
+		t.Errorf("after KindHalted(false): got %d, want 0 (running)", got)
+	}
+}
+
 // TestHoverColumn verifies that KindHover marks the Hovered column on the hovered node OR
 // port (exclusive, cleared on others), and that an empty hover clears all hover flags.
 func TestHoverColumn(t *testing.T) {

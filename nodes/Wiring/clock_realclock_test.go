@@ -54,3 +54,44 @@ func TestRealClockHaltFreezesResumeContinues(t *testing.T) {
 		t.Fatalf("Resume appears to have caught up on paused wall time: frozen=%d afterResume=%d", frozen, afterResume)
 	}
 }
+
+// TestRealClockHaltedHookExactlyOncePerTransition pins the haltedHook contract documented on
+// RealClock.haltedHook: Halt() fires the hook with true, Resume() fires with false, and a
+// REPEAT call on an already-halted/already-running clock does NOT re-fire — the emit lives
+// inside the `if !c.halted` / `if c.halted` guards specifically to get this exactly-once
+// property (this is the sole trace-emit point for KindHalted; see Trace.Halted).
+func TestRealClockHaltedHookExactlyOncePerTransition(t *testing.T) {
+	c := NewRealClock()
+	var calls []bool
+	c.SetHaltedHook(func(halted bool) {
+		calls = append(calls, halted)
+	})
+
+	c.Halt()
+	c.Halt() // repeat: already halted, must not re-fire
+	c.Halt() // repeat again
+	if got := calls; len(got) != 1 || got[0] != true {
+		t.Fatalf("after 3x Halt(): hook calls = %v, want [true]", got)
+	}
+
+	c.Resume()
+	c.Resume() // repeat: already running, must not re-fire
+	if got := calls; len(got) != 2 || got[0] != true || got[1] != false {
+		t.Fatalf("after Resume() x2: hook calls = %v, want [true false]", got)
+	}
+
+	c.Halt()
+	if got := calls; len(got) != 3 || got[2] != true {
+		t.Fatalf("after second real Halt(): hook calls = %v, want [true false true]", got)
+	}
+}
+
+// TestRealClockNilHookNoPanic verifies that a RealClock with no hook installed (the default —
+// headless tests construct clocks without wiring a hook/Trace) does not panic on Halt/Resume.
+func TestRealClockNilHookNoPanic(t *testing.T) {
+	c := NewRealClock()
+	c.Halt()
+	c.Halt()
+	c.Resume()
+	c.Resume()
+}
