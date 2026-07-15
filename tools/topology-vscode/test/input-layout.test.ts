@@ -8,10 +8,10 @@ import {
   IN_KIND_RESEND,
   IN_KIND_SAVE,
   IN_KIND_FADE_TOGGLE,
+  IN_KIND_RAW_INPUT,
   IN_KIND_EDIT_CREATE,
   IN_KIND_EDIT_DELETE,
   IN_KIND_EDIT_UPDATE,
-  IN_UPDATE_KINDS,
   INPUT_LAYOUT_FINGERPRINT,
   encodePlay,
   encodePause,
@@ -55,6 +55,14 @@ describe("control records — exact bytes", () => {
     expect(new Uint8Array(encodeFadeToggle())).toEqual(new Uint8Array([IN_KIND_FADE_TOGGLE]));
   });
 
+  it("play is pinned to the literal byte 0x01 (Go's IN_KIND_RESUME)", () => {
+    // This does not re-derive IN_KIND_RESUME — it pins the actual wire byte Go's
+    // stdin_reader.go decoder expects for "resume playback". If IN_KIND_RESUME ever
+    // changes value, this literal must be independently updated to match Go, or this
+    // assertion (not just the constant-derived one above) will catch the drift.
+    expect(new Uint8Array(encodePlay())).toEqual(new Uint8Array([0x01]));
+  });
+
   it("decode control", () => {
     expect(decodeInputRecord(encodePlay())).toEqual({ kind: "play" });
     expect(decodeInputRecord(encodePause())).toEqual({ kind: "pause" });
@@ -89,13 +97,17 @@ describe("overlays edit-update — fully numeric (no JSON)", () => {
   it("toggle: [22][entityKind=overlays][attr=toggle=0][flagId] + round-trip", () => {
     const rec = encodeOverlaysToggle("tori");
     const b = new Uint8Array(rec);
-    expect(b[0]).toBe(IN_KIND_EDIT_UPDATE);
-    expect(b[1]).toBe(IN_UPDATE_KINDS.indexOf("overlays"));
+    // Literal bytes pinned against the current wire contract, not re-derived from the
+    // same enumIndex() call the encoder uses — a drift in IN_KIND_EDIT_UPDATE, in
+    // IN_UPDATE_KINDS ordering, or in OVERLAY_FLAG_ORDER ordering must change one of
+    // these literals too, or the assertion fails.
+    expect(b[0]).toBe(22); // IN_KIND_EDIT_UPDATE
+    expect(b[1]).toBe(0); // "overlays" is IN_UPDATE_KINDS[0]
     expect(b[2]).toBe(0); // attr=toggle
-    expect(b[3]).toBe(OVERLAY_FLAG_ORDER.indexOf("tori"));
+    expect(b[3]).toBe(0); // "tori" is OVERLAY_FLAG_ORDER[0]
     expect(decodeInputRecord(rec)).toEqual({ kind: "edit-update", entity: "overlays", attr: "toggle", flag: "tori" });
-    // A non-zero flag maps by index.
-    expect(new Uint8Array(encodeOverlaysToggle("overlays"))[3]).toBe(OVERLAY_FLAG_ORDER.indexOf("overlays"));
+    // A non-zero flag maps by index — "overlays" is the last entry in OVERLAY_FLAG_ORDER (index 8).
+    expect(new Uint8Array(encodeOverlaysToggle("overlays"))[3]).toBe(8);
   });
 
 });
@@ -103,6 +115,16 @@ describe("overlays edit-update — fully numeric (no JSON)", () => {
 describe("fingerprint self-consistency", () => {
   it("overlayFlags token equals OVERLAY_FLAG_ORDER", () => {
     expect(INPUT_LAYOUT_FINGERPRINT).toContain(`overlayFlags=${OVERLAY_FLAG_ORDER.join(",")}`);
+  });
+
+  it("kinds= token matches the actual IN_KIND_* constants (not a string literal copy)", () => {
+    // Built from the live constants, not typed in by hand — if any IN_KIND_* value drifts
+    // from the fingerprint's hardcoded numbers, this fails instead of silently passing.
+    const expected =
+      `kinds=resume:${IN_KIND_RESUME},pause:${IN_KIND_PAUSE},resend:${IN_KIND_RESEND},` +
+      `save:${IN_KIND_SAVE},fadeToggle:${IN_KIND_FADE_TOGGLE},raw-input:${IN_KIND_RAW_INPUT},` +
+      `edit-create:${IN_KIND_EDIT_CREATE},edit-delete:${IN_KIND_EDIT_DELETE},edit-update:${IN_KIND_EDIT_UPDATE}`;
+    expect(INPUT_LAYOUT_FINGERPRINT).toContain(expected);
   });
 });
 
