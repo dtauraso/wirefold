@@ -63,7 +63,7 @@ func TestEventBlockPopulate(t *testing.T) {
 		nodeCount*BufInteriorSlotsPerNode*BufInteriorStride +
 		edgeCount*BufEdgeStride +
 		portCount*BufPortStride +
-		BufCameraStride + BufOverlayStride + BufSceneStride + labelBytesCount
+		BufCameraStride + BufOverlayStride + BufSceneStride + BufClockStride + labelBytesCount
 
 	// Find the send row (kind == index of "send" in TraceEventKinds).
 	sendKind := -1
@@ -202,6 +202,7 @@ func TestSnapshotRoundTrip(t *testing.T) {
 		BufCameraStride +
 		BufOverlayStride +
 		BufSceneStride +
+		BufClockStride +
 		int(eventCount)*BufEventStride +
 		int(portNameBytesCount) +
 		int(edgeLabelBytesCount)
@@ -603,7 +604,7 @@ func TestSnapshotFraming(t *testing.T) {
 		int(nodeCount)*BufNodeStride +
 		int(nodeCount)*BufInteriorSlotsPerNode*BufInteriorStride +
 		int(edgeCount)*BufEdgeStride +
-		BufCameraStride + BufOverlayStride + BufSceneStride +
+		BufCameraStride + BufOverlayStride + BufSceneStride + BufClockStride +
 		int(readU32(payload, 24))*BufEventStride + // event block
 		int(readU32(payload, 28)) + // port-name bytes
 		int(readU32(payload, 32)) // edge-label bytes
@@ -926,7 +927,8 @@ func TestSnapshotNodeLabels(t *testing.T) {
 		portCount*BufPortStride +
 		BufCameraStride +
 		BufOverlayStride +
-		BufSceneStride
+		BufSceneStride +
+		BufClockStride
 	// The label section is followed by the EVENT block + port-name + edge-label sections, so
 	// its end is the start of the event block, not the snapshot end. Verify the full length.
 	eventCount := int(readU32(snap, 24))

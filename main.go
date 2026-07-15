@@ -60,6 +60,14 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 	// not a per-tick firehose) and fire-and-forget.
 	tr.SetDebugSink(os.Stdout)
 
+	// Wire the clock's halted-state trace hook so Halt()/Resume() (the only emit point —
+	// see clock.go/Trace.Halted) streams the running-vs-paused truth into the buffer's Clock
+	// block. RealClock is the only production Clock implementation; a test/fake Clock (none
+	// exist today) simply has no hook and streams nothing, which is safe.
+	if rc, ok := clk.(*W.RealClock); ok {
+		rc.SetHaltedHook(tr.Halted)
+	}
+
 	// starts halted; geometry still emits in LoadTopology; first `play` stdin signal resumes.
 	clk.Halt()
 

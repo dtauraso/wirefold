@@ -24,7 +24,7 @@
 package Buffer
 
 // BufLayoutVersion is the schema version. Bump when any column changes.
-const BufLayoutVersion = 25
+const BufLayoutVersion = 26
 
 // BufInteriorSlotsPerNode is the fixed number of interior grid slots reserved per
 // node in the Interior block (a 2x2 held/interior-bead grid: slot = row*2 + col).
@@ -288,6 +288,14 @@ type bufLayoutScene struct {
 	Radius float32 `buf:"f32"` // scene-sphere radius
 }
 
+// bufLayoutClock defines the clock-state block (always 1 row).
+// Matched from KindHalted trace events. The clock (nodes/Wiring/clock.go RealClock) is the
+// single source of truth for running-vs-paused; this block streams that truth so the webview
+// never predicts play/pause locally (see runCommand.ts play()/pause()).
+type bufLayoutClock struct {
+	Halted uint8 `buf:"u8"` // 1 = clock is halted (paused)
+}
+
 // bufLayoutEvent defines one row of the per-tick EVENT column block.
 // The block is self-sizing via an eventCount field in the snapshot header; it carries
 // the causal trace events that occurred since the previous snapshot (recv/fire/send/done/
@@ -328,5 +336,6 @@ var _ = [...]any{
 	bufLayoutCamera{},
 	bufLayoutOverlay{},
 	bufLayoutScene{},
+	bufLayoutClock{},
 	bufLayoutEvent{},
 }

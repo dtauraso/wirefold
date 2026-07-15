@@ -78,6 +78,22 @@ type RealClock struct {
 	haltedAt time.Time
 	// haltedTotal is the accumulated paused duration across all prior halts.
 	haltedTotal time.Duration
+	// haltedHook, when non-nil, is called with the new halted state from inside the
+	// Halt()/Resume() transition guards below — exactly once per real state change. This is
+	// the sole trace-emit point for KindHalted (see Trace.Halted): the 4 Halt/Resume call
+	// sites (main.go, stdin_reader.go) never emit directly, so the truth can't drift across
+	// them. Optional/nil-safe: headless tests construct a RealClock without wiring a hook.
+	haltedHook func(halted bool)
+}
+
+// SetHaltedHook installs the clock's halted-state trace hook: after this call, every REAL
+// transition made by Halt()/Resume() calls hook(halted) exactly once. Call once at startup
+// (after both the clock and Trace exist) before the first Halt()/Resume(). Pass nil to leave
+// it unset (the default) — Halt/Resume then emit nothing, which is safe for headless tests.
+func (c *RealClock) SetHaltedHook(hook func(halted bool)) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.haltedHook = hook
 }
 
 // NewRealClock returns a started RealClock anchored at the current monotonic instant.
@@ -113,21 +129,35 @@ func (c *RealClock) Tick() int64 {
 // Halt pauses the clock.
 func (c *RealClock) Halt() {
 	c.mu.Lock()
+	changed := false
 	if !c.halted {
 		c.halted = true
 		c.haltedAt = time.Now()
+		changed = true
 	}
+	hook := c.haltedHook
 	c.mu.Unlock()
+	// Emit outside the lock — the hook may block on a channel send (Trace.emit), and Tick()
+	// must not wait on that.
+	if changed && hook != nil {
+		hook(true)
+	}
 }
 
 // Resume un-pauses the clock.
 func (c *RealClock) Resume() {
 	c.mu.Lock()
+	changed := false
 	if c.halted {
 		c.halted = false
 		c.haltedTotal += time.Since(c.haltedAt)
+		changed = true
 	}
+	hook := c.haltedHook
 	c.mu.Unlock()
+	if changed && hook != nil {
+		hook(false)
+	}
 }
 
 // SleepCycle blocks for one tickPeriod, or until ctx is done.
