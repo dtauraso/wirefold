@@ -73,7 +73,7 @@ export function decodeNavNodes(decoded: DecodedSnapshot): NavNode[] {
  * Content sphere (arcball) from precomputed node centers: bounding-box center +
  * farthest-node radius (+10% margin, radius ≥ 1). Mirrors
  * geometry-helpers.contentSphere line-for-line but takes centers directly, so the
- * buffer path and the RFNode path produce identical spheres from identical centers.
+ * spheres are derived from the buffer's centers alone.
  * Returns (0,0,0)/100 when there are no finite centers.
  */
 export function contentSphereFromCenters(centers: THREE.Vector3[]): { center: THREE.Vector3; radius: number } {

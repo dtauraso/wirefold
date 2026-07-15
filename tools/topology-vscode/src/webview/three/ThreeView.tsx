@@ -113,7 +113,7 @@ export function ThreeView() {
   }, [onWheelNative]);
 
   // Occlusion counts: recomputed only when the camera settles (not per-frame). Computed from
-  // the buffer's node block (Go-owned centers/radii), never an RFNode array.
+  // the buffer's node block (Go-owned centers/radii).
   const [bufferOcclusionCounts, setBufferOcclusionCounts] = useState<Map<number, number>>(new Map());
 
   const onCameraSettle = useCallback(() => {

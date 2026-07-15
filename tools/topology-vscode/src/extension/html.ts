@@ -23,10 +23,16 @@ export function buildWebviewHtml(
     .asWebviewUri(vscode.Uri.file(stylePath))
     .with({ query: `v=${mtimeMs(stylePath)}` });
   const nonce = randomNonce();
-  // React Flow positions every node via inline `style="transform: ..."`
-  // attributes, which `style-src` governs when `style-src-attr` is unset.
-  // The bundled stylesheet is still served from cspSource; 'unsafe-inline'
-  // is the minimal additional grant needed for RF to lay nodes out.
+  // NOTE — the 'unsafe-inline' style-src grant below is UNJUSTIFIED as of the React Flow
+  // erase. Its original rationale was that RF positioned every node via an inline
+  // `style="transform: ..."` ATTRIBUTE, which `style-src` governs when `style-src-attr` is
+  // unset. RF is gone; the renderer is a three.js canvas. React's `style={{...}}` prop
+  // (16 sites) assigns CSSOM properties rather than emitting a style attribute, and CSP
+  // does not govern CSSOM writes — so this grant is likely removable.
+  //
+  // NOT removed here because that needs a live editor check, not a grep: a dropped grant
+  // that breaks rendering fails at runtime, and stop-checks cannot see it. Try removing
+  // 'unsafe-inline', reload the webview, confirm the scene still draws.
   const csp = [
     `default-src 'none'`,
     `img-src ${webview.cspSource} data:`,

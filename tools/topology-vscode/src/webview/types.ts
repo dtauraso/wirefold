@@ -1,40 +1,11 @@
-// Typed data payloads for nodes and edges.
-// These mirror Spec.Node / Spec.Edge fields plus viewer-only and adapter fields.
-// Consumers still read from Zustand; this file is schema-only.
+// Typed data payloads for nodes and edges. These mirror Spec.Node / Spec.Edge fields.
+// Schema-only: no runtime state lives here.
 
 import type { Port, SendRule, StateValue } from "../schema/types";
 import type { NodeSpec } from "../schema/types-graph";
 import type { WireProps } from "../schema/wire-defs";
 
-// ---------------------------------------------------------------------------
-// Own Node / Edge type shapes (Phase 3 rf-retirement).
-// These replace the `import type { Node as RFNode, Edge as RFEdge } from "reactflow"`
-// aliases throughout the codebase. Fields are the subset actually used.
-// ---------------------------------------------------------------------------
-
-export interface RFNode<T = unknown> {
-  id: string;
-  type?: string;
-  position: { x: number; y: number };
-  data: T;
-  selected?: boolean;
-  zIndex?: number;
-  draggable?: boolean;
-  selectable?: boolean;
-}
-
-export interface RFEdge<T = unknown> {
-  id: string;
-  source: string;
-  target: string;
-  sourceHandle?: string | null;
-  targetHandle?: string | null;
-  type?: string;
-  style?: Record<string, string | number | undefined>;
-  data?: T;
-}
-
-// Per-node data carried in RF Node<NodeData>.data.
+// Per-node data payload.
 export interface NodeData {
   // --- Spec.Node fields ---
   type: string;
@@ -84,11 +55,8 @@ export interface NodeData {
   height: number;
 }
 
-// Per-edge data carried in RF Edge<EdgeData>.data.
-// RF-native fields (id, source, sourceHandle, target, targetHandle) live on
-// the RF edge itself. sourceHandle/targetHandle are intentionally also stored
-// here in data for round-trip fidelity: the spec serializer reads them from
-// EdgeData.data (not from RFEdge top-level) so handle names survive
+// Per-edge data payload. sourceHandle/targetHandle are stored here for round-trip
+// fidelity: the spec serializer reads handle names from EdgeData so they survive
 // save→load without a separate mapping step.
 export interface EdgeData extends WireProps {
   /** Raw Spec.Edge.data — carried verbatim for round-trip. */
