@@ -37,10 +37,8 @@ import {
   readEventKind, readEventNodeRow, readEventPortRow, readEventTargetRow, readEventTargetPortRow,
   readEventEdgeRow, readEventSlot, readEventValue, readEventBead,
   readEventArcLength, readEventSimLatencyMs, readEventX, readEventY, readEventZ, readEventF,
+  UNKNOWN_KIND_ID,
 } from "./schema/buffer-layout";
-
-/** KindId sentinel for an unknown node kind (matches KindIDUnknown in Buffer/node_kind_id_gen.go). */
-const KIND_ID_UNKNOWN = 0xff;
 
 type Line = Record<string, unknown>;
 
@@ -202,7 +200,7 @@ function nodeGeometryLine(d: DecodedSnapshot, nodeRow: number, node: string): Li
   }
   const l: Line = { kind: "node-geometry", node };
   if (node) l.label = node;
-  if (kindId !== KIND_ID_UNKNOWN && NODE_KIND_NAMES[kindId] !== undefined) l.nodeKind = NODE_KIND_NAMES[kindId];
+  if (kindId !== UNKNOWN_KIND_ID && NODE_KIND_NAMES[kindId] !== undefined) l.nodeKind = NODE_KIND_NAMES[kindId];
   l.nx = cx; l.ny = cy; l.nz = cz; l.radius = radius;
   if (sphereR !== 0) l.sphereR = sphereR;
   l.vrx = readNodeVRX(n, nodeRow); l.vry = readNodeVRY(n, nodeRow); l.vrz = readNodeVRZ(n, nodeRow);

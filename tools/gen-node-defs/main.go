@@ -2323,6 +2323,10 @@ func writeBufferLayoutTS(outPath string, schema bufLayoutSchema) error {
 		fmt.Fprintf(w, "export const %-25s = %d;\n", tsName, ev.value)
 	}
 
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, `/** Sentinel Node KindId value meaning "unknown kind" (matches KindIDUnknown in Buffer/node_kind_id_gen.go). */`)
+	fmt.Fprintln(w, `export const UNKNOWN_KIND_ID = 0xff;`)
+
 	w.Flush()
 	return os.WriteFile(outPath, buf.Bytes(), 0644)
 }

@@ -12,8 +12,8 @@
 // The actual per-block renderers live in sibling files (BeadInstances, NodeInstances,
 // PortInstances, SelectionHighlight/HoverHighlight, SphereRings, InteriorBeadInstances,
 // EdgeTube, BufferCamera, BufferLabelProjector) — this file is just the capacity-manager
-// orchestrator that mounts them, plus the shared pick-tag/color re-exports other modules
-// (scene-content.tsx, SelectedEquationGuides.tsx, ThreeView.tsx) still import from here.
+// orchestrator that mounts them, plus the shared pick-tag re-exports scene-content.tsx and
+// ThreeView.tsx still import from here.
 
 import { useState } from "react";
 import { useFrame } from "@react-three/fiber";
@@ -37,9 +37,7 @@ export {
   BUFFER_PORT_TAG,
   BUFFER_RING_TAG,
   BUFFER_EDGE_TAG,
-  nodeRowColors,
 } from "./buffer-scene-shared";
-export { EDGE_HALO_RADIUS, EDGE_HALO_COLOR, EDGE_HALO_SELECTED_OPACITY } from "./EdgeTube";
 export { BufferLabelProjector };
 
 // ── Sizing constants ──────────────────────────────────────────────────────────

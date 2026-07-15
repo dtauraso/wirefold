@@ -227,3 +227,6 @@ export const BUF_EVENT_FIRE            = 1;
 export const BUF_EVENT_SEND            = 2;
 export const BUF_EVENT_ARRIVE          = 3;
 export const BUF_EVENT_DONE            = 4;
+
+/** Sentinel Node KindId value meaning "unknown kind" (matches KindIDUnknown in Buffer/node_kind_id_gen.go). */
+export const UNKNOWN_KIND_ID = 0xff;
