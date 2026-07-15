@@ -122,6 +122,13 @@ type SnapshotState struct {
 	// kindID maps a trace-event kind string to its index in T.TraceEventKinds (the shared
 	// Go/TS vocabulary), which is the EVENT block's Kind column. Built once in NewSnapshotState.
 	kindID map[string]uint8
+
+	// overlayFlagFields maps a bare-visibility-toggle trace Kind to the *uint8 field on
+	// s.overlay it sets. Collapses the nine identical
+	// "s.overlay.X = boolU8(ev.Visible); s.emitSnapshot()" Update cases into one lookup+set.
+	// Built once in NewSnapshotState (pointers into s.overlay, valid for the state's
+	// lifetime since overlay is a fixed-offset struct field, not reallocated).
+	overlayFlagFields map[string]*uint8
 }
 
 // eventRec is one buffered causal event, holding string identities that buildSnapshot
@@ -264,7 +271,7 @@ type overlaySnapState struct {
 // to out. Pass nil for out to build snapshots without emitting them (useful in
 // tests that only inspect state).
 func NewSnapshotState(out io.Writer) *SnapshotState {
-	return &SnapshotState{
+	s := &SnapshotState{
 		nodeIndex:          map[string]int{},
 		edgeIndex:          map[string]int{},
 		beads:              map[beadSnapKey]beadSnapState{},
@@ -274,6 +281,18 @@ func NewSnapshotState(out io.Writer) *SnapshotState {
 		out:                out,
 		kindID:             buildKindIDMap(),
 	}
+	s.overlayFlagFields = map[string]*uint8{
+		T.KindSceneTori:      &s.overlay.sceneTori,
+		T.KindScenePoles:     &s.overlay.scenePoles,
+		T.KindNodePoles:      &s.overlay.nodePoles,
+		T.KindAngleLabels:    &s.overlay.angleLabels,
+		T.KindSelSpherePoles: &s.overlay.selSpherePoles,
+		T.KindHandholds:      &s.overlay.handholds,
+		T.KindLabelsGlobal:   &s.overlay.labelsGlobal,
+		T.KindBadgesGlobal:   &s.overlay.badgesGlobal,
+		T.KindOverlaysVis:    &s.overlay.overlaysVis,
+	}
+	return s
 }
 
 // buildKindIDMap indexes T.TraceEventKinds so the EVENT block Kind column matches the
@@ -308,32 +327,12 @@ func (s *SnapshotState) Update(ev T.Event) {
 			upTheta: ev.UpTheta, upPhi: ev.UpPhi,
 		}
 		s.emitSnapshot() // state-change point: emit on camera changes
-	case T.KindSceneTori:
-		s.overlay.sceneTori = boolU8(ev.Visible)
-		s.emitSnapshot()
-	case T.KindScenePoles:
-		s.overlay.scenePoles = boolU8(ev.Visible)
-		s.emitSnapshot()
-	case T.KindNodePoles:
-		s.overlay.nodePoles = boolU8(ev.Visible)
-		s.emitSnapshot()
-	case T.KindAngleLabels:
-		s.overlay.angleLabels = boolU8(ev.Visible)
-		s.emitSnapshot()
-	case T.KindSelSpherePoles:
-		s.overlay.selSpherePoles = boolU8(ev.Visible)
-		s.emitSnapshot()
-	case T.KindHandholds:
-		s.overlay.handholds = boolU8(ev.Visible)
-		s.emitSnapshot()
-	case T.KindLabelsGlobal:
-		s.overlay.labelsGlobal = boolU8(ev.Visible)
-		s.emitSnapshot()
-	case T.KindBadgesGlobal:
-		s.overlay.badgesGlobal = boolU8(ev.Visible)
-		s.emitSnapshot()
-	case T.KindOverlaysVis:
-		s.overlay.overlaysVis = boolU8(ev.Visible)
+	case T.KindSceneTori, T.KindScenePoles, T.KindNodePoles, T.KindAngleLabels,
+		T.KindSelSpherePoles, T.KindHandholds, T.KindLabelsGlobal, T.KindBadgesGlobal,
+		T.KindOverlaysVis:
+		if field, ok := s.overlayFlagFields[ev.Kind]; ok {
+			*field = boolU8(ev.Visible)
+		}
 		s.emitSnapshot()
 
 	case T.KindPosition:
