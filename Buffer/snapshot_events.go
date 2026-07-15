@@ -36,6 +36,8 @@ func (s *SnapshotState) recordEvent(ev T.Event) {
 		r.portIsInput = false
 	case T.KindGeometry:
 		r.edge = ev.Edge
+	case T.KindLayoutLink:
+		r.target = ev.Target
 	case T.KindNodeBead:
 		r.slot = ev.Row*2 + ev.Col
 	case T.KindCamera:
@@ -44,7 +46,7 @@ func (s *SnapshotState) recordEvent(ev T.Event) {
 		// All fields read from the Scene block at decode time (same pattern as Camera).
 	case T.KindSceneTori, T.KindScenePoles, T.KindNodePoles,
 		T.KindSelSpherePoles, T.KindHandholds, T.KindLabelsGlobal, T.KindBadgesGlobal,
-		T.KindOverlaysVis:
+		T.KindOverlaysVis, T.KindDoubleLinks:
 		r.flag = ev.Visible
 	case T.KindSelect:
 		r.edge = ev.Edge // edge!="" → edge select; else node select (value=mode)
@@ -114,10 +116,12 @@ func (s *SnapshotState) writeEventBlock(buf []byte, portRows map[portLookupKey]i
 }
 
 // FinalFlush emits one last snapshot if events accumulated since the last emit (e.g. trailing
-// recv/fire/done/arrive that were not followed by a position emit). Call AFTER Trace.Close has
-// drained every event into Update, so no trailing causal event is lost from the buffer log.
+// recv/fire/done/arrive that were not followed by a position emit), OR if a KindPosition update
+// was coalesced away (tickSource set, still on the same tick as the last emit) and so never
+// published — otherwise the run's very last bead positions could be dropped. Call AFTER
+// Trace.Close has drained every event into Update, so nothing trailing is lost from the buffer.
 func (s *SnapshotState) FinalFlush() {
-	if len(s.pendingEvents) > 0 {
+	if len(s.pendingEvents) > 0 || s.positionDirty {
 		s.emitSnapshot()
 	}
 }

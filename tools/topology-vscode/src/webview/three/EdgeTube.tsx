@@ -14,10 +14,16 @@ import {
   SHADING_PARAM_TUBE_COLOR,
   SHADING_PARAM_TUBE_EMISSIVE,
   SHADING_PARAM_TUBE_EMISSIVE_INTENSITY,
+  SHADING_PARAM_LAYOUT_LINK_COLOR,
+  SHADING_PARAM_LAYOUT_LINK_EMISSIVE,
+  SHADING_PARAM_LAYOUT_LINK_EMISSIVE_INTENSITY,
 } from "../../schema/shading-params";
 import {
   readEdgeSX, readEdgeSY, readEdgeSZ, readEdgeEX, readEdgeEY, readEdgeEZ,
   readEdgeSelected, readEdgeFaded,
+  readLayoutLinkSrcNodeRow, readLayoutLinkDstNodeRow, readLayoutLinkEdgeRow,
+  readNodeCX, readNodeCY, readNodeCZ,
+  readOverlayOverlaysVis, readOverlayDoubleLinks,
 } from "../../schema/buffer-layout";
 import { BUFFER_EDGE_TAG, DIRECTION_ZERO_EPS } from "./buffer-scene-shared";
 
@@ -34,7 +40,12 @@ const ARROWHEAD_RADIUS = 3;
 export const EDGE_HALO_RADIUS = 5;
 export const EDGE_HALO_COLOR = "#ff5a00";
 export const EDGE_HALO_SELECTED_OPACITY = 0.6;
+// Arrowhead cone dims for the layout-link overlay (slightly larger than the tube arrows).
+const DL_ARROWHEAD_LENGTH = 7;
+const DL_ARROWHEAD_RADIUS = 3.5;
+
 const TUBE_EMISSIVE_COLOR = new THREE.Color(SHADING_PARAM_TUBE_EMISSIVE);
+const LAYOUT_LINK_EMISSIVE_COLOR = new THREE.Color(SHADING_PARAM_LAYOUT_LINK_EMISSIVE);
 
 interface EdgeSeg { sx: number; sy: number; sz: number; ex: number; ey: number; ez: number; }
 
@@ -56,14 +67,15 @@ function buildArrow(apex: THREE.Vector3, dir: THREE.Vector3, height: number): {
 // userData[BUFFER_EDGE_TAG] as the pickable edge target (mirrors the pre-branch
 // SingleEdgeTube halo, which doubled as the pick tube). `selected` paints that halo orange
 // (opacity 0.6) when Go marks this edge selected; otherwise the halo stays opacity 0 but
-// remains raycast-hittable.
-function EdgeTube({ seg, row, selected, faded }: { seg: EdgeSeg; row: number; selected: boolean; faded: boolean }) {
+// remains raycast-hittable. `dimmed` (the layout-link overlay is on) drops opacity to 0.25,
+// same as the pre-removal DoubleEdgeOverlay dim — fade takes precedence over it.
+function EdgeTube({ seg, dimmed, row, selected, faded }: { seg: EdgeSeg; dimmed: boolean; row: number; selected: boolean; faded: boolean }) {
   // Faded edge: dim the tube (mirror pre-branch SingleEdgeTube `faded ? FADE_OPACITY : …`).
-  // The traveling bead is suppressed Go-side (a faded edge's bead rows stream Live=0), so no
-  // bead-hiding is needed here.
-  const tubeTransparent = faded;
-  const tubeOpacity = faded ? SHADING_PARAM_NODE_FADE_OPACITY : 1;
-  const matKey = faded ? "faded" : "solid";
+  // Fade takes precedence over the layout-link dim. The traveling bead is suppressed
+  // Go-side (a faded edge's bead rows stream Live=0), so no bead-hiding is needed here.
+  const tubeTransparent = faded || dimmed;
+  const tubeOpacity = faded ? SHADING_PARAM_NODE_FADE_OPACITY : dimmed ? 0.25 : 1;
+  const matKey = faded ? "faded" : dimmed ? "dimmed" : "solid";
   const { tubeGeo, haloGeo, arrow } = useMemo(() => {
     const start = new THREE.Vector3(seg.sx, seg.sy, seg.sz);
     const end = new THREE.Vector3(seg.ex, seg.ey, seg.ez);
@@ -129,6 +141,68 @@ function EdgeTube({ seg, row, selected, faded }: { seg: EdgeSeg; row: number; se
   );
 }
 
+// One layout-link pair's cyan bidirectional overlay: thin tube (radius 1.0) + an
+// outward-pointing arrowhead at each end. Mirrors the pre-removal DoubleEdgeOverlay. The
+// segment endpoints are the connecting bead edge's own port-anchored SX..EZ (Edge block,
+// resolved via this pair's LayoutLink EdgeRow) — the same points the bead wire itself uses,
+// so the overlay terminates at the PORTS, not the node centers, and stays attached under a
+// drag (the Edge block is re-emitted on every node/port move). `viaEdge=false` means this
+// pair had no bead edge to ride along (LayoutLink EdgeRow === -1); the caller falls back to
+// node centers, and this is rendered visibly dimmer so a center-anchored fallback segment
+// never looks identical to a real port-anchored one.
+function LayoutLinkOverlay({ seg, viaEdge }: { seg: EdgeSeg; viaEdge: boolean }) {
+  const { lineGeo, arrowStart, arrowEnd } = useMemo(() => {
+    const start = new THREE.Vector3(seg.sx, seg.sy, seg.sz);
+    const end = new THREE.Vector3(seg.ex, seg.ey, seg.ez);
+    const curve = new THREE.LineCurve3(start, end);
+    const _lineGeo = new THREE.TubeGeometry(curve, 1, 1.0, 6, false);
+    const dir = end.clone().sub(start);
+    let _arrowStart: { center: THREE.Vector3; q: THREE.Quaternion } | null = null;
+    let _arrowEnd: { center: THREE.Vector3; q: THREE.Quaternion } | null = null;
+    if (dir.length() >= DIRECTION_ZERO_EPS) {
+      const dirNorm = dir.clone().normalize();
+      _arrowStart = buildArrow(start, dirNorm.clone().negate(), DL_ARROWHEAD_LENGTH);
+      _arrowEnd = buildArrow(end, dirNorm, DL_ARROWHEAD_LENGTH);
+    }
+    return { lineGeo: _lineGeo, arrowStart: _arrowStart, arrowEnd: _arrowEnd };
+  }, [seg.sx, seg.sy, seg.sz, seg.ex, seg.ey, seg.ez]);
+
+  useEffect(() => () => { lineGeo.dispose(); }, [lineGeo]);
+
+  const cone = (a: { center: THREE.Vector3; q: THREE.Quaternion }, key: string) => (
+    <mesh
+      key={key}
+      position={[a.center.x, a.center.y, a.center.z]}
+      quaternion={[a.q.x, a.q.y, a.q.z, a.q.w]}
+      raycast={() => null}
+      frustumCulled={false}
+    >
+      <coneGeometry args={[DL_ARROWHEAD_RADIUS, DL_ARROWHEAD_LENGTH, 16]} />
+      <meshStandardMaterial
+        color={SHADING_PARAM_LAYOUT_LINK_COLOR}
+        emissive={LAYOUT_LINK_EMISSIVE_COLOR}
+        emissiveIntensity={SHADING_PARAM_LAYOUT_LINK_EMISSIVE_INTENSITY}
+      />
+    </mesh>
+  );
+
+  return (
+    <>
+      <mesh geometry={lineGeo} raycast={() => null} frustumCulled={false}>
+        <meshStandardMaterial
+          color={SHADING_PARAM_LAYOUT_LINK_COLOR}
+          emissive={LAYOUT_LINK_EMISSIVE_COLOR}
+          emissiveIntensity={SHADING_PARAM_LAYOUT_LINK_EMISSIVE_INTENSITY}
+          transparent={!viaEdge}
+          opacity={viaEdge ? 1 : 0.35}
+        />
+      </mesh>
+      {arrowStart && cone(arrowStart, "start")}
+      {arrowEnd && cone(arrowEnd, "end")}
+    </>
+  );
+}
+
 function sameSegs(a: EdgeSeg[], b: EdgeSeg[]): boolean {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) {
@@ -165,12 +239,20 @@ export function EdgeTubes({ capacity }: { capacity: number }) {
   const fadedPrevRef = useRef<boolean[]>([]);
   const prevRef = useRef<{ segs: EdgeSeg[] }>({ segs: [] });
 
+  // Layout-link overlay state: whether it's on (Go-owned overlay flag), and the current
+  // per-pair segments — sourced from the buffer's LayoutLink block (node-row pairs) resolved
+  // against the ALREADY-DECODED Node block's centers, never from the Edge block.
+  const [showDouble, setShowDouble] = useState(false);
+  const [linkSegs, setLinkSegs] = useState<EdgeSeg[]>([]);
+  const [linkViaEdge, setLinkViaEdge] = useState<boolean[]>([]);
+  const linkPrevRef = useRef<{ dbl: boolean; segs: EdgeSeg[]; viaEdge: boolean[] }>({ dbl: false, segs: [], viaEdge: [] });
+
   useFrame(() => {
     const snap = getLatestSnapshot();
     if (!snap) return;
     const decoded = decodeSnapshot(snap);
     if (!decoded) return;
-    const { edgeCount, edgeView } = decoded;
+    const { edgeCount, edgeView, nodeView, layoutLinkCount, layoutLinkView, overlayView } = decoded;
 
     const n = Math.min(edgeCount, capacity);
     const next: EdgeSeg[] = new Array<EdgeSeg>(n);
@@ -199,14 +281,55 @@ export function EdgeTubes({ capacity }: { capacity: number }) {
       fadedPrevRef.current = fadedNext;
       setFadedRows(fadedNext);
     }
+
+    // Layout-link overlay: Go-streamed pairs (LayoutLink block). Each pair's endpoints are the
+    // connecting bead edge's own port-anchored SX..EZ (Edge block, row = this pair's EdgeRow) —
+    // the same points the bead wire uses, so the overlay terminates at the ports and stays
+    // attached as a node is dragged (the Edge block is re-emitted on every move). Fallback
+    // (EdgeRow === -1, no bead edge for this pair): the two nodes' CENTERS from the Node
+    // block — an honest degradation, rendered dimmer (viaEdge=false) so it never looks like a
+    // real port-anchored link.
+    const dbl = !!readOverlayOverlaysVis(overlayView) && !!readOverlayDoubleLinks(overlayView);
+    const linkN = Math.min(layoutLinkCount, capacity);
+    const nextLinks: EdgeSeg[] = new Array<EdgeSeg>(linkN);
+    const nextViaEdge: boolean[] = new Array<boolean>(linkN);
+    for (let i = 0; i < linkN; i++) {
+      const edgeRow = readLayoutLinkEdgeRow(layoutLinkView, i);
+      if (edgeRow >= 0) {
+        nextLinks[i] = {
+          sx: readEdgeSX(edgeView, edgeRow), sy: readEdgeSY(edgeView, edgeRow), sz: readEdgeSZ(edgeView, edgeRow),
+          ex: readEdgeEX(edgeView, edgeRow), ey: readEdgeEY(edgeView, edgeRow), ez: readEdgeEZ(edgeView, edgeRow),
+        };
+        nextViaEdge[i] = true;
+      } else {
+        const srcRow = readLayoutLinkSrcNodeRow(layoutLinkView, i);
+        const dstRow = readLayoutLinkDstNodeRow(layoutLinkView, i);
+        nextLinks[i] = {
+          sx: readNodeCX(nodeView, srcRow), sy: readNodeCY(nodeView, srcRow), sz: readNodeCZ(nodeView, srcRow),
+          ex: readNodeCX(nodeView, dstRow), ey: readNodeCY(nodeView, dstRow), ez: readNodeCZ(nodeView, dstRow),
+        };
+        nextViaEdge[i] = false;
+      }
+    }
+    const viaEdgeChanged = linkPrevRef.current.viaEdge.length !== nextViaEdge.length
+      || nextViaEdge.some((v, i) => v !== linkPrevRef.current.viaEdge[i]);
+    if (dbl !== linkPrevRef.current.dbl || !sameSegs(linkPrevRef.current.segs, nextLinks) || viaEdgeChanged) {
+      linkPrevRef.current = { dbl, segs: nextLinks, viaEdge: nextViaEdge };
+      setShowDouble(dbl);
+      setLinkSegs(nextLinks);
+      setLinkViaEdge(nextViaEdge);
+    }
   });
 
   return (
     <>
       {segs.map((s, i) => (
         <React.Fragment key={`edge-row-${i}`}>
-          <EdgeTube seg={s} row={i} selected={i === selRow} faded={!!fadedRows[i]} />
+          <EdgeTube seg={s} dimmed={showDouble} row={i} selected={i === selRow} faded={!!fadedRows[i]} />
         </React.Fragment>
+      ))}
+      {showDouble && linkSegs.map((s, i) => (
+        <LayoutLinkOverlay key={`layout-link-row-${i}`} seg={s} viaEdge={!!linkViaEdge[i]} />
       ))}
     </>
   );

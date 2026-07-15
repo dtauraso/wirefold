@@ -25,10 +25,6 @@
 | FromInput | in | chain | sampled input value; updates the held value |
 | Out | out | chain | continuously drives the held value (starts -1) |
 | Out2 | out | chain | optional second continuous output of the same held value (fan to a second destination); inert when unwired |
-| ToInput | out | chain | declared output back to an Input node (inert) |
-| ToHoldNewSendOld | out | chain | declared output to a HoldNewSendOld node (inert) |
-| FromLeftGate | in | chain | declared input from a WindowAndInhibitLeftGate node (inert) |
-| FromRightGate | in | chain | declared input from a WindowAndInhibitRightGate node (inert) |
 
 ## Firing rule
 

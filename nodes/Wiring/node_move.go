@@ -117,8 +117,11 @@ type centerSnap struct {
 //   - "" or "move": node-move — currently a no-op (polar-layout positions all nodes via "center" messages).
 //   - "fade":       per-wire fade — Faded applied by edgeMover only (nodeMover ignores).
 //
-// ack (if non-nil) is closed by the mover after it has fully handled the message —
-// used only by the synchronous test façade. The live bridge path leaves ack nil.
+// ack (if non-nil) is closed by the mover after it has fully handled the message.
+// The live "resend" command path (ResendGeometry, reached from stdin_reader.go's
+// "resend" case) DOES construct and block on acks — it is not test-only. (The ack
+// mechanism itself is slated for removal in a later round; this comment only
+// corrects what is true of it today.)
 type moveMsg struct {
 	Kind   string
 	NodeID string
@@ -131,8 +134,9 @@ type moveMsg struct {
 	AnchorId int
 	// Center (Kind == "center"): the re-propagated world center for NodeID under the
 	// polar layout. Each owning node/edge goroutine writes it onto its held geom
-	// and re-emits its own geometry. RootMove updates one node centrally and
-	// fans the fresh centers out — the one centralized step (sphere_layout.go).
+	// and re-emits its own geometry. (RootMove is now a thin wrapper over
+	// rootMoveViaMessages — the decentralized node-to-node message cascade; there is
+	// no central fan-out step.)
 	Center *vec3
 	// Centers (Kind == "centers"): batched per-edge re-propagation. Maps node id → new
 	// world center for every moved endpoint of THIS edge in a single frame, so an edge

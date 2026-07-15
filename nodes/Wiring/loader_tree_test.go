@@ -51,8 +51,8 @@ func TestLoadTreeRoundTrip(t *testing.T) {
 	if len(spec.Nodes) != 9 {
 		t.Fatalf("expected 9 nodes, got %d", len(spec.Nodes))
 	}
-	if len(spec.Edges) != 20 {
-		t.Fatalf("expected 20 edges, got %d", len(spec.Edges))
+	if len(spec.Edges) != 10 {
+		t.Fatalf("expected 10 edges, got %d", len(spec.Edges))
 	}
 
 	nodeByID := map[string]specNode{}

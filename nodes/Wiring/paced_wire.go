@@ -627,10 +627,3 @@ func (pw *PacedWire) Restore() {
 		}
 	}
 }
-
-// InFlight reports whether any bead is currently traversing this wire.
-func (pw *PacedWire) InFlight() bool {
-	pw.mu.Lock()
-	defer pw.mu.Unlock()
-	return len(pw.inflight) > 0
-}

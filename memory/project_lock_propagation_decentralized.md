@@ -23,10 +23,25 @@ The decentralized cascade can't amplify because each node only COPIES its own va
 neighbor (idempotent once equal) and re-broadcasts only if it actually moved > epsilon —
 a consistent set converges, an over-constrained one settles to last-consistent and goes silent.
 
-**Go-layer facts (infra already fits):** each node is a `nodeMover` goroutine with an
-`inbox chan moveMsg` + select loop (node_move.go). "Doubly linked" = `movementLink`
-(links.go, undirected pair carrying each node's polar-about-the-other). Follower math lives
-in `applyPolarEqs`/`applyPortTorusColinearity` (locks.go). Key MODEL.md rule for this:
-state rides the MESSAGE (sender id + polar-about-center + center), not shared-memory reads
-across goroutines. Keep the dragged node's own edge/aimed-port fan; only the lock-FOLLOWER
-propagation becomes the node-to-node cascade.
+**Go-layer facts (verified against code, not the file layout — a later round is expected
+to move these tables onto `LayoutHolder`, so treat the MECHANISM below as durable and the
+current file/symbol names as incidental):** each node is a `nodeMover` goroutine with an
+`inbox chan moveMsg` + select loop (`nodes/Wiring/node_move.go`). Propagation is routed
+node-to-node via `sendMove` (a lookup into `md.dispatch`, a map keyed by node/edge id →
+inbox channel) — no central worklist. Which nodes a rule-node's cascade reaches is
+described by three tables in `node_move.go`: `ruleSource` (rule-node → its designated
+source neighbor), `ruleFollowers` (rule-node → follower neighbors it repositions), and
+`gateNeighbors` (a two-neighbor gate node → its two fixed neighbors). Key MODEL.md rule
+for this: state rides the MESSAGE (e.g. `moveMsg.FromCenter`/`TargetC` for an `equalize`
+message), not shared-memory reads across goroutines. Keep the dragged node's own
+edge/aimed-port fan; only the lock-FOLLOWER propagation becomes the node-to-node cascade.
+
+There is no `links.go` or `locks.go` in the tree, and no `movementLink`/`applyPolarEqs`/
+`applyPortTorusColinearity` symbols, as of 2026-07-14. They WERE real: `links.go` landed in
+`e82bf3d8` (declare the double-link movement graph) and `locks.go` in `81464a2e` (rebuild
+lock #1 on the double-link graph); the whole subsystem was deleted in `9e247aea`
+("phase 4 — delete the polar-lock/rule-builder subsystem; quantized compose is
+authoritative"). An earlier version of this note named them as live facts and went stale
+on that deletion, which cost real time: an audit agent read this file, trusted the section
+header "Go-layer facts", and reported a finding telling another agent to move code INTO
+`locks.go`. Grep `node_move.go` fresh rather than trusting any filename cited here.

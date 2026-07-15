@@ -140,3 +140,17 @@ const ShadingParamBeadEmissive = "#ffffff"
 
 // ShadingParamBeadEmissiveIntensity is the in-flight bead emissive intensity.
 const ShadingParamBeadEmissiveIntensity = 2.5
+
+// --- Layout-link overlay (cyan double-link overlay) ------------------------
+// The second tube + arrowheads drawn over each double-linked LAYOUT pair
+// (LayoutLink block), plus the dimmed opacity applied to the real edge tube
+// underneath while the overlay is on.
+
+// ShadingParamLayoutLinkColor is the layout-link overlay line/arrowhead color (cyan accent).
+const ShadingParamLayoutLinkColor = "#00e5ff"
+
+// ShadingParamLayoutLinkEmissive is the layout-link overlay emissive color.
+const ShadingParamLayoutLinkEmissive = "#00e5ff"
+
+// ShadingParamLayoutLinkEmissiveIntensity is the layout-link overlay emissive intensity.
+const ShadingParamLayoutLinkEmissiveIntensity = 0.8

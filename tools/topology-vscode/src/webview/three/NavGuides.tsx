@@ -324,8 +324,8 @@ export function NavGuides() {
     }
   });
 
-  // Node records that drive every guide below. Memoized so the O(N²) lockArc scan below
-  // recomputes only when the node data actually changes (navTick bumps on a real change).
+  // Node records that drive every guide below. Memoized so downstream guide computations
+  // recompute only when the node data actually changes (navTick bumps on a real change).
   const navNodes = useMemo<NavNode[]>(
     () => bufNavRef.current,
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -4,11 +4,13 @@
 // returns DataView slices over each column block — zero-copy, no store writes.
 //
 // Layout (little-endian, packed):
-//   Header   36 bytes : [tick][beadCount][nodeCount][edgeCount][portCount][labelBytesCount][eventCount][portNameBytesCount][edgeLabelBytesCount] (u32 each)
+//   Header   40 bytes : [tick][beadCount][nodeCount][edgeCount][portCount][labelBytesCount][eventCount][portNameBytesCount][edgeLabelBytesCount][layoutLinkCount] (u32 each)
 //   Bead     beadCount × BEAD_STRIDE bytes
 //   Node     nodeCount × NODE_STRIDE bytes
 //   Interior nodeCount × INTERIOR_SLOTS_PER_NODE × INTERIOR_STRIDE bytes
 //   Edge     edgeCount × EDGE_STRIDE bytes
+//   LayoutLink layoutLinkCount × LAYOUT_LINK_STRIDE bytes (the LAYOUT double-link overlay
+//              pairs, from LocalPolars — NOT the Edge block)
 //   Port     portCount × PORT_STRIDE bytes   (flattened over nodes in node-row order)
 //   Camera   CAMERA_STRIDE bytes   (always 1 row)
 //   Overlay  OVERLAY_STRIDE bytes  (always 1 row)
@@ -25,6 +27,7 @@ import {
   INTERIOR_STRIDE,
   INTERIOR_SLOTS_PER_NODE,
   EDGE_STRIDE,
+  LAYOUT_LINK_STRIDE,
   PORT_STRIDE,
   CAMERA_STRIDE,
   OVERLAY_STRIDE,
@@ -62,6 +65,10 @@ export interface DecodedSnapshot {
   interiorView: DataView;
   /** DataView over the edge block only; byteLength = edgeCount × EDGE_STRIDE. */
   edgeView: DataView;
+  /** Number of LAYOUT-link pairs (from LocalPolars, NOT the Edge block). */
+  layoutLinkCount: number;
+  /** DataView over the LayoutLink block; byteLength = layoutLinkCount × LAYOUT_LINK_STRIDE. */
+  layoutLinkView: DataView;
   /** DataView over the port block only; byteLength = portCount × PORT_STRIDE. Row i is the
    *  buffer port row i — the same index a port InstancedMesh instanceId carries for picking. */
   portView: DataView;
@@ -131,17 +138,19 @@ function decodeSnapshotUncached(buf: ArrayBuffer): DecodedSnapshot | null {
   const eventCount          = hdr.getUint32(24, true);
   const portNameBytesCount  = hdr.getUint32(28, true);
   const edgeLabelBytesCount = hdr.getUint32(32, true);
+  const layoutLinkCount     = hdr.getUint32(36, true);
 
   const interiorCount = nodeCount * INTERIOR_SLOTS_PER_NODE;
 
-  const beadBytes      = beadCount * BEAD_STRIDE;
-  const nodeBytes      = nodeCount * NODE_STRIDE;
-  const interiorBytes  = interiorCount * INTERIOR_STRIDE;
-  const edgeBytes      = edgeCount * EDGE_STRIDE;
-  const portBytes      = portCount * PORT_STRIDE;
-  const eventBytes     = eventCount * EVENT_STRIDE;
+  const beadBytes       = beadCount * BEAD_STRIDE;
+  const nodeBytes       = nodeCount * NODE_STRIDE;
+  const interiorBytes   = interiorCount * INTERIOR_STRIDE;
+  const edgeBytes       = edgeCount * EDGE_STRIDE;
+  const layoutLinkBytes = layoutLinkCount * LAYOUT_LINK_STRIDE;
+  const portBytes       = portCount * PORT_STRIDE;
+  const eventBytes      = eventCount * EVENT_STRIDE;
   const expectedLen = BUF_HEADER_SIZE + beadBytes + nodeBytes + interiorBytes + edgeBytes +
-                      portBytes + CAMERA_STRIDE + OVERLAY_STRIDE + SCENE_STRIDE +
+                      layoutLinkBytes + portBytes + CAMERA_STRIDE + OVERLAY_STRIDE + SCENE_STRIDE +
                       labelBytesCount + eventBytes + portNameBytesCount + edgeLabelBytesCount;
 
   if (buf.byteLength < expectedLen) return null;
@@ -159,6 +168,9 @@ function decodeSnapshotUncached(buf: ArrayBuffer): DecodedSnapshot | null {
 
   const edgeView = new DataView(buf, off, edgeBytes);
   off += edgeBytes;
+
+  const layoutLinkView = new DataView(buf, off, layoutLinkBytes);
+  off += layoutLinkBytes;
 
   const portView = new DataView(buf, off, portBytes);
   off += portBytes;
@@ -185,8 +197,8 @@ function decodeSnapshotUncached(buf: ArrayBuffer): DecodedSnapshot | null {
 
   return {
     tick, beadCount, nodeCount, edgeCount, portCount, beadView, nodeView, interiorCount,
-    interiorView, edgeView, portView, cameraView, overlayView, sceneView, labelBytesCount,
-    labelBytes, eventCount, eventView, portNameBytes, edgeLabelBytes,
+    interiorView, edgeView, layoutLinkCount, layoutLinkView, portView, cameraView, overlayView,
+    sceneView, labelBytesCount, labelBytes, eventCount, eventView, portNameBytes, edgeLabelBytes,
   };
 }
 
