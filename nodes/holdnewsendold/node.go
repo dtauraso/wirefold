@@ -64,15 +64,20 @@ func (in *Node) Update(ctx context.Context) {
 
 	// Paced mode: single loop, one step per human-clock cycle. windowActive tracks
 	// whether the current cycle is inside a processing window — the span from
-	// consuming an input value until every placed ToNext bead has finished its
-	// transit. While a window is active, the input port is observed
-	// non-blockingly each cycle and any arrival (same or different value) is
-	// consumed and discarded (input consumption is decoupled from output
-	// transit; only the next window's PollRecv consumes a real input). The node
-	// is never parked across a traversal — it WaitTicks one
+	// consuming an input value until the placed ToNext beads' own traversal tick
+	// count has elapsed. Per MODEL.md §Sending, a node's processing window is a
+	// TICK COUNT derived from a formula, not a query of wire occupancy: the
+	// window length is ticksToCross (arcLength/pulseSpeed, already computed per
+	// wire) of the LONGEST ToNext edge, so it does not ask any wire whether a
+	// bead is still in flight. While a window is active, the input port is
+	// observed non-blockingly each cycle and any arrival (same or different
+	// value) is consumed and discarded (input consumption is decoupled from
+	// output transit; only the next window's PollRecv consumes a real input).
+	// The node is never parked across a traversal — it WaitTicks one
 	// human-clock cycle and StepOnces the in-flight ToNext beads exactly once per
 	// cycle, matching the canonical single-step shape (nodes/pacer, gatecommon.DriveHeld).
 	windowActive := false
+	var windowEndTick int64
 	for {
 		select {
 		case <-ctx.Done():
@@ -119,29 +124,39 @@ func (in *Node) Update(ctx context.Context) {
 				in.Held = value
 
 				// No live bead placed (suppressed sentinel fan-out) ⇒ no real
-				// output transit ⇒ no processing window to observe.
-				for _, di := range items {
-					if di.Live() {
-						windowActive = true
-						break
+				// output transit ⇒ no processing window to observe. Otherwise
+				// the window length is the LONGEST ToNext edge's ticksToCross
+				// (arcLength/pulseSpeed, ms-latency / MsPerTick) counted from
+				// this placement tick — a formula over the node's own outputs,
+				// not a query of wire state.
+				placeTick := clk.Tick()
+				var maxTicks float64
+				anyLive := false
+				for i, di := range items {
+					if !di.Live() {
+						continue
 					}
+					anyLive = true
+					if t := in.ToNext[i].Geom().SimLatencyMs / Wiring.MsPerTick; t > maxTicks {
+						maxTicks = t
+					}
+				}
+				if anyLive {
+					windowActive = true
+					windowEndTick = placeTick + int64(maxTicks+0.999999)
 				}
 			}
 		}
 
 		// Single loop, one step per cycle: advance every in-flight ToNext output
 		// bead exactly one position-step (mirrors nodes/pacer and
-		// gatecommon.DriveHeld). A window ends once no ToNext bead remains
-		// in-flight after stepping.
-		anyInFlight := false
+		// gatecommon.DriveHeld). A window ends once its tick-count budget has
+		// elapsed on the shared clock.
 		tick := clk.Tick()
 		for _, o := range in.ToNext {
 			o.StepOnceAt(ctx, tick)
-			if o.InFlight() {
-				anyInFlight = true
-			}
 		}
-		if windowActive && !anyInFlight {
+		if windowActive && tick >= windowEndTick {
 			windowActive = false
 		}
 	}

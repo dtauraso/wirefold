@@ -277,16 +277,6 @@ func (o *Out) Wired() bool {
 	return o.pw != nil
 }
 
-// InFlight reports whether a bead is currently traversing the underlying wire.
-// Returns false in chan mode (no wire geometry / no in-flight concept).
-// Nil-safe; returns false for a nil Out.
-func (o *Out) InFlight() bool {
-	if o == nil || o.pw == nil {
-		return false
-	}
-	return o.pw.InFlight()
-}
-
 // StepOnce advances this Out's underlying wire by one non-blocking tick-step
 // (see PacedWire.StepOnce): any in-flight bead due at the current tick moves
 // one position-step, and FIFO-head delivery is attempted if ready. Returns
