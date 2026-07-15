@@ -493,8 +493,7 @@ func buildPartnerCenterFn(nodeID string, edgeEndpoints map[string]EdgeEndpoints,
 	}
 }
 
-// emitNodeGeometryLocked is like emitNodeGeometry but named/kept as the emit entry point used
-// by the move dispatch. A CONNECTED port (partnerCenter reports hasPartner) is AIMED at its
+// emitNodeGeometryLocked is the emit entry point used by the move dispatch. A CONNECTED port (partnerCenter reports hasPartner) is AIMED at its
 // partner's center (portWorldPosAimed) so port→edge→port stays colinear; an edgeless port falls
 // back to its own polar-torus ring offset (portWorldPos). A `port ∈ torus` lock is still
 // movement-only and only ever applies to an edgeless (ring-placed) port, so it never overrides
@@ -518,11 +517,6 @@ func emitNodeGeometryLocked(tr *T.Trace, nodeName string, g nodeGeom, partnerCen
 	})
 }
 
-// emitNodeGeometryWith streams a node-geometry event for g, deriving each port's
-// world position + direction from portPosDir. The two public variants differ
-// ONLY in that function (static portDir vs aimed portDirAimed); everything else —
-// center, the input-then-output port order, the reach-radius fallback, and the
-// ring normals — is identical and lives here.
 // effectiveRadius returns the node's REACH radius (max distance to a surface child),
 // falling back to nodeR for childless nodes (ReachR == 0) so the value stays sane.
 // Used by emitNodeGeometryWith (sphereR).
@@ -533,6 +527,11 @@ func effectiveRadius(g nodeGeom) float64 {
 	return nodeR(g)
 }
 
+// emitNodeGeometryWith streams a node-geometry event for g, deriving each port's
+// world position + direction from portPosDir. It is called by the one live
+// caller, emitNodeGeometryLocked, which supplies the aimed-vs-static port
+// direction logic; center, the input-then-output port order, the reach-radius
+// fallback, and the ring normals all live here regardless of that logic.
 func emitNodeGeometryWith(tr *T.Trace, nodeName string, g nodeGeom, portPosDir func(name string, isInput bool) (pos, dir vec3)) {
 	center := nodeWorldPos(g)
 	ports := make([]T.PortGeom, 0, len(g.Inputs)+len(g.Outputs))

@@ -117,10 +117,10 @@ type PacedWire struct {
 	// arrived-but-unread values, in arrival order (FIFO). All mutation under mu.
 	inflight  []inflightBead
 	delivered []deliveredBead
-	// nextGen mints a unique id for each placed bead (walker self-cancel key) and
-	// is also bumped on teardown to invalidate ALL outstanding walkers at once.
+	// nextGen mints a unique id for each placed bead (its StepOnce self-cancel key)
+	// and is also bumped on teardown to invalidate ALL outstanding beads at once.
 	nextGen uint64
-	// teardownGen: a walker whose bead gen is < teardownGen is invalidated wholesale
+	// teardownGen: a bead whose gen is < teardownGen is invalidated wholesale
 	// (Reset/Delete). Beads placed after a teardown get gen >= teardownGen.
 	teardownGen uint64
 	faded       bool // when true, placeBeadNoWalker places nothing
@@ -489,7 +489,8 @@ type posEmitArgs struct {
 }
 
 // emitArrive sends the traversal-complete trace for a delivered bead. Called by
-// the walker AFTER releasing pw.mu (trace channel send off the lock).
+// the owning node's StepOnce-driven loop AFTER releasing pw.mu (trace channel
+// send off the lock).
 func (pw *PacedWire) emitArrive(ai arriveInfo) {
 	if ai.emit {
 		pw.Trace.Arrive(ai.node, ai.port, ai.value, ai.gen)
@@ -509,9 +510,10 @@ func (pw *PacedWire) emitArrive(ai arriveInfo) {
 // If the bead is missing or the wire torn down, all zero/false values are returned
 // and pw.mu is still released.
 //
-// NOTE: the inflight→delivered move and cond.Broadcast are NOT done here; the
-// walker's FIFO-head wait loop does that after this returns when final=true. This
-// keeps the two locking phases (trace-emit window vs. delivery window) unchanged.
+// NOTE: the inflight→delivered move and cond.Broadcast are NOT done here;
+// tryDeliverHeadLocked (called by the owning node's StepOnce) does that after
+// this returns when final=true. This keeps the two locking phases (trace-emit
+// window vs. delivery window) unchanged.
 func (pw *PacedWire) advanceBeadLocked(gen uint64, nowTick float64) (emit bool, pos posEmitArgs, final bool) {
 	tr := pw.Trace
 
@@ -560,10 +562,11 @@ func (pw *PacedWire) advanceBeadLocked(gen uint64, nowTick float64) (emit bool, 
 	return
 }
 
-// teardownLocked cancels ALL in-flight bead walkers, clears both queues, and
-// returns the per-bead source identities for any in-flight beads so the caller can
-// emit one PulseCancelled per dropped STREAMING bead after unlocking (emit mirrors
-// the bead's streams flag — delivery-only beads carry no sprite and emit nothing,
+// teardownLocked cancels ALL in-flight beads (invalidating their gen so any
+// subsequent StepOnce drops them), clears both queues, and returns the per-bead
+// source identities for any in-flight beads so the caller can emit one
+// PulseCancelled per dropped STREAMING bead after unlocking (emit mirrors the
+// bead's streams flag — delivery-only beads carry no sprite and emit nothing,
 // matching tryDeliverHeadLocked's emit: db.streams). Must be called with pw.mu held.
 func (pw *PacedWire) teardownLocked() []arriveInfo {
 	var cancelled []arriveInfo
@@ -579,8 +582,8 @@ func (pw *PacedWire) teardownLocked() []arriveInfo {
 	return cancelled
 }
 
-// Reset drops all in-flight/delivered beads and cancels their walkers; used when
-// an edge is deleted in the editor.
+// Reset drops all in-flight/delivered beads and invalidates their gen so any
+// subsequent StepOnce drops them; used when an edge is deleted in the editor.
 func (pw *PacedWire) Reset() {
 	pw.mu.Lock()
 	pw.teardownLocked()
