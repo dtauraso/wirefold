@@ -170,25 +170,40 @@ model and streams it as the content buffer; TS decodes and draws.
 
 ## Node positions & movement locks (the polar model)
 
-Editor-time node geometry and lock propagation are **pure polar**. The ONLY cartesian value
-in the system is the scene sphere's own center (the world anchor).
+Editor-time node geometry and lock propagation are **pure polar**. The scene sphere's center
+is the only cartesian value that is **persisted and authoritative** — the world anchor. It is
+not the only cartesian value that exists: the camera pose, port anchors, bead segments and
+per-node world centers are cartesian too. The invariant is narrower and stronger than
+"cartesian appears once": every other cartesian is **derived** from this anchor
+(`sceneCenter + polar2cart(…)`) or **quarantined at the renderer edge** — none is persisted,
+and none is a source of truth.
 
 - **Scene sphere** — a first-class, persisted reference (NOT the derived content-sphere
   centroid, which moves with the nodes and is circular). It has a **cartesian center** (the
-  one world anchor, in `scene.json`) and a **radius** that fits the diagram. It is a SEPARATE
-  entity from the camera pivot: camera **orbit** must not move it, and `PanViewpoint` is a
-  pure CAMERA move that deliberately does not touch it (coupling the two once left
-  `md.sceneSphere` diverged from the movers' held center — the "zoom got canceled" symptom).
+  one world anchor, in `scene.json`) and a **radius** that fits the diagram.
 
-  > **OPEN — the sphere is currently immovable.** In the code today the scene sphere is
-  > loaded once (`LoadSceneSphere`, content-fit when `scene.json` has none), READ by every
-  > scene-polar computation, and persisted on save — but **nothing ever moves its center**.
-  > There is no scene-pan entry point: the `PanScene` / `PanSceneSphere` gesture named here
-  > and in `node_move.go`'s comments does not exist, and no code assigns `sceneSphere.Center`
-  > after load. The intended behaviour (a scene pan translating the center by the same delta,
-  > holding node world positions fixed while their scene polars recompute about the new
-  > center) is UNBUILT, not merely unnamed. Do not cite it as existing; decide whether to
-  > build it or drop it from the model.
+  **It is established once and never moves.** `LoadSceneSphere` reads it from `scene.json`,
+  or content-fits it from the node centers and persists that immediately — persisting matters,
+  because every node position is a polar measured ABOUT this center, so a center re-fitted
+  over moved nodes on the next load would silently reinterpret the whole diagram.
+
+  It is a SEPARATE entity from the camera pivot, and **both camera gestures leave it alone**:
+  orbit must not move it, and `PanViewpoint` is a pure CAMERA move that deliberately does not
+  touch it.
+
+  > **Rejected: pan moves the sphere.** The model once said camera pan should translate the
+  > center by the same delta, holding node world positions fixed while their scene polars
+  > recomputed about the new center. Coupling pan/dolly to the sphere left `md.sceneSphere`
+  > diverged from the movers' held center until a later broadcast reconciled it with a jump —
+  > the "zoom got canceled" symptom. It was decoupled, a separate scene-pan gesture was named
+  > as the proper home, and that gesture was never built. The claim is now DROPPED rather than
+  > pending: the sphere is a load-time-fitted constant.
+  >
+  > The cost, stated so it is a choice and not an accident: the polar frame is best
+  > conditioned near the center it was fitted to. Pan the camera far away and drag there, and
+  > you work at large `r`, where a small angular step moves a node a long way. If that becomes
+  > real friction in the editor, THAT is the reason to revisit — and the trap to avoid is the
+  > one above: a scene pan is its own gesture, never a side effect of a camera move.
 - **Two polars per node.** (1) **Scene polar** `(r,θ,φ)` about the scene-sphere center — the
   node's POSITION, persisted (`meta.json` `scenePolar*`; cartesian `x/y/z` kept only for
   back-compat, and only used at load when no sphere is persisted yet). World = `sceneCenter +

@@ -780,9 +780,10 @@ type MoveDispatch struct {
 	// scheduled from RootMove for the dragged node.
 	quantOffsetPersist *quantOffsetPersister
 	// spherePersist is the debounced disk persister for the scene sphere (sphere_layout.go
-	// md.sceneSphere), armed by EnableEditPersist. Only ever FLUSHED (handleSaveMsg): nothing
-	// moves the sphere today, so the debounced schedule path has no caller — see MODEL.md's
-	// "the sphere is currently immovable" note. nil until armed (tests that never arm).
+	// md.sceneSphere), armed by EnableEditPersist. Its DEBOUNCE has no caller by design: the
+	// sphere is "established once and never moves" (MODEL.md), so there is nothing to coalesce.
+	// It is only ever flushed — by LoadSceneSphere on a content-fit, and by handleSaveMsg.
+	// nil until armed (tests that never arm).
 	spherePersist *sceneSpherePersister
 	// selected is the CURRENTLY-SELECTED node id (click-select), owned by Go. "" = nothing
 	// selected. Set by the gesture FSM's click outcome (applySelect) and emitted via
@@ -1656,8 +1657,9 @@ func (md *MoveDispatch) PanViewpoint(delta vec3, tr *T.Trace) {
 	// A dolly is a pure CAMERA move (the eye translates toward the cursor). It must NOT move the
 	// scene sphere: coupling them left md.sceneSphere.Center diverged from the movers' held
 	// center until a later broadcast reconciled it with a jump (the "zoom got canceled"
-	// symptom). Moving the sphere would be a SEPARATE scene-pan gesture — which does not
-	// exist today; see MODEL.md's "the sphere is currently immovable" note.
+	// symptom). Nothing moves the sphere — MODEL.md: "It is established once and never moves."
+	// Pan-moves-the-sphere is REJECTED doctrine, not a gap to fill; if it is ever revisited it
+	// must be its own gesture, never a side effect of a camera move.
 	md.vp.PanViewpoint(delta, tr)
 }
 
