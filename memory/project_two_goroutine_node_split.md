@@ -9,10 +9,10 @@ STALE as of a 2026-07 code-smell audit — kept for history, do not act on the m
 below as current.
 
 What this memory originally described (merged 2026-07-12, task/tick-pause-play): each
-node ran TWO goroutines — a `LayoutPort.run` (`nodes/Wiring/layout_edge.go`) always-on
+node ran TWO goroutines — a `LayoutPort.run` (in a now-deleted layout_edge.go) always-on
 layout goroutine handling drag/position, plus the pausable bead `Update` firing loop.
 
-That `LayoutPort`/`layout_edge.go` mechanism no longer exists in the codebase. Node-move
+That `LayoutPort`/layout_edge.go mechanism no longer exists in the codebase. Node-move
 today is the DECENTRALIZED `nodeMover` goroutine model (`node_move.go`, one inbox per
 node, `MoveDispatch.Start` launches them) described in
 `project_lock_propagation_decentralized.md` — read that one instead.

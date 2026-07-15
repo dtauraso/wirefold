@@ -142,4 +142,3 @@ func (c *RealClock) SleepCycle(ctx context.Context) error {
 
 // Compile-time assertion that RealClock satisfies Clock.
 var _ Clock = (*RealClock)(nil)
-
