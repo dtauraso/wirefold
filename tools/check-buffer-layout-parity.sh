@@ -16,9 +16,8 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 GO_FILE="$REPO_ROOT/Buffer/buffer_layout_gen.go"
 TS_FILE="$REPO_ROOT/tools/topology-vscode/src/schema/buffer-layout.ts"
-LAYOUT_SRC="$REPO_ROOT/Buffer/layout.go"
 
-for f in "$GO_FILE" "$TS_FILE" "$LAYOUT_SRC"; do
+for f in "$GO_FILE" "$TS_FILE"; do
   if [[ ! -f "$f" ]]; then
     echo "check-buffer-layout-parity: MISCONFIGURED — file not found: $f" >&2
     exit 1

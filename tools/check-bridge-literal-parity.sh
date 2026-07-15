@@ -15,26 +15,15 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-STDIN_READER="$REPO_ROOT/nodes/Wiring/stdin_reader.go"
-MESSAGES_TS="$REPO_ROOT/tools/topology-vscode/src/messages.ts"
 LOADER_GO="$REPO_ROOT/nodes/Wiring/loader.go"
 RUN_COMMAND_TS="$REPO_ROOT/tools/topology-vscode/src/runCommand.ts"
 
-for f in "$STDIN_READER" "$MESSAGES_TS" "$LOADER_GO" "$RUN_COMMAND_TS"; do
+for f in "$LOADER_GO" "$RUN_COMMAND_TS"; do
   if [[ ! -f "$f" ]]; then
     echo "bridge-literal-parity: MISCONFIGURED — file not found: $f" >&2
     exit 1
   fi
 done
-
-# Refuse a vacuous pass: an empty sentinel-bounded extraction (both sides emptied by a
-# sentinel rename/deletion) would comm empty-to-empty and "pass". Assert non-empty.
-assert_nonempty() { # value label
-  if [[ -z "$(printf '%s' "$1" | tr -d '[:space:]')" ]]; then
-    echo "bridge-literal-parity: EMPTY extracted set for '$2' — sentinel block missing/renamed; refusing vacuous parity pass" >&2
-    exit 1
-  fi
-}
 
 HITS=0
 
@@ -53,7 +42,7 @@ if ! grep -aq 'Kind: "spec"' "$LOADER_GO"; then
   echo "  producer literal missing: loader.go no longer emits Kind: \"spec\""
   HITS=$((HITS + 1))
 fi
-if ! grep -aq '"spec"' "$RUN_COMMAND_TS"; then
+if ! grep -v '^\s*//' "$RUN_COMMAND_TS" | grep -q 'kind === "spec"'; then
   echo "  consumer literal missing: runCommand.ts no longer recognizes \"spec\""
   HITS=$((HITS + 1))
 fi
