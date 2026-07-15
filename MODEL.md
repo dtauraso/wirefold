@@ -131,8 +131,11 @@ when a bead has arrived. Go owns the clock.
   The webview decodes the latest snapshot (`buffer-decode.ts`) and renders it;
   row-keyed reflect resources (`snapshot-buffer.ts`, `overlay-flags.ts`)
   mirror Go — they author nothing. There is **no JSON-trace render path
-  and no `pump.ts`**; Go still emits the JSON trace on stdout as the
-  `.probe` log source, but the webview does not consume it for rendering.
+  and no `pump.ts`**; Go emits no trace-event JSON on stdout at all — the
+  `.probe` trace log (`go.jsonl`) is now the ext host's DECODE of the fd3
+  binary content buffer's EVENT block (`buffer-log.ts`), not a stdout
+  parse. Stdout carries only the DEBUG BREADCRUMB channel's sparse
+  `{"kind":"breadcrumb",...}` control-event lines.
 - **`BufferScene`** (`tools/topology-vscode/src/webview/three/buffer-scene.tsx`)
   draws ALL geometry from the buffer: node bodies (sphere mesh + ring,
   keyed off `node.data.fill`/`node.data.stroke` from `NODE_DEFS`), ports,

@@ -111,8 +111,7 @@ func (pw *PacedWire) ticksToCross(arc float64) float64 {
 // tick (the clock does not advance while halted); Reset/Delete bump teardownGen
 // so the driven loop drops the bead.
 type PacedWire struct {
-	mu   sync.Mutex
-	cond *sync.Cond
+	mu sync.Mutex
 	// inflight holds beads traversing the wire, in send order. delivered holds
 	// arrived-but-unread values, in arrival order (FIFO). All mutation under mu.
 	inflight  []inflightBead
@@ -160,7 +159,6 @@ func NewPacedWire(arcLength float64, pulseSpeed float64) *PacedWire {
 		pulseSpeed:              pulseSpeed,
 		clock:                   NewRealClock(),
 	}
-	pw.cond = sync.NewCond(&pw.mu)
 	return pw
 }
 
@@ -252,7 +250,6 @@ func (pw *PacedWire) placeBeadNoWalkerAt(value int, bp beadPlacement, tick int64
 		gen:     pw.nextGen,
 	}
 	pw.inflight = append(pw.inflight, b)
-	pw.cond.Broadcast()
 	gen = b.gen
 	pw.mu.Unlock()
 	return gen, true
@@ -292,7 +289,6 @@ func (pw *PacedWire) tryDeliverHeadLocked(ctx context.Context, gen uint64, nowTi
 	db := pw.inflight[0]
 	pw.inflight = pw.inflight[1:]
 	pw.delivered = append(pw.delivered, deliveredBead{val: db.val, deliverTick: nowTick})
-	pw.cond.Broadcast()
 	ai = arriveInfo{emit: db.streams, node: db.node, port: db.port, value: db.val, gen: db.gen}
 	return ai, true, true
 }
@@ -507,10 +503,10 @@ func (pw *PacedWire) emitArrive(ai arriveInfo) {
 // If the bead is missing or the wire torn down, all zero/false values are returned
 // and pw.mu is still released.
 //
-// NOTE: the inflight→delivered move and cond.Broadcast are NOT done here;
-// tryDeliverHeadLocked (called by the owning node's StepOnce) does that after
-// this returns when final=true. This keeps the two locking phases (trace-emit
-// window vs. delivery window) unchanged.
+// NOTE: the inflight→delivered move is NOT done here; tryDeliverHeadLocked
+// (called by the owning node's StepOnce) does that after this returns when
+// final=true. This keeps the two locking phases (trace-emit window vs.
+// delivery window) unchanged.
 func (pw *PacedWire) advanceBeadLocked(gen uint64, nowTick float64) (emit bool, pos posEmitArgs, final bool) {
 	tr := pw.Trace
 
@@ -573,9 +569,8 @@ func (pw *PacedWire) teardownLocked() []arriveInfo {
 	}
 	pw.inflight = nil
 	pw.delivered = nil
-	// Invalidate every outstanding driven loop at once and wake any parked WaitTick.
+	// Invalidate every outstanding driven loop at once.
 	pw.teardownGen = pw.nextGen + 1
-	pw.cond.Broadcast()
 	return cancelled
 }
 

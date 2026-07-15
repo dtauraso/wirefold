@@ -127,6 +127,12 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
     // ext-host builds that record itself (BuildAndRunRunner.play(), invoked by the "run"
     // and "resume" cases above), so no webview code ever posts a bare {type:"play"}.
     // If one somehow arrives, this is a bug upstream — log it rather than silently drop it.
+    //
+    // The ONLY legitimate reason for a kind to sit here is Go-parity: it must be one of the
+    // kinds stdin_reader.go's msg.Type switch dispatches (its MSG_TYPES fence). A kind here
+    // that Go does not recognize would be dead on both sides and is checked for by
+    // check-message-kind-parity.sh — it fails the guard, it does not pass silently.
+    // DECLARED_NOT_SENT_START
     case "resend":
     case "raw-input":
     case "save":

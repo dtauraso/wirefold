@@ -78,11 +78,11 @@ func (p *quantOffsetPersister) flush() {
 	p.recordWrite()
 }
 
-// writeQuantOffset sets the node's quantized scalar triple (iTheta,iPhi,iR) in
-// <root>/nodes/<id>/meta.json, preserving every other field and DELETING the legacy
-// scenePolarR/Theta/Phi fields and any leftover `reference` field from the removed
-// reference-tree model (the scalar triple about the scene center is now the sole
-// persisted position source — see the package doc comment above). The file must
+// writeQuantOffset writes the node's EXACT scenePolarR/Theta/Phi (the authoritative,
+// lossless position — see the package doc comment above) PLUS the quantized scalar
+// triple (iTheta,iPhi,iR) as a self-describing cache of the drag-time snap cells, into
+// <root>/nodes/<id>/meta.json, preserving every other field. It deletes only the
+// leftover `reference` field from the removed reference-tree model. The file must
 // already exist.
 func writeQuantOffset(root, id string, off quantizedOffset, scene polar) error {
 	if !safeTreePathComponent(id) {

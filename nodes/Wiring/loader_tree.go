@@ -7,7 +7,6 @@
 //	<root>/nodes/<id>/inputs/<name>.json  — specPort
 //	<root>/nodes/<id>/outputs/<name>.json — specPort
 //	<root>/edges/<label>.json          — specEdge
-//	<root>/view/nodes/<id>.json        — specPosition
 //
 // It returns a topoSpec equivalent to what json.Unmarshal would produce from
 // the monolithic topology.json, enabling LoadTopology to accept either form.
@@ -140,31 +139,6 @@ func loadTree(root string) (topoSpec, error) {
 			return spec, fmt.Errorf("loadTree: parse edge file %s: %w", fname, err)
 		}
 		spec.Edges = append(spec.Edges, e)
-	}
-
-	// ── view/nodes ───────────────────────────────────────────────────────────
-	viewNodesDir := filepath.Join(root, "view", "nodes")
-	viewFiles, err := readDirNames(viewNodesDir)
-	if err != nil {
-		return spec, fmt.Errorf("loadTree: list view/nodes dir %s: %w", viewNodesDir, err)
-	}
-	sort.Strings(viewFiles)
-
-	spec.View.Nodes = map[string]specPosition{}
-	for _, fname := range viewFiles {
-		if !strings.HasSuffix(fname, ".json") {
-			continue
-		}
-		raw, err := os.ReadFile(filepath.Join(viewNodesDir, fname))
-		if err != nil {
-			return spec, fmt.Errorf("loadTree: read view/nodes/%s: %w", fname, err)
-		}
-		var jp specPosition
-		if err := json.Unmarshal(raw, &jp); err != nil {
-			return spec, fmt.Errorf("loadTree: parse view/nodes/%s: %w", fname, err)
-		}
-		id := strings.TrimSuffix(fname, ".json")
-		spec.View.Nodes[id] = jp
 	}
 
 	return spec, nil

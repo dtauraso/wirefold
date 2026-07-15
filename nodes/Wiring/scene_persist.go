@@ -1,15 +1,15 @@
 package Wiring
 
-// scene_persist.go — shared machinery for the six domain persisters in this package
-// (fade, overlays, camera viewpoint, polar-lock equations, node position, port anchor).
+// scene_persist.go — shared machinery for the five domain persisters in this package
+// (fade, overlays, camera viewpoint, node position, port anchor).
 // Each of those files repeated the same three things: a debounced-coalesce timer, a
 // read-modify-write of a JSON object, and an atomic (tmp+rename) write. This file factors
-// that machinery out once so the six files hold only their domain-specific shape (which
+// that machinery out once so the five files hold only their domain-specific shape (which
 // key(s) they own, how to marshal/unmarshal them) and wire it in.
 //
 // Two read-modify-write flavors exist because the two persisted-file kinds have different
 // failure semantics:
-//   - scene.json (fade/overlays/camera/locks) is read BEST-EFFORT: an absent or malformed
+//   - scene.json (fade/overlays/camera) is read BEST-EFFORT: an absent or malformed
 //     file yields an empty object and the writer proceeds, because the writer only ever
 //     owns a subset of scene.json's keys and scene.json is allowed to not exist yet (fresh
 //     topology). This intentionally REPLACES an unparsable file rather than blocking the

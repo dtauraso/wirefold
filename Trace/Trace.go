@@ -143,9 +143,11 @@ const (
 )
 
 // TraceEventKinds is the single source of truth for the closed kind
-// vocabulary. gen-node-defs reads this slice to emit trace-kinds.ts;
-// pump.ts exhaustiveness checks are derived from that generated file.
-// Adding a kind here forces a tsc error in pump.ts until a branch is added.
+// vocabulary. gen-node-defs reads this slice to emit trace-kinds.ts, which
+// buffer-log.ts uses as a kindId → name lookup table when decoding the
+// buffer EVENT block for the .probe log. There is no tsc exhaustiveness
+// check derived from it — adding a kind here does not force a TS branch
+// anywhere; it only extends the lookup table.
 var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone, KindPosition, KindGeometry, KindPulseCancelled, KindNodeGeometry, KindArrive, KindNodeBead, KindCamera, KindSceneTori, KindScenePoles, KindNodePoles, KindAngleLabels, KindSelSpherePoles, KindHandholds, KindLabelsGlobal, KindBadgesGlobal, KindOverlaysVis, KindSelect, KindFade, KindHover, KindSceneSphere}
 
 // PortGeom is one port's authoritative world geometry on a node-geometry event:

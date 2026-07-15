@@ -61,23 +61,6 @@ export function splitFrames(buf: Buffer, chunk: Buffer): { frames: ArrayBuffer[]
 // handleStdout below) — the .probe trace log is now the DECODE of the fd3 binary
 // content buffer's EVENT block (decodeBufferLog, in handleFd3).
 
-// tryParseSpecLine recognizes the Go startup spec line {"kind":"spec","nodes":[...],...}.
-// Spec lines carry no step ordinal; they are intercepted in handleStdout before the
-// line is appended to the output channel as plain process output.
-function tryParseSpecLine(line: string): { nodes: unknown[]; edges: unknown[]; view?: unknown } | undefined {
-  if (!line.startsWith("{")) return undefined;
-  try {
-    const obj: unknown = JSON.parse(line);
-    if (typeof obj === "object" && obj !== null) {
-      const rec = obj as Record<string, unknown>;
-      if (rec.kind === "spec" && Array.isArray(rec.nodes) && Array.isArray(rec.edges)) {
-        return obj as { nodes: unknown[]; edges: unknown[]; view?: unknown };
-      }
-    }
-  } catch { /* not JSON */ }
-  return undefined;
-}
-
 // tryParseBreadcrumb recognizes the Go Trace.Breadcrumb line shape
 // ({"kind":"breadcrumb","label":...}). Breadcrumbs are logging-only, intercepted in
 // handleStdout before the line is appended to the output channel as plain process output.
@@ -302,12 +285,6 @@ export class BuildAndRunRunner {
     const { lines, rest } = splitJsonlLines(this.stdoutBuf, chunk);
     this.stdoutBuf = rest;
     for (const line of lines) {
-      // Spec line — Go startup message carrying the full topology spec. Intercepted
-      // before the trace-event check (no step ordinal, not in TRACE_EVENT_KINDS) so it
-      // never falls through to the plain-stdout-line append below. Nothing consumes the
-      // parsed spec content today — the render path is buffer-only (no id/label sidecar,
-      // no spec store) — so this only keeps the recognized line out of the output channel.
-      if (tryParseSpecLine(line)) continue;
       // Breadcrumb lines are the Go-side DEBUG BREADCRUMB channel (Trace.Breadcrumb →
       // stdout {"kind":"breadcrumb",...}). They are logging-only (no step ordinal, outside
       // the closed trace vocabulary), so they are NEVER dispatched to the pump (its

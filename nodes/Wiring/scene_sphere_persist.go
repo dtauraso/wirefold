@@ -1,7 +1,7 @@
 // scene_sphere_persist.go — persist + load the first-class SCENE SPHERE (sphere_layout.go
 // sceneSphere; the fixed reference every node's scene polar is measured about) to
-// scene.json, mirroring scene_camera_persist.go / scene_locks_persist.go (read-modify-write
-// of one key, serialized against the other scene writers via sceneFileMu).
+// scene.json, mirroring scene_camera_persist.go (read-modify-write of one key,
+// serialized against the other scene writers via sceneFileMu).
 //
 // The Center is the only PERSISTED, AUTHORITATIVE cartesian value — the world anchor every
 // scene polar is measured about. It is NOT the only cartesian value in the system: the

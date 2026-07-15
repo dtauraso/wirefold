@@ -21,7 +21,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"math"
 	"os"
 	"reflect"
@@ -29,13 +28,6 @@ import (
 
 	T "github.com/dtauraso/wirefold/Trace"
 )
-
-// specPosition is the 3-D canvas position of a node as stored in view.nodes.
-type specPosition struct {
-	X float64 `json:"x"`
-	Y float64 `json:"y"`
-	Z float64 `json:"z"` // optional; defaults to 0 when absent
-}
 
 // specPort mirrors the per-node inputs/outputs entries in topology.json.
 // AnchorId is the only placement field; side/slot/anchor have been removed.
@@ -54,9 +46,6 @@ type specNode struct {
 	Inputs  []specPort `json:"inputs,omitempty"`
 	Outputs []specPort `json:"outputs,omitempty"`
 	R       *float64   `json:"r,omitempty"` // optional per-node sphere radius for this node's edges (nil → default; see nodeR)
-	X       float64    `json:"x"`           // legacy absolute world center (cartesian; back-compat)
-	Y       float64    `json:"y"`
-	Z       float64    `json:"z"`
 	// Scene polar (polar-model.md phase 2): the node's position as (r,θ,φ) about the scene
 	// sphere. When present AND a persisted scene sphere exists, world = sceneCenter +
 	// polar2cart(scenePolar) is AUTHORITATIVE over x/y/z (which stay for back-compat).
@@ -197,16 +186,10 @@ type specEdge struct {
 	TargetHandle string `json:"targetHandle"`
 }
 
-// topoView is the viewer-state block inside the JSON (view.nodes carries positions).
-type topoView struct {
-	Nodes map[string]specPosition `json:"nodes"`
-}
-
 // topoSpec is the top-level JSON shape.
 type topoSpec struct {
 	Nodes []specNode `json:"nodes"`
 	Edges []specEdge `json:"edges"`
-	View  topoView   `json:"view"`
 }
 
 // WireRegistry maps edge label → *PacedWire. Each entry points to the wire owned by
@@ -241,8 +224,7 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace, clk Clock) 
 
 // parseSpec reads and parses the topology spec at path — a directory tree
 // (loadTree) or a monolithic topology.json — into a topoSpec, WITHOUT validating
-// or building. Shared by LoadTopology (which then validates + builds) and
-// EmitSpecLine (which only needs the parsed spec).
+// or building. LoadTopology validates + builds from the result.
 func parseSpec(path string) (topoSpec, error) {
 	if info, err := os.Stat(path); err == nil && info.IsDir() { // path-resolution-ok: loader dispatch, not scene path resolution
 		return loadTree(path)
@@ -833,38 +815,4 @@ func (b *buildCtx) buildNodes() error {
 // aggregate.
 func (b *buildCtx) bindDispatch() {
 	b.md.Bind(b.outSink, SlotRegistry(b.destWire))
-}
-
-// EmitSpecLine reads the topology spec at jsonPath and writes a single
-// {"kind":"spec","nodes":[...],"edges":[...],"view":{...}} JSON line to w.
-// Called by main.go before node goroutines start so the TS webview receives
-// the full spec on startup without reading topology/ files directly.
-func EmitSpecLine(w io.Writer, jsonPath string) error {
-	spec, err := parseSpec(jsonPath)
-	if err != nil {
-		return err
-	}
-	// emitEdge adds the canonical "id" field (== label) that parseSpec requires
-	// for edge identity. specEdge itself carries only label (the on-disk tree
-	// shape), so we widen it here at the bridge boundary.
-	type emitEdge struct {
-		ID string `json:"id"`
-		specEdge
-	}
-	edges := make([]emitEdge, len(spec.Edges))
-	for i, e := range spec.Edges {
-		edges[i] = emitEdge{ID: e.Label, specEdge: e}
-	}
-	type specMsg struct {
-		Kind  string     `json:"kind"`
-		Nodes []specNode `json:"nodes"`
-		Edges []emitEdge `json:"edges"`
-		View  topoView   `json:"view"`
-	}
-	b, err := json.Marshal(specMsg{Kind: "spec", Nodes: spec.Nodes, Edges: edges, View: spec.View})
-	if err != nil {
-		return err
-	}
-	_, err = fmt.Fprintf(w, "%s\n", b)
-	return err
 }
