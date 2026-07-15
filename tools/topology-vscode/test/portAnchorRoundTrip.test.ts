@@ -4,8 +4,8 @@
 // port-anchor bridge record to round-trip here any more.)
 
 import { describe, it, expect } from "vitest";
-import { parseSpec } from "../src/schema";
-import type { Spec } from "../src/schema";
+import { parseSpec } from "../src/schema/parse-spec";
+import type { Spec } from "../src/schema/types-graph";
 
 const specWithAnchorId = {
   nodes: [

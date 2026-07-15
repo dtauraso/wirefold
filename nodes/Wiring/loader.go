@@ -190,7 +190,7 @@ type NodeData struct {
 // Fields tagged wire:"prop,..." are wire props emitted to wire-defs.ts by gen-node-defs.
 type specEdge struct {
 	Label        string `json:"label"          wire:"prop,required,tsType:string"`
-	Kind         string `json:"kind"           wire:"prop,required,tsType:EdgeKind"`
+	Kind         string `json:"kind"`
 	Source       string `json:"source"`
 	SourceHandle string `json:"sourceHandle"`
 	Target       string `json:"target"`

@@ -43,12 +43,17 @@ If a new kind needs a **new column in the content buffer**, add it to the buffer
 same commit — `check-buffer-layout-parity.sh` fails otherwise. This is the one
 grep-discoverable edit the three items above don't cover.
 
-**Wire props:** Wire props (`WireProps` from `tools/topology-vscode/src/schema/wire-defs.ts`)
-are Go-owned and streamed as columns of the buffer's Edge block; `buffer-scene.tsx`'s
-`EdgeTube` reads them from the decoded snapshot. A new wire prop must be added to
-`WireProps` in `wire-defs.ts`, packed into the Edge block (`Buffer/` + `buffer-layout.ts`),
-and read by `EdgeTube` in the same commit it is used; otherwise the render path is
-silently incomplete.
+**Wire props:** Wire props (`WireProps` from `tools/topology-vscode/src/schema/wire-defs.ts`,
+generated from `wire:"prop,..."` tags on `specEdge` in `nodes/Wiring/loader.go`) are
+Go-owned edge metadata from the spec JSON. Today the only prop is `label`, and it does
+NOT feed the render path: `EdgeTube` (`buffer-scene.tsx`'s edge renderer) reads only
+SX..EZ/Selected/Faded from the Edge block; `label` rides the Edge block's
+EdgeLabelOff/EdgeLabelLen columns solely for the `.probe` buffer-decoded log, never for
+drawing. If a NEW wire prop needs to affect rendering, it must be packed into the Edge
+block (`Buffer/` + `buffer-layout.ts`) and read by `EdgeTube` in the same commit — a
+`wire:"prop,..."` tag alone does not reach the screen. (An `EdgeKind`-typed `kind` prop
+was tried and removed: it had no Edge-block column and could not affect a single pixel;
+its only consumer was a test importing the schema barrel, not production code.)
 
 **Bridge surface:** **Go → TS** is the binary content buffer (`buffer-snapshot`) and
 NOTHING ELSE — Go reporting the whole scene. There is **no id/label/kind sidecar**: node
