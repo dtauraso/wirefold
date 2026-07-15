@@ -2,7 +2,6 @@ package Wiring
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 
@@ -10,7 +9,7 @@ import (
 )
 
 // deliveredBead is a value that has arrived at the wire's destination and is waiting
-// to be read by Recv or PollRecv. Recv/PollRecv consume on read (no separate Done).
+// to be read by PollRecv, which consumes on read (no separate Done).
 type deliveredBead struct {
 	val int
 	// deliverTick is the PINNED tick the caller was actually stepping when this
@@ -40,9 +39,6 @@ const PulseSpeedWuPerMs = CurveParamPulseSpeedWuPerMs
 // which equals the retired arc/pulseSpeedMs/16 sample count — so a bead visits the
 // same number of positions in the same wall time.
 const PulseSpeedWuPerTick = PulseSpeedWuPerMs * MsPerTick
-
-// ErrCanceled is returned by Send or Recv when the context is canceled.
-var ErrCanceled = errors.New("paced wire: context canceled")
 
 // beadPlacement bundles everything one placement needs. The in-flight time times
 // delivery; the segment endpoints + source identity drive the per-frame position
@@ -74,16 +70,13 @@ func (bp beadPlacement) streams() bool {
 // All fields are guarded by pw.mu.
 type inflightBead struct {
 	val           int
-	placementTick float64 // clock tick reading when placed (fractional after a geometry rebase)
-	startedTick   float64 // clock tick when the driver anchors its first step;
-	// set to placement tick so the driver's first step is always placementTick+1
-	// regardless of when the goroutine actually starts executing.
-	arc     float64     // current arc length of this bead's edge (world units)
-	seg     wireSegment // current straight-segment endpoints of this bead's edge
-	node    string      // source node id — the position/cancel routing key
-	port    string      // source output port — the position/cancel routing key
-	streams bool        // whether this bead carries position-stream context
-	gen     uint64      // per-bead id; the driven loop self-cancels on gen mismatch (teardown)
+	placementTick float64     // clock tick reading when placed (fractional after a geometry rebase)
+	arc           float64     // current arc length of this bead's edge (world units)
+	seg           wireSegment // current straight-segment endpoints of this bead's edge
+	node          string      // source node id — the position/cancel routing key
+	port          string      // source output port — the position/cancel routing key
+	streams       bool        // whether this bead carries position-stream context
+	gen           uint64      // per-bead id; the driven loop self-cancels on gen mismatch (teardown)
 	// finalPending is true once StepOnce has advanced this bead to its delivery
 	// deadline (target==deadline) but it was not yet at the FIFO head, so the
 	// move to `delivered` is still outstanding. StepOnce retries only the
@@ -249,7 +242,6 @@ func (pw *PacedWire) placeBeadNoWalkerAt(value any, bp beadPlacement, tick int64
 	b := inflightBead{
 		val:           beadVal,
 		placementTick: nowTick,
-		startedTick:   nowTick, // anchor first step to placement tick, not goroutine-start tick
 		// arc (world units) is reconstructed from the reported ms latency via the
 		// FIXED ms→wu conversion (msToArcWu), so it is independent of the clock's
 		// tick speed.
@@ -476,9 +468,6 @@ func (pw *PacedWire) ReviseInFlightGeometry(newArc float64, newSeg wireSegment) 
 		if pw.pulseSpeed > 0 {
 			b.placementTick = nowTick - t*(newArc/pw.pulseSpeed)
 		}
-		// Update startedTick to now so the driver's next step is anchored to the
-		// rebase point (avoids replaying the traversal from the old startedTick).
-		b.startedTick = nowTick
 	}
 }
 
