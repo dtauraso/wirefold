@@ -31,7 +31,7 @@ SRC_DIR="$REPO_ROOT/tools/topology-vscode/src"
 
 # Fail loud if the scanned tree moved — a silently-missing dir would make every
 # grep below error into `|| true`, keeping HITS at 0 and reporting a false clean
-# (mirror check-ts-shading-from-go.sh / check-slot-phase-boundary.sh).
+# (mirror check-ts-shading-from-go.sh).
 if [[ ! -d "$SRC_DIR" ]]; then
   echo "ts-computes-no-geometry: MISCONFIGURED — scan dir not found: $SRC_DIR" >&2
   exit 1
