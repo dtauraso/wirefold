@@ -9,10 +9,11 @@
 // alone (A's entry for B and B's entry for A are separate values).
 //
 // LayoutHolder is embedded into every node kind's struct (directly, or via
-// gatecommon.GateNode for the two gate kinds) so builders.go can attach the
-// computed list by reflection the same way it wires ports/data, and so every
-// kind gets the UpdateLayout loop for free — satisfying the Node interface's
-// second method without per-kind boilerplate.
+// gatecommon.GateNode for the two gate kinds) so loader.go can locate it by
+// reflection (the same field-lookup used for port/data injection) and load the
+// computed list through LoadLocalPolars, and so every kind gets the
+// UpdateLayout loop for free — satisfying the Node interface's second method
+// without per-kind boilerplate.
 //
 // UpdateLayout parks on ctx.Done() the same way every node's Update loop exits
 // on cancellation, but is NOT gated by the play/pause clock: it does not wait
@@ -84,7 +85,7 @@ func (lp LocalPolar) effectiveSteps() (t, p, r float64) {
 // concurrent access safe by construction rather than by convention).
 type LayoutHolder struct {
 	mu          sync.Mutex
-	LocalPolars []LocalPolar
+	localPolars []LocalPolar
 }
 
 // UpdateLayout runs this node's layout-update loop until ctx is cancelled. It is
@@ -103,12 +104,22 @@ func (lh *LayoutHolder) UpdateLayout(ctx context.Context) {
 func (lh *LayoutHolder) localPolarSteps(to string) (t, p, r float64) {
 	lh.mu.Lock()
 	defer lh.mu.Unlock()
-	for _, lp := range lh.LocalPolars {
+	for _, lp := range lh.localPolars {
 		if lp.To == to {
 			return lp.effectiveSteps()
 		}
 	}
 	return LocalPolar{}.effectiveSteps()
+}
+
+// LoadLocalPolars replaces this node's entire local-polar list under lock. Used
+// exactly once, at load time (loader.go), to attach the freshly-computed list
+// (computeLocalPolars) to the node's own LayoutHolder — the only initial-load
+// writer, distinct from SetLocalPolar's per-neighbor upsert used by drags.
+func (lh *LayoutHolder) LoadLocalPolars(lps []LocalPolar) {
+	lh.mu.Lock()
+	defer lh.mu.Unlock()
+	lh.localPolars = lps
 }
 
 // SetLocalPolar upserts this node's local-polar entry for the given neighbor
@@ -117,18 +128,18 @@ func (lh *LayoutHolder) localPolarSteps(to string) (t, p, r float64) {
 func (lh *LayoutHolder) SetLocalPolar(to string, quantITheta, quantIPhi, quantIR int, stepTheta, stepPhi, stepR float64) {
 	lh.mu.Lock()
 	defer lh.mu.Unlock()
-	for i := range lh.LocalPolars {
-		if lh.LocalPolars[i].To == to {
-			lh.LocalPolars[i].QuantITheta = quantITheta
-			lh.LocalPolars[i].QuantIPhi = quantIPhi
-			lh.LocalPolars[i].QuantIR = quantIR
-			lh.LocalPolars[i].StepTheta = stepTheta
-			lh.LocalPolars[i].StepPhi = stepPhi
-			lh.LocalPolars[i].StepR = stepR
+	for i := range lh.localPolars {
+		if lh.localPolars[i].To == to {
+			lh.localPolars[i].QuantITheta = quantITheta
+			lh.localPolars[i].QuantIPhi = quantIPhi
+			lh.localPolars[i].QuantIR = quantIR
+			lh.localPolars[i].StepTheta = stepTheta
+			lh.localPolars[i].StepPhi = stepPhi
+			lh.localPolars[i].StepR = stepR
 			return
 		}
 	}
-	lh.LocalPolars = append(lh.LocalPolars, LocalPolar{
+	lh.localPolars = append(lh.localPolars, LocalPolar{
 		To: to, QuantITheta: quantITheta, QuantIPhi: quantIPhi, QuantIR: quantIR,
 		StepTheta: stepTheta, StepPhi: stepPhi, StepR: stepR,
 	})
@@ -139,7 +150,7 @@ func (lh *LayoutHolder) SetLocalPolar(to string, quantITheta, quantIPhi, quantIR
 func (lh *LayoutHolder) LocalPolarsSnapshot() []LocalPolar {
 	lh.mu.Lock()
 	defer lh.mu.Unlock()
-	out := make([]LocalPolar, len(lh.LocalPolars))
-	copy(out, lh.LocalPolars)
+	out := make([]LocalPolar, len(lh.localPolars))
+	copy(out, lh.localPolars)
 	return out
 }

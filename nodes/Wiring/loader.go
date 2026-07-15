@@ -798,22 +798,24 @@ func (b *buildCtx) buildNodes() error {
 		if err != nil {
 			return fmt.Errorf("LoadTopology: build node %q: %w", n.ID, err)
 		}
-		// Attach this node's computed LocalPolars list (layout_holder.go) the same
-		// way port/data injection works — by reflection over the promoted field
-		// every kind gets via the embedded Wiring.LayoutHolder — so the node's
-		// layout goroutine owns it without per-kind wiring.
+		// Attach this node's computed LocalPolars list (layout_holder.go) via the
+		// promoted embedded Wiring.LayoutHolder every kind gets — so the node's
+		// layout goroutine owns it without per-kind wiring. Locate the embedded
+		// *LayoutHolder by reflection (same field-lookup builders.go/loader.go use
+		// elsewhere for port/data injection), then load through its own locked
+		// setter rather than reflecting on the unexported localPolars field
+		// directly, so this initial load goes through the same mutex every other
+		// LocalPolars access does.
 		if v := reflect.ValueOf(nd).Elem(); v.Kind() == reflect.Struct {
-			if lps, ok := b.localPolars[n.ID]; ok {
-				if f := v.FieldByName("LocalPolars"); f.IsValid() && f.CanSet() {
-					f.Set(reflect.ValueOf(lps))
-				}
-			}
-			// Register this node's embedded *Wiring.LayoutHolder with the move
-			// dispatcher so a later drag (RootMove) can route a local-polar
-			// re-quantize to the OWNING node's own holder — MoveDispatch never
-			// copies or owns LocalPolars itself.
 			if lhField := v.FieldByName("LayoutHolder"); lhField.IsValid() && lhField.CanAddr() {
 				if lh, ok := lhField.Addr().Interface().(*LayoutHolder); ok {
+					if lps, ok := b.localPolars[n.ID]; ok {
+						lh.LoadLocalPolars(lps)
+					}
+					// Register this node's embedded *Wiring.LayoutHolder with the move
+					// dispatcher so a later drag (RootMove) can route a local-polar
+					// re-quantize to the OWNING node's own holder — MoveDispatch never
+					// copies or owns LocalPolars itself.
 					b.md.layoutHolders[n.ID] = lh
 				}
 			}
