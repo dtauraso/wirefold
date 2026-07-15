@@ -309,7 +309,7 @@ func (pw *PacedWire) tryDeliverHeadLocked(ctx context.Context, gen uint64, nowTi
 }
 
 // StepOnce is the NON-BLOCKING one-tick step primitive: the only delivery path
-// (MODEL.md "one clock, sleep-only pacing"). It advances every in-flight bead
+// (MODEL.md "The model is sleep-only"). It advances every in-flight bead
 // on this wire that is due at the CURRENT clock tick by exactly one
 // position-step, attempts any FIFO-head delivery that is now ready, and
 // RETURNS IMMEDIATELY — it never loops over future ticks and never parks
