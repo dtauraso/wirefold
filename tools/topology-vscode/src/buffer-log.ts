@@ -42,6 +42,43 @@ import {
 
 type Line = Record<string, unknown>;
 
+// DecodedEventLine pins the field shape decodeEventLine (below) emits per Go event kind —
+// the SAME shape the removed JSON-on-stdout path used to emit. Kept as a typed contract
+// so trace-event-fields.test.ts's hand-curated fixture stays pinned to what this decoder
+// actually produces; this type has no runtime effect on decodeEventLine itself (which
+// returns the looser `Line`).
+export type DecodedEventLine =
+  | { step: number; kind: "recv" | "fire"; node: string; port?: string; value?: number }
+  | { step: number; kind: "send"; node: string; port?: string; value?: number; arcLength?: number; simLatencyMs?: number; target?: string; targetHandle?: string }
+  | { step: number; kind: "done"; node: string; port: string }
+  | { step: number; kind: "edge-bead"; node: string; port: string; value?: number; x: number; y: number; z: number; f: number; bead?: number }
+  | { step: number; kind: "geometry"; edge: string; sx: number; sy: number; sz: number; ex: number; ey: number; ez: number }
+  | { step: number; kind: "pulse-cancelled"; node: string; port: string; value?: number; bead?: number }
+  | { step: number; kind: "arrive"; node: string; port: string; value?: number; bead?: number }
+  | { step: number; kind: "node-geometry"; node: string; label?: string; nodeKind?: string; nx: number; ny: number; nz: number; radius: number; sphereR?: number; vrx: number; vry: number; vrz: number; frx: number; fry: number; frz: number; ports: { name: string; isInput: boolean; px: number; py: number; pz: number; dx: number; dy: number; dz: number }[] }
+  | { step: number; kind: "node-bead"; node: string; row: number; col: number; present: boolean; value: number; x: number; y: number; z: number }
+  | { step: number; kind: "camera"; px: number; py: number; pz: number; r: number; posTheta: number; posPhi: number; upTheta: number; upPhi: number }
+  | { step: number; kind: "scene-tori"; visible: boolean }
+  | { step: number; kind: "scene-poles"; visible: boolean }
+  | { step: number; kind: "node-poles"; visible: boolean }
+  | { step: number; kind: "angle-labels"; visible: boolean }
+  | { step: number; kind: "sel-sphere-poles"; visible: boolean }
+  | { step: number; kind: "handholds"; visible: boolean }
+  | { step: number; kind: "labels-global"; visible: boolean }
+  | { step: number; kind: "badges-global"; visible: boolean }
+  | { step: number; kind: "overlays-vis"; visible: boolean }
+  // Go-owned click-selection: the currently-selected node id (node="" clears it).
+  | { step: number; kind: "select"; node: string }
+  | { step: number; kind: "fade"; fadedNodes: string[]; fadedEdges: string[] }
+  | { step: number; kind: "hover"; node: string; port?: string; value?: number }
+  // Go-owned polar rule-builder session state (gesture.go trySelectSphereRule); full-mirror
+  // on every state change, like fade above.
+  | { step: number; kind: "rule-builder"; ruleCenter: string; ruleHasPending: boolean; rulePendingCode: number; ruleTerms: { node: string; code: number }[] }
+  // Go-owned COMMITTED polar-equation lock list (locks.go, md.polarEqs) + the panel's
+  // focused row (selectedLockIndex=-1 = none); full-mirror on every mutation (rule
+  // completion, toggle, select, delete, load), like rule-builder above.
+  | { step: number; kind: "polar-locks"; polarLocks: { center: string; aNode: string; aCode: number; bNode: string; bCode: number; active: boolean }[]; selectedLockIndex: number };
+
 /**
  * Decode a snapshot into `.probe/go.jsonl` lines (one JSON object per line, trailing \n each).
  * Returns "" when the frame is undecodable or carries no events. Each line uses the shared

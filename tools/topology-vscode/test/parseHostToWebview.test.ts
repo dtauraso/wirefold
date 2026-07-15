@@ -1,33 +1,12 @@
-// parseHostToWebview payload-validation tests. A malformed host→webview message
-// (esp. trace-event with a missing/malformed event) must be dropped (undefined) so
-// it can never reach pump.ts and throw, blanking the editor.
+// parseHostToWebview payload-validation tests. A malformed host→webview message must be
+// dropped (undefined) so it can never reach a downstream consumer and throw, blanking the
+// editor.
 import { describe, it, expect } from "vitest";
 import { parseHostToWebview } from "../src/messages";
 
 describe("parseHostToWebview", () => {
-  it("accepts a well-formed trace-event envelope", () => {
-    const msg = { type: "trace-event", event: { step: 3, kind: "fire", node: "n1" } };
-    expect(parseHostToWebview(msg)).toEqual(msg);
-  });
-
-  it("rejects trace-event with a missing event", () => {
-    expect(parseHostToWebview({ type: "trace-event" })).toBeUndefined();
-  });
-
-  it("rejects trace-event with a null event", () => {
-    expect(parseHostToWebview({ type: "trace-event", event: null })).toBeUndefined();
-  });
-
-  it("rejects trace-event whose event lacks a numeric step", () => {
-    expect(
-      parseHostToWebview({ type: "trace-event", event: { kind: "fire" } }),
-    ).toBeUndefined();
-  });
-
-  it("rejects trace-event whose event lacks a string kind", () => {
-    expect(
-      parseHostToWebview({ type: "trace-event", event: { step: 1 } }),
-    ).toBeUndefined();
+  it("rejects the removed trace-event type (nothing posts it; Go's JSON-on-stdout path was removed)", () => {
+    expect(parseHostToWebview({ type: "trace-event", event: { step: 3, kind: "fire", node: "n1" } })).toBeUndefined();
   });
 
   it("rejects the removed load type (the render path is buffer-only; no spec/scene load message)", () => {

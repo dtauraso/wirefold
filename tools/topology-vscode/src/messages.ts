@@ -158,55 +158,8 @@ export type WebviewToHostMsg =
   | { type: "webview-log"; entry: string }
   | EditMsg;
 
-// Mirrors Go Trace.Event shape. kind ∈
-// {"recv","fire","send","done","edge-bead","geometry","pulse-cancelled"}.
-// recv/send carry port+value; fire carries only node; send also carries edge
-// when the Go side has resolved it (currently omitted — raw form only).
-// edge-bead (Phase 2) carries the bead's Go-computed 3-D world position (x,y,z) plus
-// its FRACTIONAL progress t along the wire (f, 0..1), keyed by source node+port like
-// send so the renderer routes it by source+sourceHandle. Go owns progress; the editor
-// places the bead at lerp(liveStart, liveEnd, f) on its LOCAL (dragged) node port
-// positions so the bead rides the live wire with no round-trip lag (it does not
-// compute geometry — it places a Go-owned fraction on editor-owned node positions).
-// geometry (Phase 3) carries an edge's authoritative straight-segment endpoints
-// (sx/sy/sz = Start, ex/ey/ez = End), keyed by edge (== the edge id), so the
-// renderer draws the wire tube from Go's segment. pulse-cancelled (Phase 3) tells the renderer to drop an
-// in-flight bead's sprite (edge deleted mid-flight), keyed by source node+port.
-export type TraceEvent =
-  | { step: number; kind: "recv" | "fire"; node: string; port?: string; value?: number }
-  | { step: number; kind: "send"; node: string; port?: string; value?: number; arcLength?: number; simLatencyMs?: number; target?: string; targetHandle?: string }
-  | { step: number; kind: "done"; node: string; port: string }
-  | { step: number; kind: "edge-bead"; node: string; port: string; value?: number; x: number; y: number; z: number; f: number; bead?: number }
-  | { step: number; kind: "geometry"; edge: string; sx: number; sy: number; sz: number; ex: number; ey: number; ez: number }
-  | { step: number; kind: "pulse-cancelled"; node: string; port: string; value?: number; bead?: number }
-  | { step: number; kind: "arrive"; node: string; port: string; value?: number; bead?: number }
-  | { step: number; kind: "node-geometry"; node: string; label?: string; nodeKind?: string; nx: number; ny: number; nz: number; radius: number; sphereR?: number; vrx: number; vry: number; vrz: number; frx: number; fry: number; frz: number; ports: { name: string; isInput: boolean; px: number; py: number; pz: number; dx: number; dy: number; dz: number }[] }
-  | { step: number; kind: "node-bead"; node: string; row: number; col: number; present: boolean; value: number; x: number; y: number; z: number }
-  | { step: number; kind: "camera"; px: number; py: number; pz: number; r: number; posTheta: number; posPhi: number; upTheta: number; upPhi: number }
-  | { step: number; kind: "scene-tori"; visible: boolean }
-  | { step: number; kind: "scene-poles"; visible: boolean }
-  | { step: number; kind: "node-poles"; visible: boolean }
-  | { step: number; kind: "angle-labels"; visible: boolean }
-  | { step: number; kind: "sel-sphere-poles"; visible: boolean }
-  | { step: number; kind: "handholds"; visible: boolean }
-  | { step: number; kind: "labels-global"; visible: boolean }
-  | { step: number; kind: "badges-global"; visible: boolean }
-  | { step: number; kind: "overlays-vis"; visible: boolean }
-  // Go-owned click-selection: the currently-selected node id (node="" clears it).
-  | { step: number; kind: "select"; node: string }
-  | { step: number; kind: "fade"; fadedNodes: string[]; fadedEdges: string[] }
-  | { step: number; kind: "hover"; node: string; port?: string; value?: number }
-  // Go-owned polar rule-builder session state (gesture.go trySelectSphereRule); full-mirror
-  // on every state change, like fade above.
-  | { step: number; kind: "rule-builder"; ruleCenter: string; ruleHasPending: boolean; rulePendingCode: number; ruleTerms: { node: string; code: number }[] }
-  // Go-owned COMMITTED polar-equation lock list (locks.go, md.polarEqs) + the panel's
-  // focused row (selectedLockIndex=-1 = none); full-mirror on every mutation (rule
-  // completion, toggle, select, delete, load), like rule-builder above.
-  | { step: number; kind: "polar-locks"; polarLocks: { center: string; aNode: string; aCode: number; bNode: string; bCode: number; active: boolean }[]; selectedLockIndex: number };
-
 export type HostToWebviewMsg =
   | { type: "run-status"; state: RunStatus["state"]; message?: string }
-  | { type: "trace-event"; event: TraceEvent }
   // Phase 3: binary snapshot from Go's fd3 side channel.
   // The ArrayBuffer is transferred zero-copy (postMessage transferable).
   // Phase 5 will render from it; for now the webview stubs the handler.
@@ -225,7 +178,7 @@ export const WEBVIEW_TO_HOST_TYPES: ReadonlySet<WebviewToHostMsg["type"]> = new 
 ]);
 
 const HOST_TO_WEBVIEW_TYPES: ReadonlySet<HostToWebviewMsg["type"]> = new Set([
-  "run-status", "trace-event", "buffer-snapshot",
+  "run-status", "buffer-snapshot",
 ]);
 
 // The editor→Go payload validators (parseEdit / parseUpdate / parseRawInput) were removed
@@ -264,13 +217,10 @@ const RUN_STATUS_STATES: ReadonlySet<string> = new Set([
 ]);
 
 // parseHostToWebview validates a host→webview message by its type AND its payload,
-// mirroring parseWebviewToHost's per-op shape checks. A malformed message (esp.
-// type="trace-event" with a missing/malformed event) is dropped (undefined) rather
-// than forwarded — the webview message listener drops undefined, so a bad envelope
-// can never reach a downstream consumer that destructures it and throw, blanking the
-// editor.
-// Only the ENVELOPE is checked here (event is a non-null object with numeric step +
-// string kind); full per-kind field validation lives in runCommand.ts/trace-event-fields.
+// mirroring parseWebviewToHost's per-op shape checks. A malformed message is dropped
+// (undefined) rather than forwarded — the webview message listener drops undefined, so a
+// bad envelope can never reach a downstream consumer that destructures it and throws,
+// blanking the editor.
 export function parseHostToWebview(raw: unknown): HostToWebviewMsg | undefined {
   if (!raw || typeof raw !== "object") return undefined;
   const m = raw as Record<string, unknown>;
@@ -284,16 +234,6 @@ export function parseHostToWebview(raw: unknown): HostToWebviewMsg | undefined {
       if (typeof m.state !== "string" || !RUN_STATUS_STATES.has(m.state)) return undefined;
       if (m.message !== undefined && typeof m.message !== "string") return undefined;
       return m as unknown as HostToWebviewMsg;
-    case "trace-event": {
-      // Minimal envelope the consumer relies on: event is a non-null object carrying a
-      // numeric step and a string kind. Per-kind fields are validated downstream.
-      const ev = m.event;
-      if (!ev || typeof ev !== "object") return undefined;
-      const e = ev as Record<string, unknown>;
-      if (typeof e.step !== "number" || !Number.isFinite(e.step)) return undefined;
-      if (typeof e.kind !== "string") return undefined;
-      return m as unknown as HostToWebviewMsg;
-    }
     case "buffer-snapshot":
       // buffer must be an ArrayBuffer (transferred zero-copy from the host).
       return m.buffer instanceof ArrayBuffer ? (m as unknown as HostToWebviewMsg) : undefined;

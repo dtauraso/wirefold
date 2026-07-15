@@ -73,12 +73,6 @@ function openTopologyEditor(context: vscode.ExtensionContext, folderUri?: vscode
   };
   const runner = new BuildAndRunRunner(
     (status) => post({ type: "run-status", ...status }),
-    (event) => {
-      // Forward the JSON trace event verbatim (the .probe log source). Node labels are NOT
-      // derived here anymore — each node's label rides the binary content buffer's node block
-      // (LabelOff/LabelLen), so there is no id/label sidecar. Go → TS is buffer-only.
-      post({ type: "trace-event", event });
-    },
     // fd3 buffer-snapshot frames: forward each to the webview verbatim. Without this
     // wiring the runner reads fd3 (handleFd3) but drops every frame, so the new-system
     // BufferScene (which polls getLatestSnapshot each frame) never receives node/edge/
