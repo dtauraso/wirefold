@@ -221,8 +221,6 @@ func TestSnapshotRoundTrip(t *testing.T) {
 	gotY := readF32(snap, beadOff+BufBeadColY)
 	gotZ := readF32(snap, beadOff+BufBeadColZ)
 	gotVal := readI32(snap, beadOff+BufBeadColValue)
-	gotFrac := readF32(snap, beadOff+BufBeadColFrac)
-	gotID := readU32(snap, beadOff+BufBeadColBeadID)
 	gotLive := snap[beadOff+BufBeadColLive]
 
 	if gotX != 2.5 {
@@ -236,12 +234,6 @@ func TestSnapshotRoundTrip(t *testing.T) {
 	}
 	if gotVal != 42 {
 		t.Errorf("bead.Value: got %v, want 42", gotVal)
-	}
-	if gotFrac != float32(0.6) {
-		t.Errorf("bead.Frac: got %v, want 0.6", gotFrac)
-	}
-	if gotID != 1 {
-		t.Errorf("bead.BeadID: got %v, want 1", gotID)
 	}
 	if gotLive != 1 {
 		t.Errorf("bead.Live: got %v, want 1", gotLive)

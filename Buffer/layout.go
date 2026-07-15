@@ -24,7 +24,7 @@
 package Buffer
 
 // BufLayoutVersion is the schema version. Bump when any column changes.
-const BufLayoutVersion = 22
+const BufLayoutVersion = 23
 
 // BufInteriorSlotsPerNode is the fixed number of interior grid slots reserved per
 // node in the Interior block (a 2x2 held/interior-bead grid: slot = row*2 + col).
@@ -52,13 +52,11 @@ const (
 // bufLayoutBead defines one row of the beads column block.
 // One row per live in-flight bead. Matched from KindPosition trace events.
 type bufLayoutBead struct {
-	X      float32 `buf:"f32"` // world x position
-	Y      float32 `buf:"f32"` // world y position
-	Z      float32 `buf:"f32"` // world z position
-	Value  int32   `buf:"i32"` // bead integer value
-	Frac   float32 `buf:"f32"` // fractional progress t in [0,1] along wire
-	BeadID uint32  `buf:"u32"` // per-wire monotonic bead id (1-based)
-	Live   uint8   `buf:"u8"`  // 1 = slot occupied; 0 = absent (sentinel row)
+	X     float32 `buf:"f32"` // world x position
+	Y     float32 `buf:"f32"` // world y position
+	Z     float32 `buf:"f32"` // world z position
+	Value int32   `buf:"i32"` // bead integer value
+	Live  uint8   `buf:"u8"`  // 1 = slot occupied; 0 = absent (sentinel row)
 }
 
 // bufLayoutNode defines one row of the nodes column block.

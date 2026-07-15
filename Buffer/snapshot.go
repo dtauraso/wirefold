@@ -245,8 +245,6 @@ type edgeSnapState struct {
 type beadSnapState struct {
 	x, y, z float64
 	value   int
-	frac    float64
-	beadID  uint64
 }
 
 // cameraSnapState mirrors the camera block (single row).
@@ -361,9 +359,7 @@ func (s *SnapshotState) Update(ev T.Event) {
 		k := beadSnapKey{ev.Node, ev.Port, ev.Bead}
 		s.beads[k] = beadSnapState{
 			x: ev.X, y: ev.Y, z: ev.Z,
-			value:  ev.Value,
-			frac:   ev.F,
-			beadID: ev.Bead,
+			value: ev.Value,
 		}
 		s.emitSnapshot()
 
@@ -1000,9 +996,10 @@ func (s *SnapshotState) writeHeader(buf []byte, b *snapshotBuild) int {
 	return off
 }
 
-// writeBeadBlock writes one row per live bead (map iteration; order not guaranteed, but the
-// consumer identifies beads by beadID, not row position). Suppresses a faded edge's transit
-// bead (Live=0) — a faded edge shows no traveling bead.
+// writeBeadBlock writes one row per live bead (map iteration; row order is not stable across
+// snapshots, but the renderer reads beads by row position each frame with no cross-frame
+// identity needed). Suppresses a faded edge's transit bead (Live=0) — a faded edge shows no
+// traveling bead.
 func (s *SnapshotState) writeBeadBlock(buf []byte, off int, b *snapshotBuild) int {
 	beadBuf := buf[off : off+int(b.beadCount)*BufBeadStride]
 	row := 0
@@ -1013,7 +1010,7 @@ func (s *SnapshotState) writeBeadBlock(buf []byte, off int, b *snapshotBuild) in
 		}
 		SetBeadRow(beadBuf, row,
 			float32(bead.x), float32(bead.y), float32(bead.z),
-			int32(bead.value), float32(bead.frac), uint32(bead.beadID), live)
+			int32(bead.value), live)
 		row++
 	}
 	return off + int(b.beadCount)*BufBeadStride
