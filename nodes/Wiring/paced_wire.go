@@ -627,4 +627,3 @@ func (pw *PacedWire) Restore() {
 		}
 	}
 }
-
