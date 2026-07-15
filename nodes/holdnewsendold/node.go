@@ -15,19 +15,6 @@ type Node struct {
 	Held                       int `wire:"data.state"`
 	FromPrevHoldNewSendOldNode *Wiring.In
 	ToNext                     Wiring.OutMulti
-	ToInput                    *Wiring.Out
-	// ToHoldNewSendOld is a declared output back to another HoldNewSendOld
-	// node. Intentionally inert (no send logic) — see 5To2/6To2 edge task.
-	ToHoldNewSendOld *Wiring.Out
-	// FromHoldNewSendOld is a declared input from another HoldNewSendOld
-	// node. Intentionally inert (no read logic) — see 5To2/6To2 edge task.
-	FromHoldNewSendOld *Wiring.In
-	// FromPulse is a declared input from a Pulse node. Intentionally inert
-	// (no read logic) — see 6To2 edge task.
-	FromPulse *Wiring.In
-	// FromHold is a declared input from a Hold node. Intentionally inert
-	// (no read logic) — see 7To5 edge task.
-	FromHold *Wiring.In
 }
 
 // placeHeld appends the ToNext fan-out beads (held value) to items WITHOUT driving

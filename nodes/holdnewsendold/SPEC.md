@@ -31,11 +31,6 @@
 |------|-----------|----------|-------|
 | FromPrevHoldNewSendOldNode | in | chain | receives value from upstream chain holdnewsendold |
 | ToNext | out | chain | fan-out to downstream nodes (multi-output) |
-| ToInput | out | chain | declared step back to the Input node (inert) |
-| ToHoldNewSendOld | out | chain | declared output to another HoldNewSendOld node (inert) |
-| FromHoldNewSendOld | in | chain | declared input from another HoldNewSendOld node (inert) |
-| FromPulse | in | chain | declared input from a Pulse node (inert) |
-| FromHold | in | chain | declared input from a Hold node (inert) |
 
 ## Firing rule
 
