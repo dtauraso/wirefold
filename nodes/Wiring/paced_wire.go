@@ -136,7 +136,7 @@ type PacedWire struct {
 	clock      Clock
 	pulseSpeed float64
 	// MaxIncomingSimLatencyMs is the per-port aggregate max(SimLatencyMs) over
-	// every edge feeding this destination port. Read only by In.SimLatencyMs().
+	// every edge feeding this destination port. Kept in step by SetIncomingLatency.
 	MaxIncomingSimLatencyMs float64
 	// incomingLatency tracks each feeding edge's own SimLatencyMs (edgeId → latency).
 	incomingLatency map[string]float64
@@ -414,28 +414,7 @@ func (pw *PacedWire) findInflightLocked(gen uint64) int {
 	return -1
 }
 
-// Recv blocks until a delivered value is available, then pops and returns it
-// (FIFO, in send order). Recv CONSUMES on read — there is no separate Done step.
-// Returns ErrCanceled if ctx is done before a value arrives.
-func (pw *PacedWire) Recv(ctx context.Context) (any, error) {
-	done := broadcastOnCancel(ctx, &pw.mu, pw.cond)
-	defer close(done)
-
-	pw.mu.Lock()
-	for len(pw.delivered) == 0 && ctx.Err() == nil {
-		pw.cond.Wait()
-	}
-	if len(pw.delivered) == 0 {
-		pw.mu.Unlock()
-		return nil, ErrCanceled
-	}
-	b := pw.delivered[0]
-	pw.delivered = pw.delivered[1:]
-	pw.mu.Unlock()
-	return b.val, nil
-}
-
-// PollRecv is the non-blocking variant of Recv. It pops and returns the front
+// PollRecv is the non-blocking variant of the former Recv. It pops and returns the front
 // delivered value if one is present, else (nil, false). Like Recv, PollRecv
 // CONSUMES on read.
 func (pw *PacedWire) PollRecv() (any, bool) {

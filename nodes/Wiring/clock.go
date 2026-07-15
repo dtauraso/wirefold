@@ -148,21 +148,3 @@ func (c *RealClock) SleepCycle(ctx context.Context) error {
 // Compile-time assertion that RealClock satisfies Clock.
 var _ Clock = (*RealClock)(nil)
 
-// broadcastOnCancel starts a goroutine that broadcasts on cond when ctx is done,
-// holding mu around the broadcast so the wake cannot be lost in a waiter's
-// check→Wait window. The caller closes the returned channel to stop the watcher.
-// Shared with PacedWire.Recv — the one place the "wake a cond-parked waiter on
-// cancellation" pattern lives.
-func broadcastOnCancel(ctx context.Context, mu *sync.Mutex, cond *sync.Cond) chan struct{} {
-	stop := make(chan struct{})
-	go func() {
-		select {
-		case <-ctx.Done():
-			mu.Lock()
-			cond.Broadcast()
-			mu.Unlock()
-		case <-stop:
-		}
-	}()
-	return stop
-}

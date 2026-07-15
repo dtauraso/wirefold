@@ -2,8 +2,8 @@
 //
 // Two edges of different length fan into one destination input port. Each edge
 // must keep its OWN Out.SimLatencyMs (per-edge travel-time), while the shared
-// destination wire's MaxIncomingSimLatencyMs is the max over both edges (the
-// value In.SimLatencyMs() returns to derive a windowed node's coincidence W).
+// destination wire's MaxIncomingSimLatencyMs is the max over both edges (used
+// to derive a windowed node's coincidence W).
 
 package Wiring
 

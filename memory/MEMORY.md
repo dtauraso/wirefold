@@ -57,7 +57,7 @@ Each entry can drift; if it conflicts with current code, update or remove the me
 - [feedback_dont_invent_doctrine.md](feedback_dont_invent_doctrine.md) — Don't paraphrase a one-off note into a "rule" and cite the paraphrase as project doctrine; grep for the literal phrasing first
 - [feedback_tsc_verify_after_removal.md](feedback_tsc_verify_after_removal.md) — After deleting/refactoring webview TS, verify with `tsc --noEmit` too; esbuild (`npm run build`) skips type-checking and lets dangling refs reach runtime
 - [feedback_node_model_not_networking_handshake.md](feedback_node_model_not_networking_handshake.md) — Nodes do local work + drive their outputs; no TCP-handshake/ack-nack/send-gating delivery guarantees
-- [feedback_paced_tryrecv_blocks.md](feedback_paced_tryrecv_blocks.md) — Paced TryRecv blocks (not a poll); judge from paced_wire.go impl, not the Try/ok idiom
+- [feedback_paced_tryrecv_blocks.md](feedback_paced_tryrecv_blocks.md) — In.TryRecv/PacedWire.Recv deleted as dead code (2026-07); live non-blocking receive is In.PollRecv/PacedWire.PollRecv
 - [feedback_per_goroutine_bridge.md](feedback_per_goroutine_bridge.md) — Go↔TS bridge is per-goroutine (each goroutine sends/picks up); geometry's central emitter is the deviation
 - [project_wire_is_straight_line_not_chain.md](project_wire_is_straight_line_not_chain.md) — Wires are straight PacedWire lines; bead-item chain model was built then rejected (O(N²) follow latency); don't re-propose it
 - [feedback_place_all_then_drive_concurrently.md](feedback_place_all_then_drive_concurrently.md) — Place all outbound beads before driving concurrently (DriveAll); serial per-edge drive causes fan-out timing regression (node-2 lesson, 2026-06-14)

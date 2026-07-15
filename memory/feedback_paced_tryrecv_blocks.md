@@ -1,8 +1,8 @@
 ---
 name: paced-tryrecv-blocks
-description: Paced-mode TryRecv BLOCKS; judge blocking-ness from paced_wire.go implementation, not the Try/ok call-site idiom
+description: In.TryRecv / PacedWire.Recv were deleted as dead code (2026-07); the live non-blocking receive is In.PollRecv / PacedWire.PollRecv
 metadata:
   type: feedback
 ---
 
-Paced-mode `TryRecv` BLOCKS; it is not a poll. The paced branch in `nodes/Wiring/ports.go` calls `paced_wire.go` `Recv`, which selects on `slotReadyCh` with NO default → parks until the clock delivers; `ok=false` means ctx-cancelled, not "nothing available." The `if v, ok := port.TryRecv(); ok {` call-site idiom looks non-blocking (Go Try/comma-ok convention) and misled a subagent into mis-reporting i0 as a per-round poll. Rule: judge blocking-ness from the paced_wire.go implementation, not the call-site idiom. Consequence: an unseeded feedback ring deadlocks at t=0 (read-before-send parks forever) — why in08 must send before it reads.
+`In.TryRecv` and `PacedWire.Recv` (the cond.Wait-parked receive this memory used to warn about) were DELETED — a code-smell audit found `In.TryRecv` had zero callers anywhere, including tests. All live nodes read via `In.PollRecv`, which is genuinely non-blocking: in paced mode it calls `PacedWire.PollRecv` (returns immediately with `ok=false` when no delivered value is present, without parking); it does not select on anything with no default and does not `cond.Wait()`. If future code adds a blocking receive back, judge its blocking-ness from the `paced_wire.go` implementation, not the Try/ok call-site idiom, per the original lesson here. The historical deadlock this memory described (unseeded feedback ring parking forever at t=0 on `TryRecv`) is now moot — no receive path blocks — but ring bootstrap still needs a seed edge for correctness (`feedback_edge_seed_required_for_rings.md`).
