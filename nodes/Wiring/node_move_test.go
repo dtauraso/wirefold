@@ -42,7 +42,7 @@ func deliver(md *MoveDispatch, nodeID string, x, y, z float64) {
 	acks := make([]chan struct{}, 0, len(keys))
 	for _, kk := range keys {
 		ack := make(chan struct{})
-		md.dispatch[kk] <- moveMsg{Kind: moveMsgKindCenter, NodeID: nodeID, Center: center, ack: ack}
+		md.dispatch[kk] <- moveMsg{Kind: moveMsgKindCenter, NodeID: nodeID, Center: center, testDone: ack}
 		acks = append(acks, ack)
 	}
 	for _, ack := range acks {

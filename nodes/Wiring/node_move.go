@@ -98,11 +98,17 @@ type centerSnap struct {
 //   - "" or "move": node-move — currently a no-op (polar-layout positions all nodes via "center" messages).
 //   - "fade":       per-wire fade — Faded applied by edgeMover only (nodeMover ignores).
 //
-// ack (if non-nil) is closed by the mover after it has fully handled the message.
-// The live "resend" command path (ResendGeometry, reached from stdin_reader.go's
-// "resend" case) DOES construct and block on acks — it is not test-only. (The ack
-// mechanism itself is slated for removal in a later round; this comment only
-// corrects what is true of it today.)
+// Every PRODUCTION send is fire-and-forget: the sender drops the message in an inbox
+// and returns. No production path observes the receiver finishing — a node does its own
+// local work on its own goroutine and drives its own outputs (MODEL.md: no ack, no
+// send-gating, no delivery signal).
+//
+// testDone is the one exception and it is NOT a production mechanism: it exists only so
+// a test can block until an async mover has handled a message before asserting (see
+// node_move_test.go's `deliver`). It is needed because an edgeMover publishes no atomic
+// snapshot a test could safely poll. Production ALWAYS leaves it nil — if you find
+// yourself setting it outside a _test.go file, you are reintroducing the ack the model
+// forbids; make the receiver's own goroutine do the work instead.
 type moveMsg struct {
 	Kind   string
 	NodeID string
@@ -145,7 +151,8 @@ type moveMsg struct {
 	// owner-goroutine commit. Node 6 is a free move,
 	// so this is committed as-is (no gate solve).
 	Target vec3
-	ack    chan struct{}
+	// testDone: see the type comment. Test-only; production leaves it nil.
+	testDone chan struct{}
 }
 
 // setPortAnchorId sets the AnchorId on the named port within the given geom,
@@ -571,8 +578,8 @@ func (m *nodeMover) run(ctx context.Context) {
 			return
 		case msg := <-m.inbox:
 			m.handle(msg)
-			if msg.ack != nil {
-				close(msg.ack)
+			if msg.testDone != nil {
+				close(msg.testDone)
 			}
 		}
 	}
@@ -741,8 +748,8 @@ func (m *edgeMover) run(ctx context.Context) {
 			return
 		case msg := <-m.inbox:
 			m.handle(msg)
-			if msg.ack != nil {
-				close(msg.ack)
+			if msg.testDone != nil {
+				close(msg.testDone)
 			}
 		}
 	}
@@ -1009,10 +1016,10 @@ func (md *MoveDispatch) Start(ctx context.Context) {
 // restarting Go.
 //
 // When movers are running (md.started), each mover emits its own geometry on its own
-// goroutine via a synchronous moveMsgKindResend inbox message (ack-gated), removing
-// all cross-goroutine reads of mover geom. When movers are not started (test setup
-// that never calls Start), the direct read path is safe — no concurrent goroutines
-// own the geom yet.
+// goroutine via a fire-and-forget moveMsgKindResend inbox message, removing all
+// cross-goroutine reads of mover geom. When movers are not started (test setup that
+// never calls Start), the direct read path is safe — no concurrent goroutines own the
+// geom yet.
 func (md *MoveDispatch) ResendGeometry(ctx context.Context, tr *T.Trace) {
 	if tr == nil {
 		return
@@ -1030,32 +1037,26 @@ func (md *MoveDispatch) ResendGeometry(ctx context.Context, tr *T.Trace) {
 		}
 		return
 	}
-	// Movers running — route resend through each mover's inbox so the emit happens
-	// on the owning goroutine (no cross-goroutine geom reads). Collect all acks
-	// before returning so the caller observes a complete geometry stream.
-	total := len(md.nodeMovers) + len(md.edgeMovers)
-	acks := make([]chan struct{}, 0, total)
+	// Movers running — hand each mover the news on its own inbox and return. Each one
+	// re-emits ITS OWN geometry on ITS OWN goroutine (moveMsgKindResend), so there is
+	// no cross-goroutine geom read and nothing here to collect: the send is
+	// fire-and-forget, like every other message on this path. Nothing needs to observe
+	// completion — the buffer snapshot is eventually-consistent by construction, and a
+	// remounted webview renders whatever the next snapshot carries.
 	for _, nm := range md.nodeMovers {
-		ack := make(chan struct{}) // chan-name-ok: resend-handled acknowledgment sync signal, not a node wire
+		// NodeID is REQUIRED: nodeMover.handle drops any message whose NodeID is not
+		// its own on the first line. Omitting it made every node silently discard the
+		// resend (edges were unaffected — edgeMover.handle has no such guard), so a
+		// remounted webview got edges and no nodes.
 		select {
-		case nm.inbox <- moveMsg{Kind: moveMsgKindResend, ack: ack}:
-			acks = append(acks, ack)
+		case nm.inbox <- moveMsg{Kind: moveMsgKindResend, NodeID: nm.id}:
 		case <-ctx.Done():
 			return
 		}
 	}
 	for _, em := range md.edgeMovers {
-		ack := make(chan struct{}) // chan-name-ok: resend-handled acknowledgment sync signal, not a node wire
 		select {
-		case em.inbox <- moveMsg{Kind: moveMsgKindResend, ack: ack}:
-			acks = append(acks, ack)
-		case <-ctx.Done():
-			return
-		}
-	}
-	for _, ack := range acks {
-		select {
-		case <-ack:
+		case em.inbox <- moveMsg{Kind: moveMsgKindResend}:
 		case <-ctx.Done():
 			return
 		}
