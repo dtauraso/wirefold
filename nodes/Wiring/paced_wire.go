@@ -150,6 +150,17 @@ type PacedWire struct {
 // per TICK (use PulseSpeedWuPerTick). MaxIncomingSimLatencyMs stays in ms (the
 // reporting unit) so it is derived from the fixed ms conversion, independent of
 // the clock's tick speed.
+//
+// PULSE SPEED IS UNIFORM ACROSS ALL WIRES — per-wire speed is rejected doctrine, and the
+// TS layer cannot even express it (no speed prop in WireProps). The pulseSpeed PARAMETER
+// survives only as a TEST affordance: the lean per-node tests pass PulseSpeedWuPerMs so
+// that ticksToCross falls out as latMs. What keeps production uniform is that there is
+// exactly ONE non-test call site (loader.go), passing PulseSpeedWuPerTick.
+//
+// That one-call-site invariant is enforced by tools/check-uniform-pulse-speed.sh. Do not
+// add a second production caller: it converts "uniform" from structural to conventional.
+// If production ever needs to build a wire elsewhere, drop this parameter instead and let
+// the tests express arc as ticks*PulseSpeedWuPerTick.
 func NewPacedWire(arcLength float64, pulseSpeed float64) *PacedWire {
 	pw := &PacedWire{
 		MaxIncomingSimLatencyMs: arcLength / PulseSpeedWuPerMs,
