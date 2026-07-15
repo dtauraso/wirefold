@@ -58,9 +58,8 @@ describe("parseHostToWebview", () => {
     expect(parseHostToWebview({ type: "save-error" })).toBeUndefined();
   });
 
-  it("accepts flush with no payload", () => {
-    const msg = { type: "flush" };
-    expect(parseHostToWebview(msg)).toEqual(msg);
+  it("rejects the removed flush type (Go persists its own scene state; nothing to flush)", () => {
+    expect(parseHostToWebview({ type: "flush" })).toBeUndefined();
   });
 
   it("rejects the removed id/label sidecar type (labels now ride the binary buffer)", () => {

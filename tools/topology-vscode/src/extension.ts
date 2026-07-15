@@ -107,9 +107,6 @@ function openTopologyEditor(context: vscode.ExtensionContext, folderUri?: vscode
     (snapshot) => post(snapshot),
   );
 
-  const viewStateSub = panel.onDidChangeViewState(() => {
-    if (!panel.visible) post({ type: "flush" });
-  });
 
   // Hot-reload of the webview bundle (dev-loop).
   const bundleWatcher =
@@ -183,7 +180,7 @@ function openTopologyEditor(context: vscode.ExtensionContext, folderUri?: vscode
     panel.onDidDispose(() => goChannel.dispose());
   }
 
-  context.subscriptions.push(viewStateSub, runner);
+  context.subscriptions.push(runner);
   // bundleWatcher tracks THIS panel's lifetime, so the panel is its single disposal
   // owner (onDidDispose below). It is deliberately NOT pushed into
   // context.subscriptions to avoid a muddled double-owner contract.
@@ -191,7 +188,6 @@ function openTopologyEditor(context: vscode.ExtensionContext, folderUri?: vscode
   panel.onDidDispose(() => {
     bundleWatcher?.dispose();
     goWatcher?.dispose();
-    viewStateSub.dispose();
     runner.dispose();
   });
 

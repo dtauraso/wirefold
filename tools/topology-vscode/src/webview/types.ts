@@ -1,4 +1,4 @@
-// Typed data payloads for nodes and edges produced by spec-to-flow.
+// Typed data payloads for nodes and edges.
 // These mirror Spec.Node / Spec.Edge fields plus viewer-only and adapter fields.
 // Consumers still read from Zustand; this file is schema-only.
 
