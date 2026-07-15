@@ -140,7 +140,6 @@ export type WebviewToHostMsg =
   | { type: "go-record"; record: ArrayBuffer }
   | { type: "raw-input"; event: RawInputEvent }
   | { type: "run" }
-  | { type: "run-cancel" }
   | { type: "play" }
   | { type: "pause" }
   | { type: "resume" }
@@ -174,7 +173,7 @@ export type HostToWebviewMsg =
 // kind (every kind Go reads on stdin has a seam here); the webview simply never
 // sends it.
 export const WEBVIEW_TO_HOST_TYPES: ReadonlySet<WebviewToHostMsg["type"]> = new Set([
-  "ready", "run", "run-cancel", "play", "pause", "resume", "stop", "webview-log", "edit", "resend", "save", "fade-toggle", "raw-input", "go-record",
+  "ready", "run", "play", "pause", "resume", "stop", "webview-log", "edit", "resend", "save", "fade-toggle", "raw-input", "go-record",
 ]);
 
 const HOST_TO_WEBVIEW_TYPES: ReadonlySet<HostToWebviewMsg["type"]> = new Set([

@@ -65,6 +65,11 @@ export async function handleMessage(raw: unknown, ctx: MessageCtx): Promise<void
 async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
   const { logUri, runner } = ctx;
   switch (msg.type) {
+    // Every kind in the LIVE_CASES fence below is actually posted by the webview
+    // (grep-checked by check-message-kind-parity.sh against literal `postMessage({ type:
+    // "..." })` call sites) as well as handled here. A kind with a real handler case but
+    // no live sender is exactly the bug class this fence exists to catch (see "run-cancel").
+    // LIVE_CASES_START
     case "ready": {
       // Spawn Go immediately so edges render from geometry events before the
       // user presses Run. Go starts HALTED — the clock won't tick until play().
@@ -88,17 +93,11 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
       runner.run();
       runner.play();
       return;
-    case "play":
-      runner.play();
-      return;
-    case "run-cancel":
-      runner.cancel();
-      return;
     case "pause":
       runner.pause();
       return;
     case "resume":
-      runner.resume();
+      runner.play();
       return;
     case "stop":
       runner.stop();
@@ -118,19 +117,25 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
       if (!runner.isRunning()) return;
       runner.writeStdin(msg.record);
       return;
+    // LIVE_CASES_END
     // The following kinds are declared in WebviewToHostMsg (and WEBVIEW_TO_HOST_TYPES) so
     // message-kind-parity tracks stdin_reader.go's msg.Type switch, but no live webview code
     // path posts them as a bare JS object: "resend" is host-originated only (never sent by
     // the webview); "raw-input"/"edit"/"save"/"fade-toggle" are always encoded into a binary
-    // record and sent as "go-record" (see schema/input-layout.ts), never posted directly.
+    // record and sent as "go-record" (see schema/input-layout.ts), never posted directly;
+    // "play" is declared only so this union tracks Go's binary-record "play" kind — the
+    // ext-host builds that record itself (BuildAndRunRunner.play(), invoked by the "run"
+    // and "resume" cases above), so no webview code ever posts a bare {type:"play"}.
     // If one somehow arrives, this is a bug upstream — log it rather than silently drop it.
     case "resend":
     case "raw-input":
     case "save":
     case "fade-toggle":
+    case "play":
     case "edit":
       console.warn(`topology editor: unexpected direct "${msg.type}" message (expected via go-record)`, msg);
       return;
+    // DECLARED_NOT_SENT_END
     default:
       assertNever(msg);
   }

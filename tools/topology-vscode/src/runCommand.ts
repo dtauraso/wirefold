@@ -370,7 +370,10 @@ export class BuildAndRunRunner {
     }
   }
 
-  /** Send play to Go's stdin — resumes the clock gate. Fire-and-forget. */
+  /** Send play to Go's stdin — resumes the clock gate. Fire-and-forget. Called for both
+   *  the ext-host "run" (first start) and "resume" (after pause) message kinds — Go's
+   *  gate has one Resume(), so there is nothing for a separate resume-vs-play distinction
+   *  to do on this seam. */
   play(): void {
     if (!this.proc) return;
     this.writeStdin(encodePlay());
@@ -382,11 +385,6 @@ export class BuildAndRunRunner {
     if (!this.proc) return;
     this.writeStdin(encodePause());
     this.post({ state: "paused" });
-  }
-
-  /** Alias for play() — retained so existing handle-message case "resume" still works. */
-  resume(): void {
-    this.play();
   }
 
   isRunning(): boolean {

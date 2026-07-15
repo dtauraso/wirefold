@@ -27,9 +27,7 @@ function fakeRunner(running: boolean) {
     run: rec("run"),
     play: rec("play"),
     pause: rec("pause"),
-    resume: rec("resume"),
     stop: rec("stop"),
-    cancel: rec("cancel"),
     resend: rec("resend"),
     writeStdin: rec("writeStdin"),
   };
@@ -44,10 +42,10 @@ function ctxFor(runner: ReturnType<typeof fakeRunner>): MessageCtx {
 const names = (r: ReturnType<typeof fakeRunner>) => r.calls.map((c) => c.method);
 
 describe("handleMessage dispatch — control signals", () => {
-  it("play → runner.play()", async () => {
+  it("play is declared for Go's binary-record kind only — no live webview sender posts it, so dispatch just warns", async () => {
     const r = fakeRunner(true);
     await handleMessage({ type: "play" }, ctxFor(r));
-    expect(names(r)).toEqual(["play"]);
+    expect(names(r)).toEqual([]);
   });
 
   it("pause → runner.pause()", async () => {
@@ -56,22 +54,16 @@ describe("handleMessage dispatch — control signals", () => {
     expect(names(r)).toEqual(["pause"]);
   });
 
-  it("resume → runner.resume()", async () => {
+  it("resume → runner.play() (one clock gate; no separate resume-vs-play distinction)", async () => {
     const r = fakeRunner(true);
     await handleMessage({ type: "resume" }, ctxFor(r));
-    expect(names(r)).toEqual(["resume"]);
+    expect(names(r)).toEqual(["play"]);
   });
 
   it("stop → runner.stop()", async () => {
     const r = fakeRunner(true);
     await handleMessage({ type: "stop" }, ctxFor(r));
     expect(names(r)).toEqual(["stop"]);
-  });
-
-  it("run-cancel → runner.cancel()", async () => {
-    const r = fakeRunner(true);
-    await handleMessage({ type: "run-cancel" }, ctxFor(r));
-    expect(names(r)).toEqual(["cancel"]);
   });
 
   it("run → runner.run() then runner.play()", async () => {
