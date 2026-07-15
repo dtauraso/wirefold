@@ -65,7 +65,7 @@ export function decodeNavNodes(decoded: DecodedSnapshot): NavNode[] {
       ),
       radius: readNodeRadius(nodeView, i),
       // Preserve the old-path "sphereR may be missing" semantics: 0 → treated as
-      // absent by callers (lockArc `if(!pr)`, sel-poles `sphereR || radius`).
+      // absent by callers (sel-poles `sphereR || radius`).
       sphereR: sphereR || undefined,
       selected: readNodeSelected(nodeView, i) !== 0,
       latchedSel: readNodeLatchedSel(nodeView, i) !== 0,

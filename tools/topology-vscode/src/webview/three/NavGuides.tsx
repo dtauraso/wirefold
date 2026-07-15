@@ -6,7 +6,6 @@
 import React, { useMemo, useState, useEffect, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
-import { worldDirToFrameAngles, Y_POLE_FRAME } from "./polar";
 import { getLatestSnapshot } from "../snapshot-buffer";
 import { useOverlayFlags } from "./overlay-flags";
 import { decodeSnapshot } from "./buffer-decode";
@@ -280,70 +279,6 @@ export function PolarFrame({ center, scale, tag, octants }: {
   );
 }
 
-// ThetaArc — a VERTICAL meridian arc from `center`'s +y pole down to `sample`, in the
-// node's own meridian plane. Its angular sweep IS the node's θ (colatitude); the arc
-// tip touches the node. θ traces vertically (pole→down), so equal-θ shows as two arcs
-// of equal sweep (just rotated apart in φ); different θ shows as different sweep length.
-// Built canonically in the local X-Y plane, then: inner Z-rotation (π/2−θ) seats the
-// arc's far end at +Y, outer Y-rotation (−φ) swings the meridian plane to the node's φ.
-export function ThetaArc({ center, sample, color, tube }: {
-  center: THREE.Vector3; sample: THREE.Vector3; color: string; tube: number;
-}) {
-  const delta = sample.clone().sub(center);
-  const r = delta.length();
-  if (r < 1e-6) return null;
-  const [theta, phi] = worldDirToFrameAngles(delta, Y_POLE_FRAME);
-  return (
-    <group position={[center.x, center.y, center.z]} rotation={[0, -phi, 0]}>
-      <group rotation={[0, 0, Math.PI / 2 - theta]}>
-        <mesh raycast={() => null}>
-          <torusGeometry args={[r, tube, 8, 64, theta]} />
-          <meshBasicMaterial color={color} transparent opacity={0.85} depthWrite={false} />
-        </mesh>
-        {/* Live θ value at the arc's midpoint (param θ/2 in this local frame). */}
-        <AxisLabel
-          text={`θ=${((theta * 180) / Math.PI).toFixed(1)}°`}
-          color={color}
-          position={[Math.cos(theta / 2) * r * 1.16, Math.sin(theta / 2) * r * 1.16, 0]}
-          size={r * 0.13}
-        />
-      </group>
-    </group>
-  );
-}
-
-// PhiArc — a HORIZONTAL arc around `center`'s +y pole from the +x reference (φ=0) to
-// `sample`'s azimuth, at the node's own height. Its sweep IS the node's φ (longitude);
-// the arc tip sits under/at the node. φ traces horizontally (around the pole). Built
-// canonically in the local X-Y plane sweeping +X→+Y over |φ|, then rotated about X by
-// ±90° so it lies flat in world X-Z and sweeps toward +z (φ>0) or −z (φ<0).
-export function PhiArc({ center, sample, color, tube }: {
-  center: THREE.Vector3; sample: THREE.Vector3; color: string; tube: number;
-}) {
-  const dx = sample.x - center.x;
-  const dz = sample.z - center.z;
-  const ringR = Math.sqrt(dx * dx + dz * dz); // horizontal distance from the pole axis
-  if (ringR < 1e-6) return null;
-  const phi = Math.atan2(dz, dx);
-  const span = Math.abs(phi);
-  const xRot = phi >= 0 ? Math.PI / 2 : -Math.PI / 2; // sweep toward +z or −z
-  return (
-    <group position={[center.x, sample.y, center.z]} rotation={[xRot, 0, 0]}>
-      <mesh raycast={() => null}>
-        <torusGeometry args={[ringR, tube, 8, 64, span]} />
-        <meshBasicMaterial color={color} transparent opacity={0.85} depthWrite={false} />
-      </mesh>
-      {/* Live φ value at the arc's midpoint (param span/2 in this local frame). */}
-      <AxisLabel
-        text={`φ=${((phi * 180) / Math.PI).toFixed(1)}°`}
-        color={color}
-        position={[Math.cos(span / 2) * ringR * 1.16, Math.sin(span / 2) * ringR * 1.16, 0]}
-        size={ringR * 0.13}
-      />
-    </group>
-  );
-}
-
 // NavGuides — decorative 3D navigation overlays (the polar-sphere tori, pole
 // frames, and θ/φ arcs). Rendered directly as the combined export; there is no
 // pass-through wrapper.
@@ -361,7 +296,6 @@ export function NavGuides() {
   const showScenePoles = g && !!bufFlags?.scenePoles;
   const showNodePoles = g && !!bufFlags?.nodePoles;
   const showSelPoles = g && !!bufFlags?.selSpherePoles;
-  const showAngles = g && !!bufFlags?.angleLabels;
   const showHandholds = g && !!bufFlags?.handholds;
 
   // ── Buffer-driven nav sampling ───────────────────────────────────────────────
@@ -455,48 +389,7 @@ export function NavGuides() {
     </group>
   );
 
-  // Lock-arc demo decoration: θ/φ arcs from a "parent" node down to two children that
-  // sit on the parent's sphere — a visual aid showing two siblings sharing equal θ/φ
-  // about the parent's own pole frame (the frame the θ-lock actually measures in;
-  // equal-θ is only visible against the parent's pole, not the scene's).
-  //
-  // Derived STRUCTURALLY from the loaded graph, never literal node ids: the parent is
-  // the first node that has at least two OTHER nodes sitting on its sphere (world
-  // distance ≈ the parent's Go-streamed sphereR), and the children are the first two
-  // such nodes. This works on any polar topology instead of silently no-op'ing on
-  // every topology but the old demo. If no such parent+2-children triple exists the
-  // arcs are omitted (presence-guarded below, same as before).
-  //
-  // Memoized on [navNodes]: this is an O(N²) scan (per parent, filter all nodes), so
-  // recompute only when the node data actually changes (navNodes is itself memoized).
-  const lockArc = useMemo(() => {
-    for (const parent of navNodes) {
-      const pr = parent.sphereR;
-      if (!pr) continue;
-      const pc = parent.center;
-      const tol = pr * 0.25;
-      const children = navNodes.filter(
-        (n) => n.row !== parent.row && Math.abs(n.center.distanceTo(pc) - pr) <= tol,
-      );
-      if (children.length >= 2) return { parent, childA: children[0]!, childB: children[1]! };
-    }
-    return null;
-  }, [navNodes]);
-
   if (navNodes.length < 1) return null;
-
-  // Parent's own pole frame center — pole = world +y, parallel to the scene's. Sized
-  // to ~half the scene radius.
-  const node2 = lockArc?.parent;
-  const node2Center = node2 ? node2.center : null;
-  const node2Scale = radiusKey * 0.5;
-
-  // θ-lock check: vertical θ meridian arcs from the parent's pole down to its two
-  // children, from LIVE positions. θ traces vertically; equal θ ⇒ equal arc sweep
-  // (rotated apart in φ), different θ ⇒ different sweep length. (See ThetaArc.)
-  const node3 = lockArc?.childA;
-  const node7 = lockArc?.childB;
-  const thetaTube = Math.max(node2Scale * 0.014, 1.4);
 
   // Selected-sphere poles (separate, additional feature — gated by selSpherePolesVisible,
   // independent of the per-node poles below). The LATCHED selection decides which node's
@@ -548,20 +441,6 @@ export function NavGuides() {
           octants
         />
       ))}
-      {/* Vertical θ arcs from node 2's pole to node 3 (orange) and node 7 (cyan): equal sweep ⇒ equal θ. */}
-      {showAngles && node2Center && node3 && (
-        <ThetaArc center={node2Center} sample={node3.center} color="#ff8800" tube={thetaTube} />
-      )}
-      {showAngles && node2Center && node7 && (
-        <ThetaArc center={node2Center} sample={node7.center} color="#00ccff" tube={thetaTube} />
-      )}
-      {/* Horizontal φ arcs from +x reference to node 3 (orange) and node 7 (cyan). */}
-      {showAngles && node2Center && node3 && (
-        <PhiArc center={node2Center} sample={node3.center} color="#ff8800" tube={thetaTube} />
-      )}
-      {showAngles && node2Center && node7 && (
-        <PhiArc center={node2Center} sample={node7.center} color="#00ccff" tube={thetaTube} />
-      )}
     </>
   );
 }
