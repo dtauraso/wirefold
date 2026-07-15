@@ -18,9 +18,9 @@
 // (the 3-op create/update/delete concept) though the gesture FSM now produces edge
 // create/delete in-process from raw-input, so TS sends no create/delete today.
 
-// INPUT_LAYOUT_FINGERPRINT: v10 kinds=resume:1,pause:2,resend:3,save:4,fadeToggle:5,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays updateAttrs=toggle overlayFlags=tori,scenePoles,nodePoles,angleLabels,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays
+// INPUT_LAYOUT_FINGERPRINT: v11 kinds=resume:1,pause:2,resend:3,save:4,fadeToggle:5,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays updateAttrs=toggle overlayFlags=tori,scenePoles,nodePoles,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays
 export const INPUT_LAYOUT_FINGERPRINT =
-  "v10 kinds=resume:1,pause:2,resend:3,save:4,fadeToggle:5,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays updateAttrs=toggle overlayFlags=tori,scenePoles,nodePoles,angleLabels,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays";
+  "v11 kinds=resume:1,pause:2,resend:3,save:4,fadeToggle:5,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays updateAttrs=toggle overlayFlags=tori,scenePoles,nodePoles,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays";
 
 // Record kind bytes (first byte of every record). Must match input_codec.go.
 export const IN_KIND_RESUME = 1;
