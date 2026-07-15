@@ -38,9 +38,8 @@ const (
 
 // PortSpec describes one port on a node kind.
 type PortSpec struct {
-	Name     string
-	Dir      PortDir
-	Required bool // true for PortIn ports; output ports are never required
+	Name string
+	Dir  PortDir
 }
 
 // PortBindings holds resolved PacedWires keyed by port name.
@@ -191,7 +190,7 @@ func collectPorts(t reflect.Type) []PortSpec {
 		}
 		switch f.Type {
 		case tInPtr:
-			ports = append(ports, PortSpec{Name: f.Name, Dir: PortIn, Required: true})
+			ports = append(ports, PortSpec{Name: f.Name, Dir: PortIn})
 		case tOutPtr:
 			ports = append(ports, PortSpec{Name: f.Name, Dir: PortOut})
 		case tOutMulti:
