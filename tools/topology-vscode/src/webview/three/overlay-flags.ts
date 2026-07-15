@@ -16,7 +16,6 @@ import {
   readOverlaySceneTori,
   readOverlayScenePoles,
   readOverlayNodePoles,
-  readOverlayAngleLabels,
   readOverlaySelSpherePoles,
   readOverlayHandholds,
   readOverlayLabelsGlobal,
@@ -52,25 +51,23 @@ export function readOverlayFlags(): OverlayFlagVals | null {
     (readOverlaySceneTori(v) ? 1 << 0 : 0) |
     (readOverlayScenePoles(v) ? 1 << 1 : 0) |
     (readOverlayNodePoles(v) ? 1 << 2 : 0) |
-    (readOverlayAngleLabels(v) ? 1 << 3 : 0) |
-    (readOverlaySelSpherePoles(v) ? 1 << 4 : 0) |
-    (readOverlayHandholds(v) ? 1 << 5 : 0) |
-    (readOverlayLabelsGlobal(v) ? 1 << 6 : 0) |
-    (readOverlayBadgesGlobal(v) ? 1 << 7 : 0) |
-    (readOverlayOverlaysVis(v) ? 1 << 8 : 0);
+    (readOverlaySelSpherePoles(v) ? 1 << 3 : 0) |
+    (readOverlayHandholds(v) ? 1 << 4 : 0) |
+    (readOverlayLabelsGlobal(v) ? 1 << 5 : 0) |
+    (readOverlayBadgesGlobal(v) ? 1 << 6 : 0) |
+    (readOverlayOverlaysVis(v) ? 1 << 7 : 0);
   if (bits === cachedBits && cachedVals) return cachedVals;
   cachedBits = bits;
   cachedVals = {
     tori: !!(bits & (1 << 0)),
     scenePoles: !!(bits & (1 << 1)),
     nodePoles: !!(bits & (1 << 2)),
-    angleLabels: !!(bits & (1 << 3)),
-    selSpherePoles: !!(bits & (1 << 4)),
-    handholds: !!(bits & (1 << 5)),
+    selSpherePoles: !!(bits & (1 << 3)),
+    handholds: !!(bits & (1 << 4)),
     // hidden-sense: buffer stores VISIBLE, store field is *Hidden → invert.
-    labelsGlobal: !(bits & (1 << 6)),
-    badgesGlobal: !(bits & (1 << 7)),
-    overlays: !!(bits & (1 << 8)),
+    labelsGlobal: !(bits & (1 << 5)),
+    badgesGlobal: !(bits & (1 << 6)),
+    overlays: !!(bits & (1 << 7)),
   };
   return cachedVals;
 }

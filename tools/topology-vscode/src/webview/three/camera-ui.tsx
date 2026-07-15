@@ -84,15 +84,6 @@ const nodePolesCfg: ToggleCfg = {
   payload: (v) => ({ flag: "nodePoles", was: v }),
 };
 
-const angleLabelsCfg: ToggleCfg = {
-  flag: "angleLabels",
-  default: true,
-  active: (v) => v,
-  label: "θφ 2→3/7",
-  title: (a) => (a ? "Hide angle arcs+labels" : "Show angle arcs+labels"),
-  payload: (v) => ({ flag: "angleLabels", was: v }),
-};
-
 const selSpherePolesCfg: ToggleCfg = {
   flag: "selSpherePoles",
   default: true,
@@ -136,7 +127,7 @@ const badgesCfg: ToggleCfg = {
 type OverlayGroup = { heading: string; cfgs: ToggleCfg[] };
 
 const OVERLAY_GROUPS: OverlayGroup[] = [
-  { heading: "GUIDES", cfgs: [angleLabelsCfg, ringsCfg, handholdsCfg] },
+  { heading: "GUIDES", cfgs: [ringsCfg, handholdsCfg] },
   { heading: "POLES",  cfgs: [scenePolesCfg, nodePolesCfg, selSpherePolesCfg] },
   { heading: "LABELS", cfgs: [globalLabelsCfg, badgesCfg] },
 ];

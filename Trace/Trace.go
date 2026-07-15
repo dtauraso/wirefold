@@ -89,10 +89,6 @@ const (
 	// the visibility is toggled (op="node-poles"), so the renderer shows or hides
 	// PolarFrames drawn at every node sphere.
 	KindNodePoles = "node-poles"
-	// KindAngleLabels carries the θ/φ angle arc+label visibility state. Go emits it when
-	// the visibility is toggled (op="angle-labels"), so the renderer shows or hides the
-	// ThetaArc/PhiArc overlays in NavGuides.
-	KindAngleLabels = "angle-labels"
 	// KindSelSpherePoles carries the selection-sphere pole axis visibility state. Go emits it when
 	// the visibility is toggled (op="sel-sphere-poles"), so the renderer shows or hides the
 	// selection sphere pole markers in NavGuides.
@@ -148,7 +144,7 @@ const (
 // buffer EVENT block for the .probe log. There is no tsc exhaustiveness
 // check derived from it — adding a kind here does not force a TS branch
 // anywhere; it only extends the lookup table.
-var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone, KindPosition, KindGeometry, KindPulseCancelled, KindNodeGeometry, KindArrive, KindNodeBead, KindCamera, KindSceneTori, KindScenePoles, KindNodePoles, KindAngleLabels, KindSelSpherePoles, KindHandholds, KindLabelsGlobal, KindBadgesGlobal, KindOverlaysVis, KindSelect, KindFade, KindHover, KindSceneSphere}
+var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone, KindPosition, KindGeometry, KindPulseCancelled, KindNodeGeometry, KindArrive, KindNodeBead, KindCamera, KindSceneTori, KindScenePoles, KindNodePoles, KindSelSpherePoles, KindHandholds, KindLabelsGlobal, KindBadgesGlobal, KindOverlaysVis, KindSelect, KindFade, KindHover, KindSceneSphere}
 
 // PortGeom is one port's authoritative world geometry on a node-geometry event:
 // its name, whether it is an input, its sphere-surface world position (PX/PY/PZ),
@@ -463,12 +459,6 @@ func (t *Trace) ScenePoles(visible bool) {
 // visible=false = hidden. Go emits this on op="node-poles".
 func (t *Trace) NodePoles(visible bool) {
 	t.emit(Event{Kind: KindNodePoles, Visible: visible})
-}
-
-// AngleLabels emits the θ/φ angle arc+label visibility state. visible=true = shown;
-// visible=false = arcs hidden. Go emits this on op="angle-labels".
-func (t *Trace) AngleLabels(visible bool) {
-	t.emit(Event{Kind: KindAngleLabels, Visible: visible})
 }
 
 // SelSpherePoles emits the selection-sphere pole axis visibility state. visible=true = shown;
@@ -920,7 +910,7 @@ func eventValue(e Event) (any, error) {
 			Radius float64 `json:"radius"`
 		}
 		return sceneSphere{Step: e.Step, Kind: e.Kind, CX: e.PX, CY: e.PY, CZ: e.PZ, Radius: e.R}, nil
-	case KindSceneTori, KindScenePoles, KindNodePoles, KindAngleLabels, KindSelSpherePoles, KindHandholds, KindLabelsGlobal, KindBadgesGlobal, KindOverlaysVis:
+	case KindSceneTori, KindScenePoles, KindNodePoles, KindSelSpherePoles, KindHandholds, KindLabelsGlobal, KindBadgesGlobal, KindOverlaysVis:
 		// Visibility toggles: all carry just the Visible flag.
 		type visToggle struct {
 			Step    int    `json:"step"`

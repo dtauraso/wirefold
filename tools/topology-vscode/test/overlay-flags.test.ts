@@ -16,7 +16,7 @@ import { setLatestSnapshot } from "../src/webview/snapshot-buffer";
 import {
   BUF_HEADER_SIZE, NODE_STRIDE, INTERIOR_STRIDE, CAMERA_STRIDE, OVERLAY_STRIDE, SCENE_STRIDE,
   OVERLAY_COL_SCENE_TORI, OVERLAY_COL_SCENE_POLES, OVERLAY_COL_NODE_POLES,
-  OVERLAY_COL_ANGLE_LABELS, OVERLAY_COL_SEL_SPHERE_POLES, OVERLAY_COL_HANDHOLDS,
+  OVERLAY_COL_SEL_SPHERE_POLES, OVERLAY_COL_HANDHOLDS,
   OVERLAY_COL_LABELS_GLOBAL, OVERLAY_COL_BADGES_GLOBAL, OVERLAY_COL_OVERLAYS_VIS,
 } from "../src/schema/buffer-layout";
 
@@ -44,7 +44,6 @@ describe("overlay-flags readOverlayFlags", () => {
       [OVERLAY_COL_SCENE_TORI]: 1,
       [OVERLAY_COL_SCENE_POLES]: 1,
       [OVERLAY_COL_NODE_POLES]: 1,
-      [OVERLAY_COL_ANGLE_LABELS]: 1,
       [OVERLAY_COL_SEL_SPHERE_POLES]: 1,
       [OVERLAY_COL_HANDHOLDS]: 1,
       [OVERLAY_COL_LABELS_GLOBAL]: 1,
@@ -59,7 +58,6 @@ describe("overlay-flags readOverlayFlags", () => {
     expect(f!.tori).toBe(true);
     expect(f!.scenePoles).toBe(true);
     expect(f!.nodePoles).toBe(true);
-    expect(f!.angleLabels).toBe(true);
     expect(f!.selSpherePoles).toBe(true);
     expect(f!.handholds).toBe(true);
     expect(f!.overlays).toBe(true);
@@ -93,7 +91,6 @@ describe("overlay-flags readOverlayFlags", () => {
       [OVERLAY_COL_SCENE_TORI]: 1,
       [OVERLAY_COL_SCENE_POLES]: 1,
       [OVERLAY_COL_NODE_POLES]: 1,
-      [OVERLAY_COL_ANGLE_LABELS]: 1,
       [OVERLAY_COL_SEL_SPHERE_POLES]: 1,
       [OVERLAY_COL_HANDHOLDS]: 1,
       [OVERLAY_COL_LABELS_GLOBAL]: 1,

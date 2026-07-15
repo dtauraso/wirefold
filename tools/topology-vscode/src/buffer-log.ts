@@ -30,7 +30,7 @@ import {
   readPortNodeRow, readPortDX, readPortDY, readPortDZ, readPortIsInput,
   readCameraPX, readCameraPY, readCameraPZ, readCameraR,
   readCameraPosTheta, readCameraPosPhi, readCameraUpTheta, readCameraUpPhi,
-  readOverlaySceneTori, readOverlayScenePoles, readOverlayNodePoles, readOverlayAngleLabels,
+  readOverlaySceneTori, readOverlayScenePoles, readOverlayNodePoles,
   readOverlaySelSpherePoles, readOverlayHandholds, readOverlayLabelsGlobal,
   readOverlayBadgesGlobal, readOverlayOverlaysVis,
   readPortPX, readPortPY, readPortPZ,
@@ -63,7 +63,6 @@ export type DecodedEventLine =
   | { step: number; kind: "scene-tori"; visible: boolean }
   | { step: number; kind: "scene-poles"; visible: boolean }
   | { step: number; kind: "node-poles"; visible: boolean }
-  | { step: number; kind: "angle-labels"; visible: boolean }
   | { step: number; kind: "sel-sphere-poles"; visible: boolean }
   | { step: number; kind: "handholds"; visible: boolean }
   | { step: number; kind: "labels-global"; visible: boolean }
@@ -98,7 +97,6 @@ function overlayFlag(d: DecodedSnapshot, kind: string): number {
     case "scene-tori": return readOverlaySceneTori(v);
     case "scene-poles": return readOverlayScenePoles(v);
     case "node-poles": return readOverlayNodePoles(v);
-    case "angle-labels": return readOverlayAngleLabels(v);
     case "sel-sphere-poles": return readOverlaySelSpherePoles(v);
     case "handholds": return readOverlayHandholds(v);
     case "labels-global": return readOverlayLabelsGlobal(v);
@@ -109,7 +107,7 @@ function overlayFlag(d: DecodedSnapshot, kind: string): number {
 }
 
 const OVERLAY_KINDS = new Set([
-  "scene-tori", "scene-poles", "node-poles", "angle-labels", "sel-sphere-poles",
+  "scene-tori", "scene-poles", "node-poles", "sel-sphere-poles",
   "handholds", "labels-global", "badges-global", "overlays-vis",
 ]);
 

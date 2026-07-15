@@ -1513,7 +1513,7 @@ type overlayFlag struct {
 	field      string // overlayState bool field, e.g. "sceneToriVisible"
 	method     string // Toggle/Emit/Trace method basename, e.g. "SceneTori"
 	breadcrumb string // Breadcrumb scope arg on Toggle ("scene"/"nodes"); "" = uniform flip
-	accessor   bool   // emit a bare bool accessor method (only angleLabels)
+	accessor   bool   // emit a bare bool accessor method
 	defaultOn  bool   // startup default value
 }
 
@@ -1526,11 +1526,10 @@ type overlayOverride struct {
 }
 
 var overlayOverrides = map[string]overlayOverride{
-	"tori":        {field: "sceneToriVisible", method: "SceneTori"},
-	"scenePoles":  {breadcrumb: "scene"},
-	"nodePoles":   {breadcrumb: "nodes"},
-	"angleLabels": {accessor: true},
-	"overlays":    {method: "OverlaysVis"},
+	"tori":       {field: "sceneToriVisible", method: "SceneTori"},
+	"scenePoles": {breadcrumb: "scene"},
+	"nodePoles":  {breadcrumb: "nodes"},
+	"overlays":   {method: "OverlaysVis"},
 }
 
 // parseOverlayFlags reads the OVERLAY_FLAG_NAMES const in messages.ts (bounded by the
@@ -1615,8 +1614,8 @@ func parseOverlayFlags(messagesPath string) ([]overlayFlag, error) {
 // writeOverlayGen emits nodes/Wiring/overlay_gen.go: the entire Go-side overlay wiring
 // mechanically derived from OVERLAY_FLAG_NAMES — the overlayState struct + flip/emit
 // methods, the defaultOverlayState constructor, the MoveDispatch delegators, and the
-// overlayToggles method-expression table. Deviating flags (scene/node poles Breadcrumb,
-// the angleLabels accessor) are generated from overlayOverrides. Adding an overlay flag
+// overlayToggles method-expression table. Deviating flags (scene/node poles Breadcrumb)
+// are generated from overlayOverrides. Adding an overlay flag
 // now means editing OVERLAY_FLAG_NAMES (+ the ~4-5 TS/render sites); every Go site above
 // is regenerated. Parity of the generated table is guarded by check-edit-op-parity.sh
 // (which reads this file's OVERLAY_TOGGLES sentinel) and staleness by check-generated.sh.

@@ -228,7 +228,6 @@ type bufLayoutOverlay struct {
 	SceneTori      uint8 `buf:"u8"` // 1 = polar-guide tori visible
 	ScenePoles     uint8 `buf:"u8"` // 1 = scene-center pole frame visible
 	NodePoles      uint8 `buf:"u8"` // 1 = per-node pole frames visible
-	AngleLabels    uint8 `buf:"u8"` // 1 = θ/φ arc+label overlays visible
 	SelSpherePoles uint8 `buf:"u8"` // 1 = selection-sphere pole axes visible
 	Handholds      uint8 `buf:"u8"` // 1 = rotation grab-sphere handholds visible
 	LabelsGlobal   uint8 `buf:"u8"` // 1 = all node labels visible

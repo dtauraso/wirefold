@@ -12,7 +12,6 @@
 {"step":11,"kind":"scene-tori","visible":true}
 {"step":12,"kind":"scene-poles","visible":false}
 {"step":13,"kind":"node-poles","visible":true}
-{"step":14,"kind":"angle-labels","visible":false}
 {"step":15,"kind":"sel-sphere-poles","visible":true}
 {"step":16,"kind":"handholds","visible":false}
 {"step":17,"kind":"labels-global","visible":true}

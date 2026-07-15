@@ -14,8 +14,8 @@ import (
 // trace Kind) that replaced the hand-written methods. For EACH overlay flag it
 // asserts that Toggle flips the owned overlayState bool AND emits the correct trace
 // event carrying the NEW value, and that Emit re-emits the CURRENT value WITHOUT
-// flipping. The exception flags (scene/node poles breadcrumb, angleLabels accessor,
-// tori/overlays method renames) are covered explicitly.
+// flipping. The exception flags (scene/node poles breadcrumb, tori/overlays method
+// renames) are covered explicitly.
 
 // overlayCase describes one generated overlay flag by its behavior, using closures
 // so the test reads/writes the concrete overlayState field without reflection.
@@ -51,13 +51,6 @@ var overlayCases = []overlayCase{
 		emit:   (*overlayState).EmitNodePoles,
 		kind:   T.KindNodePoles,
 		crumb:  "nodes",
-	},
-	{
-		name:   "angleLabels",
-		get:    func(o *overlayState) bool { return o.angleLabelsVisible },
-		toggle: (*overlayState).ToggleAngleLabels,
-		emit:   (*overlayState).EmitAngleLabels,
-		kind:   T.KindAngleLabels,
 	},
 	{
 		name:   "selSpherePoles",
@@ -189,8 +182,6 @@ func setOverlayField(o *overlayState, name string, v bool) {
 		o.scenePolesVisible = v
 	case "nodePoles":
 		o.nodePolesVisible = v
-	case "angleLabels":
-		o.angleLabelsVisible = v
 	case "selSpherePoles":
 		o.selSpherePolesVisible = v
 	case "handholds":
@@ -206,24 +197,12 @@ func setOverlayField(o *overlayState, name string, v bool) {
 	}
 }
 
-// TestAngleLabelsAccessor covers the one generated bare-bool accessor.
-func TestAngleLabelsAccessor(t *testing.T) {
-	var o overlayState
-	if o.AngleLabels() {
-		t.Fatal("AngleLabels() should be false on zero overlayState")
-	}
-	o.angleLabelsVisible = true
-	if !o.AngleLabels() {
-		t.Fatal("AngleLabels() should mirror angleLabelsVisible=true")
-	}
-}
-
 // TestDefaultOverlayState pins the startup snapshot: every flag defaults ON.
 func TestDefaultOverlayState(t *testing.T) {
 	d := defaultOverlayState()
 	on := []bool{
 		d.sceneToriVisible, d.scenePolesVisible, d.nodePolesVisible,
-		d.angleLabelsVisible, d.selSpherePolesVisible, d.handholdsVisible,
+		d.selSpherePolesVisible, d.handholdsVisible,
 		d.labelsGlobalVisible, d.badgesGlobalVisible, d.overlaysVisible,
 	}
 	for i, v := range on {

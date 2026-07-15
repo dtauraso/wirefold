@@ -57,7 +57,6 @@ func writeSceneOverlays(scenePath string, ov overlayState) error {
 		setVisible("sceneToriVisible", ov.sceneToriVisible)
 		setVisible("scenePolesVisible", ov.scenePolesVisible)
 		setVisible("nodePolesVisible", ov.nodePolesVisible)
-		setVisible("angleLabelsVisible", ov.angleLabelsVisible)
 		setVisible("selSpherePolesVisible", ov.selSpherePolesVisible)
 		setVisible("handholdsVisible", ov.handholdsVisible)
 		setVisible("overlaysActive", ov.overlaysVisible)
@@ -104,7 +103,6 @@ type sceneOverlaysFile struct {
 	SceneToriVisible      *bool `json:"sceneToriVisible"`
 	ScenePolesVisible     *bool `json:"scenePolesVisible"`
 	NodePolesVisible      *bool `json:"nodePolesVisible"`
-	AngleLabelsVisible    *bool `json:"angleLabelsVisible"`
 	SelSpherePolesVisible *bool `json:"selSpherePolesVisible"`
 	HandholdsVisible      *bool `json:"handholdsVisible"`
 	OverlaysActive        *bool `json:"overlaysActive"`
@@ -140,10 +138,6 @@ func loadSceneOverlays(scenePath string) (overlayState, bool) {
 	}
 	if sf.NodePolesVisible != nil {
 		ov.nodePolesVisible = *sf.NodePolesVisible
-		found = true
-	}
-	if sf.AngleLabelsVisible != nil {
-		ov.angleLabelsVisible = *sf.AngleLabelsVisible
 		found = true
 	}
 	if sf.SelSpherePolesVisible != nil {

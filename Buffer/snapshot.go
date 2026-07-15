@@ -269,7 +269,6 @@ type overlaySnapState struct {
 	sceneTori      uint8
 	scenePoles     uint8
 	nodePoles      uint8
-	angleLabels    uint8
 	selSpherePoles uint8
 	handholds      uint8
 	labelsGlobal   uint8
@@ -298,7 +297,6 @@ func NewSnapshotState(out io.Writer) *SnapshotState {
 		T.KindSceneTori:      &s.overlay.sceneTori,
 		T.KindScenePoles:     &s.overlay.scenePoles,
 		T.KindNodePoles:      &s.overlay.nodePoles,
-		T.KindAngleLabels:    &s.overlay.angleLabels,
 		T.KindSelSpherePoles: &s.overlay.selSpherePoles,
 		T.KindHandholds:      &s.overlay.handholds,
 		T.KindLabelsGlobal:   &s.overlay.labelsGlobal,
@@ -346,7 +344,7 @@ func (s *SnapshotState) Update(ev T.Event) {
 		s.scene = sceneSnapState{cx: ev.PX, cy: ev.PY, cz: ev.PZ, radius: ev.R}
 		s.emitSnapshot()
 
-	case T.KindSceneTori, T.KindScenePoles, T.KindNodePoles, T.KindAngleLabels,
+	case T.KindSceneTori, T.KindScenePoles, T.KindNodePoles,
 		T.KindSelSpherePoles, T.KindHandholds, T.KindLabelsGlobal, T.KindBadgesGlobal,
 		T.KindOverlaysVis:
 		if field, ok := s.overlayFlagFields[ev.Kind]; ok {
@@ -1095,7 +1093,7 @@ func (s *SnapshotState) writeCameraBlock(buf []byte, off int) int {
 func (s *SnapshotState) writeOverlayBlock(buf []byte, off int) int {
 	ov := s.overlay
 	SetOverlayRow(buf[off:],
-		ov.sceneTori, ov.scenePoles, ov.nodePoles, ov.angleLabels,
+		ov.sceneTori, ov.scenePoles, ov.nodePoles,
 		ov.selSpherePoles, ov.handholds,
 		ov.labelsGlobal, ov.badgesGlobal,
 		ov.overlaysVis, ov.selMode)

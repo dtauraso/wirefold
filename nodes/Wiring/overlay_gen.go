@@ -17,7 +17,6 @@ type overlayState struct {
 	sceneToriVisible      bool
 	scenePolesVisible     bool
 	nodePolesVisible      bool
-	angleLabelsVisible    bool
 	selSpherePolesVisible bool
 	handholdsVisible      bool
 	labelsGlobalVisible   bool
@@ -64,21 +63,6 @@ func (o *overlayState) ToggleNodePoles(tr *T.Trace) {
 // EmitNodePoles emits the current nodePolesVisible without toggling it.
 func (o *overlayState) EmitNodePoles(tr *T.Trace) {
 	tr.NodePoles(o.nodePolesVisible)
-}
-
-// ToggleAngleLabels flips angleLabelsVisible and emits a angle-labels event.
-func (o *overlayState) ToggleAngleLabels(tr *T.Trace) {
-	o.setFlag(&o.angleLabelsVisible, tr.AngleLabels)
-}
-
-// EmitAngleLabels emits the current angleLabelsVisible without toggling it.
-func (o *overlayState) EmitAngleLabels(tr *T.Trace) {
-	tr.AngleLabels(o.angleLabelsVisible)
-}
-
-// AngleLabels returns the current angleLabelsVisible.
-func (o *overlayState) AngleLabels() bool {
-	return o.angleLabelsVisible
 }
 
 // ToggleSelSpherePoles flips selSpherePolesVisible and emits a sel-sphere-poles event.
@@ -139,7 +123,6 @@ func (o *overlayState) SetGuideVisibility(ov overlayState, tr *T.Trace) {
 	o.EmitSceneTori(tr)
 	o.EmitScenePoles(tr)
 	o.EmitNodePoles(tr)
-	o.EmitAngleLabels(tr)
 	o.EmitSelSpherePoles(tr)
 	o.EmitHandholds(tr)
 	o.EmitLabelsGlobal(tr)
@@ -153,7 +136,6 @@ func defaultOverlayState() overlayState {
 		sceneToriVisible:      true,
 		scenePolesVisible:     true,
 		nodePolesVisible:      true,
-		angleLabelsVisible:    true,
 		selSpherePolesVisible: true,
 		handholdsVisible:      true,
 		labelsGlobalVisible:   true,
@@ -170,9 +152,6 @@ func (md *MoveDispatch) ToggleScenePoles(tr *T.Trace)     { md.ov.ToggleScenePol
 func (md *MoveDispatch) EmitScenePoles(tr *T.Trace)       { md.ov.EmitScenePoles(tr) }
 func (md *MoveDispatch) ToggleNodePoles(tr *T.Trace)      { md.ov.ToggleNodePoles(tr) }
 func (md *MoveDispatch) EmitNodePoles(tr *T.Trace)        { md.ov.EmitNodePoles(tr) }
-func (md *MoveDispatch) ToggleAngleLabels(tr *T.Trace)    { md.ov.ToggleAngleLabels(tr) }
-func (md *MoveDispatch) EmitAngleLabels(tr *T.Trace)      { md.ov.EmitAngleLabels(tr) }
-func (md *MoveDispatch) AngleLabels() bool                { return md.ov.AngleLabels() }
 func (md *MoveDispatch) ToggleSelSpherePoles(tr *T.Trace) { md.ov.ToggleSelSpherePoles(tr) }
 func (md *MoveDispatch) EmitSelSpherePoles(tr *T.Trace)   { md.ov.EmitSelSpherePoles(tr) }
 func (md *MoveDispatch) ToggleHandholds(tr *T.Trace)      { md.ov.ToggleHandholds(tr) }
@@ -197,7 +176,6 @@ var overlayToggles = map[string]func(*MoveDispatch, *T.Trace){
 	"tori":           (*MoveDispatch).ToggleSceneTori,
 	"scenePoles":     (*MoveDispatch).ToggleScenePoles,
 	"nodePoles":      (*MoveDispatch).ToggleNodePoles,
-	"angleLabels":    (*MoveDispatch).ToggleAngleLabels,
 	"selSpherePoles": (*MoveDispatch).ToggleSelSpherePoles,
 	"handholds":      (*MoveDispatch).ToggleHandholds,
 	"labelsGlobal":   (*MoveDispatch).ToggleLabelsGlobal,
