@@ -83,10 +83,11 @@ resolving instantaneously.
   dragged), and a longer or shorter wire still traverses at constant
   world-speed. (Preserving distance instead would let `t` jump as the arc
   length changes.)
-- Go owns the bead's PROGRESS (the fraction `t`, timed in ticks on the human-speed clock);
-  the editor owns the live node positions during a drag and PLACES the
-  bead at `lerp(liveStart, liveEnd, t)` on its local node-port endpoints.
-  Go emits `t` on the position trace event for this placement.
+- Go owns the bead's PROGRESS (the fraction `t`, timed in ticks on the human-speed clock)
+  AND the bead's absolute world position — it computes the position from its own
+  live node/port endpoints (moved by the same drag) and packs the result into the
+  content buffer. The editor decodes and draws it (`readBeadX/Y/Z` in
+  `buffer-scene.tsx`'s `BeadInstances`); it does not interpolate or own positions.
 - Durations are tick counts: bead traversal (`ticksToCross`) and node processing windows.
 ## Driver
 
