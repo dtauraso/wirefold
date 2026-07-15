@@ -201,7 +201,7 @@ func (pw *PacedWire) SetFaded(v bool) {
 // per-cycle StepOnce/StepOnceAt calls. Returns false if the wire is
 // faded/deleted (nothing placed). Cross-package tests that only exercise
 // delivery timing use this (see gatetesthelper.Send).
-func (pw *PacedWire) PlaceDeliverOnly(value any, inFlightMs float64) bool {
+func (pw *PacedWire) PlaceDeliverOnly(value int, inFlightMs float64) bool {
 	_, ok := pw.placeBeadNoWalker(value, beadPlacement{InFlightMs: inFlightMs})
 	return ok
 }
@@ -215,7 +215,7 @@ const msToArcWu = PulseSpeedWuPerMs
 // placeBeadNoWalker appends a bead WITHOUT launching a walker goroutine,
 // returning the bead's gen so the caller can drive delivery synchronously.
 // Returns (0, false) when faded/deleted (nothing placed).
-func (pw *PacedWire) placeBeadNoWalker(value any, bp beadPlacement) (gen uint64, ok bool) {
+func (pw *PacedWire) placeBeadNoWalker(value int, bp beadPlacement) (gen uint64, ok bool) {
 	return pw.placeBeadNoWalkerAt(value, bp, pw.clock.Tick())
 }
 
@@ -227,20 +227,19 @@ func (pw *PacedWire) placeBeadNoWalker(value any, bp beadPlacement) (gen uint64,
 // per wire — otherwise fan-out siblings placed on either side of a tick
 // boundary get different placementTicks and deliver a cycle apart despite
 // equal latency.
-func (pw *PacedWire) placeBeadNoWalkerAt(value any, bp beadPlacement, tick int64) (gen uint64, ok bool) {
+func (pw *PacedWire) placeBeadNoWalkerAt(value int, bp beadPlacement, tick int64) (gen uint64, ok bool) {
 	pw.mu.Lock()
 	if pw.faded || pw.deleted {
 		pw.mu.Unlock()
 		return 0, false
 	}
-	beadVal, _ := value.(int)
 	pw.nextGen++
 	if pw.nextGen < pw.teardownGen {
 		pw.nextGen = pw.teardownGen
 	}
 	nowTick := float64(tick)
 	b := inflightBead{
-		val:           beadVal,
+		val:           value,
 		placementTick: nowTick,
 		// arc (world units) is reconstructed from the reported ms latency via the
 		// FIXED ms→wu conversion (msToArcWu), so it is independent of the clock's
