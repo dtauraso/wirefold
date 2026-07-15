@@ -39,6 +39,19 @@ set -euo pipefail
 # --------------------------------------------------------------------
 #   • backticked `tokens` in CLAUDE.md, MODEL.md, nodes/*/SPEC.md
 #   • backticked `tokens` inside comment lines of tracked *.go / *.ts / *.tsx
+#   • <code> spans in tracked docs/**/*.html — the HTML equivalent of a backtick
+#
+# HTML DOCS ARE CHECKED BY DEFAULT, opt out with a marker (see DOC_HISTORICAL_RE):
+#
+#     <meta name="doc-status" content="historical">
+#
+# Default-on is the point. An opt-IN marker would only cover docs someone remembered to
+# mark — the exact failure mode of the denylist this guard replaced. A doc asserting current
+# architecture must be checkable; a doc that is a dated SNAPSHOT (a design spec as-proposed,
+# an audit as-found) says so once, in its head, and is skipped whole.
+#
+# docs/planning/** is skipped by RULE, not by marker: CLAUDE.md already defines those as
+# branch-local docs that do not ride a merge to main. They are historical by construction.
 #
 # The backtick is the author SAYING "this is code", and that intent is what makes the check
 # precise. Scanning bare prose was tried and rejected: it flagged 110 candidates at roughly
@@ -79,6 +92,10 @@ IDENT_RE='([A-Z][a-z0-9]+([A-Z][a-z0-9]*)+|[a-z][a-z0-9]*([A-Z][a-z0-9]*)+)'
 # the next reader to delete a valuable "we tried this and it failed" note to appease a guard.
 HISTORY_RE='(gone|removed|retired|deleted|erased|obsolete|legacy|superseded|replaced|no longer|used to|formerly|gutted|gone away|gone now|dead|gone\.|was |were |gone,|old |gone;|pre-|reverted|rejected|abandoned|do not re-|don.t re-|never re-|does not exist|doesn.t exist|never existed|unbuilt|no such|there is no|do not cite)'
 
+# A whole HTML doc opts out by declaring itself a dated snapshot rather than a claim about
+# current architecture. Matched anywhere in the file (conventionally in <head>).
+DOC_HISTORICAL_RE='<meta[[:space:]]+name="doc-status"[[:space:]]+content="historical"'
+
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
@@ -115,7 +132,22 @@ for d in "${DOCS[@]}"; do
 done
 sort -u -o "$TMP/from_md.txt" "$TMP/from_md.txt"
 
-cat "$TMP/from_go.txt" "$TMP/from_md.txt" | sort -u > "$TMP/candidates.txt"
+# ---- 3b. <code> spans in tracked HTML docs ------------------------------------------------
+# Checked by DEFAULT. Skipped whole when the doc declares itself historical, and skipped by
+# rule under docs/planning/ (branch-local per CLAUDE.md; historical by construction).
+: > "$TMP/from_html.txt"
+while IFS= read -r page; do
+  [[ -f "$page" ]] || continue
+  case "$page" in docs/planning/*) continue ;; esac
+  if grep -qiE "$DOC_HISTORICAL_RE" "$page" 2>/dev/null; then continue; fi
+  grep -viE "$HISTORY_RE" "$page" 2>/dev/null \
+    | grep -oE '<code[^>]*>[^<]*</code>' \
+    | sed -e 's/<[^>]*>//g' \
+    | grep -oE "$IDENT_RE" >> "$TMP/from_html.txt" || true
+done < <(git ls-files 'docs/*.html' 'docs/**/*.html' 2>/dev/null || true)
+sort -u -o "$TMP/from_html.txt" "$TMP/from_html.txt"
+
+cat "$TMP/from_go.txt" "$TMP/from_md.txt" "$TMP/from_html.txt" | sort -u > "$TMP/candidates.txt"
 
 # ---- 4. Refuse a vacuous pass -------------------------------------------------------------
 # If either set came back empty the extractor is broken (renamed dirs, missing git, a bad
@@ -153,7 +185,8 @@ echo ""
 while IFS= read -r sym; do
   echo "  ghost: \`$sym\`"
   # Show the sites so the fix is actionable without a second grep.
-  git grep -nE "\`[^\`]*${sym}[^\`]*\`" -- '*.go' '*.ts' '*.tsx' CLAUDE.md MODEL.md 'nodes/*/SPEC.md' 2>/dev/null \
+  git grep -nE "(\`[^\`]*${sym}[^\`]*\`|<code[^>]*>[^<]*${sym}[^<]*</code>)" \
+    -- '*.go' '*.ts' '*.tsx' CLAUDE.md MODEL.md 'nodes/*/SPEC.md' 'docs/*.html' 'docs/**/*.html' 2>/dev/null \
     | head -3 | sed 's/^/      /' || true
 done < "$TMP/ghosts.txt"
 
