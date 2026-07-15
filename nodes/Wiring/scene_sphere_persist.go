@@ -72,14 +72,38 @@ func writeSceneSphere(scenePath string, s sceneSphere) error {
 // LoadSceneSphere installs md.sceneSphere from FILE DATA, or — when scene.json has no
 // persisted sphere — from a one-time content-fit of the current node centers (so an
 // existing scene gets a sane reference without any authored value). Call after LoadTopology
-// (node centers are loaded) and before the sphere is used to derive positions. Phase 1: it
-// only stores the sphere; nothing derives from it yet.
+// (node centers are loaded) and before the sphere is used to derive positions.
+//
+// A content-fit fallback is PERSISTED IMMEDIATELY, and that is load-bearing. Every node's
+// position is a scene polar measured ABOUT THIS CENTER, so the center must be the same on
+// the next load or every position is silently reinterpreted:
+//
+//	load 1: no sphere -> content-fit S1 -> user drags -> scenePolars persisted about S1
+//	load 2: still no sphere -> content-fit over the NEW centers -> S2 != S1
+//	        -> every scenePolar now read about S2 -> the whole diagram drifts
+//
+// The sphere used to reach disk only via the "save" command (spherePersist.flushNow). That
+// command has not fired since the old system was erased: its trigger chain (save.ts
+// markViewSynced <- store.ts) died with it, so _sendScene() has early-returned
+// "not-synced-yet" ever since. The existing topology/ is masked only because its sphere was
+// persisted back when save still worked. Any NEW topology walks straight into the drift.
+//
+// Go owns the authoritative scene state (MODEL.md), so its durability must not depend on the
+// webview sending a command. Persisting here removes the last reason for TS to trigger a
+// save at all.
 func (md *MoveDispatch) LoadSceneSphere(topologyPath string) {
 	if s, ok := loadSceneSphere(topologyPath); ok {
 		md.sceneSphere = s
 		return
 	}
 	md.sceneSphere = contentFitSceneSphere(md.heldCenters())
+	// Best-effort: a read-only or absent scene dir must not stop the sim from running. The
+	// in-memory sphere is correct either way; only cross-run stability is at stake.
+	// Path via sceneCameraPath (scene_paths.go) — the authoritative resolver, per
+	// check-scene-path-resolution.sh; never hand-rolled.
+	if topologyPath != "" {
+		_ = writeSceneSphere(sceneCameraPath(topologyPath), md.sceneSphere)
+	}
 }
 
 // sceneSpherePersister coalesces rapid pans into a debounced read-modify-write of
