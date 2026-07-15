@@ -782,8 +782,9 @@ type MoveDispatch struct {
 	// scheduled from RootMove for the dragged node.
 	quantOffsetPersist *quantOffsetPersister
 	// spherePersist is the debounced disk persister for the scene sphere (sphere_layout.go
-	// md.sceneSphere), armed by EnableEditPersist. Scheduled from PanScene on every
-	// camera pan. nil until armed (tests that never arm).
+	// md.sceneSphere), armed by EnableEditPersist. Only ever FLUSHED (handleSaveMsg): nothing
+	// moves the sphere today, so the debounced schedule path has no caller — see MODEL.md's
+	// "the sphere is currently immovable" note. nil until armed (tests that never arm).
 	spherePersist *sceneSpherePersister
 	// selected is the CURRENTLY-SELECTED node id (click-select), owned by Go. "" = nothing
 	// selected. Set by the gesture FSM's click outcome (applySelect) and emitted via
@@ -1670,9 +1671,10 @@ func (md *MoveDispatch) OrbitLockedViewpoint(from, to dir, tr *T.Trace) {
 func (md *MoveDispatch) ZoomViewpoint(factor float64, tr *T.Trace) { md.vp.ZoomViewpoint(factor, tr) }
 func (md *MoveDispatch) PanViewpoint(delta vec3, tr *T.Trace) {
 	// A dolly is a pure CAMERA move (the eye translates toward the cursor). It must NOT move the
-	// scene sphere — that is the separate PanScene gesture (polar-frame-rewrite.md). Coupling them
-	// left md.sceneSphere.Center diverged from the movers' held center until the next PanScene
-	// broadcast reconciled it with a jump (the "zoom got canceled" symptom).
+	// scene sphere: coupling them left md.sceneSphere.Center diverged from the movers' held
+	// center until a later broadcast reconciled it with a jump (the "zoom got canceled"
+	// symptom). Moving the sphere would be a SEPARATE scene-pan gesture — which does not
+	// exist today; see MODEL.md's "the sphere is currently immovable" note.
 	md.vp.PanViewpoint(delta, tr)
 }
 
