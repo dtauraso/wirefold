@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Polar Layout — wirefold architecture</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1><a href="index.html">wire<span class="fold">fold</span> — architecture</a></h1>
+  <div class="sub">A concurrent dataflow network where the <b>topology is the logic</b>. Go owns the model; TypeScript only draws it.</div>
+</header>
+
+<nav id="tabs"></nav>
+<div class="wrap">
+<section>
+  <h2>Positions &amp; locks are pure polar</h2>
+  <p>The scene sphere's center is the only <b>authoritative, persisted</b> cartesian value — the one world anchor
+  in <code>scene.json</code>. Every node position and every movement lock is <i>stored</i> in polar coordinates about it.</p>
+
+  <div class="banner"><b>Careful:</b> "the only cartesian value in the system" is a claim the code makes about itself
+  (<code>scene_sphere_persist.go</code>) and it is <b>not literally true</b>. Cartesian <code>vec3</code> is everywhere it
+  has to be: the camera pose (<code>gesture_camera.go</code> is a whole file of Cartesian math, self-described as
+  "quarantined"), port anchors, bead segments, and node centers derived per-frame as
+  <code>sceneCenter + polar2cart(…)</code>. The true invariant is narrower and still strong: cartesian is
+  <b>derived or quarantined at the renderer edge, never persisted and never a source of truth</b>. Nav is
+  polar-only, and that <i>is</i> guarded (<code>check-polar-only-nav.sh</code>).</div>
+
+  <figure>
+  <svg viewBox="0 0 780 320" width="780">
+    <!-- sphere -->
+    <circle cx="300" cy="170" r="130" fill="none" stroke="var(--line)" stroke-width="1.5" stroke-dasharray="4 4"/>
+    <circle cx="300" cy="170" r="4" fill="var(--accent)"/>
+    <text x="300" y="192" text-anchor="middle" fill="var(--accent)" font-size="11.5" font-weight="700">scene center</text>
+    <text x="300" y="206" text-anchor="middle" fill="var(--muted)" font-size="10.5">(only persisted cartesian)</text>
+    <!-- node -->
+    <line x1="300" y1="170" x2="392" y2="96" stroke="var(--go)" stroke-width="2"/>
+    <circle cx="392" cy="96" r="16" fill="none" stroke="var(--go)" stroke-width="3"/>
+    <text x="392" y="72" text-anchor="middle" fill="var(--go)" font-size="11.5" font-weight="700">node</text>
+    <text x="352" y="130" fill="var(--muted)" font-size="11">scene polar (r,θ,φ)</text>
+    <!-- locked satellite -->
+    <line x1="392" y1="96" x2="470" y2="70" stroke="var(--wire)" stroke-width="2" stroke-dasharray="3 3"/>
+    <circle cx="470" cy="70" r="13" fill="none" stroke="var(--go)" stroke-width="2.5"/>
+    <text x="470" y="48" text-anchor="middle" fill="var(--wire)" font-size="11" font-weight="700">local polar offset</text>
+    <!-- right: rules -->
+    <g font-size="12.5">
+      <rect x="530" y="55" width="230" height="215" rx="10" fill="var(--panel)" stroke="var(--line)"/>
+      <text x="545" y="80" fill="var(--ink)" font-weight="700">Invariants</text>
+      <text x="545" y="106" fill="var(--muted)">• offset is STORED,</text>
+      <text x="558" y="122" fill="var(--muted)">carried node→node</text>
+      <text x="545" y="146" fill="var(--muted)">• never re-derived from</text>
+      <text x="558" y="162" fill="var(--muted)">a live moving world</text>
+      <text x="545" y="186" fill="var(--muted)">• moved center rigidly</text>
+      <text x="558" y="202" fill="var(--muted)">translates satellites</text>
+      <text x="545" y="226" fill="var(--ok)" font-weight="700">⇒ no blow-up</text>
+      <text x="545" y="248" fill="var(--muted)" font-size="11">structural — the bad</text>
+      <text x="558" y="263" fill="var(--muted)" font-size="11">form is unwritable</text>
+    </g>
+  </svg>
+  <figcaption>Two polars per node: a <b>scene polar</b> (position, persisted in <code>meta.json</code>) and a <b>local polar</b> offset about its lock center.</figcaption>
+  </figure>
+
+  <div class="banner">The "positions fly to infinity" bug came from reconstructing an offset as <code>cart2polar(node − center)</code> against a mid-moving center. That reconstruction is now structurally impossible — the offset is stored and carried node→node, never re-derived from a live moving world. Lock propagation is a decentralized node-to-node cascade over per-node inboxes (<code>sendMove</code>) with <b>no central worklist</b>; the central <code>rootMove</code> was deleted. Local polar lives on <code>LayoutHolder</code> (<code>SetLocalPolar</code> / <code>localPolarSteps</code>).</div>
+
+  <div class="pager" id="pager"></div>
+</section>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>

@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Drift Log — wirefold architecture</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1><a href="index.html">wire<span class="fold">fold</span> — architecture</a></h1>
+  <div class="sub">A concurrent dataflow network where the <b>topology is the logic</b>. Go owns the model; TypeScript only draws it.</div>
+</header>
+
+<nav id="tabs"></nav>
+<div class="wrap">
+<section>
+  <h2>Stale self-descriptions found in this audit</h2>
+  <p>Each row is a place the code, or its instructions, assert something untrue. Verified against source
+  on <span class="muted">2026-07-14</span>. Ordered by how likely an agent is to act on it.</p>
+
+  <div class="card">
+    <p><span class="k bead-c">CLAUDE.md — the <code>node-label</code> sidecar</span> <span class="pill">highest risk</span></p>
+    <p class="muted">The project's own instruction file describes the bridge as "the binary content buffer plus the
+    <code>node-label</code> id/label/kind sidecar." That sidecar is <b>gone</b> — labels ride the Node block's
+    <code>LABEL_OFF</code>/<code>LABEL_LEN</code> columns into the Label section, and
+    <code>parseHostToWebview.test.ts</code> actively asserts the message type is rejected. <code>MODEL.md</code> agrees
+    with the code. An agent following CLAUDE.md would build against a deleted seam.</p>
+  </div>
+
+  <div class="card">
+    <p><span class="k bead-c">CLAUDE.md — the bridge surface omits <code>fade-toggle</code> and mis-states fade</span> <span class="pill">highest risk</span></p>
+    <p class="muted">CLAUDE.md lists the TS→Go surface as "<code>raw-input</code>, spec save/load, and a single
+    geometry-CRUD <code>edit</code> message … plus the play/pause control signal", and says "Fading an edge … [is an]
+    <code>update</code> on their entity." Neither matches the code. <code>fade-toggle</code> is a <b>seventh top-level
+    type</b> and a deliberate <b>bare command</b>: it carries no entity id because <i>Go owns the selection</i>, so TS
+    cannot name an entity to <code>update</code>. The code is right — and enforced (live sender at
+    <code>ThreeView.tsx:99</code>, a test, and <code>fadeToggle:5</code> inside the guarded
+    <code>INPUT_LAYOUT_FINGERPRINT</code> v10). <b>The doc is what drifted.</b></p>
+  </div>
+
+  <div class="card">
+    <p><span class="k muted"><code>stdin_reader.go</code> header — undercounts its own switch</span> <span class="pill">confusing, not false</span></p>
+    <p class="muted">The header enumerates <b>five</b> top-level message types; the switch has <b>seven</b>. Its line that
+    fade edits "no longer cross this seam" appears to mean fade-as-an-<code>edit</code>-op was replaced by the bare
+    command — true, but it reads as a flat contradiction of the <code>fade-toggle</code> case fifteen lines below it.</p>
+  </div>
+
+  <div class="card">
+    <p><span class="k bead-c"><code>WaitTick</code> — a symbol that no longer exists</span></p>
+    <p class="muted">Named in comments in <code>input/node.go</code>, <code>layout_holder.go</code>, and
+    <code>paced_wire.go</code>. Zero definitions repo-wide. The clock has been sleep-only
+    (<code>SleepCycle</code>) for some time. This one propagated straight into the first draft of the Clock page.</p>
+  </div>
+
+  <div class="card">
+    <p><span class="k bead-c">"The Center is the ONE cartesian value in the system"</span></p>
+    <p class="muted">A comment in <code>scene_sphere_persist.go</code>. False as written — camera pose, port anchors,
+    bead segments and derived node centers are all cartesian. The <i>intended</i> invariant (only persisted cartesian
+    anchor; everything else derived or quarantined) is true and worth stating precisely.</p>
+  </div>
+
+  <div class="card">
+    <p><span class="k muted">Vestigial <code>json:"…"</code> tags on <code>stdinMsg</code></span> <span class="pill">cosmetic, still misleading</span></p>
+    <p class="muted">Nothing unmarshals them — <code>input_codec.go</code> decodes the binary record. They imply a JSON
+    seam that no longer exists.</p>
+  </div>
+
+  <div class="card">
+    <p><span class="k muted"><code>overlay-flags.ts</code> references <code>useCameraStore</code></span></p>
+    <p class="muted">In a comment only. No such store exists anywhere in <code>src/</code> — it was erased with the old
+    system. Points an agent at a state-authority pattern the guards exist to forbid.</p>
+  </div>
+
+  <h3>Not drift — verified accurate</h3>
+  <p class="muted">fd 3 + length-prefix · framed binary stdin with no JSON · exactly three edit ops ·
+  <code>ticksToCross = arc/pulseSpeed</code> · geometry edit preserving fractional <code>t</code> ·
+  <code>rootMove</code> deleted and propagation decentralized · zero per-kind render components ·
+  all 8 node kinds present and PascalCase · all five named guards real (20 total).</p>
+
+  <div class="banner"><b>These pages are themselves tier-3 prose.</b> Nothing enforces that this site stays true —
+  it will drift exactly like the comments it documents. Re-verify against source before trusting it; the date at the
+  top of this page is the only warranty. See <a href="ai-friendliness.html" style="color:var(--accent)">AI-Friendliness</a>.</div>
+
+  <div class="pager" id="pager"></div>
+</section>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>

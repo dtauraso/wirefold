@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>wirefold — architecture</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1><a href="index.html">wire<span class="fold">fold</span> — architecture</a></h1>
+  <div class="sub">A concurrent dataflow network where the <b>topology is the logic</b>. Go owns the model; TypeScript only draws it.</div>
+</header>
+
+<nav id="tabs"></nav>
+<div class="wrap">
+<section>
+  <h2>Two processes, one binary bridge</h2>
+  <p>Everything real lives in the <span class="go-c k">Go runtime</span> — nodes, wires, the clock, all geometry.
+  It packs the <b>whole scene</b> into a binary content buffer and streams it to a
+  <span class="ts-c k">VS Code webview</span> that <b>only decodes and draws</b>, and forwards raw input back.
+  The bridge is binary both ways and <b>fire-and-forget</b> (no awaits, no request/response).</p>
+
+  <figure>
+  <svg viewBox="0 0 900 340" width="900">
+    <!-- Go box -->
+    <rect x="20" y="40" width="370" height="260" rx="14" fill="none" stroke="var(--go)" stroke-width="2"/>
+    <text x="205" y="66" text-anchor="middle" fill="var(--go)" font-weight="700" font-size="15">Go runtime — the network</text>
+    <g fill="var(--ink)" font-size="12.5">
+      <rect x="45" y="86" width="150" height="34" rx="8" fill="var(--panel)" stroke="var(--line)"/><text x="120" y="108" text-anchor="middle">node goroutines</text>
+      <rect x="215" y="86" width="150" height="34" rx="8" fill="var(--panel)" stroke="var(--line)"/><text x="290" y="108" text-anchor="middle">wires (no goroutine)</text>
+      <rect x="45" y="130" width="150" height="34" rx="8" fill="var(--panel)" stroke="var(--line)"/><text x="120" y="152" text-anchor="middle">Go channels</text>
+      <rect x="215" y="130" width="150" height="34" rx="8" fill="var(--panel)" stroke="var(--line)"/><text x="290" y="152" text-anchor="middle">one tick clock</text>
+      <rect x="45" y="182" width="320" height="44" rx="8" fill="var(--panel)" stroke="var(--wire)"/><text x="205" y="203" text-anchor="middle" fill="var(--wire)" font-weight="700">Buffer/ — pack whole scene</text><text x="205" y="219" text-anchor="middle" fill="var(--muted)" font-size="11">positions · geometry · beads · camera · overlays</text>
+      <rect x="45" y="240" width="320" height="40" rx="8" fill="var(--panel)" stroke="var(--line)"/><text x="205" y="264" text-anchor="middle">polar layout · gesture FSM · persistence</text>
+    </g>
+    <!-- TS box -->
+    <rect x="510" y="40" width="370" height="260" rx="14" fill="none" stroke="var(--ts)" stroke-width="2"/>
+    <text x="695" y="66" text-anchor="middle" fill="var(--ts)" font-weight="700" font-size="15">VS Code webview — TS/React</text>
+    <g fill="var(--ink)" font-size="12.5">
+      <rect x="535" y="90" width="320" height="40" rx="8" fill="var(--panel)" stroke="var(--line)"/><text x="695" y="114" text-anchor="middle">buffer-decode.ts → snapshot</text>
+      <rect x="535" y="142" width="320" height="40" rx="8" fill="var(--panel)" stroke="var(--line)"/><text x="695" y="166" text-anchor="middle">buffer-scene.tsx → three.js draw</text>
+      <rect x="535" y="194" width="320" height="40" rx="8" fill="var(--panel)" stroke="var(--line)"/><text x="695" y="218" text-anchor="middle">raw-input.ts → forward pointer/wheel</text>
+      <rect x="535" y="246" width="320" height="34" rx="8" fill="var(--panel)" stroke="var(--bead)"/><text x="695" y="268" text-anchor="middle" fill="var(--bead)">authors NO domain state</text>
+    </g>
+    <!-- arrows -->
+    <defs>
+      <marker id="ah" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="var(--go)"/></marker>
+      <marker id="ah2" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="var(--ts)"/></marker>
+    </defs>
+    <line x1="390" y1="150" x2="508" y2="150" stroke="var(--go)" stroke-width="2.5" marker-end="url(#ah)"/>
+    <text x="449" y="140" text-anchor="middle" fill="var(--go)" font-size="11.5" font-weight="700">buffer (fd 3)</text>
+    <line x1="508" y1="215" x2="392" y2="215" stroke="var(--ts)" stroke-width="2.5" marker-end="url(#ah2)"/>
+    <text x="449" y="235" text-anchor="middle" fill="var(--ts)" font-size="11.5" font-weight="700">raw-input (stdin)</text>
+  </svg>
+  <figcaption>Go → TS: length-prefixed binary content buffer on fd 3 (overridable via <code>WIREFOLD_BUF_OUT_FD</code>). TS → Go: framed <code>[len:u32-LE][record]</code> on stdin — no <code>JSON.parse</code>/<code>stringify</code> anywhere on that seam.</figcaption>
+  </figure>
+
+  <div class="banner"><b>"Binary both ways" is true of the <i>bridge</i>, not of every pipe.</b> <code>stdout</code> is a
+  third channel and it is still JSON: debug breadcrumbs (<code>{"kind":"breadcrumb",…}</code> → <code>.probe/go-debug.jsonl</code>)
+  and one <code>EmitSpecLine</code> topology-spec line the ext host forwards as <code>load</code>. What was removed
+  is the JSON <b>trace-event</b> emitter — those now decode from the buffer's Event block.</div>
+
+  <div class="banner"><b>Governing principle — medium vs. substance.</b> For the <b>medium</b> (VS Code, React, three.js) adopt the dominant industry choice.
+  For the <b>substance</b> (what a node is, how ticks work, what a wire is) ignore industry defaults — "logic in procedures, topology as plumbing" is exactly the inversion this project challenges.</div>
+
+  <h3>These pages were checked against the source</h3>
+  <p class="muted">Every claim here was verified by reading the Go and TS rather than the docs, on 2026-07-14.
+  Where the code's own comments turned out to be false, the page says so rather than repeating them — see
+  <a href="drift-log.html" style="color:var(--accent)">Drift Log</a>, and
+  <a href="ai-friendliness.html" style="color:var(--accent)">AI-Friendliness</a> for why that gap exists at all.</p>
+
+  <div class="pager" id="pager"></div>
+</section>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>

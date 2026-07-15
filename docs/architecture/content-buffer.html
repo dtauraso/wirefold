@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Content Buffer — wirefold architecture</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1><a href="index.html">wire<span class="fold">fold</span> — architecture</a></h1>
+  <div class="sub">A concurrent dataflow network where the <b>topology is the logic</b>. Go owns the model; TypeScript only draws it.</div>
+</header>
+
+<nav id="tabs"></nav>
+<div class="wrap">
+<section>
+  <h2>The whole scene, as one binary buffer</h2>
+  <p>Go packs everything into <code>Buffer/</code> and streams it as length-prefixed frames on fd 3 on every change.
+  TS decodes the latest snapshot and draws it generically — no positions or geometry computed on the TS side.</p>
+
+  <figure>
+  <svg viewBox="0 0 820 540" width="820">
+    <text x="410" y="22" text-anchor="middle" fill="var(--ink)" font-weight="700" font-size="14">Content buffer — all 12 blocks, in wire order</text>
+    <text x="410" y="38" text-anchor="middle" fill="var(--muted)" font-size="11">layout version 20</text>
+    <g font-size="12.5">
+      <rect x="60" y="52" width="700" height="34" rx="7" fill="var(--panel)" stroke="var(--line)"/><text x="80" y="74" fill="var(--ink)" font-weight="700">Header</text><text x="740" y="74" text-anchor="end" fill="var(--muted)">36 bytes · version + block offsets</text>
+      <rect x="60" y="92" width="700" height="34" rx="7" fill="var(--panel)" stroke="var(--bead)"/><text x="80" y="114" fill="var(--bead)" font-weight="700">Bead</text><text x="740" y="114" text-anchor="end" fill="var(--muted)">in-transit bead positions (fraction t)</text>
+      <rect x="60" y="132" width="700" height="34" rx="7" fill="var(--panel)" stroke="var(--go)"/><text x="80" y="154" fill="var(--go)" font-weight="700">Node</text><text x="740" y="154" text-anchor="end" fill="var(--muted)">row index = identity · KindId · Selected column</text>
+      <rect x="60" y="172" width="700" height="34" rx="7" fill="var(--panel)" stroke="var(--bead)"/><text x="80" y="194" fill="var(--bead)" font-weight="700">Interior</text><text x="740" y="194" text-anchor="end" fill="var(--muted)">nodeCount × 8 slots × 17 B — beads held inside a node</text>
+      <rect x="60" y="212" width="700" height="34" rx="7" fill="var(--panel)" stroke="var(--wire)"/><text x="80" y="234" fill="var(--wire)" font-weight="700">Edge</text><text x="740" y="234" text-anchor="end" fill="var(--muted)">curve params · WireProps columns · Selected</text>
+      <rect x="60" y="252" width="700" height="34" rx="7" fill="var(--panel)" stroke="var(--wire)"/><text x="80" y="274" fill="var(--wire)" font-weight="700">Port</text><text x="740" y="274" text-anchor="end" fill="var(--muted)">flattened, port-row order</text>
+      <rect x="60" y="292" width="700" height="34" rx="7" fill="var(--panel)" stroke="var(--line)"/><text x="80" y="314" fill="var(--ink)" font-weight="700">Camera</text><text x="740" y="314" text-anchor="end" fill="var(--muted)">1 row · stride 32 · pose → three.js camera</text>
+      <rect x="60" y="332" width="700" height="34" rx="7" fill="var(--panel)" stroke="var(--line)"/><text x="80" y="354" fill="var(--ink)" font-weight="700">Overlay</text><text x="740" y="354" text-anchor="end" fill="var(--muted)">1 row · stride 10 · flag bitfield</text>
+      <rect x="60" y="372" width="700" height="34" rx="7" fill="var(--panel)" stroke="var(--accent)"/><text x="80" y="394" fill="var(--accent)" font-weight="700">Label</text><text x="740" y="394" text-anchor="end" fill="var(--muted)">UTF-8 node label bytes (off/len columns on Node)</text>
+      <rect x="60" y="412" width="700" height="34" rx="7" fill="var(--panel)" stroke="var(--ok)"/><text x="80" y="434" fill="var(--ok)" font-weight="700">Event</text><text x="740" y="434" text-anchor="end" fill="var(--muted)">stride 57 · Recv/Fire/Send/Arrive/Done → .probe logs</text>
+      <rect x="60" y="452" width="700" height="34" rx="7" fill="var(--panel)" stroke="var(--accent)"/><text x="80" y="474" fill="var(--accent)" font-weight="700">PortName</text><text x="740" y="474" text-anchor="end" fill="var(--muted)">UTF-8 bytes</text>
+      <rect x="60" y="492" width="700" height="34" rx="7" fill="var(--panel)" stroke="var(--accent)"/><text x="80" y="514" fill="var(--accent)" font-weight="700">EdgeLabel</text><text x="740" y="514" text-anchor="end" fill="var(--muted)">UTF-8 bytes</text>
+    </g>
+  </svg>
+  <figcaption>Node identity is the <b>row index</b>; kind is a numeric <code>KindId</code> TS maps to <code>NODE_DEFS</code> colors. <b>Selection is not its own block</b> — it is a column on Node and on Edge. The <b>Event</b> block is how logs exist: Go's JSON trace emitter is gone, so <code>.probe</code> logs decode from the buffer. Layout parity is guarded (<code>check-buffer-layout-parity.sh</code>).</figcaption>
+  </figure>
+
+  <h3>TS → Go: exactly three edit ops</h3>
+  <div class="grid2">
+    <div class="card"><span class="k">create</span> / <span class="k">delete</span> — add or remove an edge.</div>
+    <div class="card"><span class="k">update</span> — set an attribute on a typed entity (node / edge / camera / overlays / scene).</div>
+  </div>
+  <p class="muted">New editor→Go capability is a new entity kind or attribute — <b>never a new op</b>. Fading an edge, moving a port, orbiting the camera, toggling an overlay are all <code>update</code>s. Parity guarded across <code>messages.ts</code>, <code>stdin_reader.go</code>, <code>handle-message.ts</code>, and fenced in Go by <code>EDIT_OPS_START</code>/<code>EDIT_OPS_END</code>.</p>
+
+  <div class="banner"><b>Three <i>edit ops</i> — but seven top-level message types.</b> <code>applyEdit</code> does hold exactly
+  <code>create</code>/<code>update</code>/<code>delete</code>, fenced by <code>EDIT_OPS_START/END</code>. The <i>enclosing</i>
+  stdin dispatch is wider: <code>edit</code>, <code>play</code>, <code>pause</code>, <code>resend</code>,
+  <code>raw-input</code>, <code>save</code>, and <code>fade-toggle</code>.
+  <code>fade-toggle</code> is a deliberate <b>bare command</b> — it names no entity because <b>Go owns the selection</b>,
+  so there is nothing for TS to address an <code>update</code> at. It is fully enforced (guarded
+  <code>INPUT_LAYOUT_FINGERPRINT</code>, message-kind parity, a test). CLAUDE.md's bridge paragraph omits it and says
+  fade is an <code>update</code> — that doc is stale, not the code. See
+  <a href="drift-log.html" style="color:var(--accent)">Drift Log</a>.</div>
+
+  <div class="pager" id="pager"></div>
+</section>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>
