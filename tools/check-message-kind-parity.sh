@@ -78,9 +78,14 @@ kinds_from_ts() {
     | sort -u
 }
 
-GO_KINDS=$(kinds_from_go)
-GO_DOC_KINDS=$(kinds_from_go_doc)
-TS_KINDS=$(kinds_from_ts)
+# NOTE `|| true` on every extractor assignment below. Without it, `set -euo pipefail` kills
+# the script AT THE ASSIGNMENT whenever an extractor's grep legitimately matches nothing —
+# so the assert_nonempty diagnostic underneath, which exists precisely to explain that case,
+# could never print. The script still exited nonzero, so it failed SAFE but SILENTLY,
+# defeating the message. Verified with a minimal repro.
+GO_KINDS=$(kinds_from_go) || true
+GO_DOC_KINDS=$(kinds_from_go_doc) || true
+TS_KINDS=$(kinds_from_ts) || true
 
 # Refuse a vacuous pass: if any extractor returns an EMPTY set (the switch/fence/const was
 # renamed or removed), comm would compare empty-to-empty and "pass". All must be
@@ -96,7 +101,6 @@ for pair in "GO_KINDS:stdin_reader.go MSG_TYPES fenced switch" \
 done
 
 MISSING=$(comm -23 <(echo "$GO_KINDS") <(echo "$TS_KINDS"))
-EXTRA=$(comm -13 <(echo "$GO_KINDS") <(echo "$TS_KINDS"))
 
 HITS=0
 if [[ -n "$MISSING" ]]; then
@@ -129,7 +133,8 @@ fi
 
 # Extra TS kinds that Go doesn't recognize are fine (TS handles more message
 # types than stdin_reader.go), so we only report Go→TS missing, not TS→Go extra.
-# Uncomment the block below if you want strict bidirectional parity.
+# Uncomment the block below for strict bidirectional parity; it computes its own EXTRA
+# (the live one was deleted — it was assigned on every run and read by nobody).
 #
 # if [[ -n "$EXTRA" ]]; then
 #   echo "message-kind-parity: kinds in WEBVIEW_TO_HOST_TYPES not matched in stdin_reader.go:"

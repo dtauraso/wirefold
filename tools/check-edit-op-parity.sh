@@ -98,17 +98,22 @@ report_diff() { # label missing_in_a a_name missing_in_b b_name
 }
 
 # --- Axis 1: ops ------------------------------------------------------------
-TS_OPS=$(between EDIT_MSG_START EDIT_MSG_END "$MESSAGES_TS" | grep -aoE 'op: "[^"]+"' | quoted)
-GO_OPS=$(between EDIT_OPS_START EDIT_OPS_END "$STDIN_READER" | toplevel_case | quoted)
+# NOTE `|| true` on every extractor assignment below. Without it, `set -euo pipefail` kills
+# the script AT THE ASSIGNMENT whenever an extractor's grep legitimately matches nothing —
+# so the assert_nonempty diagnostic underneath, which exists precisely to explain that case,
+# could never print. The script still exited nonzero, so it failed SAFE but SILENTLY,
+# defeating the message. Verified with a minimal repro.
+TS_OPS=$(between EDIT_MSG_START EDIT_MSG_END "$MESSAGES_TS" | grep -aoE 'op: "[^"]+"' | quoted) || true
+GO_OPS=$(between EDIT_OPS_START EDIT_OPS_END "$STDIN_READER" | toplevel_case | quoted) || true
 assert_nonempty "$TS_OPS" "axis1 messages.ts ops"
 assert_nonempty "$GO_OPS" "axis1 stdin_reader.go ops"
 report_diff "$(comm -13 <(echo "$GO_OPS") <(echo "$TS_OPS"))" "stdin_reader.go ops" \
             "$(comm -23 <(echo "$GO_OPS") <(echo "$TS_OPS"))" "messages.ts ops"
 
 # --- Axis 2: update entity kinds (3-way) ------------------------------------
-TS_KINDS=$(between EDIT_MSG_START EDIT_MSG_END "$MESSAGES_TS" | grep -aoE 'kind: "[^"]+"' | quoted)
-GO_KINDS=$(between EDIT_UPDATE_KINDS_START EDIT_UPDATE_KINDS_END "$STDIN_READER" | toplevel_case | quoted)
-HM_KINDS=$(between EDIT_UPDATE_KINDS_START EDIT_UPDATE_KINDS_END "$HANDLE_MSG" | quoted)
+TS_KINDS=$(between EDIT_MSG_START EDIT_MSG_END "$MESSAGES_TS" | grep -aoE 'kind: "[^"]+"' | quoted) || true
+GO_KINDS=$(between EDIT_UPDATE_KINDS_START EDIT_UPDATE_KINDS_END "$STDIN_READER" | toplevel_case | quoted) || true
+HM_KINDS=$(between EDIT_UPDATE_KINDS_START EDIT_UPDATE_KINDS_END "$HANDLE_MSG" | quoted) || true
 assert_nonempty "$TS_KINDS" "axis2 messages.ts update kinds"
 assert_nonempty "$GO_KINDS" "axis2 stdin_reader.go update kinds"
 assert_nonempty "$HM_KINDS" "axis2 handle-message.ts update kinds"
@@ -132,7 +137,7 @@ report_diff "$(comm -13 <(echo "$HM_KINDS") <(echo "$TS_KINDS"))" "handle-messag
 # camelCase↔read-name compare would false-diverge. Counts are robust and catch the dominant
 # failure (flag added/removed on one side only). The three independent hand-authored lists
 # (flags, readOverlay* reads, OverlayFlagVals object keys) must have equal cardinality.
-TS_FLAGS=$(between OVERLAY_FLAGS_START OVERLAY_FLAGS_END "$MESSAGES_TS" | quoted)
+TS_FLAGS=$(between OVERLAY_FLAGS_START OVERLAY_FLAGS_END "$MESSAGES_TS" | quoted) || true
 assert_nonempty "$TS_FLAGS" "axis3 messages.ts overlay flags"
 # Per-flag buffer reads: the distinct readOverlay* function names used in overlay-flags.ts.
 RENDER_READS=$(grep -aoE 'readOverlay[A-Za-z]+\(v\)' "$OVERLAY_FLAGS_TS" | sort -u)
