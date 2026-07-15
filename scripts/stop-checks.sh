@@ -2,7 +2,28 @@
 # Fast deterministic checks for the Stop hook. Skips slow test suites.
 # Returns nonzero (and prints why) if anything fails.
 set -u
-cd "$(git rev-parse --show-toplevel)" || exit 0
+# Resolve the repo root via an ASSIGNMENT, not `cd "$(...)" || ...`.
+#
+# The `cd "$(git rev-parse --show-toplevel)" || exit 0` this replaces looked like it
+# handled failure and did not: when git rev-parse fails it prints nothing, so the line
+# degrades to `cd ""` — which SUCCEEDS as a no-op. The `||` was unreachable, and the suite
+# ran on in whatever cwd it started in. It still failed loudly (every guard reports "No
+# such file or directory" and the Stop hook blocks), so this was never the silent-green it
+# resembles — but it failed for an accidental reason, and the guard clause was decoration.
+#
+# `ROOT=$(cmd)` propagates cmd's exit status, so this form actually fires.
+ROOT="$(git rev-parse --show-toplevel)" || {
+  echo "stop-checks: MISCONFIGURED — 'git rev-parse --show-toplevel' failed; cannot locate repo root." >&2
+  exit 1
+}
+if [ -z "$ROOT" ]; then
+  echo "stop-checks: MISCONFIGURED — repo root resolved to empty; refusing to run checks against the wrong tree." >&2
+  exit 1
+fi
+cd "$ROOT" || {
+  echo "stop-checks: MISCONFIGURED — cannot cd to repo root '$ROOT'." >&2
+  exit 1
+}
 
 # Files to consider for the EXPENSIVE language builds. This is the union of:
 #   - the working tree (uncommitted changes), and
