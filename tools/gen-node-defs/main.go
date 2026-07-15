@@ -1705,12 +1705,24 @@ func parseOverlayFlags(messagesPath string) ([]overlayFlag, error) {
 		return nil, err
 	}
 	lines := strings.Split(string(data), "\n")
+	// Match the sentinels ANCHORED: a comment line carrying the marker and nothing else.
+	// strings.Contains is a trap here — the moment messages.ts's own prose names the
+	// sentinel (e.g. "the flags below are fenced by OVERLAY_FLAGS_START/END", exactly the
+	// style this repo uses), an unanchored scan opens the fence on that prose line and the
+	// generator silently emits a WRONG flag set. Same class as the guards' fence bug.
 	start, end := -1, -1
 	for i, l := range lines {
-		if strings.Contains(l, "OVERLAY_FLAGS_START") {
-			start = i
-		} else if strings.Contains(l, "OVERLAY_FLAGS_END") {
-			end = i
+		switch strings.TrimSpace(l) {
+		case "// OVERLAY_FLAGS_START":
+			if start == -1 {
+				start = i
+			}
+		case "// OVERLAY_FLAGS_END":
+			if start != -1 && end == -1 {
+				end = i
+			}
+		}
+		if end != -1 {
 			break
 		}
 	}
