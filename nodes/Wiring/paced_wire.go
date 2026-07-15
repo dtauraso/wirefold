@@ -259,32 +259,31 @@ func (pw *PacedWire) placeBeadNoWalkerAt(value int, bp beadPlacement, tick int64
 }
 
 // tryDeliverHeadLocked attempts, ONE TIME (no parking/looping), to deliver the bead
-// identified by gen. Caller must hold pw.mu on entry.
+// identified by gen. Caller must hold pw.mu on entry; this function ALWAYS releases
+// pw.mu before returning, on every path (LOCK-NEUTRAL: same locking contract as
+// advanceBeadLocked, checkable from the signature/doc alone — no branch leaves the
+// mutex held).
 //
 // Three outcomes:
 //   - ready=true, ok=true: the bead was at the FIFO head and was moved to
-//     `delivered`; ai carries its source identity for the arrive trace. pw.mu is
-//     released.
+//     `delivered`; ai carries its source identity for the arrive trace.
 //   - ready=true, ok=false: the bead is gone (ctx canceled, torn down, or already
-//     dropped) — no delivery, nothing to wait for. pw.mu is released.
+//     dropped) — no delivery, nothing to wait for.
 //   - ready=false: the bead is still live but is NOT yet at the FIFO head (an
-//     earlier bead must deliver first). pw.mu is left HELD so a blocking caller
-//     can park on pw.cond, or a non-blocking caller can unlock and retry later.
+//     earlier bead must deliver first); the caller retries on a later StepOnce.
 //
 // This is the (never-parking) core StepOnce retries every cycle for a bead that
 // is not yet at the FIFO head.
 func (pw *PacedWire) tryDeliverHeadLocked(ctx context.Context, gen uint64, nowTick int64) (ai arriveInfo, ok bool, ready bool) {
+	defer pw.mu.Unlock()
 	if ctx.Err() != nil {
-		pw.mu.Unlock()
 		return arriveInfo{}, false, true
 	}
 	if gen < pw.teardownGen {
-		pw.mu.Unlock()
 		return arriveInfo{}, false, true
 	}
 	j := pw.findInflightLocked(gen)
 	if j < 0 {
-		pw.mu.Unlock()
 		return arriveInfo{}, false, true
 	}
 	if j != 0 {
@@ -295,7 +294,6 @@ func (pw *PacedWire) tryDeliverHeadLocked(ctx context.Context, gen uint64, nowTi
 	pw.delivered = append(pw.delivered, deliveredBead{val: db.val, deliverTick: nowTick})
 	pw.cond.Broadcast()
 	ai = arriveInfo{emit: db.streams, node: db.node, port: db.port, value: db.val, gen: db.gen}
-	pw.mu.Unlock()
 	return ai, true, true
 }
 
@@ -384,9 +382,8 @@ func (pw *PacedWire) StepOnceAt(ctx context.Context, tick int64) {
 		// handoff. If it is not yet head, tryDeliverHeadLocked leaves it in-flight
 		// (still finalPending) for a later StepOnce call to retry.
 		pw.mu.Lock()
-		ai, ok, ready := pw.tryDeliverHeadLocked(ctx, gen, tick)
+		ai, ok, ready := pw.tryDeliverHeadLocked(ctx, gen, tick) // always releases pw.mu
 		if !ready {
-			pw.mu.Unlock()
 			continue
 		}
 		if ok {
