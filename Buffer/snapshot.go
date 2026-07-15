@@ -432,15 +432,6 @@ func sliceToSet(ids []string) map[string]bool {
 	return m
 }
 
-// NodeCount returns the number of registered nodes (for tests).
-func (s *SnapshotState) NodeCount() int { return len(s.nodes) }
-
-// EdgeCount returns the number of registered edges (for tests).
-func (s *SnapshotState) EdgeCount() int { return len(s.edges) }
-
-// BeadCount returns the number of live in-flight beads (for tests).
-func (s *SnapshotState) BeadCount() int { return len(s.beads) }
-
 // PortCount returns the total number of port rows across all nodes (for tests).
 func (s *SnapshotState) PortCount() int {
 	n := 0
