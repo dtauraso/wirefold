@@ -689,21 +689,13 @@ type NodeBuilder struct {
 	Build     func(ctx context.Context, name string, data *NodeData, pb PortBindings, tr *T.Trace, geom nodeGeom, partnerCenter partnerCenterFn) (Node, error)
 }
 
-// Registry is the loader-facing map, built once at init from kindRegistry.
+// Registry is the loader-facing map, populated one kind at a time by
+// Register (registry.go) as each node package's init() runs.
 var Registry map[string]NodeBuilder
 
 func init() {
-	Registry = make(map[string]NodeBuilder, len(kindRegistry))
-	for kind, e := range kindRegistry {
-		sample := e.newNode()
-		ports := reflectPorts(sample)
-		stateKeys := reflectStateKeys(sample)
-		Registry[kind] = NodeBuilder{
-			Ports:     ports,
-			StateKeys: stateKeys,
-			Build: func(ctx context.Context, name string, data *NodeData, pb PortBindings, tr *T.Trace, geom nodeGeom, partnerCenter partnerCenterFn) (Node, error) {
-				return reflectBuild(ctx, name, data, pb, e, tr, geom, partnerCenter)
-			},
-		}
-	}
+	// Register needs a non-nil map to write into; kindRegistry is always
+	// empty at this point because package Wiring's init runs before the
+	// importing packages' inits populate it via Register.
+	Registry = make(map[string]NodeBuilder)
 }
