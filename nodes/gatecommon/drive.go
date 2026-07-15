@@ -17,10 +17,12 @@ import (
 // value.
 //
 // The goroutine paces itself ONE CYCLE AT A TIME via out.StepOnce — it never
-// parks inside a full traversal. Each cycle: if no bead is currently in
-// flight on out's wire, place the next pulse bead (reading held fresh); then
-// sleep one cycle and StepOnce the wire once. Stops when ctx is cancelled or
-// a placement fails (wire faded/torn down).
+// parks inside a full traversal. Each cycle: place the next pulse bead
+// (reading held fresh) unconditionally — per MODEL.md §Sending, a node
+// places a bead whenever its own rule says to and never checks the wire's
+// occupancy; a wire may carry more than one bead at once. Then sleep one
+// cycle and StepOnce the wire once. Stops when ctx is cancelled or a
+// placement fails (wire faded/torn down).
 //
 // Paced-wire mode (out.Clock() != nil) sleeps on the shared clock's
 // SleepCycle so it freezes on pause. Chan mode (out.Clock() == nil, unit
@@ -45,10 +47,8 @@ func DriveHeld(ctx context.Context, out *Wiring.Out, held *atomic.Int64, transfo
 			if ctx.Err() != nil {
 				return
 			}
-			if !out.InFlight() {
-				if !out.PlaceDriven(transform(held.Load())).Live() {
-					return
-				}
+			if !out.PlaceDriven(transform(held.Load())).Live() {
+				return
 			}
 			if err := sleep(ctx); err != nil {
 				return
