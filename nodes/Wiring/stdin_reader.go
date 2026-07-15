@@ -160,8 +160,12 @@ type rawHit struct {
 type SlotRegistry map[string]*PacedWire
 
 // RunStdinReader reads FRAMED BINARY records from r, dispatching geometry-CRUD "edit"
-// messages and play/pause clock-gate control messages. Returns when ctx is done
-// or r reaches EOF. Call in a goroutine alongside the node run loop.
+// messages and play/pause clock-gate control messages. RunStdinReader itself returns
+// when ctx is done or r reaches EOF. CAVEAT: its background frame-reader goroutine
+// (which blocks in io.ReadFull) has NO ctx-cancel exit path — on ctx-done it keeps
+// parked in the read until r reaches EOF or is closed. Benign in production (process
+// exit reclaims it), but a caller that wants the goroutine itself to unwind on cancel
+// must close r. Call in a goroutine alongside the node run loop.
 //
 // slotReg is keyed by "target.targetHandle" and resolves create/delete ops to the
 // destination port's wire. md may be nil; if non-nil, update (node-move) and
