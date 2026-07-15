@@ -42,8 +42,8 @@ absent: multi-node selection, undo, edge waypoints/auto-layout lib).
   primitive scene-graph — would re-derive geometry from buffer blocks.
   Drop unless vector output is specifically wanted.
 - *Properties inspector sidebar* (M → **M**, scaffolding exists). No
-  general inspector; the old `state/ops/rename.ts` is DEAD react-flow-era
-  code (unmounted, still imports reactflow). But `RuleEquationPanel.tsx`
+  general inspector; the old `state/ops/rename.ts` was DEAD react-flow-era
+  code (unmounted, still imported reactflow) — since deleted. But `RuleEquationPanel.tsx`
   (the live equation/lock DOM-portal panel, mounted in `main.tsx`) is
   the clone target, and it uses the `edit-update` lock-style wire path a
   generic inspector would extend. Surface when editing arbitrary `props`
@@ -121,7 +121,8 @@ erase deleted the files they lived in:
   shows up.
 - `MiniMap` — GONE (no match).
 
-Dead-code cleanup candidates surfaced during this re-scope (still
-compile, unmounted, react-flow-era): `webview/state/ops/rename.ts`, the
-`webview/state/adapter/*` tree, `webview/types.ts` (still imports
-reactflow). Delete when convenient; not load-bearing.
+Dead-code cleanup candidates surfaced during this re-scope (still compiled,
+unmounted, react-flow-era) and since deleted: `webview/state/ops/rename.ts`, the
+`webview/state/adapter/*` tree, and the webview's react-flow-era edge/node data
+types file (zero importers, deleted alongside the dead wire-prop kind chain and
+its barrel/color-map modules — see task/code-smell-audit-fixes).

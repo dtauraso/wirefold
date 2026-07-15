@@ -71,35 +71,8 @@ function openTopologyEditor(context: vscode.ExtensionContext, folderUri?: vscode
   const post = (msg: HostToWebviewMsg): void => {
     void panel.webview.postMessage(msg);
   };
-  // Read the scene sidecar (topology/view/scene.json) fresh at load time so the
-  // navigated camera (camera3d) is delivered to the webview as `sceneText`.
-  // Without this the spec from Go carries only nodes/edges/view (diagram) and
-  // viewerState.camera3d stays undefined on reload — hasRestoredCamera is then
-  // false at first content render and CameraFitter's auto-fit clobbers the saved
-  // pose. Re-read on each load (not cached) so a save written between reloads
-  // restores correctly.
-  const readSceneText = (): string | undefined => {
-    if (!topologyPath) return undefined;
-    try {
-      return fs.readFileSync(path.join(topologyPath, "view", "scene.json"), "utf8");
-    } catch {
-      return undefined; // no sidecar yet → auto-fit frames the graph once (intended)
-    }
-  };
-  let lastSpec: { nodes: unknown[]; edges: unknown[]; view?: unknown } | undefined;
   const runner = new BuildAndRunRunner(
     (status) => post({ type: "run-status", ...status }),
-    (event) => {
-      // Forward the JSON trace event verbatim (the .probe log source). Node labels are NOT
-      // derived here anymore — each node's label rides the binary content buffer's node block
-      // (LabelOff/LabelLen), so there is no id/label sidecar. Go → TS is buffer-only.
-      post({ type: "trace-event", event });
-    },
-    (spec) => {
-      // Go emitted the spec on startup — cache it and send it to the webview as a load message.
-      lastSpec = spec;
-      post({ type: "load", text: JSON.stringify(spec), sceneText: readSceneText() });
-    },
     // fd3 buffer-snapshot frames: forward each to the webview verbatim. Without this
     // wiring the runner reads fd3 (handleFd3) but drops every frame, so the new-system
     // BufferScene (which polls getLatestSnapshot each frame) never receives node/edge/
@@ -192,11 +165,6 @@ function openTopologyEditor(context: vscode.ExtensionContext, folderUri?: vscode
   });
 
   panel.webview.onDidReceiveMessage((raw) => {
-    // If the webview just mounted and we have a cached spec, replay it so the
-    // diagram renders even when Go's one-shot startup emission beat the listener.
-    if ((raw as Record<string, unknown>)?.type === "ready" && lastSpec !== undefined) {
-      post({ type: "load", text: JSON.stringify(lastSpec), sceneText: readSceneText() });
-    }
     const workspaceFolder = folderUri ? vscode.workspace.getWorkspaceFolder(folderUri) : undefined;
     // Final fallback is undefined (no real workspace) — appendWebviewLog skips the
     // write rather than misdirecting .probe/ logs to an arbitrary cwd.
@@ -206,6 +174,7 @@ function openTopologyEditor(context: vscode.ExtensionContext, folderUri?: vscode
     });
   });
 
-  // Spawn Go immediately (halted); it emits spec on startup which triggers load.
+  // Spawn Go immediately (halted); the render path is buffer-only (buffer-snapshot on
+  // fd3) so there is nothing else to send on "ready".
   runner.run(topologyPath);
 }

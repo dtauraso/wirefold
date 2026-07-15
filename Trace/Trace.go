@@ -132,13 +132,21 @@ const (
 	// Emitted only when the hovered entity CHANGES (the FSM dedupes) so pointer-move does not
 	// flood the snapshot stream. Keyed by node id / (node,port); the renderer highlights it.
 	KindHover = "hover"
+	// KindSceneSphere carries the persisted scene sphere (center + radius) — the fixed
+	// world anchor every node's scene polar is measured about (nodes/Wiring/sphere_layout.go
+	// sceneSphere). It is established ONCE at load (LoadSceneSphere) and never moves, so Go
+	// emits this a single time at startup; the renderer reads it in place of deriving a
+	// content-sphere centroid from live node positions (which moves with the nodes and is a
+	// different, non-authoritative sphere). Reuses the PX/PY/PZ/R fields (center/radius);
+	// no new Event fields.
+	KindSceneSphere = "scene-sphere"
 )
 
 // TraceEventKinds is the single source of truth for the closed kind
 // vocabulary. gen-node-defs reads this slice to emit trace-kinds.ts;
 // pump.ts exhaustiveness checks are derived from that generated file.
 // Adding a kind here forces a tsc error in pump.ts until a branch is added.
-var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone, KindPosition, KindGeometry, KindPulseCancelled, KindNodeGeometry, KindArrive, KindNodeBead, KindCamera, KindSceneTori, KindScenePoles, KindNodePoles, KindAngleLabels, KindSelSpherePoles, KindHandholds, KindLabelsGlobal, KindBadgesGlobal, KindOverlaysVis, KindSelect, KindFade, KindHover}
+var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone, KindPosition, KindGeometry, KindPulseCancelled, KindNodeGeometry, KindArrive, KindNodeBead, KindCamera, KindSceneTori, KindScenePoles, KindNodePoles, KindAngleLabels, KindSelSpherePoles, KindHandholds, KindLabelsGlobal, KindBadgesGlobal, KindOverlaysVis, KindSelect, KindFade, KindHover, KindSceneSphere}
 
 // PortGeom is one port's authoritative world geometry on a node-geometry event:
 // its name, whether it is an input, its sphere-surface world position (PX/PY/PZ),
@@ -426,6 +434,14 @@ func (t *Trace) NodeBead(nodeID string, row, col int, present bool, value int, x
 // (upTheta,upPhi). Go emits this whenever the camera is set, orbited, zoomed, or panned.
 func (t *Trace) Camera(px, py, pz, r, posTheta, posPhi, upTheta, upPhi float64) {
 	t.emit(Event{Kind: KindCamera, PX: px, PY: py, PZ: pz, R: r, PosTheta: posTheta, PosPhi: posPhi, UpTheta: upTheta, UpPhi: upPhi})
+}
+
+// SceneSphere emits the persisted scene sphere (center cx,cy,cz + radius): the fixed world
+// anchor every node's scene polar is measured about. Established once at load and never
+// moved (see LoadSceneSphere); reuses the PX/PY/PZ/R fields (center/radius) — no new Event
+// fields needed.
+func (t *Trace) SceneSphere(cx, cy, cz, radius float64) {
+	t.emit(Event{Kind: KindSceneSphere, PX: cx, PY: cy, PZ: cz, R: radius})
 }
 
 // SceneTori emits the polar-guide tori visibility state. visible=true = tori shown;
@@ -891,6 +907,17 @@ func eventValue(e Event) (any, error) {
 			UpPhi    float64 `json:"upPhi"`
 		}
 		return camera{Step: e.Step, Kind: e.Kind, PX: e.PX, PY: e.PY, PZ: e.PZ, R: e.R, PosTheta: e.PosTheta, PosPhi: e.PosPhi, UpTheta: e.UpTheta, UpPhi: e.UpPhi}, nil
+	case KindSceneSphere:
+		// Center (cx,cy,cz) + radius; reuses the PX/PY/PZ/R fields (see SceneSphere above).
+		type sceneSphere struct {
+			Step   int     `json:"step"`
+			Kind   string  `json:"kind"`
+			CX     float64 `json:"cx"`
+			CY     float64 `json:"cy"`
+			CZ     float64 `json:"cz"`
+			Radius float64 `json:"radius"`
+		}
+		return sceneSphere{Step: e.Step, Kind: e.Kind, CX: e.PX, CY: e.PY, CZ: e.PZ, Radius: e.R}, nil
 	case KindSceneTori, KindScenePoles, KindNodePoles, KindAngleLabels, KindSelSpherePoles, KindHandholds, KindLabelsGlobal, KindBadgesGlobal, KindOverlaysVis:
 		// Visibility toggles: all carry just the Visible flag.
 		type visToggle struct {

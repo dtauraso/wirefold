@@ -1951,9 +1951,10 @@ type bufEventEntry struct {
 
 // bufLayoutSchema is the parsed content of Buffer/layout.go.
 type bufLayoutSchema struct {
-	version int
-	blocks  []bufBlock
-	events  []bufEventEntry
+	version              int
+	blocks               []bufBlock
+	events               []bufEventEntry
+	interiorSlotsPerNode int
 }
 
 // bufTypeSize returns the byte width of a buf: type tag value.
@@ -2005,6 +2006,8 @@ func parseBufferLayout(layoutPath string) (bufLayoutSchema, error) {
 						switch {
 						case nm.Name == "BufLayoutVersion":
 							schema.version = ival
+						case nm.Name == "BufInteriorSlotsPerNode":
+							schema.interiorSlotsPerNode = ival
 						case strings.HasPrefix(nm.Name, "BufEvent"):
 							suffix := nm.Name[len("BufEvent"):]
 							schema.events = append(schema.events, bufEventEntry{name: suffix, value: ival})
@@ -2058,6 +2061,9 @@ func parseBufferLayout(layoutPath string) (bufLayoutSchema, error) {
 	if schema.version == 0 {
 		return bufLayoutSchema{}, fmt.Errorf("BufLayoutVersion const not found in %s", layoutPath)
 	}
+	if schema.interiorSlotsPerNode == 0 {
+		return bufLayoutSchema{}, fmt.Errorf("BufInteriorSlotsPerNode const not found in %s", layoutPath)
+	}
 	if len(schema.events) == 0 {
 		return bufLayoutSchema{}, fmt.Errorf("no BufEvent* consts found in %s", layoutPath)
 	}
@@ -2072,6 +2078,7 @@ func parseBufferLayout(layoutPath string) (bufLayoutSchema, error) {
 func buildBufFingerprint(schema bufLayoutSchema) string {
 	var parts []string
 	parts = append(parts, fmt.Sprintf("version:%d", schema.version))
+	parts = append(parts, fmt.Sprintf("interiorSlotsPerNode:%d", schema.interiorSlotsPerNode))
 	for _, blk := range schema.blocks {
 		var cols []string
 		for _, c := range blk.columns {
@@ -2195,6 +2202,9 @@ func writeBufferLayoutGo(outPath string, schema bufLayoutSchema) error {
 	fmt.Fprintf(w, "// BufLayoutVersionGenerated must equal BufLayoutVersion in layout.go.\n")
 	fmt.Fprintf(w, "const BufLayoutVersionGenerated = %d\n", schema.version)
 	fmt.Fprintln(w)
+	fmt.Fprintf(w, "// BufInteriorSlotsPerNodeGenerated must equal BufInteriorSlotsPerNode in layout.go.\n")
+	fmt.Fprintf(w, "const BufInteriorSlotsPerNodeGenerated = %d\n", schema.interiorSlotsPerNode)
+	fmt.Fprintln(w)
 	fmt.Fprintln(w, `// BufHeaderSize is the byte width of the snapshot header:`)
 	fmt.Fprintln(w, `// [tick:u32][beadCount:u32][nodeCount:u32][edgeCount:u32][portCount:u32][labelBytesCount:u32][eventCount:u32][portNameBytesCount:u32][edgeLabelBytesCount:u32]`)
 	fmt.Fprintln(w, `const BufHeaderSize = 36`)
@@ -2213,7 +2223,7 @@ func writeBufferLayoutGo(outPath string, schema bufLayoutSchema) error {
 
 		// Writer function.
 		var params []string
-		if blk.name == "Camera" || blk.name == "Overlay" || blk.name == "RuleBuilder" {
+		if blk.name == "Camera" || blk.name == "Overlay" || blk.name == "RuleBuilder" || blk.name == "Scene" {
 			// Camera and Overlay always have exactly 1 row; omit row param.
 			for _, c := range blk.columns {
 				pname := strings.ToLower(c.name[:1]) + c.name[1:]
@@ -2283,6 +2293,10 @@ func writeBufferLayoutTS(outPath string, schema bufLayoutSchema) error {
 	fmt.Fprintf(w, "/** Schema version — must match BufLayoutVersion in Buffer/layout.go. */\n")
 	fmt.Fprintf(w, "export const BUF_LAYOUT_VERSION = %d;\n", schema.version)
 	fmt.Fprintln(w)
+	fmt.Fprintf(w, "/** Fixed interior-grid slots per node — must match BufInteriorSlotsPerNode in Buffer/layout.go.\n")
+	fmt.Fprintf(w, " * Generated (part of BUF_LAYOUT_FINGERPRINT): a mismatch fails check-buffer-layout-parity.sh. */\n")
+	fmt.Fprintf(w, "export const INTERIOR_SLOTS_PER_NODE = %d;\n", schema.interiorSlotsPerNode)
+	fmt.Fprintln(w)
 	fmt.Fprintln(w, `/** Snapshot header: [tick:u32][beadCount:u32][nodeCount:u32][edgeCount:u32][portCount:u32][labelBytesCount:u32][eventCount:u32][portNameBytesCount:u32][edgeLabelBytesCount:u32] */`)
 	fmt.Fprintln(w, `export const BUF_HEADER_SIZE = 36;`)
 
@@ -2303,7 +2317,7 @@ func writeBufferLayoutTS(outPath string, schema bufLayoutSchema) error {
 			getter := tsDataViewGetter(c.bufType)
 			le := tsDataViewLE(c.bufType)
 			fnName := readerFnTSName(blk.name, c.name)
-			if blk.name == "Camera" || blk.name == "Overlay" || blk.name == "RuleBuilder" {
+			if blk.name == "Camera" || blk.name == "Overlay" || blk.name == "RuleBuilder" || blk.name == "Scene" {
 				// Single-row blocks: no row param.
 				fmt.Fprintf(w, "export function %s(view: DataView): number { return view.%s(%s%s); }\n",
 					fnName, getter, colConst, le)
@@ -2322,6 +2336,10 @@ func writeBufferLayoutTS(outPath string, schema bufLayoutSchema) error {
 		tsName := "BUF_EVENT_" + strings.ToUpper(ev.name)
 		fmt.Fprintf(w, "export const %-25s = %d;\n", tsName, ev.value)
 	}
+
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, `/** Sentinel Node KindId value meaning "unknown kind" (matches KindIDUnknown in Buffer/node_kind_id_gen.go). */`)
+	fmt.Fprintln(w, `export const UNKNOWN_KIND_ID = 0xff;`)
 
 	w.Flush()
 	return os.WriteFile(outPath, buf.Bytes(), 0644)

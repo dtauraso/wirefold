@@ -1,11 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Verifies TWO parities for the editor→Go seam:
+# Verifies THREE parities for the editor<->Go/ext-host seams:
 #   1. every message type dispatched by stdin_reader.go is declared in
 #      WEBVIEW_TO_HOST_TYPES in messages.ts;
 #   2. every message type dispatched by stdin_reader.go is DOCUMENTED in that file's own
 #      MSG_TYPES_DOC block, and vice versa — so the header cannot undercount its switch.
+#   3. every kind in handle-message.ts's LIVE_CASES fence (a real handler case, not the
+#      DECLARED_NOT_SENT fallthrough) has at least one literal `postMessage({ type: "..." })`
+#      sender somewhere in the webview source. This is the check that would have caught
+#      "run-cancel" and the dead "play" handler case: a kind can have a handler and be
+#      declared in WEBVIEW_TO_HOST_TYPES yet have NOTHING that ever sends it. (1) alone only
+#      checks Go's kinds are a subset of TS's — it never asked whether a TS-declared kind is
+#      reachable from anywhere, so a handler with no sender could never fail it.
 # Exit 0 if clean; exit 1 with a report if they diverge.
 #
 # (2) exists because the header once enumerated five types while the switch had seven; the
@@ -17,13 +24,19 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 STDIN_READER="$REPO_ROOT/nodes/Wiring/stdin_reader.go"
 MESSAGES_TS="$REPO_ROOT/tools/topology-vscode/src/messages.ts"
+HANDLE_MESSAGE_TS="$REPO_ROOT/tools/topology-vscode/src/extension/handle-message.ts"
+WEBVIEW_SRC_DIR="$REPO_ROOT/tools/topology-vscode/src/webview"
 
-for f in "$STDIN_READER" "$MESSAGES_TS"; do
+for f in "$STDIN_READER" "$MESSAGES_TS" "$HANDLE_MESSAGE_TS"; do
   if [[ ! -f "$f" ]]; then
     echo "message-kind-parity: MISCONFIGURED — file not found: $f" >&2
     exit 1
   fi
 done
+if [[ ! -d "$WEBVIEW_SRC_DIR" ]]; then
+  echo "message-kind-parity: MISCONFIGURED — dir not found: $WEBVIEW_SRC_DIR" >&2
+  exit 1
+fi
 
 # Extract string literals compared against msg.Type in stdin_reader.go.
 # Patterns matched:
@@ -132,17 +145,40 @@ if [[ -n "$PHANTOM" ]]; then
 fi
 
 # Extra TS kinds that Go doesn't recognize are fine (TS handles more message
-# types than stdin_reader.go), so we only report Go→TS missing, not TS→Go extra.
-# Uncomment the block below for strict bidirectional parity; it computes its own EXTRA
-# (the live one was deleted — it was assigned on every run and read by nobody).
-#
-# if [[ -n "$EXTRA" ]]; then
-#   echo "message-kind-parity: kinds in WEBVIEW_TO_HOST_TYPES not matched in stdin_reader.go:"
-#   while IFS= read -r k; do
-#     echo "  extra: \"$k\""
-#     HITS=$((HITS + 1))
-#   done <<< "$EXTRA"
-# fi
+# types than stdin_reader.go: ext-host-only kinds like "ready"/"stop"/"webview-log" never
+# reach Go), so we only report Go→TS missing above, not TS→Go extra. What extra TS kinds DO
+# need is a live sender — checked next.
+
+# (3) Every kind in handle-message.ts's LIVE_CASES fence must have a real sender: a literal
+# `postMessage({ type: "<kind>"` (or `type: "<kind>",`) call site somewhere under the webview
+# source tree. "go-record" is sent via a typed wrapper (vscode-api.ts) rather than a bare
+# object literal per kind, so it is checked for the literal `"go-record"` string instead.
+kinds_from_live_cases() {
+  awk '
+    /^[[:space:]]*\/\/[[:space:]]*LIVE_CASES_START[[:space:]]*$/ { inblk=1; next }
+    /^[[:space:]]*\/\/[[:space:]]*LIVE_CASES_END[[:space:]]*$/   { inblk=0 }
+    inblk
+  ' "$HANDLE_MESSAGE_TS" \
+    | grep -aoE 'case[[:space:]]+"[^"]+"' \
+    | grep -oE '"[^"]+"' \
+    | tr -d '"' \
+    | sort -u
+}
+
+LIVE_CASE_KINDS=$(kinds_from_live_cases) || true
+if [[ -z "$(printf '%s' "$LIVE_CASE_KINDS" | tr -d '[:space:]')" ]]; then
+  echo "message-kind-parity: EMPTY extracted set for 'handle-message.ts LIVE_CASES fence' — fence missing or renamed; refusing vacuous parity pass" >&2
+  exit 1
+fi
+
+while IFS= read -r k; do
+  [[ -z "$k" ]] && continue
+  if ! grep -arE "type:[[:space:]]*\"$k\"" "$WEBVIEW_SRC_DIR" >/dev/null 2>&1; then
+    echo "  no sender: \"$k\" is a LIVE_CASES handler in handle-message.ts but nothing under" \
+         "$WEBVIEW_SRC_DIR posts { type: \"$k\" } (move it to DECLARED_NOT_SENT if that's intended)"
+    HITS=$((HITS + 1))
+  fi
+done <<< "$LIVE_CASE_KINDS"
 
 if [[ $HITS -eq 0 ]]; then
   echo "message-kind-parity: clean"

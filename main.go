@@ -119,12 +119,8 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 
 	// Read the editor→Go bridge: "edit" JSON lines (op = create/update/delete/fade)
 	// from stdin. When stdin reaches EOF (extension host disconnect), cancel the context.
-	treeRoot := ""
-	if info, err2 := os.Stat(topologyPath); err2 == nil && info.IsDir() {
-		treeRoot = topologyPath
-	}
 	go func() {
-		W.RunStdinReader(ctx, os.Stdin, slotReg, md, tr, clk, treeRoot)
+		W.RunStdinReader(ctx, os.Stdin, slotReg, md, tr, clk)
 		cancel()
 	}()
 
@@ -137,16 +133,12 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 		}()
 	}
 
-	// Each node also runs a pause-INDEPENDENT layout-update goroutine (owns its
-	// LocalPolars list, layout_holder.go) — NOT gated by the play/pause clock, so
-	// it stays live while beads are paused. Same WaitGroup accounting as Update.
-	wg.Add(len(nodes))
-	for _, node := range nodes {
-		go func() {
-			defer wg.Done()
-			node.UpdateLayout(ctx)
-		}()
-	}
+	// Each node kind also satisfies UpdateLayout (Node interface, layout_holder.go)
+	// via the embedded Wiring.LayoutHolder, but nothing calls it today: it is just
+	// <-ctx.Done() with no runtime mutation, so a dedicated per-node goroutine
+	// would exist purely to block. Spawning that loop is deferred to the slice
+	// that gives it actual work (drag-time local-polar recomputation); see
+	// memory/project_two_goroutine_node_split.md.
 
 	// Bounded poll (not a fixed sleep) on the atomically-published node-row table —
 	// concurrency-safe (NodeRowCount), gives up after 500ms so a load never hangs.

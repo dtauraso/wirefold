@@ -13,7 +13,7 @@ func TestToNodeGeomScenePolar(t *testing.T) {
 	}
 	sceneCenter := vec3{X: 10, Y: 20, Z: -5}
 
-	g := n.toNodeGeom(sceneCenter, true)
+	g := n.toNodeGeom(sceneCenter)
 	if !g.HasPos {
 		t.Fatalf("scene polar present: HasPos=false, want true")
 	}
@@ -24,7 +24,7 @@ func TestToNodeGeomScenePolar(t *testing.T) {
 
 	// A node with NO scene polar has no position (HasPos false → world origin).
 	n2 := specNode{ID: "n2", Type: "Pulse"}
-	g2 := n2.toNodeGeom(sceneCenter, true)
+	g2 := n2.toNodeGeom(sceneCenter)
 	if g2.HasPos {
 		t.Fatalf("no polar fields: HasPos=true, want false")
 	}

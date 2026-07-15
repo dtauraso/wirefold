@@ -94,15 +94,22 @@ func writeSceneSphere(scenePath string, s sceneSphere) error {
 func (md *MoveDispatch) LoadSceneSphere(topologyPath string) {
 	if s, ok := loadSceneSphere(topologyPath); ok {
 		md.sceneSphere = s
-		return
+	} else {
+		md.sceneSphere = contentFitSceneSphere(md.heldCenters())
+		// Best-effort: a read-only or absent scene dir must not stop the sim from running.
+		// The in-memory sphere is correct either way; only cross-run stability is at stake.
+		// Path via sceneCameraPath (scene_paths.go) — the authoritative resolver, per
+		// check-scene-path-resolution.sh; never hand-rolled.
+		if topologyPath != "" {
+			_ = writeSceneSphere(sceneCameraPath(topologyPath), md.sceneSphere)
+		}
 	}
-	md.sceneSphere = contentFitSceneSphere(md.heldCenters())
-	// Best-effort: a read-only or absent scene dir must not stop the sim from running. The
-	// in-memory sphere is correct either way; only cross-run stability is at stake.
-	// Path via sceneCameraPath (scene_paths.go) — the authoritative resolver, per
-	// check-scene-path-resolution.sh; never hand-rolled.
-	if topologyPath != "" {
-		_ = writeSceneSphere(sceneCameraPath(topologyPath), md.sceneSphere)
+	// Emit the scene sphere ONCE at load, on both paths: it is established here and never
+	// moves again (MODEL.md), so this is the single source-of-truth broadcast the renderer
+	// uses in place of deriving a content-sphere centroid from live node positions.
+	if md.tr != nil {
+		c := md.sceneSphere.Center
+		md.tr.SceneSphere(c.X, c.Y, c.Z, md.sceneSphere.Radius)
 	}
 }
 

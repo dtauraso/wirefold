@@ -37,12 +37,42 @@ import {
   readEventKind, readEventNodeRow, readEventPortRow, readEventTargetRow, readEventTargetPortRow,
   readEventEdgeRow, readEventSlot, readEventValue, readEventBead,
   readEventArcLength, readEventSimLatencyMs, readEventX, readEventY, readEventZ, readEventF,
+  readSceneCX, readSceneCY, readSceneCZ, readSceneRadius,
+  UNKNOWN_KIND_ID,
 } from "./schema/buffer-layout";
 
-/** KindId sentinel for an unknown node kind (matches KindIDUnknown in Buffer/node_kind_id_gen.go). */
-const KIND_ID_UNKNOWN = 0xff;
-
 type Line = Record<string, unknown>;
+
+// DecodedEventLine pins the field shape decodeEventLine (below) emits per Go event kind —
+// the SAME shape the removed JSON-on-stdout path used to emit. Kept as a typed contract
+// so trace-event-fields.test.ts's hand-curated fixture stays pinned to what this decoder
+// actually produces; this type has no runtime effect on decodeEventLine itself (which
+// returns the looser `Line`).
+export type DecodedEventLine =
+  | { step: number; kind: "recv" | "fire"; node: string; port?: string; value?: number }
+  | { step: number; kind: "send"; node: string; port?: string; value?: number; arcLength?: number; simLatencyMs?: number; target?: string; targetHandle?: string }
+  | { step: number; kind: "done"; node: string; port: string }
+  | { step: number; kind: "edge-bead"; node: string; port: string; value?: number; x: number; y: number; z: number; f: number; bead?: number }
+  | { step: number; kind: "geometry"; edge: string; sx: number; sy: number; sz: number; ex: number; ey: number; ez: number }
+  | { step: number; kind: "pulse-cancelled"; node: string; port: string; value?: number; bead?: number }
+  | { step: number; kind: "arrive"; node: string; port: string; value?: number; bead?: number }
+  | { step: number; kind: "node-geometry"; node: string; label?: string; nodeKind?: string; nx: number; ny: number; nz: number; radius: number; sphereR?: number; vrx: number; vry: number; vrz: number; frx: number; fry: number; frz: number; ports: { name: string; isInput: boolean; px: number; py: number; pz: number; dx: number; dy: number; dz: number }[] }
+  | { step: number; kind: "node-bead"; node: string; row: number; col: number; present: boolean; value: number; x: number; y: number; z: number }
+  | { step: number; kind: "camera"; px: number; py: number; pz: number; r: number; posTheta: number; posPhi: number; upTheta: number; upPhi: number }
+  | { step: number; kind: "scene-sphere"; cx: number; cy: number; cz: number; radius: number }
+  | { step: number; kind: "scene-tori"; visible: boolean }
+  | { step: number; kind: "scene-poles"; visible: boolean }
+  | { step: number; kind: "node-poles"; visible: boolean }
+  | { step: number; kind: "angle-labels"; visible: boolean }
+  | { step: number; kind: "sel-sphere-poles"; visible: boolean }
+  | { step: number; kind: "handholds"; visible: boolean }
+  | { step: number; kind: "labels-global"; visible: boolean }
+  | { step: number; kind: "badges-global"; visible: boolean }
+  | { step: number; kind: "overlays-vis"; visible: boolean }
+  // Go-owned click-selection: the currently-selected node id (node="" clears it).
+  | { step: number; kind: "select"; node: string }
+  | { step: number; kind: "fade"; fadedNodes: string[]; fadedEdges: string[] }
+  | { step: number; kind: "hover"; node: string; port?: string; value?: number };
 
 /**
  * Decode a snapshot into `.probe/go.jsonl` lines (one JSON object per line, trailing \n each).
@@ -158,6 +188,10 @@ function decodeEventLine(d: DecodedSnapshot, i: number): Line | null {
         upTheta: readCameraUpTheta(c), upPhi: readCameraUpPhi(c),
       };
     }
+    case "scene-sphere": {
+      const sc = d.sceneView;
+      return { kind, cx: readSceneCX(sc), cy: readSceneCY(sc), cz: readSceneCZ(sc), radius: readSceneRadius(sc) };
+    }
     case "select":
       // stdout marshals select via the default {node,port,value} shape (edge label not emitted).
       return { kind, node, port: "", value };
@@ -202,7 +236,7 @@ function nodeGeometryLine(d: DecodedSnapshot, nodeRow: number, node: string): Li
   }
   const l: Line = { kind: "node-geometry", node };
   if (node) l.label = node;
-  if (kindId !== KIND_ID_UNKNOWN && NODE_KIND_NAMES[kindId] !== undefined) l.nodeKind = NODE_KIND_NAMES[kindId];
+  if (kindId !== UNKNOWN_KIND_ID && NODE_KIND_NAMES[kindId] !== undefined) l.nodeKind = NODE_KIND_NAMES[kindId];
   l.nx = cx; l.ny = cy; l.nz = cz; l.radius = radius;
   if (sphereR !== 0) l.sphereR = sphereR;
   l.vrx = readNodeVRX(n, nodeRow); l.vry = readNodeVRY(n, nodeRow); l.vrz = readNodeVRZ(n, nodeRow);

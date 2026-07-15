@@ -22,7 +22,8 @@ import * as THREE from "three";
 import { type DecodedSnapshot, nodeLabel } from "./buffer-decode";
 import {
   readNodeCX, readNodeCY, readNodeCZ,
-  readNodeRadius, readNodeSphereR, readNodeSelected,
+  readNodeRadius, readNodeSphereR, readNodeSelected, readNodeLatchedSel,
+  readSceneCX, readSceneCY, readSceneCZ, readSceneRadius,
 } from "../../schema/buffer-layout";
 
 /** One node's nav-overlay geometry, decoded from the buffer. Identity is `row` (its buffer
@@ -37,6 +38,9 @@ export interface NavNode {
   /** Go's per-node sphere radius. 0 means "not yet populated" (pre-first-geometry). */
   sphereR: number | undefined;
   selected: boolean;
+  /** Go-owned: 1 marks the LAST node that was click-selected, persisting through a
+   *  deselect (see LatchedSel in Buffer/layout.go / setSelected in Buffer/snapshot.go). */
+  latchedSel: boolean;
 }
 
 // ── Pure decode ───────────────────────────────────────────────────────────────
@@ -64,34 +68,30 @@ export function decodeNavNodes(decoded: DecodedSnapshot): NavNode[] {
       // absent by callers (lockArc `if(!pr)`, sel-poles `sphereR || radius`).
       sphereR: sphereR || undefined,
       selected: readNodeSelected(nodeView, i) !== 0,
+      latchedSel: readNodeLatchedSel(nodeView, i) !== 0,
     });
   }
   return out;
 }
 
 /**
- * Content sphere (arcball) from precomputed node centers: bounding-box center +
- * farthest-node radius (+10% margin, radius ≥ 1). Mirrors
- * geometry-helpers.contentSphere line-for-line but takes centers directly, so the
- * spheres are derived from the buffer's centers alone.
- * Returns (0,0,0)/100 when there are no finite centers.
+ * The scene sphere — Go's persisted, first-class world anchor (nodes/Wiring/sphere_layout.go
+ * sceneSphere), read from the buffer's Scene block (see readSceneCX../readSceneRadius,
+ * KindSceneSphere). Established ONCE at load and never moves; this is NOT a derived
+ * content-sphere centroid recomputed from live node positions (that sphere moves with the
+ * nodes and is circular — Go's own comment on sceneSphere calls this out explicitly).
+ * Falls back to (0,0,0)/100 before the one-time startup event has landed (radius 0 in the
+ * buffer, mirroring the sphereR "0 = not yet populated" convention).
  */
-export function contentSphereFromCenters(centers: THREE.Vector3[]): { center: THREE.Vector3; radius: number } {
-  const center = new THREE.Vector3();
-  if (centers.length === 0) return { center, radius: 100 };
-  const min = new THREE.Vector3(Infinity, Infinity, Infinity);
-  const max = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
-  let any = false;
-  for (const p of centers) {
-    if (!Number.isFinite(p.x) || !Number.isFinite(p.y) || !Number.isFinite(p.z)) continue;
-    min.min(p); max.max(p); any = true;
-  }
-  if (!any) return { center, radius: 100 };
-  center.addVectors(min, max).multiplyScalar(0.5);
-  let r = 0;
-  for (const p of centers) {
-    if (!Number.isFinite(p.x) || !Number.isFinite(p.y) || !Number.isFinite(p.z)) continue;
-    r = Math.max(r, p.distanceTo(center));
-  }
-  return { center, radius: Math.max(r * 1.1, 1) };
+export function sceneSphereFromSnapshot(decoded: DecodedSnapshot): { center: THREE.Vector3; radius: number } {
+  const radius = readSceneRadius(decoded.sceneView);
+  if (radius <= 0) return { center: new THREE.Vector3(), radius: 100 };
+  return {
+    center: new THREE.Vector3(
+      readSceneCX(decoded.sceneView),
+      readSceneCY(decoded.sceneView),
+      readSceneCZ(decoded.sceneView),
+    ),
+    radius,
+  };
 }

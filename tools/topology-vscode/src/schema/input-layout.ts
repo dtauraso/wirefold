@@ -125,9 +125,6 @@ export function encodeControl(kind: number): ArrayBuffer {
 export const encodePlay = () => encodeControl(IN_KIND_RESUME);
 export const encodePause = () => encodeControl(IN_KIND_PAUSE);
 export const encodeResend = () => encodeControl(IN_KIND_RESEND);
-/** Bare SAVE command: Go persists its OWN authoritative scene state (camera + overlay
- *  visibility). No payload — the editor holds no authoritative scene document to send. */
-export const encodeSave = () => encodeControl(IN_KIND_SAVE);
 /** Bare FADE-TOGGLE command: toggle fade on Go's CURRENT selection (the "f" key press).
  *  Go owns selection + topology, so no id crosses the wire — just the kind byte. */
 export const encodeFadeToggle = () => encodeControl(IN_KIND_FADE_TOGGLE);
@@ -135,22 +132,12 @@ export const encodeFadeToggle = () => encodeControl(IN_KIND_FADE_TOGGLE);
 // Update attr indices (must match IN_UPDATE_ATTRS ordering).
 const IN_OVERLAY_ATTR_TOGGLE = 0;
 
-/** Build an edit create/delete record: two length-prefixed UTF-8 strings. Kept for the
- *  3-op (create/update/delete) codec concept; no live TS caller (the FSM creates/deletes
- *  edges in-process from raw-input). */
-export function encodeEditCreate(target: string, targetHandle: string): ArrayBuffer {
-  return encodeCreateDelete(IN_KIND_EDIT_CREATE, target, targetHandle);
-}
-export function encodeEditDelete(target: string, targetHandle: string): ArrayBuffer {
-  return encodeCreateDelete(IN_KIND_EDIT_DELETE, target, targetHandle);
-}
-function encodeCreateDelete(kind: number, target: string, targetHandle: string): ArrayBuffer {
-  const w = new ByteWriter();
-  w.u8(kind);
-  w.str(target);
-  w.str(targetHandle);
-  return w.toArrayBuffer();
-}
+// NOTE: there is no encodeSave/encodeEditCreate/encodeEditDelete here. IN_KIND_SAVE and
+// IN_KIND_EDIT_CREATE/IN_KIND_EDIT_DELETE stay defined (Go reads them and they are in the
+// INPUT_LAYOUT_FINGERPRINT), but no live TS sender builds those records: `save` has no UI
+// affordance today, and the gesture FSM creates/deletes edges in-process from raw-input.
+// decodeInputRecord below still decodes all three kinds (round-trip-tested from raw bytes
+// in input-layout.test.ts) since Go's codec and the fingerprint both carry them.
 
 /** Build an overlays TOGGLE record: [22][entityKind=overlays][attr=toggle][u8 flagId].
  *  flagId is the index of `flag` in OVERLAY_FLAG_ORDER — no flag name crosses the wire. */

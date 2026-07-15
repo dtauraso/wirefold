@@ -63,7 +63,7 @@ func TestEventBlockPopulate(t *testing.T) {
 		nodeCount*BufInteriorSlotsPerNode*BufInteriorStride +
 		edgeCount*BufEdgeStride +
 		portCount*BufPortStride +
-		BufCameraStride + BufOverlayStride + labelBytesCount
+		BufCameraStride + BufOverlayStride + BufSceneStride + labelBytesCount
 
 	// Find the send row (kind == index of "send" in TraceEventKinds).
 	sendKind := -1
@@ -201,6 +201,7 @@ func TestSnapshotRoundTrip(t *testing.T) {
 		int(edgeCount)*BufEdgeStride +
 		BufCameraStride +
 		BufOverlayStride +
+		BufSceneStride +
 		int(eventCount)*BufEventStride +
 		int(portNameBytesCount) +
 		int(edgeLabelBytesCount)
@@ -220,8 +221,6 @@ func TestSnapshotRoundTrip(t *testing.T) {
 	gotY := readF32(snap, beadOff+BufBeadColY)
 	gotZ := readF32(snap, beadOff+BufBeadColZ)
 	gotVal := readI32(snap, beadOff+BufBeadColValue)
-	gotFrac := readF32(snap, beadOff+BufBeadColFrac)
-	gotID := readU32(snap, beadOff+BufBeadColBeadID)
 	gotLive := snap[beadOff+BufBeadColLive]
 
 	if gotX != 2.5 {
@@ -235,12 +234,6 @@ func TestSnapshotRoundTrip(t *testing.T) {
 	}
 	if gotVal != 42 {
 		t.Errorf("bead.Value: got %v, want 42", gotVal)
-	}
-	if gotFrac != float32(0.6) {
-		t.Errorf("bead.Frac: got %v, want 0.6", gotFrac)
-	}
-	if gotID != 1 {
-		t.Errorf("bead.BeadID: got %v, want 1", gotID)
 	}
 	if gotLive != 1 {
 		t.Errorf("bead.Live: got %v, want 1", gotLive)
@@ -610,7 +603,7 @@ func TestSnapshotFraming(t *testing.T) {
 		int(nodeCount)*BufNodeStride +
 		int(nodeCount)*BufInteriorSlotsPerNode*BufInteriorStride +
 		int(edgeCount)*BufEdgeStride +
-		BufCameraStride + BufOverlayStride +
+		BufCameraStride + BufOverlayStride + BufSceneStride +
 		int(readU32(payload, 24))*BufEventStride + // event block
 		int(readU32(payload, 28)) + // port-name bytes
 		int(readU32(payload, 32)) // edge-label bytes
@@ -734,6 +727,46 @@ func TestSelectionPersistsAndIsExclusive(t *testing.T) {
 	snap = s.BuildSnapshot()
 	if snap[n1+BufNodeColSelected] != 0 || snap[n2+BufNodeColSelected] != 0 {
 		t.Fatalf("after clear: n1.Selected=%d n2.Selected=%d want 0,0", snap[n1+BufNodeColSelected], snap[n2+BufNodeColSelected])
+	}
+}
+
+// TestLatchedSelPersistsThroughDeselect verifies the Go-owned LatchedSel column: it moves
+// with Selected when a DIFFERENT node is selected, but — unlike Selected — does NOT clear
+// when the node is deselected (Node=""). This is the replacement for the old TS-owned
+// `latchedSel` React state in NavGuides.tsx (see Buffer/layout.go LatchedSel).
+func TestLatchedSelPersistsThroughDeselect(t *testing.T) {
+	s := NewSnapshotState(nil)
+	s.Update(T.Event{Kind: T.KindNodeGeometry, Node: "n1", Radius: 1})
+	s.Update(T.Event{Kind: T.KindNodeGeometry, Node: "n2", Radius: 1})
+
+	n1 := BufHeaderSize
+	n2 := n1 + BufNodeStride
+
+	// Select n1: both Selected and LatchedSel move to n1.
+	s.Update(T.Event{Kind: T.KindSelect, Node: "n1"})
+	snap := s.BuildSnapshot()
+	if snap[n1+BufNodeColSelected] != 1 || snap[n1+BufNodeColLatchedSel] != 1 {
+		t.Fatalf("after select n1: Selected=%d LatchedSel=%d want 1,1", snap[n1+BufNodeColSelected], snap[n1+BufNodeColLatchedSel])
+	}
+
+	// Deselect (Node=""): Selected clears, but LatchedSel STAYS on n1.
+	s.Update(T.Event{Kind: T.KindSelect, Node: ""})
+	snap = s.BuildSnapshot()
+	if snap[n1+BufNodeColSelected] != 0 {
+		t.Fatalf("after deselect: n1.Selected=%d want 0", snap[n1+BufNodeColSelected])
+	}
+	if snap[n1+BufNodeColLatchedSel] != 1 {
+		t.Fatalf("after deselect: n1.LatchedSel=%d want 1 (latch persists through deselect)", snap[n1+BufNodeColLatchedSel])
+	}
+
+	// Selecting a DIFFERENT node (n2) moves the latch to n2 and clears it on n1.
+	s.Update(T.Event{Kind: T.KindSelect, Node: "n2"})
+	snap = s.BuildSnapshot()
+	if snap[n2+BufNodeColSelected] != 1 || snap[n2+BufNodeColLatchedSel] != 1 {
+		t.Fatalf("after select n2: n2.Selected=%d n2.LatchedSel=%d want 1,1", snap[n2+BufNodeColSelected], snap[n2+BufNodeColLatchedSel])
+	}
+	if snap[n1+BufNodeColLatchedSel] != 0 {
+		t.Fatalf("after select n2: n1.LatchedSel=%d want 0 (latch moved off n1)", snap[n1+BufNodeColLatchedSel])
 	}
 }
 
@@ -892,7 +925,8 @@ func TestSnapshotNodeLabels(t *testing.T) {
 		edgeCount*BufEdgeStride +
 		portCount*BufPortStride +
 		BufCameraStride +
-		BufOverlayStride
+		BufOverlayStride +
+		BufSceneStride
 	// The label section is followed by the EVENT block + port-name + edge-label sections, so
 	// its end is the start of the event block, not the snapshot end. Verify the full length.
 	eventCount := int(readU32(snap, 24))

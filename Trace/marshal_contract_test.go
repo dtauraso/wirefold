@@ -69,6 +69,7 @@ func TestMarshalEventMatchesFixture(t *testing.T) {
 		{Step: 21, Kind: KindSelect, Node: "A"},
 		{Step: 22, Kind: KindFade, FadedNodes: []string{"A"}, FadedEdges: []string{"e1"}},
 		{Step: 23, Kind: KindHover, Node: "A"},
+		{Step: 24, Kind: KindSceneSphere, PX: 1.0, PY: 2.0, PZ: 3.0, R: 100.0},
 	}
 
 	fixture := fixtureLines(t)

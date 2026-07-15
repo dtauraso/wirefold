@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # check-dead-doc-tokens.sh — fail if retired architecture tokens reappear in CLAUDE.md or MODEL.md.
-# Run from repo root: bash scripts/check-dead-doc-tokens.sh
+# Run from repo root: bash tools/check-dead-doc-tokens.sh
 set -euo pipefail
 
 # Lives in tools/ with every other guard, and resolves the repo root the way they all do

@@ -5,7 +5,7 @@
 // source of truth for the pick-tags, sizing/epsilon constants, and hover/highlight colors
 // instead of each keeping its own copy. Pure constants/types — no React, no state.
 
-import { readNodeKindId } from "../../schema/buffer-layout";
+import { readNodeKindId, UNKNOWN_KIND_ID } from "../../schema/buffer-layout";
 import { NODE_DEFS_ARRAY } from "../../schema/node-defs";
 
 /** Projected label position for one buffer node row. `row` is the node's buffer node-row
@@ -38,8 +38,7 @@ export const BUFFER_EDGE_TAG = "bufferEdgeRow";
 
 // ── Sizing constants shared across sub-components ──────────────────────────────
 export const NODE_SPHERE_RADIUS = 12;
-// Port hit-sphere radius (world units): the small grabbable ball drawn at each port. Matches
-// the pre-branch PortSphere (scene-graph.tsx PORT_SPHERE_R).
+// Port hit-sphere radius (world units): the small grabbable ball drawn at each port.
 export const PORT_SPHERE_R = 4;
 // Border-ring tube thickness as a fraction of the node radius (mirrors GraphNode's
 // resting torusThick = r * 0.08).
@@ -71,23 +70,19 @@ export const SPHERE_RING_MIN_RADIUS = 1e-3;
 // rather than normalized.
 export const DIRECTION_ZERO_EPS = 1e-6;
 
-// Fallback fill/stroke for a node whose kind is unknown or whose sidecar message has
-// not arrived yet. Neutral grey — matches GraphNode's own defaults
-// (fill "#ffffff"/stroke "#888888" ← node.data fallbacks).
+// Fallback fill/stroke for a node whose KindId column is the UNKNOWN_KIND sentinel (no
+// entry in NODE_DEFS_ARRAY). Neutral grey.
 const NODE_DEFAULT_FILL = "#ffffff";
 const NODE_DEFAULT_STROKE = "#888888";
-// Node-KindId sentinel value meaning "unknown kind" (no entry in NODE_DEFS_ARRAY).
-// Must match the Go-side sentinel written into the buffer's KindId column.
-const UNKNOWN_KIND = 0xFF;
 
 /**
  * Resolve a node row's fill/stroke from its KindId column in the buffer.
  * Reads KindId (u8) at the given row and indexes NODE_DEFS_ARRAY; falls back to
- * grey when the id is out-of-range (UNKNOWN_KIND sentinel = unknown kind).
+ * grey when the id is out-of-range (UNKNOWN_KIND_ID sentinel = unknown kind).
  */
 export function nodeRowColors(nodeView: DataView, row: number): { fill: string; stroke: string } {
   const kindId = readNodeKindId(nodeView, row);
-  const def = kindId === UNKNOWN_KIND ? undefined : NODE_DEFS_ARRAY[kindId];
+  const def = kindId === UNKNOWN_KIND_ID ? undefined : NODE_DEFS_ARRAY[kindId];
   return {
     fill: def?.fill ?? NODE_DEFAULT_FILL,
     stroke: def?.stroke ?? NODE_DEFAULT_STROKE,

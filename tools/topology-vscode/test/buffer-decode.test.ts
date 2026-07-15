@@ -8,10 +8,10 @@ import { describe, it, expect } from "vitest";
 import { decodeSnapshot, nodeLabel, INTERIOR_SLOTS_PER_NODE } from "../src/webview/three/buffer-decode";
 import {
   BUF_HEADER_SIZE,
-  BEAD_STRIDE, NODE_STRIDE, INTERIOR_STRIDE, EDGE_STRIDE, PORT_STRIDE, CAMERA_STRIDE, OVERLAY_STRIDE,
+  BEAD_STRIDE, NODE_STRIDE, INTERIOR_STRIDE, EDGE_STRIDE, PORT_STRIDE, CAMERA_STRIDE, OVERLAY_STRIDE, SCENE_STRIDE,
   PORT_COL_NODE_ROW, PORT_COL_DX, PORT_COL_DY, PORT_COL_DZ, PORT_COL_IS_INPUT,
   NODE_COL_LABEL_OFF, NODE_COL_LABEL_LEN,
-  readBeadX, readBeadY, readBeadZ, readBeadFrac, readBeadLive, readBeadBeadID,
+  readBeadX, readBeadY, readBeadZ, readBeadLive,
   readNodeCX, readNodeCY, readNodeCZ, readNodeRadius,
   readInteriorPresent, readInteriorValue, readInteriorOX, readInteriorOY, readInteriorOZ,
   readEdgeSX, readEdgeSY, readEdgeSZ, readEdgeEX, readEdgeEY, readEdgeEZ,
@@ -45,7 +45,7 @@ function makeSnapshot(beadCount: number, nodeCount: number, edgeCount: number, p
   const interiorBytes = nodeCount  * INTERIOR_SLOTS_PER_NODE * INTERIOR_STRIDE;
   const edgeBytes     = edgeCount  * EDGE_STRIDE;
   const portBytes     = portCount  * PORT_STRIDE;
-  const totalBytes  = BUF_HEADER_SIZE + beadBytes + nodeBytes + interiorBytes + edgeBytes + portBytes + CAMERA_STRIDE + OVERLAY_STRIDE;
+  const totalBytes  = BUF_HEADER_SIZE + beadBytes + nodeBytes + interiorBytes + edgeBytes + portBytes + CAMERA_STRIDE + OVERLAY_STRIDE + SCENE_STRIDE;
 
   const buf = new ArrayBuffer(totalBytes);
   const dv  = new DataView(buf);
@@ -85,7 +85,7 @@ describe("decodeSnapshot — null for bad input", () => {
 
   it("returns null when buffer is one byte short of expected size", () => {
     // 0 beads/nodes/edges → expected = header + camera + overlay
-    const expected = BUF_HEADER_SIZE + CAMERA_STRIDE + OVERLAY_STRIDE;
+    const expected = BUF_HEADER_SIZE + CAMERA_STRIDE + OVERLAY_STRIDE + SCENE_STRIDE;
     const buf = new ArrayBuffer(expected - 1);
     expect(decodeSnapshot(buf)).toBeNull();
   });
@@ -119,19 +119,17 @@ describe("decodeSnapshot — bead block", () => {
   it("decodes two bead rows correctly", () => {
     const { buf, dv, beadOff } = makeSnapshot(2, 0, 0);
 
-    // Row 0: live bead at (1, 2, 3), frac=0.5, beadID=7
+    // Row 0: live bead at (1, 2, 3)
     dv.setFloat32(beadOff + 0 * BEAD_STRIDE + 0,  1.0, true); // X
     dv.setFloat32(beadOff + 0 * BEAD_STRIDE + 4,  2.0, true); // Y
     dv.setFloat32(beadOff + 0 * BEAD_STRIDE + 8,  3.0, true); // Z
-    dv.setFloat32(beadOff + 0 * BEAD_STRIDE + 16, 0.5, true); // Frac
-    dv.setUint32( beadOff + 0 * BEAD_STRIDE + 20, 7,   true); // BeadID
-    dv.setUint8(  beadOff + 0 * BEAD_STRIDE + 24, 1);         // Live=1
+    dv.setUint8(  beadOff + 0 * BEAD_STRIDE + 16, 1);         // Live=1
 
-    // Row 1: dead bead at (10, 20, 30), frac=0.0, beadID=8
+    // Row 1: dead bead at (10, 20, 30)
     dv.setFloat32(beadOff + 1 * BEAD_STRIDE + 0,  10.0, true);
     dv.setFloat32(beadOff + 1 * BEAD_STRIDE + 4,  20.0, true);
     dv.setFloat32(beadOff + 1 * BEAD_STRIDE + 8,  30.0, true);
-    dv.setUint8(  beadOff + 1 * BEAD_STRIDE + 24, 0);          // Live=0
+    dv.setUint8(  beadOff + 1 * BEAD_STRIDE + 16, 0);          // Live=0
 
     const d = decodeSnapshot(buf)!;
     expect(d.beadCount).toBe(2);
@@ -141,8 +139,6 @@ describe("decodeSnapshot — bead block", () => {
     expectF32(readBeadX(bv, 0), 1.0);
     expectF32(readBeadY(bv, 0), 2.0);
     expectF32(readBeadZ(bv, 0), 3.0);
-    expectF32(readBeadFrac(bv, 0), 0.5);
-    expect(readBeadBeadID(bv, 0)).toBe(7);
     expect(readBeadLive(bv, 0)).toBe(1);
 
     expectF32(readBeadX(bv, 1), 10.0);
@@ -239,9 +235,9 @@ describe("live-bead instance-count logic", () => {
   it("counts only live=1 bead rows, matching BeadInstances slot-fill logic", () => {
     // 3 beads: rows 0 and 2 live, row 1 dead. Mirrors the filter in BeadInstances.useFrame.
     const { buf, dv, beadOff } = makeSnapshot(3, 0, 0);
-    dv.setUint8(beadOff + 0 * BEAD_STRIDE + 24, 1); // Live=1
-    dv.setUint8(beadOff + 1 * BEAD_STRIDE + 24, 0); // Live=0 (dead)
-    dv.setUint8(beadOff + 2 * BEAD_STRIDE + 24, 1); // Live=1
+    dv.setUint8(beadOff + 0 * BEAD_STRIDE + 16, 1); // Live=1
+    dv.setUint8(beadOff + 1 * BEAD_STRIDE + 16, 0); // Live=0 (dead)
+    dv.setUint8(beadOff + 2 * BEAD_STRIDE + 16, 1); // Live=1
 
     const d = decodeSnapshot(buf)!;
     expect(d.beadCount).toBe(3); // header count is total rows (live + dead)
@@ -256,8 +252,8 @@ describe("live-bead instance-count logic", () => {
 
   it("all-dead beads yield zero live slots", () => {
     const { buf, dv, beadOff } = makeSnapshot(2, 0, 0);
-    dv.setUint8(beadOff + 0 * BEAD_STRIDE + 24, 0);
-    dv.setUint8(beadOff + 1 * BEAD_STRIDE + 24, 0);
+    dv.setUint8(beadOff + 0 * BEAD_STRIDE + 16, 0);
+    dv.setUint8(beadOff + 1 * BEAD_STRIDE + 16, 0);
 
     const d = decodeSnapshot(buf)!;
     let liveSlot = 0;
@@ -326,13 +322,13 @@ describe("decodeSnapshot — label section", () => {
     const labelBytesCount = labels[0]!.length + labels[1]!.length; // 5 + 7 = 12
     const nodeBytes = 2 * NODE_STRIDE;
     const interiorBytes = 2 * INTERIOR_SLOTS_PER_NODE * INTERIOR_STRIDE;
-    const total = BUF_HEADER_SIZE + nodeBytes + interiorBytes + CAMERA_STRIDE + OVERLAY_STRIDE + labelBytesCount;
+    const total = BUF_HEADER_SIZE + nodeBytes + interiorBytes + CAMERA_STRIDE + OVERLAY_STRIDE + SCENE_STRIDE + labelBytesCount;
     const buf = new ArrayBuffer(total);
     const dv = new DataView(buf);
     dv.setUint32(8, 2, true);                // nodeCount
     dv.setUint32(20, labelBytesCount, true); // labelBytesCount
     const nodeOff = BUF_HEADER_SIZE;
-    const labelSecOff = BUF_HEADER_SIZE + nodeBytes + interiorBytes + CAMERA_STRIDE + OVERLAY_STRIDE;
+    const labelSecOff = BUF_HEADER_SIZE + nodeBytes + interiorBytes + CAMERA_STRIDE + OVERLAY_STRIDE + SCENE_STRIDE;
     const labelView = new Uint8Array(buf, labelSecOff, labelBytesCount);
     let cursor = 0;
     labels.forEach((chunk, row) => {
@@ -353,7 +349,7 @@ describe("decodeSnapshot — label section", () => {
   it("decodes an unset label (len 0) as the empty string", () => {
     const nodeBytes = 1 * NODE_STRIDE;
     const interiorBytes = 1 * INTERIOR_SLOTS_PER_NODE * INTERIOR_STRIDE;
-    const total = BUF_HEADER_SIZE + nodeBytes + interiorBytes + CAMERA_STRIDE + OVERLAY_STRIDE;
+    const total = BUF_HEADER_SIZE + nodeBytes + interiorBytes + CAMERA_STRIDE + OVERLAY_STRIDE + SCENE_STRIDE;
     const buf = new ArrayBuffer(total);
     new DataView(buf).setUint32(8, 1, true); // nodeCount=1, labelBytesCount=0
     const d = decodeSnapshot(buf)!;

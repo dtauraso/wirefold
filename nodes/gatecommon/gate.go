@@ -16,10 +16,6 @@ import (
 // while staying under the input cadence (~3104 ms).
 const WindowMs = 3000
 
-// WindowWu is derived from WindowMs and the one pulse speed so it stays correct
-// if PulseSpeedWuPerMs is retuned: WindowWu = WindowMs × PulseSpeedWuPerMs.
-const WindowWu = WindowMs * Wiring.PulseSpeedWuPerMs // = 120 wu at PulseSpeedWuPerMs=0.04
-
 // PollIntervalTicks bounds the busy-spin of the window loop. It is a free
 // scheduling choice (not derivable from pulse speed or fire-dwell) that trades
 // CPU burn against reaction latency between window polls. One tick is the finest
@@ -31,9 +27,11 @@ const PollIntervalTicks = 1
 // second-arriving interior bead only flashes for ~1ms before the fire clears it.
 const FireDwellMs = 800
 
-// NoValue is the sentinel meaning "no value yet" / "no real bead". Real values
-// are non-negative indices so NoValue (-1) never collides with a legitimate value.
-const NoValue = -1
+// NoValue aliases Wiring.NoValue, the sentinel meaning "no value yet" / "no real
+// bead". Defined in Wiring (not here) because gatecommon imports Wiring, not the
+// reverse — Wiring.NoValue is the one definition; this is just gatecommon's name
+// for it.
+const NoValue = Wiring.NoValue
 
 // GateNode holds all the fields shared between the two gate node kinds.
 // Each kind embeds GateNode so its init/Update can delegate here.

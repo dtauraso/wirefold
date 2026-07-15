@@ -69,12 +69,14 @@ set -euo pipefail
 # tools/doc-symbols-allow.txt, one per line. Add to the allowlist; do not weaken the shape
 # rule — the allowlist is auditable, a loosened rule is not.
 #
-# RELATION TO scripts/check-dead-doc-tokens.sh: that guard is a DENYLIST of specific retired
+# RELATION TO tools/check-dead-doc-tokens.sh: that guard is a DENYLIST of specific retired
 # tokens (rf/nodes, GenericNode, PUMP_SLOT_HANDLER…) in CLAUDE.md/MODEL.md. It only catches
-# what someone remembered to list — which is why WaitTick, FromLocalPolar, PanSceneSphere and
-# TestPolarLockNoBlowup all sat in MODEL.md unflagged. This guard is the general rule and
-# needs no list. Both are kept: the denylist also covers path-shaped and ALL_CAPS tokens that
-# this one's identifier-shape rule deliberately skips.
+# what someone remembered to list. This guard is the general rule and needs no list — it was
+# fixed to also exclude guard-script prose (tools/check-*.sh) from vouching for a symbol, after
+# an audit found WaitTick, FromLocalPolar, PanSceneSphere, TestPolarLockNoBlowup and GenericNode
+# vouched for only by guard-script comments/denylists, not real code. Both are kept: the
+# denylist also covers path-shaped and ALL_CAPS tokens that this one's identifier-shape rule
+# deliberately skips.
 #
 # Exit 0 if clean; exit 1 with a report otherwise.
 
@@ -103,6 +105,7 @@ trap 'rm -rf "$TMP"' EXIT
 # Tracked sources only (git ls-files keeps node_modules/out out of scope automatically).
 # Strip // line comments so a ghost mentioned ONLY in comments cannot vouch for itself.
 git ls-files -z '*.go' '*.ts' '*.tsx' '*.js' '*.sh' 2>/dev/null \
+  | tr '\0' '\n' | grep -v '^tools/check-' | tr '\n' '\0' \
   | xargs -0 -r sed -e 's|//.*||' 2>/dev/null \
   | grep -oE "$IDENT_RE" \
   | sort -u > "$TMP/code.txt" || true

@@ -108,17 +108,17 @@ func (n specNode) label() string {
 // toNodeGeom builds the geometry descriptor for arc-length computation,
 // resolving the port lists from the spec node (falling back to the kind's
 // registry ports with default sides when the spec omits inputs/outputs).
-func (n specNode) toNodeGeom(sceneCenter vec3, hasScene bool) nodeGeom {
+func (n specNode) toNodeGeom(sceneCenter vec3) nodeGeom {
 	// Position is POLAR (polar-frame-rewrite.md). The stored ScenePolar (r,θ,φ about the scene
 	// sphere center) is the ONLY stored position and is adopted directly — there is no cartesian
 	// x/y/z load path. When it is absent the node has no position (HasPos false → nodeWorldPos
-	// returns origin).
+	// returns origin). Scene presence does not gate polar adoption: the stored polar is
+	// authoritative regardless.
 	g := nodeGeom{Kind: n.Type, Label: n.label(), R: n.R, SceneCenter: sceneCenter}
 	if n.ScenePolarR != nil && n.ScenePolarTheta != nil && n.ScenePolarPhi != nil {
 		g.ScenePolar = polar{R: *n.ScenePolarR, Theta: *n.ScenePolarTheta, Phi: *n.ScenePolarPhi}
 		g.HasPos = true
 	}
-	_ = hasScene // scene presence no longer gates polar adoption; the stored polar is authoritative.
 	g.Inputs = specPortsToGeom(n.Inputs)
 	g.Outputs = specPortsToGeom(n.Outputs)
 	// Fallback to registry ports when the spec omits the lists (keeps geometry
@@ -190,7 +190,7 @@ type NodeData struct {
 // Fields tagged wire:"prop,..." are wire props emitted to wire-defs.ts by gen-node-defs.
 type specEdge struct {
 	Label        string `json:"label"          wire:"prop,required,tsType:string"`
-	Kind         string `json:"kind"           wire:"prop,required,tsType:EdgeKind"`
+	Kind         string `json:"kind"`
 	Source       string `json:"source"`
 	SourceHandle string `json:"sourceHandle"`
 	Target       string `json:"target"`
@@ -349,7 +349,7 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock, s
 func (b *buildCtx) computeNodeGeometry() {
 	nodeGeoms := map[string]nodeGeom{}
 	for _, n := range b.spec.Nodes {
-		nodeGeoms[n.ID] = n.toNodeGeom(b.sphere.Center, b.hasScene)
+		nodeGeoms[n.ID] = n.toNodeGeom(b.sphere.Center)
 	}
 	b.nodeGeoms = nodeGeoms
 
@@ -798,22 +798,24 @@ func (b *buildCtx) buildNodes() error {
 		if err != nil {
 			return fmt.Errorf("LoadTopology: build node %q: %w", n.ID, err)
 		}
-		// Attach this node's computed LocalPolars list (layout_holder.go) the same
-		// way port/data injection works — by reflection over the promoted field
-		// every kind gets via the embedded Wiring.LayoutHolder — so the node's
-		// layout goroutine owns it without per-kind wiring.
+		// Attach this node's computed LocalPolars list (layout_holder.go) via the
+		// promoted embedded Wiring.LayoutHolder every kind gets — so the node's
+		// layout goroutine owns it without per-kind wiring. Locate the embedded
+		// *LayoutHolder by reflection (same field-lookup builders.go/loader.go use
+		// elsewhere for port/data injection), then load through its own locked
+		// setter rather than reflecting on the unexported localPolars field
+		// directly, so this initial load goes through the same mutex every other
+		// LocalPolars access does.
 		if v := reflect.ValueOf(nd).Elem(); v.Kind() == reflect.Struct {
-			if lps, ok := b.localPolars[n.ID]; ok {
-				if f := v.FieldByName("LocalPolars"); f.IsValid() && f.CanSet() {
-					f.Set(reflect.ValueOf(lps))
-				}
-			}
-			// Register this node's embedded *Wiring.LayoutHolder with the move
-			// dispatcher so a later drag (RootMove) can route a local-polar
-			// re-quantize to the OWNING node's own holder — MoveDispatch never
-			// copies or owns LocalPolars itself.
 			if lhField := v.FieldByName("LayoutHolder"); lhField.IsValid() && lhField.CanAddr() {
 				if lh, ok := lhField.Addr().Interface().(*LayoutHolder); ok {
+					if lps, ok := b.localPolars[n.ID]; ok {
+						lh.LoadLocalPolars(lps)
+					}
+					// Register this node's embedded *Wiring.LayoutHolder with the move
+					// dispatcher so a later drag (RootMove) can route a local-polar
+					// re-quantize to the OWNING node's own holder — MoveDispatch never
+					// copies or owns LocalPolars itself.
 					b.md.layoutHolders[n.ID] = lh
 				}
 			}

@@ -19,7 +19,6 @@ set -euo pipefail
 #   - snapshot-buffer.ts   (holds the latest binary snapshot + subscribe)
 #   - overlay-flags.ts     (decodes the buffer Overlay columns via useSyncExternalStore)
 #   - buffer-nav.ts        (row-keyed id/label table decoded from the buffer)
-#   - rule-builder.ts      (decodes the buffer RuleBuilder row via useSyncExternalStore)
 #
 # Exit 0 when clean.
 
@@ -52,7 +51,7 @@ while IFS= read -r line; do
   [[ -z "$line" ]] && continue
   report "zustand-create: $line  (store constructor in the webview — domain state must live in Go)"
 done < <(grep -arnE '\bcreate[<(]' \
-  --include="*.ts" --include="*.tsx" "$WEBVIEW_DIR" 2>/dev/null | grep -vE 'createRoot|document\.create|createElement' || true)
+  --include="*.ts" --include="*.tsx" "$WEBVIEW_DIR" 2>/dev/null || true)
 
 # 3. useSyncExternalStore only in the allowed buffer-reflect resources. Anywhere else it is a
 #    stateful domain hook and is forbidden.
@@ -61,7 +60,7 @@ while IFS= read -r line; do
   f="${line%%:*}"
   base="$(basename "$f")"
   case "$base" in
-    snapshot-buffer.ts|overlay-flags.ts|buffer-nav.ts|rule-builder.ts) continue ;;
+    snapshot-buffer.ts|overlay-flags.ts|buffer-nav.ts) continue ;;
   esac
   report "domain-hook: $line  (useSyncExternalStore outside the allowed buffer-reflect resources)"
 done < <(grep -arnE '\buseSyncExternalStore\b' \

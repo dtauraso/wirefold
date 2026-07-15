@@ -19,6 +19,7 @@
 //	Port     portCount × BufPortStride bytes   (flattened over nodes in node-row order; + port-name off/len)
 //	Camera   BufCameraStride bytes             (always 1 row)
 //	Overlay  BufOverlayStride bytes            (always 1 row)
+//	Scene    BufSceneStride bytes              (always 1 row; persisted scene-sphere center+radius)
 //	Label    labelBytesCount bytes             (node labels' UTF-8 bytes, node-row order)
 //	Event    eventCount × BufEventStride bytes (per-tick causal trace events; .probe log only)
 //	PortName portNameBytesCount bytes          (port names' UTF-8 bytes, flattened port-row order)
@@ -80,9 +81,10 @@ type SnapshotState struct {
 	directlyFadedNodes map[string]bool
 	directlyFadedEdges map[string]bool
 
-	// Camera and overlay singletons (always one row each in the snapshot).
+	// Camera, overlay, and scene-sphere singletons (always one row each in the snapshot).
 	camera  cameraSnapState
 	overlay overlaySnapState
+	scene   sceneSnapState
 
 	// tick is the monotonic snapshot sequence counter.
 	tick uint32
@@ -122,6 +124,13 @@ type SnapshotState struct {
 	// kindID maps a trace-event kind string to its index in T.TraceEventKinds (the shared
 	// Go/TS vocabulary), which is the EVENT block's Kind column. Built once in NewSnapshotState.
 	kindID map[string]uint8
+
+	// overlayFlagFields maps a bare-visibility-toggle trace Kind to the *uint8 field on
+	// s.overlay it sets. Collapses the nine identical
+	// "s.overlay.X = boolU8(ev.Visible); s.emitSnapshot()" Update cases into one lookup+set.
+	// Built once in NewSnapshotState (pointers into s.overlay, valid for the state's
+	// lifetime since overlay is a fixed-offset struct field, not reallocated).
+	overlayFlagFields map[string]*uint8
 }
 
 // eventRec is one buffered causal event, holding string identities that buildSnapshot
@@ -178,6 +187,10 @@ type nodeSnapState struct {
 	// hovered is PERSISTENT (not a transient event flag): 1 marks this node as the one under
 	// the pointer. Set/cleared by KindHover; NOT reset in clearTransients.
 	hovered uint8
+	// latchedSel is PERSISTENT: 1 marks this node as the LAST node that was click-selected.
+	// Unlike selected, it does NOT clear when the node is deselected (clicking empty space) —
+	// only selecting a DIFFERENT node moves it. Set alongside selected in setSelected.
+	latchedSel uint8
 	// kindID is the node's kind as its index into NODE_DEFS_ARRAY (from NodeKindID).
 	// Set once on first KindNodeGeometry; subsequent re-emits don't change kind.
 	kindID uint8
@@ -232,8 +245,6 @@ type edgeSnapState struct {
 type beadSnapState struct {
 	x, y, z float64
 	value   int
-	frac    float64
-	beadID  uint64
 }
 
 // cameraSnapState mirrors the camera block (single row).
@@ -242,6 +253,15 @@ type cameraSnapState struct {
 	r                float64
 	posTheta, posPhi float64
 	upTheta, upPhi   float64
+}
+
+// sceneSnapState mirrors the scene-sphere block (single row): the persisted world anchor
+// every node's scene polar is measured about. Established ONCE at load and never moved
+// (see KindSceneSphere); zero-value (radius 0) until that one-time startup event arrives,
+// mirroring the sphereR "0 = not yet populated" convention used elsewhere in this file.
+type sceneSnapState struct {
+	cx, cy, cz float64
+	radius     float64
 }
 
 // overlaySnapState mirrors the overlay block (single row).
@@ -264,7 +284,7 @@ type overlaySnapState struct {
 // to out. Pass nil for out to build snapshots without emitting them (useful in
 // tests that only inspect state).
 func NewSnapshotState(out io.Writer) *SnapshotState {
-	return &SnapshotState{
+	s := &SnapshotState{
 		nodeIndex:          map[string]int{},
 		edgeIndex:          map[string]int{},
 		beads:              map[beadSnapKey]beadSnapState{},
@@ -274,6 +294,18 @@ func NewSnapshotState(out io.Writer) *SnapshotState {
 		out:                out,
 		kindID:             buildKindIDMap(),
 	}
+	s.overlayFlagFields = map[string]*uint8{
+		T.KindSceneTori:      &s.overlay.sceneTori,
+		T.KindScenePoles:     &s.overlay.scenePoles,
+		T.KindNodePoles:      &s.overlay.nodePoles,
+		T.KindAngleLabels:    &s.overlay.angleLabels,
+		T.KindSelSpherePoles: &s.overlay.selSpherePoles,
+		T.KindHandholds:      &s.overlay.handholds,
+		T.KindLabelsGlobal:   &s.overlay.labelsGlobal,
+		T.KindBadgesGlobal:   &s.overlay.badgesGlobal,
+		T.KindOverlaysVis:    &s.overlay.overlaysVis,
+	}
+	return s
 }
 
 // buildKindIDMap indexes T.TraceEventKinds so the EVENT block Kind column matches the
@@ -308,32 +340,18 @@ func (s *SnapshotState) Update(ev T.Event) {
 			upTheta: ev.UpTheta, upPhi: ev.UpPhi,
 		}
 		s.emitSnapshot() // state-change point: emit on camera changes
-	case T.KindSceneTori:
-		s.overlay.sceneTori = boolU8(ev.Visible)
+	case T.KindSceneSphere:
+		// The scene sphere is established ONCE at load and never moves (MODEL.md); Go emits
+		// this a single time at startup, so a plain assign (not a merge) is correct.
+		s.scene = sceneSnapState{cx: ev.PX, cy: ev.PY, cz: ev.PZ, radius: ev.R}
 		s.emitSnapshot()
-	case T.KindScenePoles:
-		s.overlay.scenePoles = boolU8(ev.Visible)
-		s.emitSnapshot()
-	case T.KindNodePoles:
-		s.overlay.nodePoles = boolU8(ev.Visible)
-		s.emitSnapshot()
-	case T.KindAngleLabels:
-		s.overlay.angleLabels = boolU8(ev.Visible)
-		s.emitSnapshot()
-	case T.KindSelSpherePoles:
-		s.overlay.selSpherePoles = boolU8(ev.Visible)
-		s.emitSnapshot()
-	case T.KindHandholds:
-		s.overlay.handholds = boolU8(ev.Visible)
-		s.emitSnapshot()
-	case T.KindLabelsGlobal:
-		s.overlay.labelsGlobal = boolU8(ev.Visible)
-		s.emitSnapshot()
-	case T.KindBadgesGlobal:
-		s.overlay.badgesGlobal = boolU8(ev.Visible)
-		s.emitSnapshot()
-	case T.KindOverlaysVis:
-		s.overlay.overlaysVis = boolU8(ev.Visible)
+
+	case T.KindSceneTori, T.KindScenePoles, T.KindNodePoles, T.KindAngleLabels,
+		T.KindSelSpherePoles, T.KindHandholds, T.KindLabelsGlobal, T.KindBadgesGlobal,
+		T.KindOverlaysVis:
+		if field, ok := s.overlayFlagFields[ev.Kind]; ok {
+			*field = boolU8(ev.Visible)
+		}
 		s.emitSnapshot()
 
 	case T.KindPosition:
@@ -341,9 +359,7 @@ func (s *SnapshotState) Update(ev T.Event) {
 		k := beadSnapKey{ev.Node, ev.Port, ev.Bead}
 		s.beads[k] = beadSnapState{
 			x: ev.X, y: ev.Y, z: ev.Z,
-			value:  ev.Value,
-			frac:   ev.F,
-			beadID: ev.Bead,
+			value: ev.Value,
 		}
 		s.emitSnapshot()
 
@@ -431,15 +447,6 @@ func sliceToSet(ids []string) map[string]bool {
 	}
 	return m
 }
-
-// NodeCount returns the number of registered nodes (for tests).
-func (s *SnapshotState) NodeCount() int { return len(s.nodes) }
-
-// EdgeCount returns the number of registered edges (for tests).
-func (s *SnapshotState) EdgeCount() int { return len(s.edges) }
-
-// BeadCount returns the number of live in-flight beads (for tests).
-func (s *SnapshotState) BeadCount() int { return len(s.beads) }
 
 // PortCount returns the total number of port rows across all nodes (for tests).
 func (s *SnapshotState) PortCount() int {
@@ -639,8 +646,15 @@ func (s *SnapshotState) setSelected(nodeID string) {
 	for i := range s.nodes {
 		if i == sel {
 			s.nodes[i].selected = 1
+			// latchedSel moves to the newly-selected node; a deselect (sel == -1) leaves
+			// every node's latchedSel untouched here (the loop below never sets latchedSel
+			// on i == -1), so the PREVIOUSLY latched node stays latched through deselect.
+			s.nodes[i].latchedSel = 1
 		} else {
 			s.nodes[i].selected = 0
+			if sel >= 0 {
+				s.nodes[i].latchedSel = 0
+			}
 		}
 	}
 	// Node selection is exclusive with edge selection: selecting/clearing a node clears
@@ -946,6 +960,7 @@ func (s *SnapshotState) newSnapshotBuild() *snapshotBuild {
 		b.portCount*BufPortStride +
 		BufCameraStride +
 		BufOverlayStride +
+		BufSceneStride +
 		b.labelBytesCount +
 		b.eventCount*BufEventStride +
 		b.portNameBytesCount +
@@ -981,9 +996,10 @@ func (s *SnapshotState) writeHeader(buf []byte, b *snapshotBuild) int {
 	return off
 }
 
-// writeBeadBlock writes one row per live bead (map iteration; order not guaranteed, but the
-// consumer identifies beads by beadID, not row position). Suppresses a faded edge's transit
-// bead (Live=0) — a faded edge shows no traveling bead.
+// writeBeadBlock writes one row per live bead (map iteration; row order is not stable across
+// snapshots, but the renderer reads beads by row position each frame with no cross-frame
+// identity needed). Suppresses a faded edge's transit bead (Live=0) — a faded edge shows no
+// traveling bead.
 func (s *SnapshotState) writeBeadBlock(buf []byte, off int, b *snapshotBuild) int {
 	beadBuf := buf[off : off+int(b.beadCount)*BufBeadStride]
 	row := 0
@@ -994,7 +1010,7 @@ func (s *SnapshotState) writeBeadBlock(buf []byte, off int, b *snapshotBuild) in
 		}
 		SetBeadRow(beadBuf, row,
 			float32(bead.x), float32(bead.y), float32(bead.z),
-			int32(bead.value), float32(bead.frac), uint32(bead.beadID), live)
+			int32(bead.value), live)
 		row++
 	}
 	return off + int(b.beadCount)*BufBeadStride
@@ -1010,7 +1026,7 @@ func (s *SnapshotState) writeNodeBlock(buf []byte, off int, b *snapshotBuild) in
 			float32(n.vrx), float32(n.vry), float32(n.vrz),
 			float32(n.frx), float32(n.fry), float32(n.frz),
 			n.evRecv, n.evFire, n.evSend, n.evArrive, n.evDone, n.selected, n.kindID,
-			b.labelOffs[i], b.labelLens[i], boolU8(b.fadedNodes[s.nodeIDs[i]]), n.hovered)
+			b.labelOffs[i], b.labelLens[i], boolU8(b.fadedNodes[s.nodeIDs[i]]), n.hovered, n.latchedSel)
 	}
 	return off + int(b.nodeCount)*BufNodeStride
 }
@@ -1086,6 +1102,14 @@ func (s *SnapshotState) writeOverlayBlock(buf []byte, off int) int {
 	return off + BufOverlayStride
 }
 
+// writeSceneBlock writes the Scene block (always 1 row): the persisted scene-sphere center +
+// radius, established once at load and never moved (see KindSceneSphere / sceneSnapState).
+func (s *SnapshotState) writeSceneBlock(buf []byte, off int) int {
+	sc := s.scene
+	SetSceneRow(buf[off:], float32(sc.cx), float32(sc.cy), float32(sc.cz), float32(sc.radius))
+	return off + BufSceneStride
+}
+
 // writeLabelBytesSection writes the Label bytes section (self-sizing via header
 // labelBytesCount): every node's label UTF-8 bytes concatenated in node-row order. Each
 // node's LabelOff/LabelLen columns slice into this section; the numeric node row carries its
@@ -1135,6 +1159,7 @@ func (s *SnapshotState) buildSnapshot() []byte {
 	off = s.writePortBlock(buf, off, b)
 	off = s.writeCameraBlock(buf, off)
 	off = s.writeOverlayBlock(buf, off)
+	off = s.writeSceneBlock(buf, off)
 	off = s.writeLabelBytesSection(buf, off, b)
 	off = s.writeEventBlockSection(buf, off, b)
 	off = s.writePortNameBytesSection(buf, off, b)

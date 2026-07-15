@@ -12,6 +12,7 @@
 //   Port     portCount × PORT_STRIDE bytes   (flattened over nodes in node-row order)
 //   Camera   CAMERA_STRIDE bytes   (always 1 row)
 //   Overlay  OVERLAY_STRIDE bytes  (always 1 row)
+//   Scene    SCENE_STRIDE bytes    (always 1 row; persisted scene-sphere center+radius)
 //   Label    labelBytesCount bytes (node labels' UTF-8 bytes, node-row order)
 //   Event    eventCount × EVENT_STRIDE bytes (per-tick causal trace events; .probe log only)
 //   PortName portNameBytesCount bytes (port names' UTF-8 bytes, flattened port-row order)
@@ -22,10 +23,12 @@ import {
   BEAD_STRIDE,
   NODE_STRIDE,
   INTERIOR_STRIDE,
+  INTERIOR_SLOTS_PER_NODE,
   EDGE_STRIDE,
   PORT_STRIDE,
   CAMERA_STRIDE,
   OVERLAY_STRIDE,
+  SCENE_STRIDE,
   EVENT_STRIDE,
   readNodeLabelOff,
   readNodeLabelLen,
@@ -34,17 +37,13 @@ import {
   readEdgeEdgeLabelOff,
   readEdgeEdgeLabelLen,
 } from "../../schema/buffer-layout";
+// Generated (part of BUF_LAYOUT_FINGERPRINT) — re-exported here so existing consumers
+// (buffer-scene.tsx, InteriorBeadInstances.tsx, buffer-log.ts) keep importing it from the
+// decode module rather than reaching into schema/buffer-layout directly.
+export { INTERIOR_SLOTS_PER_NODE } from "../../schema/buffer-layout";
 
 /** Shared UTF-8 decoder for the label / port-name / edge-label sections. */
 const STR_DECODER = new TextDecoder();
-
-/**
- * Fixed interior grid slots per node in the Interior block. MUST match
- * BufInteriorSlotsPerNode in Buffer/layout.go — the Interior block carries exactly
- * nodeCount × INTERIOR_SLOTS_PER_NODE rows (slot = gridRow*2 + gridCol), so it has no
- * separate header count. Locked in parity by the interior-block decode test.
- */
-export const INTERIOR_SLOTS_PER_NODE = 4;
 
 export interface DecodedSnapshot {
   tick: number;
@@ -70,6 +69,9 @@ export interface DecodedSnapshot {
   cameraView: DataView;
   /** DataView over the single overlay row. */
   overlayView: DataView;
+  /** DataView over the single scene-sphere row (persisted center + radius; established once
+   *  at load and never moved — see readSceneCX/readSceneRadius, KindSceneSphere). */
+  sceneView: DataView;
   /** Total bytes in the trailing label section (self-sizing via the header labelBytesCount). */
   labelBytesCount: number;
   /** Uint8 view over the label-bytes section: every node's label UTF-8 bytes concatenated in
@@ -85,6 +87,18 @@ export interface DecodedSnapshot {
   edgeLabelBytes: Uint8Array;
 }
 
+// Single-entry memo keyed on the ArrayBuffer's OBJECT IDENTITY (not its contents — the
+// buffer's bytes never mutate in place, a new ArrayBuffer arrives per snapshot). Every
+// per-block renderer (BeadInstances, NodeInstances, PortInstances, EdgeTube, SphereRings,
+// SelectionHighlight ×2, BufferCamera, BufferLabelProjector, InteriorBeadInstances,
+// NavGuides, ThreeView ×2 — ~14 call sites) independently decodes the SAME snapshot every
+// frame; without this cache each one builds its own ~10 DataViews, ~140 short-lived
+// DataViews/frame at 60fps under a ~430-700 snapshot/sec stream. This shares one decode
+// per frame across all consumers. It moves no ownership — the memo just skips redoing
+// pure arithmetic on unchanged input, exactly what memoization is for.
+let lastBuf: ArrayBuffer | null = null;
+let lastDecoded: DecodedSnapshot | null = null;
+
 /**
  * Decode a snapshot ArrayBuffer into typed block views.
  *
@@ -92,9 +106,19 @@ export interface DecodedSnapshot {
  * (guards against partial frames or empty buffers).
  *
  * This is a PURE function — no side effects, no store reads/writes.
- * All views alias the original buffer (zero-copy).
+ * All views alias the original buffer (zero-copy). Memoized on `buf`'s identity (see
+ * lastBuf/lastDecoded above) so N consumers decoding the same snapshot in one frame share
+ * a single decode.
  */
 export function decodeSnapshot(buf: ArrayBuffer): DecodedSnapshot | null {
+  if (buf === lastBuf) return lastDecoded;
+  const decoded = decodeSnapshotUncached(buf);
+  lastBuf = buf;
+  lastDecoded = decoded;
+  return decoded;
+}
+
+function decodeSnapshotUncached(buf: ArrayBuffer): DecodedSnapshot | null {
   if (buf.byteLength < BUF_HEADER_SIZE) return null;
 
   const hdr = new DataView(buf, 0, BUF_HEADER_SIZE);
@@ -117,7 +141,7 @@ export function decodeSnapshot(buf: ArrayBuffer): DecodedSnapshot | null {
   const portBytes      = portCount * PORT_STRIDE;
   const eventBytes     = eventCount * EVENT_STRIDE;
   const expectedLen = BUF_HEADER_SIZE + beadBytes + nodeBytes + interiorBytes + edgeBytes +
-                      portBytes + CAMERA_STRIDE + OVERLAY_STRIDE +
+                      portBytes + CAMERA_STRIDE + OVERLAY_STRIDE + SCENE_STRIDE +
                       labelBytesCount + eventBytes + portNameBytesCount + edgeLabelBytesCount;
 
   if (buf.byteLength < expectedLen) return null;
@@ -145,6 +169,9 @@ export function decodeSnapshot(buf: ArrayBuffer): DecodedSnapshot | null {
   const overlayView = new DataView(buf, off, OVERLAY_STRIDE);
   off += OVERLAY_STRIDE;
 
+  const sceneView = new DataView(buf, off, SCENE_STRIDE);
+  off += SCENE_STRIDE;
+
   const labelBytes = new Uint8Array(buf, off, labelBytesCount);
   off += labelBytesCount;
 
@@ -158,7 +185,7 @@ export function decodeSnapshot(buf: ArrayBuffer): DecodedSnapshot | null {
 
   return {
     tick, beadCount, nodeCount, edgeCount, portCount, beadView, nodeView, interiorCount,
-    interiorView, edgeView, portView, cameraView, overlayView, labelBytesCount,
+    interiorView, edgeView, portView, cameraView, overlayView, sceneView, labelBytesCount,
     labelBytes, eventCount, eventView, portNameBytes, edgeLabelBytes,
   };
 }

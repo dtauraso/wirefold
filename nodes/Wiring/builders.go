@@ -38,18 +38,15 @@ const (
 
 // PortSpec describes one port on a node kind.
 type PortSpec struct {
-	Name     string
-	Dir      PortDir
-	Required bool // true for PortIn ports; output ports are never required
+	Name string
+	Dir  PortDir
 }
 
-// PortBindings holds resolved channels or PacedWires keyed by port name.
-// For PortOutMulti ports, use AppendMulti / OutSlice.
-// Paced variants (SetSinglePaced / AppendMultiPacedWithHandle) take precedence over
-// chan variants when both are set; in practice the loader uses only one mode.
+// PortBindings holds resolved PacedWires keyed by port name.
+// For PortOutMulti ports, use AppendMultiPacedWithHandle.
+// A port name with no paced binding resolves to a dead-end chan wrapper
+// (deadEndIn/deadEndOut/deadEndOutSlice) that neither sends nor receives.
 type PortBindings struct {
-	single map[string]chan int
-	multi  map[string][]chan int
 	// singlePaced holds the resolved paced binding for each single In/Out port.
 	// multiPaced holds the per-element bindings for each OutMulti fan-out port.
 	// Consolidating the formerly-parallel per-edge maps into one struct keeps
@@ -95,8 +92,6 @@ type multiBinding struct {
 
 func newPortBindings() PortBindings {
 	return PortBindings{
-		single:      map[string]chan int{},
-		multi:       map[string][]chan int{},
 		singlePaced: map[string]singleBinding{},
 		multiPaced:  map[string][]multiBinding{},
 	}
@@ -124,29 +119,23 @@ func (pb *PortBindings) AppendMultiPacedWithHandle(name, handle string, pw *Pace
 	})
 }
 
-func (pb *PortBindings) In(name string) <-chan int {
-	ch := pb.single[name]
-	if ch == nil {
-		ch = make(chan int, 1) // chan-name-ok: local placeholder accessor; wire identity is the port `name` (map key)
-	}
-	return ch
+// deadEndIn returns a fresh unbuffered-in-effect receive-only chan for a port
+// name with no paced binding. It is never fed a value; it exists only so an
+// unwired In field has a non-nil channel to hold.
+func (pb *PortBindings) deadEndIn(name string) <-chan int {
+	return make(chan int, 1) // chan-name-ok: dead-end placeholder; wire identity is the port `name` (map key)
 }
 
-func (pb *PortBindings) Out(name string) chan<- int {
-	ch := pb.single[name]
-	if ch == nil {
-		ch = make(chan int, 1) // chan-name-ok: local placeholder accessor; wire identity is the port `name` (map key)
-	}
-	return ch
+// deadEndOut is deadEndIn's send-only counterpart for an unwired Out field.
+func (pb *PortBindings) deadEndOut(name string) chan<- int {
+	return make(chan int, 1) // chan-name-ok: dead-end placeholder; wire identity is the port `name` (map key)
 }
 
-func (pb *PortBindings) OutSlice(name string) []chan<- int {
-	chs := pb.multi[name]
-	result := make([]chan<- int, len(chs))
-	for i, c := range chs {
-		result[i] = c
-	}
-	return result
+// deadEndOutSlice is deadEndOut's counterpart for an unwired OutMulti field:
+// there is no fan-out recorded for this port name, so it resolves to an empty
+// slice of dead-end sends.
+func (pb *PortBindings) deadEndOutSlice(name string) []chan<- int {
+	return nil
 }
 
 var (
@@ -201,7 +190,7 @@ func collectPorts(t reflect.Type) []PortSpec {
 		}
 		switch f.Type {
 		case tInPtr:
-			ports = append(ports, PortSpec{Name: f.Name, Dir: PortIn, Required: true})
+			ports = append(ports, PortSpec{Name: f.Name, Dir: PortIn})
 		case tOutPtr:
 			ports = append(ports, PortSpec{Name: f.Name, Dir: PortOut})
 		case tOutMulti:
@@ -368,7 +357,7 @@ func wireInPort(f reflect.Value, portName string, ctx context.Context, name stri
 	if b := pb.singlePaced[portName]; b.pw != nil {
 		f.Set(reflect.ValueOf(NewInPaced(b.pw, ctx, name, portName, tr)))
 	} else {
-		ch := pb.In(portName)
+		ch := pb.deadEndIn(portName)
 		f.Set(reflect.ValueOf(&In{ch: ch, node: name, port: portName, trace: tr}))
 	}
 }
@@ -387,7 +376,7 @@ func wireOutPort(f reflect.Value, portName string, ctx context.Context, name str
 		}
 		f.Set(reflect.ValueOf(o))
 	} else {
-		ch := pb.Out(portName)
+		ch := pb.deadEndOut(portName)
 		f.Set(reflect.ValueOf(&Out{ch: ch, node: name, port: portName, trace: tr}))
 	}
 }
@@ -409,7 +398,7 @@ func wireOutMultiPort(f reflect.Value, portName string, ctx context.Context, nam
 		}
 		f.Set(reflect.ValueOf(outs))
 	} else {
-		chs := pb.OutSlice(portName)
+		chs := pb.deadEndOutSlice(portName)
 		outs := make(OutMulti, len(chs))
 		for i, c := range chs {
 			outs[i] = &Out{ch: c, node: name, port: portName, trace: tr}
@@ -504,8 +493,7 @@ func buildPartnerCenterFn(nodeID string, edgeEndpoints map[string]EdgeEndpoints,
 	}
 }
 
-// emitNodeGeometryLocked is like emitNodeGeometry but named/kept as the emit entry point used
-// by the move dispatch. A CONNECTED port (partnerCenter reports hasPartner) is AIMED at its
+// emitNodeGeometryLocked is the emit entry point used by the move dispatch. A CONNECTED port (partnerCenter reports hasPartner) is AIMED at its
 // partner's center (portWorldPosAimed) so port→edge→port stays colinear; an edgeless port falls
 // back to its own polar-torus ring offset (portWorldPos). A `port ∈ torus` lock is still
 // movement-only and only ever applies to an edgeless (ring-placed) port, so it never overrides
@@ -529,11 +517,6 @@ func emitNodeGeometryLocked(tr *T.Trace, nodeName string, g nodeGeom, partnerCen
 	})
 }
 
-// emitNodeGeometryWith streams a node-geometry event for g, deriving each port's
-// world position + direction from portPosDir. The two public variants differ
-// ONLY in that function (static portDir vs aimed portDirAimed); everything else —
-// center, the input-then-output port order, the reach-radius fallback, and the
-// ring normals — is identical and lives here.
 // effectiveRadius returns the node's REACH radius (max distance to a surface child),
 // falling back to nodeR for childless nodes (ReachR == 0) so the value stays sane.
 // Used by emitNodeGeometryWith (sphereR).
@@ -544,6 +527,11 @@ func effectiveRadius(g nodeGeom) float64 {
 	return nodeR(g)
 }
 
+// emitNodeGeometryWith streams a node-geometry event for g, deriving each port's
+// world position + direction from portPosDir. It is called by the one live
+// caller, emitNodeGeometryLocked, which supplies the aimed-vs-static port
+// direction logic; center, the input-then-output port order, the reach-radius
+// fallback, and the ring normals all live here regardless of that logic.
 func emitNodeGeometryWith(tr *T.Trace, nodeName string, g nodeGeom, portPosDir func(name string, isInput bool) (pos, dir vec3)) {
 	center := nodeWorldPos(g)
 	ports := make([]T.PortGeom, 0, len(g.Inputs)+len(g.Outputs))
@@ -607,22 +595,31 @@ func emitNodeBeads(tr *T.Trace, nodeName string, working, backup []int) {
 
 // emitHeldBead streams the HoldNewSendOld node's interior as a SINGLE centered
 // bead (row 0, col 0) at the node center (offset 0,0,0). The bead is PRESENT when
-// held != -1 and colored by the held value (0 = white, 1 = black per the existing
-// node-bead convention); held == -1 (no value seen yet) → present=false so the
-// interior renders empty. Called from the node's injected EmitHeldBead closure
-// only when the held value changes.
+// NoValue is the sentinel meaning "no value yet" / "no real bead". Real values
+// are non-negative indices so NoValue (-1) never collides with a legitimate
+// value. Lives here (not gatecommon) because gatecommon imports Wiring —
+// gatecommon.NoValue aliases THIS constant, not the reverse, so every package
+// that needs the sentinel (including this one, which cannot import gatecommon)
+// shares one definition.
+const NoValue = -1
+
+// held != NoValue and colored by the held value (0 = white, 1 = black per the
+// existing node-bead convention); held == NoValue (no value seen yet) →
+// present=false so the interior renders empty. Called from the node's injected
+// EmitHeldBead closure only when the held value changes.
 func emitHeldBead(tr *T.Trace, nodeName string, held int) {
-	tr.NodeBead(nodeName, 0, 0, held != -1, held, 0, 0, 0)
+	tr.NodeBead(nodeName, 0, 0, held != NoValue, held, 0, 0, 0)
 }
 
 // emitInputBeads streams a gate's two held inputs as interior beads: the LEFT
 // input on the left of the node (negative x), the RIGHT input on the right
-// (positive x), vertically centered. -1 = not held → present=false. Slot keys
-// (0,0)=left, (0,1)=right. Offsets use interiorSlot so they sit inside the sphere.
+// (positive x), vertically centered. NoValue = not held → present=false. Slot
+// keys (0,0)=left, (0,1)=right. Offsets use interiorSlot so they sit inside the
+// sphere.
 func emitInputBeads(tr *T.Trace, nodeName string, left, right int) {
 	s := interiorSlot
-	tr.NodeBead(nodeName, 0, 0, left != -1, left, -s, 0, 0)
-	tr.NodeBead(nodeName, 0, 1, right != -1, right, s, 0, 0)
+	tr.NodeBead(nodeName, 0, 0, left != NoValue, left, -s, 0, 0)
+	tr.NodeBead(nodeName, 0, 1, right != NoValue, right, s, 0, 0)
 }
 
 // emitRefillSlide runs the clock-paced animated refill for the Input node's
@@ -689,21 +686,13 @@ type NodeBuilder struct {
 	Build     func(ctx context.Context, name string, data *NodeData, pb PortBindings, tr *T.Trace, geom nodeGeom, partnerCenter partnerCenterFn) (Node, error)
 }
 
-// Registry is the loader-facing map, built once at init from kindRegistry.
+// Registry is the loader-facing map, populated one kind at a time by
+// Register (registry.go) as each node package's init() runs.
 var Registry map[string]NodeBuilder
 
 func init() {
-	Registry = make(map[string]NodeBuilder, len(kindRegistry))
-	for kind, e := range kindRegistry {
-		sample := e.newNode()
-		ports := reflectPorts(sample)
-		stateKeys := reflectStateKeys(sample)
-		Registry[kind] = NodeBuilder{
-			Ports:     ports,
-			StateKeys: stateKeys,
-			Build: func(ctx context.Context, name string, data *NodeData, pb PortBindings, tr *T.Trace, geom nodeGeom, partnerCenter partnerCenterFn) (Node, error) {
-				return reflectBuild(ctx, name, data, pb, e, tr, geom, partnerCenter)
-			},
-		}
-	}
+	// Register needs a non-nil map to write into; kindRegistry is always
+	// empty at this point because package Wiring's init runs before the
+	// importing packages' inits populate it via Register.
+	Registry = make(map[string]NodeBuilder)
 }

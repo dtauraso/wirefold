@@ -125,28 +125,24 @@ type rawInputMsg struct {
 }
 
 // rawHit is the classified raycast hit: which rendered entity is under the pointer and its
-// world point. Kind ∈ port|handhold|node|empty; Id is the entity id (node id, or
-// "nodeId:in|out:portName" for a port). Topology facts (e.g. connected?) are NOT carried —
-// Go's FSM decides those from its own held state.
+// world point. Kind ∈ port|handhold|node|edge|torus|empty. Topology facts (e.g. connected?)
+// are NOT carried — Go's FSM decides those from its own held state.
 type rawHit struct {
 	Kind string
-	Id   string
-	// PortRow is the numeric buffer PORT-ROW index for a new-system port hit (the port
-	// InstancedMesh instanceId == its buffer port row). -1 (or absent) on the old path, whose
-	// port identity rides the Id string ("nodeId:in|out:portName") instead. Go resolves this
-	// row → (node, port) via its own port-row table (portFromHit); no port name crosses the
-	// bridge.
+	// PortRow is the numeric buffer PORT-ROW index for a port hit (the port InstancedMesh
+	// instanceId == its buffer port row). -1 (or absent) when not a port hit. Go resolves
+	// this row → (node, port) via its own port-row table (portFromHit); no port name crosses
+	// the bridge.
 	PortRow int
-	// EdgeRow is the numeric buffer EDGE-ROW index for a new-system edge hit (the edge's
-	// pick-halo carries its buffer edge row). -1 (or absent) when not an edge hit. Go
-	// resolves this row → edge label via its own edge-row table (edgeFromHit); no edge
-	// label crosses the bridge.
+	// EdgeRow is the numeric buffer EDGE-ROW index for an edge hit (the edge's pick-halo
+	// carries its buffer edge row). -1 (or absent) when not an edge hit. Go resolves this
+	// row → edge label via its own edge-row table (edgeFromHit); no edge label crosses the
+	// bridge.
 	EdgeRow int
-	// NodeRow is the numeric buffer NODE-ROW index for a new-system node hit (the node
-	// InstancedMesh instanceId == its buffer node row). -1 (or absent) on the old path /
-	// unit tests, which carry the node id in the Id string instead. Go resolves this row →
-	// node id via its own node-row table (nodeFromHit); no node id crosses the bridge on the
-	// new-system path.
+	// NodeRow is the numeric buffer NODE-ROW index for a node hit (the node InstancedMesh
+	// instanceId == its buffer node row). -1 (or absent) when not a node hit. Go resolves
+	// this row → node id via its own node-row table (nodeFromHit); no node id crosses the
+	// bridge.
 	NodeRow int
 	// HandholdTerm is the term-id for a handhold hit (+θ=0, +φ=1, -θ=2, -φ=3; see
 	// NavGuides.tsx HANDHOLD_TERM_TAG); -1 (or absent) when not a handhold hit. Decoded into
@@ -164,8 +160,12 @@ type rawHit struct {
 type SlotRegistry map[string]*PacedWire
 
 // RunStdinReader reads FRAMED BINARY records from r, dispatching geometry-CRUD "edit"
-// messages and play/pause clock-gate control messages. Returns when ctx is done
-// or r reaches EOF. Call in a goroutine alongside the node run loop.
+// messages and play/pause clock-gate control messages. RunStdinReader itself returns
+// when ctx is done or r reaches EOF. CAVEAT: its background frame-reader goroutine
+// (which blocks in io.ReadFull) has NO ctx-cancel exit path — on ctx-done it keeps
+// parked in the read until r reaches EOF or is closed. Benign in production (process
+// exit reclaims it), but a caller that wants the goroutine itself to unwind on cancel
+// must close r. Call in a goroutine alongside the node run loop.
 //
 // slotReg is keyed by "target.targetHandle" and resolves create/delete ops to the
 // destination port's wire. md may be nil; if non-nil, update (node-move) and
@@ -177,7 +177,7 @@ type SlotRegistry map[string]*PacedWire
 // drive an unbounded allocation. Matches the 1 MB headroom of the pre-frame line buffer.
 const maxFrameBytes = 1 << 20
 
-func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace, clk Clock, treeRoot string) {
+func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace, clk Clock) {
 	// Framed-binary reader: each record is [len:u32-LE][record bytes]. A background
 	// goroutine reads whole frames (io.ReadFull handles partial reads — a frame split
 	// across TCP/pipe chunks is reassembled before the record is decoded) and hands the
@@ -237,7 +237,7 @@ func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *
 			// MSG_TYPES_START
 			switch msg.Type {
 			case "edit":
-				applyEdit(msg, slotReg, md, tr, treeRoot)
+				applyEdit(msg, slotReg, md, tr)
 			case "play":
 				handlePlayMsg(clk)
 			case "pause":
@@ -360,7 +360,7 @@ func createEdgeInSlot(slotReg SlotRegistry, dstNode, dstPort string, tr *T.Trace
 	return true
 }
 
-func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace, treeRoot string) {
+func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace) {
 	// EDIT_OPS_START
 	switch msg.Op {
 	case "create":
@@ -382,7 +382,7 @@ func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace
 		tr.Breadcrumb("delete", pw.Target, pw.TargetHandle, destKey)
 		pw.Delete()
 	case "update":
-		applyUpdate(msg, md, tr, treeRoot)
+		applyUpdate(msg, md, tr)
 	}
 	// EDIT_OPS_END
 }
@@ -390,8 +390,7 @@ func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace
 // applyUpdate routes an op=="update" edit to the entity named by msg.Kind, setting the
 // requested attribute. The sole live entity is overlays (toggle one flag).
 // Unknown kinds/attrs are ignored (forward-compat).
-func applyUpdate(msg stdinMsg, md *MoveDispatch, tr *T.Trace, treeRoot string) {
-	_ = treeRoot // overlay persistence rides the armed overlaysPersist writer, not treeRoot here.
+func applyUpdate(msg stdinMsg, md *MoveDispatch, tr *T.Trace) {
 	// EDIT_UPDATE_KINDS_START
 	switch msg.Kind {
 	case "overlays":

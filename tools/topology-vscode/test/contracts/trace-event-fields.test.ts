@@ -1,9 +1,9 @@
-// Cross-language contract: Go Trace.Event JSON tags ↔ pump.ts field reads.
-//
-// Go emits JSONL trace events; pump.ts reads them by string key. A Go
-// json-tag rename passes `go build` / `go test` but silently breaks the
-// pump. This test pins the exact fields pump.ts reads so any rename is
-// caught at `npm test` time.
+// Cross-language contract: Go Trace.Event JSON tags ↔ buffer-log.ts's decodeEventLine field
+// reads. Go's JSON-on-stdout trace path was removed; the live decoder is buffer-log.ts's
+// decodeEventLine, which reads the buffer EVENT block and emits the SAME field shape the
+// removed stdout path used to. A Go json-tag rename on the (still-live, file-based -trace)
+// serializer passes `go build` / `go test` but could silently drift from what
+// decodeEventLine's switch expects. This test pins the exact field shape.
 //
 // Fixture: test/fixtures/trace-events.jsonl — one representative event
 // per `kind` variant, hand-curated to match Go Trace.marshalEvent output.
@@ -13,16 +13,16 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { TraceEvent } from "../../src/messages";
+import type { DecodedEventLine } from "../../src/buffer-log";
 import { TRACE_EVENT_KINDS } from "../../src/schema/trace-kinds";
 
 const FIXTURE = join(__dirname, "../fixtures/trace-events.jsonl");
 
-function loadEvents(): TraceEvent[] {
+function loadEvents(): DecodedEventLine[] {
   return readFileSync(FIXTURE, "utf8")
     .split("\n")
     .filter((l) => l.trim() !== "")
-    .map((l) => JSON.parse(l) as TraceEvent);
+    .map((l) => JSON.parse(l) as DecodedEventLine);
 }
 
 describe("trace-event-fields contract", () => {
@@ -30,7 +30,7 @@ describe("trace-event-fields contract", () => {
 
   it("fixture has one event for each kind variant", () => {
     const kinds = new Set(events.map((e) => e.kind));
-    expect(kinds).toEqual(new Set(["recv", "fire", "send", "done", "edge-bead", "geometry", "pulse-cancelled", "node-geometry", "arrive", "node-bead", "camera", "scene-tori", "scene-poles", "node-poles", "angle-labels", "sel-sphere-poles", "handholds", "labels-global", "badges-global", "overlays-vis", "select", "fade", "hover"]));
+    expect(kinds).toEqual(new Set(["recv", "fire", "send", "done", "edge-bead", "geometry", "pulse-cancelled", "node-geometry", "arrive", "node-bead", "camera", "scene-tori", "scene-poles", "node-poles", "angle-labels", "sel-sphere-poles", "handholds", "labels-global", "badges-global", "overlays-vis", "select", "fade", "hover", "scene-sphere"]));
   });
 
   it("every fixture event kind is in TRACE_EVENT_KINDS", () => {
@@ -52,8 +52,8 @@ describe("trace-event-fields contract", () => {
     expect(typeof e.step).toBe("number");
     expect(e.kind).toBe("recv");
     expect(typeof e.node).toBe("string");
-    expect(typeof (e as Extract<TraceEvent, { kind: "recv" }> & { port?: string }).port).toBe("string");
-    expect(typeof (e as Extract<TraceEvent, { kind: "recv" }> & { value?: number }).value).toBe("number");
+    expect(typeof (e as Extract<DecodedEventLine, { kind: "recv" }> & { port?: string }).port).toBe("string");
+    expect(typeof (e as Extract<DecodedEventLine, { kind: "recv" }> & { value?: number }).value).toBe("number");
   });
 
   it("fire event has step, kind, node", () => {
@@ -78,11 +78,11 @@ describe("trace-event-fields contract", () => {
     expect(typeof e.step).toBe("number");
     expect(e.kind).toBe("done");
     expect(typeof e.node).toBe("string");
-    expect(typeof (e as Extract<TraceEvent, { kind: "done" }> & { port?: string }).port).toBe("string");
+    expect(typeof (e as Extract<DecodedEventLine, { kind: "done" }> & { port?: string }).port).toBe("string");
   });
 
   it("edge-bead event has step, kind, node, port, x, y, z, f (Phase 2)", () => {
-    const e = events.find((ev) => ev.kind === "edge-bead")! as Extract<TraceEvent, { kind: "edge-bead" }>;
+    const e = events.find((ev) => ev.kind === "edge-bead")! as Extract<DecodedEventLine, { kind: "edge-bead" }>;
     expect(typeof e.step).toBe("number");
     expect(e.kind).toBe("edge-bead");
     expect(typeof e.node).toBe("string");
@@ -94,7 +94,7 @@ describe("trace-event-fields contract", () => {
   });
 
   it("geometry event has step, kind, edge, and six segment-endpoint coords (Phase 3)", () => {
-    const e = events.find((ev) => ev.kind === "geometry")! as Extract<TraceEvent, { kind: "geometry" }>;
+    const e = events.find((ev) => ev.kind === "geometry")! as Extract<DecodedEventLine, { kind: "geometry" }>;
     expect(typeof e.step).toBe("number");
     expect(e.kind).toBe("geometry");
     expect(typeof e.edge).toBe("string");
@@ -104,7 +104,7 @@ describe("trace-event-fields contract", () => {
   });
 
   it("pulse-cancelled event has step, kind, node, port (Phase 3)", () => {
-    const e = events.find((ev) => ev.kind === "pulse-cancelled")! as Extract<TraceEvent, { kind: "pulse-cancelled" }>;
+    const e = events.find((ev) => ev.kind === "pulse-cancelled")! as Extract<DecodedEventLine, { kind: "pulse-cancelled" }>;
     expect(typeof e.step).toBe("number");
     expect(e.kind).toBe("pulse-cancelled");
     expect(typeof e.node).toBe("string");
@@ -116,11 +116,11 @@ describe("trace-event-fields contract", () => {
     expect(typeof e.step).toBe("number");
     expect(e.kind).toBe("arrive");
     expect(typeof e.node).toBe("string");
-    expect(typeof (e as Extract<TraceEvent, { kind: "arrive" }> & { port?: string }).port).toBe("string");
+    expect(typeof (e as Extract<DecodedEventLine, { kind: "arrive" }> & { port?: string }).port).toBe("string");
   });
 
   it("node-geometry event has step, kind, node, nx, ny, nz, radius, ports", () => {
-    const e = events.find((ev) => ev.kind === "node-geometry")! as Extract<TraceEvent, { kind: "node-geometry" }>;
+    const e = events.find((ev) => ev.kind === "node-geometry")! as Extract<DecodedEventLine, { kind: "node-geometry" }>;
     expect(typeof e.step).toBe("number");
     expect(e.kind).toBe("node-geometry");
     expect(typeof e.node).toBe("string");
@@ -131,7 +131,7 @@ describe("trace-event-fields contract", () => {
   });
 
   it("node-bead event has step, kind, node, row, col, value, x, y, z (Phase 2b)", () => {
-    const e = events.find((ev) => ev.kind === "node-bead")! as Extract<TraceEvent, { kind: "node-bead" }>;
+    const e = events.find((ev) => ev.kind === "node-bead")! as Extract<DecodedEventLine, { kind: "node-bead" }>;
     expect(typeof e.step).toBe("number");
     expect(e.kind).toBe("node-bead");
     expect(typeof e.node).toBe("string");
@@ -141,6 +141,16 @@ describe("trace-event-fields contract", () => {
     expect(typeof e.x).toBe("number");
     expect(typeof e.y).toBe("number");
     expect(typeof e.z).toBe("number");
+  });
+
+  it("scene-sphere event has step, kind, cx, cy, cz, radius", () => {
+    const e = events.find((ev) => ev.kind === "scene-sphere")! as Extract<DecodedEventLine, { kind: "scene-sphere" }>;
+    expect(typeof e.step).toBe("number");
+    expect(e.kind).toBe("scene-sphere");
+    expect(typeof e.cx).toBe("number");
+    expect(typeof e.cy).toBe("number");
+    expect(typeof e.cz).toBe("number");
+    expect(typeof e.radius).toBe("number");
   });
 
 });

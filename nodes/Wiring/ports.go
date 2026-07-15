@@ -37,33 +37,6 @@ type In struct {
 	trace *T.Trace
 }
 
-// TryRecv in chan mode: non-blocking select. In paced mode: blocks until
-// a value is placed or ctx is cancelled.
-func (i *In) TryRecv() (int, bool) {
-	if i == nil {
-		return 0, false
-	}
-	if i.pw != nil {
-		v, err := i.pw.Recv(i.ctx)
-		if err != nil {
-			return 0, false
-		}
-		n, _ := v.(int)
-		i.trace.Recv(i.node, i.port, n)
-		return n, true
-	}
-	if i.ch == nil {
-		return 0, false
-	}
-	select {
-	case v := <-i.ch:
-		i.trace.Recv(i.node, i.port, v)
-		return v, true
-	default:
-		return 0, false
-	}
-}
-
 // PollRecv is the non-blocking receive used by windowed nodes. In paced mode it
 // calls pw.PollRecv (returns immediately with ok=false when no value is present,
 // without parking) and, on success, CONSUMES the value on read (pops the front
@@ -95,27 +68,6 @@ func (i *In) PollRecv() (int, bool) {
 	}
 }
 
-// PollRecvTick is PollRecv but also returns the tick the delivered bead
-// actually landed on (see PacedWire.PollRecvTick) — paced mode only. In chan
-// mode there is no wire clock to report, so it returns tick=0 alongside the
-// same ok as PollRecv.
-func (i *In) PollRecvTick() (int, int64, bool) {
-	if i == nil {
-		return 0, 0, false
-	}
-	if i.pw != nil {
-		v, tick, ok := i.pw.PollRecvTick()
-		if !ok {
-			return 0, 0, false
-		}
-		n, _ := v.(int)
-		i.trace.Recv(i.node, i.port, n)
-		return n, tick, true
-	}
-	n, ok := i.PollRecv()
-	return n, 0, ok
-}
-
 // Clock returns the wire's shared human-speed Clock, or nil in chan mode / for a
 // nil In (no wire, no clock). A future non-blocking node Update loop reads this
 // to pace itself off the same clock the wire times delivery on, without owning
@@ -125,16 +77,6 @@ func (i *In) Clock() Clock {
 		return nil
 	}
 	return i.pw.clock
-}
-
-// SimLatencyMs reports the input wire's traversal latency in milliseconds
-// (arcLength / pulseSpeed), or 0 in chan mode (no wire geometry). Windowed nodes
-// use this to derive their coincidence window W from current geometry.
-func (i *In) SimLatencyMs() float64 {
-	if i == nil || i.pw == nil {
-		return 0
-	}
-	return i.pw.MaxIncomingSimLatencyMs
 }
 
 // Wired reports whether this In port is bound to a real edge (paced-wire
@@ -442,26 +384,14 @@ func (o *Out) PlaceDrivenAt(v int, tick int64) DriveItem {
 // OutMulti is a fanout port: a slice of Outs sharing one logical name.
 type OutMulti []*Out
 
-// PlaceDrivenAll places value v (no walker) on EVERY Out in the set, emitting the
-// SendWire trace for each, and appends a DriveItem per Out to dst. Delivery is
-// driven by the caller's per-cycle StepOnce on each wire, so the whole fan-out
-// animates concurrently. Chan-mode Outs send immediately and contribute inert
-// items.
-func (outs OutMulti) PlaceDrivenAll(v int, dst []DriveItem) []DriveItem {
-	for _, o := range outs {
-		if o == nil {
-			continue
-		}
-		dst = append(dst, o.PlaceDriven(v))
-	}
-	return dst
-}
-
-// PlaceDrivenAllAt is PlaceDrivenAll with the placement tick PINNED by the
-// caller (see PacedWire.placeBeadNoWalkerAt / Out.PlaceDrivenAt) so every
-// element of this fan-out set stamps the SAME placementTick instead of each
-// independently re-reading the live shared clock across sequential
-// placements.
+// PlaceDrivenAllAt places value v (no walker) on EVERY Out in the set, emitting
+// the SendWire trace for each and appending a DriveItem per Out to dst, with
+// the placement tick PINNED by the caller (see PacedWire.placeBeadNoWalkerAt /
+// Out.PlaceDrivenAt) so every element of this fan-out set stamps the SAME
+// placementTick instead of each independently re-reading the live shared clock
+// across sequential placements. Delivery is driven by the caller's per-cycle
+// StepOnce on each wire, so the whole fan-out animates concurrently. Chan-mode
+// Outs send immediately and contribute inert items.
 func (outs OutMulti) PlaceDrivenAllAt(v int, tick int64, dst []DriveItem) []DriveItem {
 	for _, o := range outs {
 		if o == nil {
@@ -470,16 +400,6 @@ func (outs OutMulti) PlaceDrivenAllAt(v int, tick int64, dst []DriveItem) []Driv
 		dst = append(dst, o.PlaceDrivenAt(v, tick))
 	}
 	return dst
-}
-
-// NewIn / NewOut are exported for tests that construct nodes directly
-// without going through reflectBuild. Uses chan mode.
-func NewIn(ch <-chan int, node, port string, tr *T.Trace) *In {
-	return &In{ch: ch, node: node, port: port, trace: tr}
-}
-
-func NewOut(ch chan<- int, node, port string, tr *T.Trace) *Out {
-	return &Out{ch: ch, node: node, port: port, trace: tr, Rule: RuleConsumeGated}
 }
 
 // NewInPaced / NewOutPaced are used by the loader. Uses PacedWire mode.

@@ -13,7 +13,7 @@ export function RunButton() {
 
   const onPlayPause = () => {
     if (isPaused) {
-      // Resume the clock — sends play to Go via runner.resume() (→ play()).
+      // Resume the clock — handle-message.ts's "resume" case calls runner.play() directly.
       vscode.postMessage({ type: "resume" });
       return;
     }

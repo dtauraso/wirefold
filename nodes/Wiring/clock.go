@@ -66,12 +66,10 @@ type Clock interface {
 // RealClock is the production Clock. It tracks active elapsed by subtracting the
 // total halted duration from wall-clock elapsed, then floors that to a tick via
 // MsPerTick, so pause stops tick advance while the underlying monotonic clock
-// keeps ticking. Resume broadcasts so a freshly-resumed clock re-checks every
-// waiter promptly.
+// keeps ticking. Nothing waits on this clock via a condition variable — pacing
+// loops call SleepCycle (time.After-based) and re-check Tick() themselves.
 type RealClock struct {
 	mu sync.Mutex
-	// cond signals waiters when state changes (Resume, or the periodic re-check).
-	cond *sync.Cond
 	// start is the wall-clock instant the clock began (monotonic).
 	start time.Time
 	// halted is true while paused.
@@ -84,9 +82,7 @@ type RealClock struct {
 
 // NewRealClock returns a started RealClock anchored at the current monotonic instant.
 func NewRealClock() *RealClock {
-	c := &RealClock{start: time.Now()}
-	c.cond = sync.NewCond(&c.mu)
-	return c
+	return &RealClock{start: time.Now()}
 }
 
 // activeElapsedLocked computes active elapsed (pause-aware); caller holds c.mu.
@@ -124,14 +120,13 @@ func (c *RealClock) Halt() {
 	c.mu.Unlock()
 }
 
-// Resume un-pauses the clock and wakes all waiters to re-check their targets.
+// Resume un-pauses the clock.
 func (c *RealClock) Resume() {
 	c.mu.Lock()
 	if c.halted {
 		c.halted = false
 		c.haltedTotal += time.Since(c.haltedAt)
 	}
-	c.cond.Broadcast()
 	c.mu.Unlock()
 }
 
@@ -147,22 +142,3 @@ func (c *RealClock) SleepCycle(ctx context.Context) error {
 
 // Compile-time assertion that RealClock satisfies Clock.
 var _ Clock = (*RealClock)(nil)
-
-// broadcastOnCancel starts a goroutine that broadcasts on cond when ctx is done,
-// holding mu around the broadcast so the wake cannot be lost in a waiter's
-// check→Wait window. The caller closes the returned channel to stop the watcher.
-// Shared with PacedWire.Recv — the one place the "wake a cond-parked waiter on
-// cancellation" pattern lives.
-func broadcastOnCancel(ctx context.Context, mu *sync.Mutex, cond *sync.Cond) chan struct{} {
-	stop := make(chan struct{})
-	go func() {
-		select {
-		case <-ctx.Done():
-			mu.Lock()
-			cond.Broadcast()
-			mu.Unlock()
-		case <-stop:
-		}
-	}()
-	return stop
-}

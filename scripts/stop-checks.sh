@@ -129,8 +129,9 @@ fi
 # EXCLUDED, deliberately:
 #   check-staticcheck / check-eslint / check-vitest — expensive; invoked above under their
 #     language gate, not in this fast unconditional loop.
-#   check-no-foreground-sim — a PreToolUse hook, not a check; it must always exit 0.
-GUARD_EXCLUDE="check-staticcheck|check-eslint|check-vitest|check-no-foreground-sim"
+#   check-no-foreground-sim / check-stray-screenshots — PreToolUse hooks, not checks;
+#     they read tool_input JSON from stdin and must always exit 0.
+GUARD_EXCLUDE="check-staticcheck|check-eslint|check-vitest|check-no-foreground-sim|check-stray-screenshots"
 
 shopt -s nullglob
 guards=(tools/check-*.sh)

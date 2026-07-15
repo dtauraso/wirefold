@@ -51,27 +51,23 @@ func assertU8At(t *testing.T, buf []byte, offset int, want uint8, label string) 
 func TestSetBeadRow(t *testing.T) {
 	buf := make([]byte, BufBeadStride*2)
 	// Write row 0.
-	SetBeadRow(buf, 0, 1.5, -2.25, 3.0, -7, 0.75, 42, 1)
+	SetBeadRow(buf, 0, 1.5, -2.25, 3.0, -7, 1)
 	// Write row 1 with different values to verify stride independence.
-	SetBeadRow(buf, 1, 10.0, 20.0, 30.0, 99, 0.5, 1, 0)
+	SetBeadRow(buf, 1, 10.0, 20.0, 30.0, 99, 0)
 
 	// Row 0 assertions.
 	assertF32At(t, buf, BufBeadColX, 1.5, "row0.X")
 	assertF32At(t, buf, BufBeadColY, -2.25, "row0.Y")
 	assertF32At(t, buf, BufBeadColZ, 3.0, "row0.Z")
 	assertI32At(t, buf, BufBeadColValue, -7, "row0.Value")
-	assertF32At(t, buf, BufBeadColFrac, 0.75, "row0.Frac")
-	assertU32At(t, buf, BufBeadColBeadID, 42, "row0.BeadID")
 	assertU8At(t, buf, BufBeadColLive, 1, "row0.Live")
 
-	// Row 1 assertions (offset by BufBeadStride = 25 bytes).
+	// Row 1 assertions (offset by BufBeadStride).
 	base := BufBeadStride
 	assertF32At(t, buf, base+BufBeadColX, 10.0, "row1.X")
 	assertF32At(t, buf, base+BufBeadColY, 20.0, "row1.Y")
 	assertF32At(t, buf, base+BufBeadColZ, 30.0, "row1.Z")
 	assertI32At(t, buf, base+BufBeadColValue, 99, "row1.Value")
-	assertF32At(t, buf, base+BufBeadColFrac, 0.5, "row1.Frac")
-	assertU32At(t, buf, base+BufBeadColBeadID, 1, "row1.BeadID")
 	assertU8At(t, buf, base+BufBeadColLive, 0, "row1.Live")
 }
 
@@ -88,6 +84,7 @@ func TestSetNodeRow(t *testing.T) {
 		7, 4, // labelOff, labelLen
 		1, // faded
 		1, // hovered
+		1, // latchedSel
 	)
 
 	assertF32At(t, buf, BufNodeColCX, 1.0, "CX")
@@ -112,6 +109,7 @@ func TestSetNodeRow(t *testing.T) {
 	assertU32At(t, buf, BufNodeColLabelLen, 4, "LabelLen")
 	assertU8At(t, buf, BufNodeColFaded, 1, "Faded")
 	assertU8At(t, buf, BufNodeColHovered, 1, "Hovered")
+	assertU8At(t, buf, BufNodeColLatchedSel, 1, "LatchedSel")
 }
 
 func TestSetEdgeRow(t *testing.T) {
@@ -171,17 +169,17 @@ func TestSetOverlayRow(t *testing.T) {
 }
 
 func TestBeadStrideIsPackedSize(t *testing.T) {
-	// Bead block: 3×f32 + i32 + f32 + u32 + u8 = 5×4 + 4 + 4 + 1 = 6×4+1 = 25
-	want := 3*4 + 4 + 4 + 4 + 1
+	// Bead block: 3×f32 + i32 + u8 = 4×4 + 1 = 17
+	want := 3*4 + 4 + 1
 	if BufBeadStride != want {
 		t.Errorf("BufBeadStride = %d, want %d (packed size)", BufBeadStride, want)
 	}
 }
 
 func TestNodeStrideIsPackedSize(t *testing.T) {
-	// Node block: 5×f32 + 6×f32 (vr/fr normals) + 5×u8 (events) + 1×u8 (selected) + 1×u8 (kindID) + 2×u32 (label off/len) + 1×u8 (faded) + 1×u8 (hovered)
-	//           = (5+6)×4 + 5 + 1 + 1 + 8 + 1 + 1 = 61
-	want := 5*4 + 6*4 + 5*1 + 1*1 + 1*1 + 2*4 + 1*1 + 1*1
+	// Node block: 5×f32 + 6×f32 (vr/fr normals) + 5×u8 (events) + 1×u8 (selected) + 1×u8 (kindID) + 2×u32 (label off/len) + 1×u8 (faded) + 1×u8 (hovered) + 1×u8 (latchedSel)
+	//           = (5+6)×4 + 5 + 1 + 1 + 8 + 1 + 1 + 1 = 62
+	want := 5*4 + 6*4 + 5*1 + 1*1 + 1*1 + 2*4 + 1*1 + 1*1 + 1*1
 	if BufNodeStride != want {
 		t.Errorf("BufNodeStride = %d, want %d (packed size)", BufNodeStride, want)
 	}

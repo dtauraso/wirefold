@@ -1,21 +1,22 @@
-// Unit tests for buffer-nav.ts — the pure decodeNavNodes + content sphere.
+// Unit tests for buffer-nav.ts — the pure decodeNavNodes + scene sphere.
 //
 // Builds raw snapshot ArrayBuffers matching the Go node-block layout and asserts:
 //   - decodeNavNodes maps buffer row i to NavNode i (identity is the row index)
 //   - the per-node label decodes from the buffer's trailing label section
 //   - sphereR==0 decodes to undefined (old-path "missing" semantics)
-//   - contentSphereFromCenters matches the geometry-helpers.contentSphere formula
+//   - sceneSphereFromSnapshot reads the Go-owned Scene block (center/radius), NOT a
+//     TS-derived centroid over node centers
 
 import { describe, it, expect } from "vitest";
-import * as THREE from "three";
 import { decodeSnapshot } from "../src/webview/three/buffer-decode";
 import {
-  decodeNavNodes, contentSphereFromCenters,
+  decodeNavNodes, sceneSphereFromSnapshot,
 } from "../src/webview/three/buffer-nav";
 import {
-  BUF_HEADER_SIZE, NODE_STRIDE, INTERIOR_STRIDE, CAMERA_STRIDE, OVERLAY_STRIDE,
+  BUF_HEADER_SIZE, NODE_STRIDE, INTERIOR_STRIDE, CAMERA_STRIDE, OVERLAY_STRIDE, SCENE_STRIDE,
   NODE_COL_CX, NODE_COL_CY, NODE_COL_CZ, NODE_COL_RADIUS,
   NODE_COL_SPHERE_R, NODE_COL_SELECTED, NODE_COL_LABEL_OFF, NODE_COL_LABEL_LEN,
+  SCENE_COL_CX, SCENE_COL_CY, SCENE_COL_CZ, SCENE_COL_RADIUS,
 } from "../src/schema/buffer-layout";
 import { INTERIOR_SLOTS_PER_NODE } from "../src/webview/three/buffer-decode";
 
@@ -24,9 +25,12 @@ type NodeFields = {
   selected?: number; label?: string;
 };
 
+type SceneFields = { cx?: number; cy?: number; cz?: number; radius?: number };
+
 // Build a snapshot with `nodeCount` node rows (no beads/edges). Labels are concatenated into
 // the trailing label section and each node's LabelOff/LabelLen columns point into it.
-function makeNodeSnapshot(nodeCount: number, fields: NodeFields[]): ArrayBuffer {
+// `scene` fills the Scene block (defaults to all-zero, i.e. "not yet populated").
+function makeNodeSnapshot(nodeCount: number, fields: NodeFields[], scene?: SceneFields): ArrayBuffer {
   const nodeBytes = nodeCount * NODE_STRIDE;
   // Interior block (fixed INTERIOR_SLOTS_PER_NODE rows per node) sits between the node
   // and camera blocks; decodeSnapshot's length check requires it even when empty.
@@ -34,13 +38,20 @@ function makeNodeSnapshot(nodeCount: number, fields: NodeFields[]): ArrayBuffer 
   const enc = new TextEncoder();
   const labelChunks = fields.map((f) => enc.encode(f.label ?? ""));
   const labelBytesCount = labelChunks.reduce((n, c) => n + c.length, 0);
-  const total = BUF_HEADER_SIZE + nodeBytes + interiorBytes + CAMERA_STRIDE + OVERLAY_STRIDE + labelBytesCount;
+  const total = BUF_HEADER_SIZE + nodeBytes + interiorBytes + CAMERA_STRIDE + OVERLAY_STRIDE + SCENE_STRIDE + labelBytesCount;
   const buf = new ArrayBuffer(total);
   const dv = new DataView(buf);
   dv.setUint32(8, nodeCount, true);       // nodeCount header field
   dv.setUint32(20, labelBytesCount, true); // labelBytesCount header field
   const nodeOff = BUF_HEADER_SIZE;
-  const labelSecOff = BUF_HEADER_SIZE + nodeBytes + interiorBytes + CAMERA_STRIDE + OVERLAY_STRIDE;
+  const sceneOff = BUF_HEADER_SIZE + nodeBytes + interiorBytes + CAMERA_STRIDE + OVERLAY_STRIDE;
+  if (scene) {
+    dv.setFloat32(sceneOff + SCENE_COL_CX, scene.cx ?? 0, true);
+    dv.setFloat32(sceneOff + SCENE_COL_CY, scene.cy ?? 0, true);
+    dv.setFloat32(sceneOff + SCENE_COL_CZ, scene.cz ?? 0, true);
+    dv.setFloat32(sceneOff + SCENE_COL_RADIUS, scene.radius ?? 0, true);
+  }
+  const labelSecOff = sceneOff + SCENE_STRIDE;
   const labelView = new Uint8Array(buf, labelSecOff, labelBytesCount);
   let labelCursor = 0;
   fields.forEach((f, row) => {
@@ -94,37 +105,29 @@ describe("decodeNavNodes — row identity + buffer-sourced label", () => {
   });
 });
 
-describe("contentSphereFromCenters", () => {
-  it("returns origin/100 for no centers", () => {
-    const cs = contentSphereFromCenters([]);
-    expect(cs.center.equals(new THREE.Vector3())).toBe(true);
+describe("sceneSphereFromSnapshot", () => {
+  it("falls back to origin/100 before the Scene block is populated (radius 0)", () => {
+    const buf = makeNodeSnapshot(1, [{ cx: 0, cy: 0, cz: 0, radius: 1, label: "" }]);
+    const decoded = decodeSnapshot(buf)!;
+    const cs = sceneSphereFromSnapshot(decoded);
+    expect(cs.center.x).toBe(0);
+    expect(cs.center.y).toBe(0);
+    expect(cs.center.z).toBe(0);
     expect(cs.radius).toBe(100);
   });
 
-  it("computes bbox center + farthest-node radius with 10% margin", () => {
-    const centers = [
-      new THREE.Vector3(-10, 0, 0),
-      new THREE.Vector3(10, 0, 0),
-    ];
-    const cs = contentSphereFromCenters(centers);
-    expect(cs.center.x).toBeCloseTo(0, 5);
-    // farthest = 10 from center; ×1.1 = 11
-    expect(cs.radius).toBeCloseTo(11, 5);
-  });
-
-  it("radius is at least 1 for a single center", () => {
-    const cs = contentSphereFromCenters([new THREE.Vector3(3, 4, 5)]);
-    expect(cs.center.x).toBeCloseTo(3, 5);
-    expect(cs.radius).toBe(1);
-  });
-
-  it("ignores non-finite centers", () => {
-    const cs = contentSphereFromCenters([
-      new THREE.Vector3(0, 0, 0),
-      new THREE.Vector3(NaN, 0, 0),
-      new THREE.Vector3(6, 0, 0),
-    ]);
-    expect(cs.center.x).toBeCloseTo(3, 5);
-    expect(cs.radius).toBeCloseTo(3.3, 5);
+  it("reads the Go-owned Scene block center + radius verbatim (not derived from node centers)", () => {
+    // Node centers are far from the scene sphere center on purpose: sceneSphereFromSnapshot
+    // must read the Scene block, NOT compute a bbox centroid over these node positions.
+    const buf = makeNodeSnapshot(2, [
+      { cx: 1000, cy: 0, cz: 0, radius: 1 },
+      { cx: -1000, cy: 0, cz: 0, radius: 1 },
+    ], { cx: 5, cy: 6, cz: 7, radius: 42 });
+    const decoded = decodeSnapshot(buf)!;
+    const cs = sceneSphereFromSnapshot(decoded);
+    expect(cs.center.x).toBeCloseTo(5, 5);
+    expect(cs.center.y).toBeCloseTo(6, 5);
+    expect(cs.center.z).toBeCloseTo(7, 5);
+    expect(cs.radius).toBeCloseTo(42, 5);
   });
 });

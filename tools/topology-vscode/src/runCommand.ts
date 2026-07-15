@@ -2,33 +2,13 @@ import * as vscode from "vscode";
 import * as cp from "child_process";
 import * as fs from "fs";
 import * as path from "path";
-import type { RunStatus, TraceEvent, HostToWebviewMsg } from "./messages";
-import { TRACE_EVENT_KINDS } from "./schema/trace-kinds";
+import type { RunStatus, HostToWebviewMsg } from "./messages";
 import { buildBinary, maxGoMtime, killOrphanedSims } from "./goBuild";
 import { encodePlay, encodePause, encodeResend, frameRecord } from "./schema/input-layout";
 import { PROBE_DIR, PROBE_FILES } from "./probe-files";
 import { decodeBufferLog } from "./buffer-log";
-import {
-  BUF_HEADER_SIZE,
-  BEAD_STRIDE,
-  NODE_STRIDE,
-  NODE_COL_EV_RECV,
-  NODE_COL_EV_FIRE,
-  NODE_COL_EV_SEND,
-  NODE_COL_EV_ARRIVE,
-  NODE_COL_EV_DONE,
-} from "./schema/buffer-layout";
 
 export type { RunStatus };
-
-// Set to true locally to log every Go trace event to the extension console (~60Hz/wire).
-const DEBUG_TRACE = false;
-
-// Set of every trace-event kind Go can emit, sourced from the GENERATED
-// TRACE_EVENT_KINDS (Trace/Trace.go is the single source of truth). Using it here
-// keeps the stdout filter from drifting when a kind is added — a new kind flows to
-// the pump automatically instead of being silently dropped by a hardcoded list.
-const TRACE_EVENT_KIND_SET: ReadonlySet<string> = new Set(TRACE_EVENT_KINDS);
 
 /** Format a Go-side error as a probe JSONL line (src="go", kind="error"). */
 function goErrorLine(message: string): string {
@@ -76,68 +56,14 @@ export function splitFrames(buf: Buffer, chunk: Buffer): { frames: ArrayBuffer[]
   return { frames, rest };
 }
 
-// decodeSnapshotEvents reads the transient per-node event columns (EvRecv/Fire/Send/
-// Arrive/Done) from a snapshot payload and returns human-readable log lines — one
-// entry per set event flag across all nodes. Returns an empty array when no events
-// are flagged. Used to append to the .probe log.
-export function decodeSnapshotEvents(ab: ArrayBuffer): string[] {
-  const view = new DataView(ab);
-  if (ab.byteLength < BUF_HEADER_SIZE) return [];
-  const tick = view.getUint32(0, true);
-  const beadCount = view.getUint32(4, true);
-  const nodeCount = view.getUint32(8, true);
-  const nodeBlockOff = BUF_HEADER_SIZE + beadCount * BEAD_STRIDE;
-  const lines: string[] = [];
-  const eventCols: [number, string][] = [
-    [NODE_COL_EV_RECV, "recv"],
-    [NODE_COL_EV_FIRE, "fire"],
-    [NODE_COL_EV_SEND, "send"],
-    [NODE_COL_EV_ARRIVE, "arrive"],
-    [NODE_COL_EV_DONE, "done"],
-  ];
-  for (let i = 0; i < nodeCount; i++) {
-    const rowOff = nodeBlockOff + i * NODE_STRIDE;
-    if (rowOff + NODE_STRIDE > ab.byteLength) break;
-    for (const [col, name] of eventCols) {
-      const flag = view.getUint8(rowOff + col);
-      if (flag !== 0) {
-        lines.push(JSON.stringify({ ts_ms: Date.now(), src: "buf", kind: "buf-event", tick, node: i, event: name }) + "\n");
-      }
-    }
-  }
-  return lines;
-}
-
-// Go stdout relay: trace events are written to .probe/go.jsonl with a
-// shared envelope { ts_ms, src:"go", step?, ...ev }. Errors (stderr,
-// non-zero exit, spawn failure) are written to .probe/go-errors.jsonl.
-//
-// tryParseTraceEvent: a stdout line is a trace event when it's valid JSON with a
-// numeric `step` and a `kind` in the generated TRACE_EVENT_KINDS set. Validating
-// against the generated set (not a hardcoded literal list) means every Go kind —
-// recv/fire/send/done/position/geometry/pulse-cancelled and any future addition —
-// is recognized and forwarded to the pump without per-kind edits here.
-function tryParseTraceEvent(line: string): TraceEvent | undefined {
-  if (!line.startsWith("{")) return undefined;
-  try {
-    const obj: unknown = JSON.parse(line);
-    if (typeof obj === "object" && obj !== null) {
-      const rec = obj as Record<string, unknown>;
-      if (
-        typeof rec.step === "number" &&
-        typeof rec.kind === "string" &&
-        TRACE_EVENT_KIND_SET.has(rec.kind)
-      ) {
-        return obj as TraceEvent;
-      }
-    }
-  } catch { /* not JSON */ }
-  return undefined;
-}
+// Go stdout relay: errors (stderr, non-zero exit, spawn failure) are written to
+// .probe/go-errors.jsonl. Trace events are no longer emitted on stdout at all (see
+// handleStdout below) — the .probe trace log is now the DECODE of the fd3 binary
+// content buffer's EVENT block (decodeBufferLog, in handleFd3).
 
 // tryParseSpecLine recognizes the Go startup spec line {"kind":"spec","nodes":[...],...}.
-// Spec lines carry no step ordinal and are not in TRACE_EVENT_KINDS; they are handled
-// specially: intercepted before tryParseTraceEvent and forwarded via onSpecEvent.
+// Spec lines carry no step ordinal; they are intercepted in handleStdout before the
+// line is appended to the output channel as plain process output.
 function tryParseSpecLine(line: string): { nodes: unknown[]; edges: unknown[]; view?: unknown } | undefined {
   if (!line.startsWith("{")) return undefined;
   try {
@@ -153,8 +79,8 @@ function tryParseSpecLine(line: string): { nodes: unknown[]; edges: unknown[]; v
 }
 
 // tryParseBreadcrumb recognizes the Go Trace.Breadcrumb line shape
-// ({"kind":"breadcrumb","label":...}). Breadcrumbs are logging-only and
-// carry no step ordinal, so tryParseTraceEvent rejects them.
+// ({"kind":"breadcrumb","label":...}). Breadcrumbs are logging-only, intercepted in
+// handleStdout before the line is appended to the output channel as plain process output.
 export function tryParseBreadcrumb(line: string): Record<string, unknown> | undefined {
   if (!line.startsWith("{")) return undefined;
   try {
@@ -243,8 +169,6 @@ export class BuildAndRunRunner {
 
   constructor(
     private readonly post: (s: RunStatus) => void,
-    private readonly onTraceEvent?: (e: TraceEvent) => void,
-    private readonly onSpecEvent?: (spec: { nodes: unknown[]; edges: unknown[]; view?: unknown }) => void,
     private readonly onSnapshot?: (msg: HostToWebviewMsg & { type: "buffer-snapshot" }) => void,
   ) {}
 
@@ -379,12 +303,11 @@ export class BuildAndRunRunner {
     this.stdoutBuf = rest;
     for (const line of lines) {
       // Spec line — Go startup message carrying the full topology spec. Intercepted
-      // before the trace-event check (no step ordinal, not in TRACE_EVENT_KINDS).
-      const spec = tryParseSpecLine(line);
-      if (spec) {
-        this.onSpecEvent?.(spec);
-        continue;
-      }
+      // before the trace-event check (no step ordinal, not in TRACE_EVENT_KINDS) so it
+      // never falls through to the plain-stdout-line append below. Nothing consumes the
+      // parsed spec content today — the render path is buffer-only (no id/label sidecar,
+      // no spec store) — so this only keeps the recognized line out of the output channel.
+      if (tryParseSpecLine(line)) continue;
       // Breadcrumb lines are the Go-side DEBUG BREADCRUMB channel (Trace.Breadcrumb →
       // stdout {"kind":"breadcrumb",...}). They are logging-only (no step ordinal, outside
       // the closed trace vocabulary), so they are NEVER dispatched to the pump (its
@@ -447,7 +370,10 @@ export class BuildAndRunRunner {
     }
   }
 
-  /** Send play to Go's stdin — resumes the clock gate. Fire-and-forget. */
+  /** Send play to Go's stdin — resumes the clock gate. Fire-and-forget. Called for both
+   *  the ext-host "run" (first start) and "resume" (after pause) message kinds — Go's
+   *  gate has one Resume(), so there is nothing for a separate resume-vs-play distinction
+   *  to do on this seam. */
   play(): void {
     if (!this.proc) return;
     this.writeStdin(encodePlay());
@@ -459,11 +385,6 @@ export class BuildAndRunRunner {
     if (!this.proc) return;
     this.writeStdin(encodePause());
     this.post({ state: "paused" });
-  }
-
-  /** Alias for play() — retained so existing handle-message case "resume" still works. */
-  resume(): void {
-    this.play();
   }
 
   isRunning(): boolean {

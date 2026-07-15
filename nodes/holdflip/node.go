@@ -14,11 +14,10 @@ import (
 //
 // Two goroutines split the two concerns so the held value (and its interior
 // bead) updates the INSTANT input arrives, with no one-output-drive lag:
-//   - The MAIN loop BLOCKS on input receive (TryRecv, which parks in paced
-//     mode until a value is placed), then drains any additional queued beads
-//     non-blocking via PollRecv to keep only the LATEST value. It calls
-//     g.In.Done(), g.Fire(), updates the atomic held, and emits the interior
-//     bead when held changes.
+//   - The MAIN loop polls input non-blocking (PollRecv, one cycle-sleep per
+//     iteration), then drains any additional queued beads the same way to keep
+//     only the LATEST value. It calls g.Fire(), updates the atomic held, and
+//     emits the interior bead when held changes.
 //   - A DRIVE goroutine continuously pulses 1-held to the output via
 //     gatecommon.DriveHeld (PlaceDriven + per-cycle StepOnce, sleeping one
 //     cycle between steps), so it self-paces at the wire rate and re-reads

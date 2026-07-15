@@ -2,7 +2,6 @@ package Wiring
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 
@@ -10,7 +9,7 @@ import (
 )
 
 // deliveredBead is a value that has arrived at the wire's destination and is waiting
-// to be read by Recv or PollRecv. Recv/PollRecv consume on read (no separate Done).
+// to be read by PollRecv, which consumes on read (no separate Done).
 type deliveredBead struct {
 	val int
 	// deliverTick is the PINNED tick the caller was actually stepping when this
@@ -40,9 +39,6 @@ const PulseSpeedWuPerMs = CurveParamPulseSpeedWuPerMs
 // which equals the retired arc/pulseSpeedMs/16 sample count — so a bead visits the
 // same number of positions in the same wall time.
 const PulseSpeedWuPerTick = PulseSpeedWuPerMs * MsPerTick
-
-// ErrCanceled is returned by Send or Recv when the context is canceled.
-var ErrCanceled = errors.New("paced wire: context canceled")
 
 // beadPlacement bundles everything one placement needs. The in-flight time times
 // delivery; the segment endpoints + source identity drive the per-frame position
@@ -74,16 +70,13 @@ func (bp beadPlacement) streams() bool {
 // All fields are guarded by pw.mu.
 type inflightBead struct {
 	val           int
-	placementTick float64 // clock tick reading when placed (fractional after a geometry rebase)
-	startedTick   float64 // clock tick when the driver anchors its first step;
-	// set to placement tick so the driver's first step is always placementTick+1
-	// regardless of when the goroutine actually starts executing.
-	arc     float64     // current arc length of this bead's edge (world units)
-	seg     wireSegment // current straight-segment endpoints of this bead's edge
-	node    string      // source node id — the position/cancel routing key
-	port    string      // source output port — the position/cancel routing key
-	streams bool        // whether this bead carries position-stream context
-	gen     uint64      // per-bead id; the driven loop self-cancels on gen mismatch (teardown)
+	placementTick float64     // clock tick reading when placed (fractional after a geometry rebase)
+	arc           float64     // current arc length of this bead's edge (world units)
+	seg           wireSegment // current straight-segment endpoints of this bead's edge
+	node          string      // source node id — the position/cancel routing key
+	port          string      // source output port — the position/cancel routing key
+	streams       bool        // whether this bead carries position-stream context
+	gen           uint64      // per-bead id; the driven loop self-cancels on gen mismatch (teardown)
 	// finalPending is true once StepOnce has advanced this bead to its delivery
 	// deadline (target==deadline) but it was not yet at the FIFO head, so the
 	// move to `delivered` is still outstanding. StepOnce retries only the
@@ -124,10 +117,10 @@ type PacedWire struct {
 	// arrived-but-unread values, in arrival order (FIFO). All mutation under mu.
 	inflight  []inflightBead
 	delivered []deliveredBead
-	// nextGen mints a unique id for each placed bead (walker self-cancel key) and
-	// is also bumped on teardown to invalidate ALL outstanding walkers at once.
+	// nextGen mints a unique id for each placed bead (its StepOnce self-cancel key)
+	// and is also bumped on teardown to invalidate ALL outstanding beads at once.
 	nextGen uint64
-	// teardownGen: a walker whose bead gen is < teardownGen is invalidated wholesale
+	// teardownGen: a bead whose gen is < teardownGen is invalidated wholesale
 	// (Reset/Delete). Beads placed after a teardown get gen >= teardownGen.
 	teardownGen uint64
 	faded       bool // when true, placeBeadNoWalker places nothing
@@ -136,7 +129,7 @@ type PacedWire struct {
 	clock      Clock
 	pulseSpeed float64
 	// MaxIncomingSimLatencyMs is the per-port aggregate max(SimLatencyMs) over
-	// every edge feeding this destination port. Read only by In.SimLatencyMs().
+	// every edge feeding this destination port. Kept in step by SetIncomingLatency.
 	MaxIncomingSimLatencyMs float64
 	// incomingLatency tracks each feeding edge's own SimLatencyMs (edgeId → latency).
 	incomingLatency map[string]float64
@@ -208,7 +201,7 @@ func (pw *PacedWire) SetFaded(v bool) {
 // per-cycle StepOnce/StepOnceAt calls. Returns false if the wire is
 // faded/deleted (nothing placed). Cross-package tests that only exercise
 // delivery timing use this (see gatetesthelper.Send).
-func (pw *PacedWire) PlaceDeliverOnly(value any, inFlightMs float64) bool {
+func (pw *PacedWire) PlaceDeliverOnly(value int, inFlightMs float64) bool {
 	_, ok := pw.placeBeadNoWalker(value, beadPlacement{InFlightMs: inFlightMs})
 	return ok
 }
@@ -222,7 +215,7 @@ const msToArcWu = PulseSpeedWuPerMs
 // placeBeadNoWalker appends a bead WITHOUT launching a walker goroutine,
 // returning the bead's gen so the caller can drive delivery synchronously.
 // Returns (0, false) when faded/deleted (nothing placed).
-func (pw *PacedWire) placeBeadNoWalker(value any, bp beadPlacement) (gen uint64, ok bool) {
+func (pw *PacedWire) placeBeadNoWalker(value int, bp beadPlacement) (gen uint64, ok bool) {
 	return pw.placeBeadNoWalkerAt(value, bp, pw.clock.Tick())
 }
 
@@ -234,22 +227,20 @@ func (pw *PacedWire) placeBeadNoWalker(value any, bp beadPlacement) (gen uint64,
 // per wire — otherwise fan-out siblings placed on either side of a tick
 // boundary get different placementTicks and deliver a cycle apart despite
 // equal latency.
-func (pw *PacedWire) placeBeadNoWalkerAt(value any, bp beadPlacement, tick int64) (gen uint64, ok bool) {
+func (pw *PacedWire) placeBeadNoWalkerAt(value int, bp beadPlacement, tick int64) (gen uint64, ok bool) {
 	pw.mu.Lock()
 	if pw.faded || pw.deleted {
 		pw.mu.Unlock()
 		return 0, false
 	}
-	beadVal, _ := value.(int)
 	pw.nextGen++
 	if pw.nextGen < pw.teardownGen {
 		pw.nextGen = pw.teardownGen
 	}
 	nowTick := float64(tick)
 	b := inflightBead{
-		val:           beadVal,
+		val:           value,
 		placementTick: nowTick,
-		startedTick:   nowTick, // anchor first step to placement tick, not goroutine-start tick
 		// arc (world units) is reconstructed from the reported ms latency via the
 		// FIXED ms→wu conversion (msToArcWu), so it is independent of the clock's
 		// tick speed.
@@ -268,32 +259,31 @@ func (pw *PacedWire) placeBeadNoWalkerAt(value any, bp beadPlacement, tick int64
 }
 
 // tryDeliverHeadLocked attempts, ONE TIME (no parking/looping), to deliver the bead
-// identified by gen. Caller must hold pw.mu on entry.
+// identified by gen. Caller must hold pw.mu on entry; this function ALWAYS releases
+// pw.mu before returning, on every path (LOCK-NEUTRAL: same locking contract as
+// advanceBeadLocked, checkable from the signature/doc alone — no branch leaves the
+// mutex held).
 //
 // Three outcomes:
 //   - ready=true, ok=true: the bead was at the FIFO head and was moved to
-//     `delivered`; ai carries its source identity for the arrive trace. pw.mu is
-//     released.
+//     `delivered`; ai carries its source identity for the arrive trace.
 //   - ready=true, ok=false: the bead is gone (ctx canceled, torn down, or already
-//     dropped) — no delivery, nothing to wait for. pw.mu is released.
+//     dropped) — no delivery, nothing to wait for.
 //   - ready=false: the bead is still live but is NOT yet at the FIFO head (an
-//     earlier bead must deliver first). pw.mu is left HELD so a blocking caller
-//     can park on pw.cond, or a non-blocking caller can unlock and retry later.
+//     earlier bead must deliver first); the caller retries on a later StepOnce.
 //
 // This is the (never-parking) core StepOnce retries every cycle for a bead that
 // is not yet at the FIFO head.
 func (pw *PacedWire) tryDeliverHeadLocked(ctx context.Context, gen uint64, nowTick int64) (ai arriveInfo, ok bool, ready bool) {
+	defer pw.mu.Unlock()
 	if ctx.Err() != nil {
-		pw.mu.Unlock()
 		return arriveInfo{}, false, true
 	}
 	if gen < pw.teardownGen {
-		pw.mu.Unlock()
 		return arriveInfo{}, false, true
 	}
 	j := pw.findInflightLocked(gen)
 	if j < 0 {
-		pw.mu.Unlock()
 		return arriveInfo{}, false, true
 	}
 	if j != 0 {
@@ -304,7 +294,6 @@ func (pw *PacedWire) tryDeliverHeadLocked(ctx context.Context, gen uint64, nowTi
 	pw.delivered = append(pw.delivered, deliveredBead{val: db.val, deliverTick: nowTick})
 	pw.cond.Broadcast()
 	ai = arriveInfo{emit: db.streams, node: db.node, port: db.port, value: db.val, gen: db.gen}
-	pw.mu.Unlock()
 	return ai, true, true
 }
 
@@ -393,9 +382,8 @@ func (pw *PacedWire) StepOnceAt(ctx context.Context, tick int64) {
 		// handoff. If it is not yet head, tryDeliverHeadLocked leaves it in-flight
 		// (still finalPending) for a later StepOnce call to retry.
 		pw.mu.Lock()
-		ai, ok, ready := pw.tryDeliverHeadLocked(ctx, gen, tick)
+		ai, ok, ready := pw.tryDeliverHeadLocked(ctx, gen, tick) // always releases pw.mu
 		if !ready {
-			pw.mu.Unlock()
 			continue
 		}
 		if ok {
@@ -414,28 +402,7 @@ func (pw *PacedWire) findInflightLocked(gen uint64) int {
 	return -1
 }
 
-// Recv blocks until a delivered value is available, then pops and returns it
-// (FIFO, in send order). Recv CONSUMES on read — there is no separate Done step.
-// Returns ErrCanceled if ctx is done before a value arrives.
-func (pw *PacedWire) Recv(ctx context.Context) (any, error) {
-	done := broadcastOnCancel(ctx, &pw.mu, pw.cond)
-	defer close(done)
-
-	pw.mu.Lock()
-	for len(pw.delivered) == 0 && ctx.Err() == nil {
-		pw.cond.Wait()
-	}
-	if len(pw.delivered) == 0 {
-		pw.mu.Unlock()
-		return nil, ErrCanceled
-	}
-	b := pw.delivered[0]
-	pw.delivered = pw.delivered[1:]
-	pw.mu.Unlock()
-	return b.val, nil
-}
-
-// PollRecv is the non-blocking variant of Recv. It pops and returns the front
+// PollRecv is the non-blocking variant of the former Recv. It pops and returns the front
 // delivered value if one is present, else (nil, false). Like Recv, PollRecv
 // CONSUMES on read.
 func (pw *PacedWire) PollRecv() (any, bool) {
@@ -497,9 +464,6 @@ func (pw *PacedWire) ReviseInFlightGeometry(newArc float64, newSeg wireSegment) 
 		if pw.pulseSpeed > 0 {
 			b.placementTick = nowTick - t*(newArc/pw.pulseSpeed)
 		}
-		// Update startedTick to now so the driver's next step is anchored to the
-		// rebase point (avoids replaying the traversal from the old startedTick).
-		b.startedTick = nowTick
 	}
 }
 
@@ -522,7 +486,8 @@ type posEmitArgs struct {
 }
 
 // emitArrive sends the traversal-complete trace for a delivered bead. Called by
-// the walker AFTER releasing pw.mu (trace channel send off the lock).
+// the owning node's StepOnce-driven loop AFTER releasing pw.mu (trace channel
+// send off the lock).
 func (pw *PacedWire) emitArrive(ai arriveInfo) {
 	if ai.emit {
 		pw.Trace.Arrive(ai.node, ai.port, ai.value, ai.gen)
@@ -542,9 +507,10 @@ func (pw *PacedWire) emitArrive(ai arriveInfo) {
 // If the bead is missing or the wire torn down, all zero/false values are returned
 // and pw.mu is still released.
 //
-// NOTE: the inflight→delivered move and cond.Broadcast are NOT done here; the
-// walker's FIFO-head wait loop does that after this returns when final=true. This
-// keeps the two locking phases (trace-emit window vs. delivery window) unchanged.
+// NOTE: the inflight→delivered move and cond.Broadcast are NOT done here;
+// tryDeliverHeadLocked (called by the owning node's StepOnce) does that after
+// this returns when final=true. This keeps the two locking phases (trace-emit
+// window vs. delivery window) unchanged.
 func (pw *PacedWire) advanceBeadLocked(gen uint64, nowTick float64) (emit bool, pos posEmitArgs, final bool) {
 	tr := pw.Trace
 
@@ -593,10 +559,11 @@ func (pw *PacedWire) advanceBeadLocked(gen uint64, nowTick float64) (emit bool, 
 	return
 }
 
-// teardownLocked cancels ALL in-flight bead walkers, clears both queues, and
-// returns the per-bead source identities for any in-flight beads so the caller can
-// emit one PulseCancelled per dropped STREAMING bead after unlocking (emit mirrors
-// the bead's streams flag — delivery-only beads carry no sprite and emit nothing,
+// teardownLocked cancels ALL in-flight beads (invalidating their gen so any
+// subsequent StepOnce drops them), clears both queues, and returns the per-bead
+// source identities for any in-flight beads so the caller can emit one
+// PulseCancelled per dropped STREAMING bead after unlocking (emit mirrors the
+// bead's streams flag — delivery-only beads carry no sprite and emit nothing,
 // matching tryDeliverHeadLocked's emit: db.streams). Must be called with pw.mu held.
 func (pw *PacedWire) teardownLocked() []arriveInfo {
 	var cancelled []arriveInfo
@@ -612,8 +579,8 @@ func (pw *PacedWire) teardownLocked() []arriveInfo {
 	return cancelled
 }
 
-// Reset drops all in-flight/delivered beads and cancels their walkers; used when
-// an edge is deleted in the editor.
+// Reset drops all in-flight/delivered beads and invalidates their gen so any
+// subsequent StepOnce drops them; used when an edge is deleted in the editor.
 func (pw *PacedWire) Reset() {
 	pw.mu.Lock()
 	pw.teardownLocked()

@@ -24,14 +24,18 @@
 package Buffer
 
 // BufLayoutVersion is the schema version. Bump when any column changes.
-const BufLayoutVersion = 20
+const BufLayoutVersion = 23
 
 // BufInteriorSlotsPerNode is the fixed number of interior grid slots reserved per
 // node in the Interior block (a 2x2 held/interior-bead grid: slot = row*2 + col).
 // The Interior block carries exactly nodeCount*BufInteriorSlotsPerNode rows in
 // stable node order, so it needs no separate count in the header — the decoder
-// derives its length from nodeCount. Not a generated column; kept in sync with the
-// TS INTERIOR_SLOTS_PER_NODE by the interior-block decode test.
+// derives its length from nodeCount. Not a per-column generated field (there is no
+// bufLayoutInterior column for it), but gen-node-defs DOES read this const directly
+// (parseBufferLayout) and emits it as generated TS (INTERIOR_SLOTS_PER_NODE in
+// buffer-layout.ts) and Go (BufInteriorSlotsPerNodeGenerated) constants, folded into
+// BUF_LAYOUT_FINGERPRINT — so a drift here fails check-buffer-layout-parity.sh, not
+// just a same-symbolic-constant-on-both-sides test that could never catch a value change.
 const BufInteriorSlotsPerNode = 4
 
 // --- Semantic event enum ------------------------------------------------
@@ -52,13 +56,11 @@ const (
 // bufLayoutBead defines one row of the beads column block.
 // One row per live in-flight bead. Matched from KindPosition trace events.
 type bufLayoutBead struct {
-	X      float32 `buf:"f32"` // world x position
-	Y      float32 `buf:"f32"` // world y position
-	Z      float32 `buf:"f32"` // world z position
-	Value  int32   `buf:"i32"` // bead integer value
-	Frac   float32 `buf:"f32"` // fractional progress t in [0,1] along wire
-	BeadID uint32  `buf:"u32"` // per-wire monotonic bead id (1-based)
-	Live   uint8   `buf:"u8"`  // 1 = slot occupied; 0 = absent (sentinel row)
+	X     float32 `buf:"f32"` // world x position
+	Y     float32 `buf:"f32"` // world y position
+	Z     float32 `buf:"f32"` // world z position
+	Value int32   `buf:"i32"` // bead integer value
+	Live  uint8   `buf:"u8"`  // 1 = slot occupied; 0 = absent (sentinel row)
 }
 
 // bufLayoutNode defines one row of the nodes column block.
@@ -109,6 +111,13 @@ type bufLayoutNode struct {
 	// hover style: #aaddff, r*0.14). Persistent-until-next-move; NOT a transient event flag.
 	// Selection styling takes precedence over hover where both apply (renderer-side).
 	Hovered uint8 `buf:"u8"` // 1 = node is pointer-hovered
+	// LatchedSel is Go-owned: 1 marks the LAST node that was click-selected, and stays 1
+	// through a deselect (clicking empty space clears Selected but NOT LatchedSel; selecting
+	// a DIFFERENT node moves LatchedSel to it). Set by setSelected alongside Selected — see
+	// nodeSnapState.latchedSel in Buffer/snapshot.go. Replaces the old TS-owned
+	// `latchedSel` React state in NavGuides.tsx (that was a second, TS-invented selection
+	// concept unreachable from Go); the render path now just reads this column.
+	LatchedSel uint8 `buf:"u8"` // 1 = this is the last-selected node (persists through deselect)
 }
 
 // bufLayoutInterior defines one row of the interior-bead column block.
@@ -233,6 +242,19 @@ type bufLayoutOverlay struct {
 	SelMode uint8 `buf:"u8"`
 }
 
+// bufLayoutScene defines the scene-sphere column block (always 1 row).
+// Matched from KindSceneSphere trace events. The scene sphere is the persisted, first-class
+// world anchor every node's scene polar is measured about (nodes/Wiring/sphere_layout.go
+// sceneSphere) — established ONCE at load and never moved. Replaces the TS-side
+// contentSphereFromCenters (a derived, non-authoritative content-sphere centroid recomputed
+// from live node positions every frame) as the sphere NavGuides draws its polar tori around.
+type bufLayoutScene struct {
+	CX     float32 `buf:"f32"` // scene-sphere center x (world)
+	CY     float32 `buf:"f32"` // scene-sphere center y (world)
+	CZ     float32 `buf:"f32"` // scene-sphere center z (world)
+	Radius float32 `buf:"f32"` // scene-sphere radius
+}
+
 // bufLayoutEvent defines one row of the per-tick EVENT column block.
 // The block is self-sizing via an eventCount field in the snapshot header; it carries
 // the causal trace events that occurred since the previous snapshot (recv/fire/send/done/
@@ -271,5 +293,6 @@ var _ = [...]any{
 	bufLayoutPort{},
 	bufLayoutCamera{},
 	bufLayoutOverlay{},
+	bufLayoutScene{},
 	bufLayoutEvent{},
 }

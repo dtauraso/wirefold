@@ -21,7 +21,7 @@ These rarely change; skim once per session and apply throughout.
 Each entry can drift; if it conflicts with current code, update or remove the memory rather than acting on it.
 
 - [project_node_color_vocab.md](project_node_color_vocab.md) — David's node-kind nicknames: "time nodes" = HoldNewSendOld, "and nodes" = WindowAndInhibit*Gate
-- [project_two_goroutine_node_split.md](project_two_goroutine_node_split.md) — Each node = always-on layout goroutine + pausable bead loop; pause governs only beads; drag-cascade upstream leak deferred
+- [project_two_goroutine_node_split.md](project_two_goroutine_node_split.md) — STALE: described LayoutPort.run, since removed; node-move is now decentralized nodeMover goroutines (see project_lock_propagation_decentralized.md); LayoutHolder.UpdateLayout is a vestigial no-op
 
 - [project_go_visual_vocabulary.md](project_go_visual_vocabulary.md) — Go visual vocabulary is chan→wire + per-node running indicator (with reloop); goroutine and select are not separate visual primitives
 - [project_industry_pattern_deferrals.md](project_industry_pattern_deferrals.md) — Deferred visual-editor gaps, re-scoped 2026-07-05 vs current buffer/Three.js arch: render-only items (edge labels S, hover tooltips XS) cheap; stateful items all L (no multi-select/undo/waypoints)
@@ -57,7 +57,7 @@ Each entry can drift; if it conflicts with current code, update or remove the me
 - [feedback_dont_invent_doctrine.md](feedback_dont_invent_doctrine.md) — Don't paraphrase a one-off note into a "rule" and cite the paraphrase as project doctrine; grep for the literal phrasing first
 - [feedback_tsc_verify_after_removal.md](feedback_tsc_verify_after_removal.md) — After deleting/refactoring webview TS, verify with `tsc --noEmit` too; esbuild (`npm run build`) skips type-checking and lets dangling refs reach runtime
 - [feedback_node_model_not_networking_handshake.md](feedback_node_model_not_networking_handshake.md) — Nodes do local work + drive their outputs; no TCP-handshake/ack-nack/send-gating delivery guarantees
-- [feedback_paced_tryrecv_blocks.md](feedback_paced_tryrecv_blocks.md) — Paced TryRecv blocks (not a poll); judge from paced_wire.go impl, not the Try/ok idiom
+- [feedback_paced_tryrecv_blocks.md](feedback_paced_tryrecv_blocks.md) — In.TryRecv/PacedWire.Recv deleted as dead code (2026-07); live non-blocking receive is In.PollRecv/PacedWire.PollRecv
 - [feedback_per_goroutine_bridge.md](feedback_per_goroutine_bridge.md) — Go↔TS bridge is per-goroutine (each goroutine sends/picks up); geometry's central emitter is the deviation
 - [project_wire_is_straight_line_not_chain.md](project_wire_is_straight_line_not_chain.md) — Wires are straight PacedWire lines; bead-item chain model was built then rejected (O(N²) follow latency); don't re-propose it
 - [feedback_place_all_then_drive_concurrently.md](feedback_place_all_then_drive_concurrently.md) — Place all outbound beads before driving concurrently (DriveAll); serial per-edge drive causes fan-out timing regression (node-2 lesson, 2026-06-14)

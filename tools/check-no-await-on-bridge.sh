@@ -48,16 +48,16 @@ done < <(grep -arnE '\.(writeStdin|postMessage)\([^)]*\)[[:space:]]*\.(then|catc
 
 # 3. writeStdin must NOT be declared to return a Promise/Thenable — a void return is
 #    what keeps the send fire-and-forget at the type level.
-if [[ -f "$RUNCOMMAND" ]]; then
-  while IFS= read -r line; do
-    [[ -z "$line" ]] && continue
-    report "writeStdin-returns-promise: $line"
-  done < <(grep -nE 'writeStdin\([^)]*\)[[:space:]]*:[[:space:]]*(Promise|Thenable)' "$RUNCOMMAND" 2>/dev/null || true)
+[[ -f "$RUNCOMMAND" ]] || { echo "no-await-on-bridge: MISCONFIGURED — $RUNCOMMAND not found" >&2; exit 1; }
 
-  # Positive assertion: writeStdin must be declared returning void.
-  if ! grep -qE 'writeStdin\([^)]*\)[[:space:]]*:[[:space:]]*void' "$RUNCOMMAND"; then
-    report "writeStdin-not-void: $RUNCOMMAND does not declare writeStdin(...): void — the TS→Go send must be fire-and-forget"
-  fi
+while IFS= read -r line; do
+  [[ -z "$line" ]] && continue
+  report "writeStdin-returns-promise: $line"
+done < <(grep -nE 'writeStdin\([^)]*\)[[:space:]]*:[[:space:]]*(Promise|Thenable)' "$RUNCOMMAND" 2>/dev/null || true)
+
+# Positive assertion: writeStdin must be declared returning void.
+if ! grep -qE 'writeStdin\([^)]*\)[[:space:]]*:[[:space:]]*void' "$RUNCOMMAND"; then
+  report "writeStdin-not-void: $RUNCOMMAND does not declare writeStdin(...): void — the TS→Go send must be fire-and-forget"
 fi
 
 if [[ $HITS -eq 0 ]]; then
