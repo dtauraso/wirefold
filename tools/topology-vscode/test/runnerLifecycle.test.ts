@@ -167,6 +167,19 @@ describe("lastSnapshot cache (getLastSnapshot) — resend replacement", () => {
     expect(cached).toBeDefined();
     expect(cached!.byteLength).toBe(3);
     expect(new Uint8Array(cached!)).toEqual(new Uint8Array([1, 2, 3]));
+
+    // SERVING the cache must not detach it. The "ready" handler posts what
+    // getLastSnapshot returns, and postMessage TRANSFERS — so if we handed out the
+    // cached reference, the first remount would empty our own cache. That breaks the
+    // exact case this cache exists for: while PAUSED no new frame arrives to
+    // repopulate it, so the SECOND remount would be served zero bytes.
+    structuredClone(cached!, { transfer: [cached!] }); // simulate the post transferring it
+    expect(cached!.byteLength).toBe(0); // the served copy is detached, as postMessage would
+
+    const second = r.getLastSnapshot(); // a second remount, no new frame in between
+    expect(second).toBeDefined();
+    expect(second!.byteLength).toBe(3);
+    expect(new Uint8Array(second!)).toEqual(new Uint8Array([1, 2, 3]));
   });
 
   it("cache is overwritten by each new frame; getLastSnapshot reflects the LATEST one", () => {

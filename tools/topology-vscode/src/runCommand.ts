@@ -383,10 +383,15 @@ export class BuildAndRunRunner {
 
   /** The most recent fd3 buffer-snapshot frame, or undefined if none has arrived yet.
    *  Used by the "ready" handler to hand a remounted webview a full frame instantly
-   *  (see the lastSnapshot field comment). Returns the cached COPY directly — callers
-   *  must not further cache the returned reference past a subsequent postMessage call. */
+   *  (see the lastSnapshot field comment).
+   *
+   *  Returns a FRESH COPY on every call, because the caller posts what it gets and
+   *  webview.postMessage TRANSFERS ArrayBuffers — handing out the cached reference
+   *  would detach our own cache on the first serve. That breaks the exact case this
+   *  cache exists for: while PAUSED no new frame ever arrives to repopulate it, so a
+   *  second remount would be served a zero-length buffer. The copy is one per remount. */
   getLastSnapshot(): ArrayBuffer | undefined {
-    return this.lastSnapshot;
+    return this.lastSnapshot?.slice(0);
   }
 
   stop() {
