@@ -50,17 +50,31 @@ are Go-owned and streamed as columns of the buffer's Edge block; `buffer-scene.t
 and read by `EdgeTube` in the same commit it is used; otherwise the render path is
 silently incomplete.
 
-**Bridge surface:** **Go → TS** is the binary content buffer (`buffer-snapshot`) plus the
-`node-label` id/label/kind sidecar — Go reporting the whole scene. **TS → Go** is
-`raw-input` (raw pointer/wheel + raycast hit → Go's gesture FSM), spec save/load, and a
-single geometry-CRUD `edit` message with **exactly three ops** (create / update / delete)
-plus the play/pause control signal (see `nodes/Wiring/stdin_reader.go` `applyEdit` and
-`src/messages.ts` `EditMsg`). create/delete add or remove an edge; **`update` sets an
-ATTRIBUTE on a typed entity** (`kind` = node / edge / camera / overlays / scene) —
-there is no per-feature op. Fading an edge, moving a port anchor, orbiting the camera,
-and toggling an overlay are all `update`s on their entity. New editor→Go capability
-is a new entity kind or attribute, NOT a new op; keep it in parity across messages.ts,
-stdin_reader.go, and handle-message.ts (guard: `tools/check-edit-op-parity.sh`). The
+**Bridge surface:** **Go → TS** is the binary content buffer (`buffer-snapshot`) and
+NOTHING ELSE — Go reporting the whole scene. There is **no id/label/kind sidecar**: node
+identity is the buffer's **row index**, kind is a numeric column, and the human label rides
+the buffer's Label section via off/len columns on the Node block. (A test asserts the
+removed sidecar message is rejected; do not reintroduce one.)
+
+**TS → Go** is framed binary records on stdin. Two shapes, and the distinction is the model:
+
+- **Addressed edits** — a single geometry-CRUD `edit` message with **exactly three ops**
+  (create / update / delete) (see `nodes/Wiring/stdin_reader.go` `applyEdit`, fenced by
+  `EDIT_OPS_START`/`EDIT_OPS_END`, and `src/messages.ts` `EditMsg`). create/delete add or
+  remove an edge; **`update` sets an ATTRIBUTE on a typed entity** (`kind` = node / edge /
+  camera / overlays / scene) — there is no per-feature op. New *addressed* capability is a
+  new entity kind or attribute, NOT a new op.
+- **Bare commands** — `play` / `pause`, `resend`, `save`, `fade-toggle`. These carry **no
+  entity id on purpose**: they act on state **Go already owns** (the clock; the current
+  selection), so there is nothing for TS to address. `fade-toggle` flips fade on the
+  Go-owned selection — TS cannot name the target, therefore it cannot be an `update`.
+- **`raw-input`** — raw pointer/wheel + stateless raycast hit → Go's gesture FSM. Camera
+  orbit, node moves, port-anchor moves and edge fade are produced **in-process** by the FSM
+  from raw-input; they do not cross this seam as edits.
+
+Keep all of it in parity across `messages.ts`, `stdin_reader.go`, and `handle-message.ts`
+(guards: `tools/check-edit-op-parity.sh`, `tools/check-message-kind-parity.sh`, and the
+`INPUT_LAYOUT_FINGERPRINT` in `input_codec.go` / `schema/input-layout.ts`). The
 TS → Go send is **fire-and-forget** — no `await`, no Promise chain, no request/response,
 no delivery signal (guard: `tools/check-no-await-on-bridge.sh`).
 

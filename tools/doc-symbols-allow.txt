@@ -1,0 +1,25 @@
+# doc-symbols-allow.txt — tokens check-doc-symbols.sh must NOT treat as ghost symbols.
+#
+# One token per line. Blank lines, #-comments, and trailing #-comments are ignored.
+#
+# ONLY add a token here when it is genuinely NOT a code symbol:
+#   * a variable in prose-math (`tick = floor((systemNow - start) * scale)`)
+#   * a placeholder in a pseudo-code example
+#   * a name owned by an external tool/library, not by this repo
+#
+# Do NOT add a token to silence a real stale reference. The guard exists because a comment
+# naming a symbol that no longer exists points the next reader (or AI) at a pattern the code
+# deliberately moved away from. If the symbol is dead, DELETE the claim — an entry here is
+# permanent and will swallow that symbol forever, including a future real regression.
+
+# ---- prose-math variables (MODEL.md formulas; never declared anywhere) --------------------
+systemNow          # tick = floor((systemNow - start) * scale)
+remainingTicks     # remainingTicks = (1-t)*newArc/pulseSpeed
+liveStart          # lerp(liveStart, liveEnd, t)
+liveEnd            # lerp(liveStart, liveEnd, t)
+
+# ---- pseudo-code placeholders ------------------------------------------------------------
+ArrayUnion         # schema/types.ts: `const _ : MustEqual<Union, ArrayUnion> = true` example
+
+# ---- external tool concepts (not symbols in this repo) ------------------------------------
+disableAnimations  # Playwright flake-control concept, cited in e2e/visual-regression.spec.ts

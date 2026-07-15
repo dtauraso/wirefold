@@ -32,7 +32,7 @@ the network itself is the nodes-and-wires Go runtime.
   fires. There is no slot — node-local held state replaces it.
 - **Channel.** A Go channel connecting a source to a wire, or a wire to a
   destination node. One input port is one channel.
-- **Clock (the human-speed clock).** There is exactly one clock: the system monotonic clock, read through a **scale** so it advances in integer **ticks** at human-watchable speed (`tick = ⌊(systemNow − start) × scale⌋`; the scale is the human-speed / playback-speed knob). All timing is **tick counts**, not wall-clock durations: goroutines wait on `WaitTick(k)` ("resume when tick ≥ k"). The play/pause gate freezes the tick advance — it stops incrementing the tick, not the underlying system clock. **Everything that animates runs in these ticks:** bead traveling, all in-node animations, and all node/gate processing windows. Per-update tick counts come from formulas, not literals — a bead crossing an edge takes `ticksToCross = arcLength / pulseSpeed` (pulseSpeed in world-units-per-tick, uniform across wires); node processing windows are tick counts. There is no separate render cadence — the tick IS the animation clock.
+- **Clock (the human-speed clock).** There is exactly one clock: the system monotonic clock, read through a **scale** so it advances in integer **ticks** at human-watchable speed (`tick = ⌊(now − start − haltedTotal) / tickPeriod⌋`; the scale is the human-speed / playback-speed knob, `MsPerTick = 16` ⇒ ≈62.5 ticks/sec). All timing is **tick counts**, not wall-clock durations. The model is **sleep-only**: a pacing loop calls `SleepCycle` to wait exactly ONE cycle and re-reads `Tick()`, rather than blocking on a target tick — there is no wait-until-tick-k primitive. The play/pause gate (`Halt` / `Resume`) freezes the tick advance by subtracting halted time; it stops incrementing the tick, not the underlying system clock, and touches no goroutine. **Everything that animates runs in these ticks:** bead traveling, all in-node animations, and all node/gate processing windows. Per-update tick counts come from formulas, not literals — a bead crossing an edge takes `ticksToCross = arcLength / pulseSpeed` (pulseSpeed in world-units-per-tick, uniform across wires); node processing windows are tick counts. There is no separate render cadence — the tick IS the animation clock.
 
 ## Wire lifecycle
 
@@ -64,7 +64,8 @@ A node places a bead on its outgoing wire whenever its own rule says to. It does
 
 Nodes time their processing in **ticks**: a firing rule may span a
 **tick-count window** (e.g. a gate's inhibit/processing window is K ticks),
-scheduled against the human-speed clock via `WaitTick`. Firing is still
+paced against the human-speed clock by sleeping one cycle at a time
+(`SleepCycle`) and comparing `Tick()`. Firing is still
 gated on held state — now optionally held across a tick window rather than
 resolving instantaneously.
 
@@ -94,14 +95,16 @@ and wire is a goroutine; they coordinate through channels. A single
 global gate halts or resumes wire animation. There is no central walker.
 
 Each wire times its OWN delivery on the human-speed clock: when its
-`ticksToCross` have elapsed (via `WaitTick`) the wire puts the bead on the
+`ticksToCross` have elapsed (observed by the owning node's loop driving
+`StepOnce` one cycle at a time) the wire puts the bead on the
 channel to the destination node. Delivery is not triggered by the renderer — there is no
 cross-boundary delivery signal. The editor is told where each bead is;
 it is never asked when a bead has arrived.
 
 There is one tick clock (the human-speed clock) but no lockstep round or
 simultaneity layer: goroutines schedule independently against the shared
-tick via `WaitTick` — they are not aligned into global rounds, and the
+tick, each sleeping a cycle (`SleepCycle`) and re-reading `Tick()` on its
+own — they are not aligned into global rounds, and the
 network does not count rounds. Coordination between nodes happens through
 the values nodes place on wires and the topology — not through
 round-alignment or a delivery handshake. Any reasoning that treats
@@ -172,10 +175,20 @@ in the system is the scene sphere's own center (the world anchor).
 
 - **Scene sphere** — a first-class, persisted reference (NOT the derived content-sphere
   centroid, which moves with the nodes and is circular). It has a **cartesian center** (the
-  one world anchor, in `scene.json`) and a **radius** that fits the diagram and re-fits on
-  pan. It is a SEPARATE entity from the camera pivot: camera **orbit** must not move it;
-  camera **pan** does (`PanViewpoint` → `PanSceneSphere`, same delta), holding node world
-  positions fixed while their scene polars recompute about the new center.
+  one world anchor, in `scene.json`) and a **radius** that fits the diagram. It is a SEPARATE
+  entity from the camera pivot: camera **orbit** must not move it, and `PanViewpoint` is a
+  pure CAMERA move that deliberately does not touch it (coupling the two once left
+  `md.sceneSphere` diverged from the movers' held center — the "zoom got canceled" symptom).
+
+  > **OPEN — the sphere is currently immovable.** In the code today the scene sphere is
+  > loaded once (`LoadSceneSphere`, content-fit when `scene.json` has none), READ by every
+  > scene-polar computation, and persisted on save — but **nothing ever moves its center**.
+  > There is no scene-pan entry point: the `PanScene` / `PanSceneSphere` gesture named here
+  > and in `node_move.go`'s comments does not exist, and no code assigns `sceneSphere.Center`
+  > after load. The intended behaviour (a scene pan translating the center by the same delta,
+  > holding node world positions fixed while their scene polars recompute about the new
+  > center) is UNBUILT, not merely unnamed. Do not cite it as existing; decide whether to
+  > build it or drop it from the model.
 - **Two polars per node.** (1) **Scene polar** `(r,θ,φ)` about the scene-sphere center — the
   node's POSITION, persisted (`meta.json` `scenePolar*`; cartesian `x/y/z` kept only for
   back-compat, and only used at load when no sphere is persisted yet). World = `sceneCenter +
@@ -183,14 +196,18 @@ in the system is the scene sphere's own center (the world anchor).
   node it is doubly-linked to (its lock center). This is the constraint frame.
 - **Locks are offsets.** A node-node lock nudges ONE component of a node's **stored local
   polar** offset (a bounded copy of a neighbor's owned component), carried node-to-node in the
-  decentralized cascade message (`FromLocalPolar`). The offset is taken from the existing
-  movement-link value on first touch (`localPolarOf`) — there is no separate seed step.
+  decentralized cascade message (`sendMove`, node-to-node over per-node inboxes — there is no
+  central worklist). The offset lives on the node's `LayoutHolder` (`SetLocalPolar` /
+  `LocalPolarsSnapshot`), seeded from the existing movement-link value by
+  `computeLocalPolars` at load and re-quantized on move by `requantizeLocalPolars` — there is
+  no separate seed step.
 - **No blow-up, by construction.** The offset is STORED and only carried through the
   composition or nudged one component — it is NEVER re-derived as `cart2polar(node − center)`
   from a live world during a cascade. That reconstruction against a mid-moving center is the
   bug that made positions fly to infinity. A moved center rigidly translates its satellites
-  (offset unchanged ⇒ locks stay satisfied ⇒ the wave terminates). Guard:
-  `TestPolarLockNoBlowup`.
+  (offset unchanged ⇒ locks stay satisfied ⇒ the wave terminates). This is STRUCTURAL, not a
+  test: the reconstruction that caused the blow-up has no call site to write. Nav is held
+  polar-only by `tools/check-polar-only-nav.sh`.
 - **Panel-authored locks must be structurally incapable of a position blow-up.** If one
   happens, the implementation is wrong (an offset was reconstructed from a moving reference),
   not the locks.
@@ -202,7 +219,7 @@ in the system is the scene sphere's own center (the world anchor).
 - arc length, pulse speed (world-units per tick), ticks-to-cross,
   tick-count processing window
 - tick, human-speed clock (the one system monotonic clock scaled to ticks
-  at human speed), scale, `WaitTick`
+  at human speed), scale, `SleepCycle`, `Tick`, `Halt` / `Resume`
 - node receives, node holds, node fires, wire advances, wire delivers,
   wire emits position
 - halt, resume, global gate

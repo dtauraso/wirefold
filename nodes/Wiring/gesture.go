@@ -64,9 +64,9 @@ type gestureState struct {
 	smoothX, smoothY float64
 	smoothSeeded     bool
 	// secondary is true when the pointer-down was a SECONDARY (button 2) press — a
-	// two-finger trackpad tap. Mirrors interaction-handlers.ts `secondaryDown`: such a
-	// press is always a tap-select and NEVER converts to a drag/rotate, so it stays
-	// `gestPending` through any finger drift and resolves to a select on pointer-up.
+	// two-finger trackpad tap. Such a press is always a tap-select and NEVER converts to a
+	// drag/rotate, so it stays `gestPending` through any finger drift and resolves to a
+	// select on pointer-up.
 	secondary bool
 
 	// empty-space rotation gate + the entity grabbed at pointer-down
@@ -262,8 +262,7 @@ func (md *MoveDispatch) gestPointerMove(ev rawInputMsg, tr *T.Trace) {
 	dist := math.Hypot(dx, dy)
 
 	// A secondary (two-finger) press never becomes a drag/rotate — it is a tap-select, so
-	// it stays gestPending through any finger drift and resolves on pointer-up (mirrors
-	// interaction-handlers.ts handlePointerMove's `!s.secondaryDown` guard).
+	// it stays gestPending through any finger drift and resolves on pointer-up.
 	if g.phase == gestPending && dist > gestureMoveSlopPx && !g.secondary {
 		switch {
 		case g.wireNode != "":
