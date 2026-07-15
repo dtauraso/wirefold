@@ -3,7 +3,14 @@
 // scene.json, mirroring scene_camera_persist.go / scene_locks_persist.go (read-modify-write
 // of one key, serialized against the other scene writers via sceneFileMu).
 //
-// The Center is the ONE cartesian value in the system — the world anchor. On-disk shape:
+// The Center is the only PERSISTED, AUTHORITATIVE cartesian value — the world anchor every
+// scene polar is measured about. It is NOT the only cartesian value in the system: the
+// camera pose (gesture_camera.go), port anchors (port_geometry.go), bead segments
+// (paced_wire.go) and per-node centers (quantized_layout.go deriveCenters) are all cartesian
+// too. The invariant is narrower and stronger than "cartesian appears once": every other
+// cartesian is DERIVED from this anchor (sceneCenter + polar2cart(…)) or QUARANTINED at the
+// renderer edge — none is persisted, and none is a source of truth. Nav stays polar-only
+// (guard: tools/check-polar-only-nav.sh). On-disk shape:
 //
 //	{ "sceneSphere": { "center": [x,y,z], "radius": n } }
 //
