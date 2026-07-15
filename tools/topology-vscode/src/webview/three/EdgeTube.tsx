@@ -21,7 +21,7 @@ import {
 import {
   readEdgeSX, readEdgeSY, readEdgeSZ, readEdgeEX, readEdgeEY, readEdgeEZ,
   readEdgeSelected, readEdgeFaded,
-  readLayoutLinkSrcNodeRow, readLayoutLinkDstNodeRow,
+  readLayoutLinkSrcNodeRow, readLayoutLinkDstNodeRow, readLayoutLinkEdgeRow,
   readNodeCX, readNodeCY, readNodeCZ,
   readOverlayOverlaysVis, readOverlayDoubleLinks,
 } from "../../schema/buffer-layout";
@@ -142,10 +142,15 @@ function EdgeTube({ seg, dimmed, row, selected, faded }: { seg: EdgeSeg; dimmed:
 }
 
 // One layout-link pair's cyan bidirectional overlay: thin tube (radius 1.0) + an
-// outward-pointing arrowhead at each end. Mirrors the pre-removal DoubleEdgeOverlay, but the
-// segment endpoints come from the two nodes' CENTERS (the LayoutLink block carries node-row
-// indices, not duplicated endpoint geometry), not from any Edge block segment.
-function LayoutLinkOverlay({ seg }: { seg: EdgeSeg }) {
+// outward-pointing arrowhead at each end. Mirrors the pre-removal DoubleEdgeOverlay. The
+// segment endpoints are the connecting bead edge's own port-anchored SX..EZ (Edge block,
+// resolved via this pair's LayoutLink EdgeRow) — the same points the bead wire itself uses,
+// so the overlay terminates at the PORTS, not the node centers, and stays attached under a
+// drag (the Edge block is re-emitted on every node/port move). `viaEdge=false` means this
+// pair had no bead edge to ride along (LayoutLink EdgeRow === -1); the caller falls back to
+// node centers, and this is rendered visibly dimmer so a center-anchored fallback segment
+// never looks identical to a real port-anchored one.
+function LayoutLinkOverlay({ seg, viaEdge }: { seg: EdgeSeg; viaEdge: boolean }) {
   const { lineGeo, arrowStart, arrowEnd } = useMemo(() => {
     const start = new THREE.Vector3(seg.sx, seg.sy, seg.sz);
     const end = new THREE.Vector3(seg.ex, seg.ey, seg.ez);
@@ -188,7 +193,8 @@ function LayoutLinkOverlay({ seg }: { seg: EdgeSeg }) {
           color={SHADING_PARAM_LAYOUT_LINK_COLOR}
           emissive={LAYOUT_LINK_EMISSIVE_COLOR}
           emissiveIntensity={SHADING_PARAM_LAYOUT_LINK_EMISSIVE_INTENSITY}
-          transparent={false}
+          transparent={!viaEdge}
+          opacity={viaEdge ? 1 : 0.35}
         />
       </mesh>
       {arrowStart && cone(arrowStart, "start")}
@@ -238,7 +244,8 @@ export function EdgeTubes({ capacity }: { capacity: number }) {
   // against the ALREADY-DECODED Node block's centers, never from the Edge block.
   const [showDouble, setShowDouble] = useState(false);
   const [linkSegs, setLinkSegs] = useState<EdgeSeg[]>([]);
-  const linkPrevRef = useRef<{ dbl: boolean; segs: EdgeSeg[] }>({ dbl: false, segs: [] });
+  const [linkViaEdge, setLinkViaEdge] = useState<boolean[]>([]);
+  const linkPrevRef = useRef<{ dbl: boolean; segs: EdgeSeg[]; viaEdge: boolean[] }>({ dbl: false, segs: [], viaEdge: [] });
 
   useFrame(() => {
     const snap = getLatestSnapshot();
@@ -275,23 +282,42 @@ export function EdgeTubes({ capacity }: { capacity: number }) {
       setFadedRows(fadedNext);
     }
 
-    // Layout-link overlay: Go-streamed pairs (LayoutLink block), each endpoint resolved via
-    // its node-row's CENTER from the already-decoded Node block — no Edge-block reuse.
+    // Layout-link overlay: Go-streamed pairs (LayoutLink block). Each pair's endpoints are the
+    // connecting bead edge's own port-anchored SX..EZ (Edge block, row = this pair's EdgeRow) —
+    // the same points the bead wire uses, so the overlay terminates at the ports and stays
+    // attached as a node is dragged (the Edge block is re-emitted on every move). Fallback
+    // (EdgeRow === -1, no bead edge for this pair): the two nodes' CENTERS from the Node
+    // block — an honest degradation, rendered dimmer (viaEdge=false) so it never looks like a
+    // real port-anchored link.
     const dbl = !!readOverlayOverlaysVis(overlayView) && !!readOverlayDoubleLinks(overlayView);
     const linkN = Math.min(layoutLinkCount, capacity);
     const nextLinks: EdgeSeg[] = new Array<EdgeSeg>(linkN);
+    const nextViaEdge: boolean[] = new Array<boolean>(linkN);
     for (let i = 0; i < linkN; i++) {
-      const srcRow = readLayoutLinkSrcNodeRow(layoutLinkView, i);
-      const dstRow = readLayoutLinkDstNodeRow(layoutLinkView, i);
-      nextLinks[i] = {
-        sx: readNodeCX(nodeView, srcRow), sy: readNodeCY(nodeView, srcRow), sz: readNodeCZ(nodeView, srcRow),
-        ex: readNodeCX(nodeView, dstRow), ey: readNodeCY(nodeView, dstRow), ez: readNodeCZ(nodeView, dstRow),
-      };
+      const edgeRow = readLayoutLinkEdgeRow(layoutLinkView, i);
+      if (edgeRow >= 0) {
+        nextLinks[i] = {
+          sx: readEdgeSX(edgeView, edgeRow), sy: readEdgeSY(edgeView, edgeRow), sz: readEdgeSZ(edgeView, edgeRow),
+          ex: readEdgeEX(edgeView, edgeRow), ey: readEdgeEY(edgeView, edgeRow), ez: readEdgeEZ(edgeView, edgeRow),
+        };
+        nextViaEdge[i] = true;
+      } else {
+        const srcRow = readLayoutLinkSrcNodeRow(layoutLinkView, i);
+        const dstRow = readLayoutLinkDstNodeRow(layoutLinkView, i);
+        nextLinks[i] = {
+          sx: readNodeCX(nodeView, srcRow), sy: readNodeCY(nodeView, srcRow), sz: readNodeCZ(nodeView, srcRow),
+          ex: readNodeCX(nodeView, dstRow), ey: readNodeCY(nodeView, dstRow), ez: readNodeCZ(nodeView, dstRow),
+        };
+        nextViaEdge[i] = false;
+      }
     }
-    if (dbl !== linkPrevRef.current.dbl || !sameSegs(linkPrevRef.current.segs, nextLinks)) {
-      linkPrevRef.current = { dbl, segs: nextLinks };
+    const viaEdgeChanged = linkPrevRef.current.viaEdge.length !== nextViaEdge.length
+      || nextViaEdge.some((v, i) => v !== linkPrevRef.current.viaEdge[i]);
+    if (dbl !== linkPrevRef.current.dbl || !sameSegs(linkPrevRef.current.segs, nextLinks) || viaEdgeChanged) {
+      linkPrevRef.current = { dbl, segs: nextLinks, viaEdge: nextViaEdge };
       setShowDouble(dbl);
       setLinkSegs(nextLinks);
+      setLinkViaEdge(nextViaEdge);
     }
   });
 
@@ -303,7 +329,7 @@ export function EdgeTubes({ capacity }: { capacity: number }) {
         </React.Fragment>
       ))}
       {showDouble && linkSegs.map((s, i) => (
-        <LayoutLinkOverlay key={`layout-link-row-${i}`} seg={s} />
+        <LayoutLinkOverlay key={`layout-link-row-${i}`} seg={s} viaEdge={!!linkViaEdge[i]} />
       ))}
     </>
   );

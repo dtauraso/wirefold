@@ -24,7 +24,7 @@
 package Buffer
 
 // BufLayoutVersion is the schema version. Bump when any column changes.
-const BufLayoutVersion = 24
+const BufLayoutVersion = 25
 
 // BufInteriorSlotsPerNode is the fixed number of interior grid slots reserved per
 // node in the Interior block (a 2x2 held/interior-bead grid: slot = row*2 + col).
@@ -169,17 +169,31 @@ type bufLayoutEdge struct {
 
 // bufLayoutLayoutLink defines one row of the LAYOUT-link column block: the double-link
 // LAYOUT relationship (nodes/Wiring/layout_holder.go LocalPolars — each node's stored polar
-// OFFSET to a neighbor it is double-linked to), NOT the bead-edge graph. Streamed once per
-// pair at load (deduplicated by the emitter — nodes/Wiring/loader.go emitLayoutLinks), from
-// the same computeLocalPolars data that seeds LayoutHolder.LoadLocalPolars — so this block
-// can never silently drift into "just re-drawing the Edge block" even on a topology where the
-// layout-link pairs and the bead-edge pairs diverge. SrcNodeRow/DstNodeRow are the buffer
-// NODE-ROW indices (same resolution as bufLayoutEdge's); the renderer looks up both nodes'
-// CX/CY/CZ from the already-decoded Node block to draw the overlay segment — no duplicated
-// endpoint geometry here.
+// OFFSET to a neighbor it is double-linked to), NOT the bead-edge graph. The PAIR is
+// streamed once at load (deduplicated by the emitter — nodes/Wiring/loader.go
+// emitLayoutLinks), from the same computeLocalPolars data that seeds
+// LayoutHolder.LoadLocalPolars — so this block can never silently drift into "just
+// re-drawing the Edge block" even on a topology where the layout-link pairs and the
+// bead-edge pairs diverge.
+//
+// SrcNodeRow/DstNodeRow are the buffer NODE-ROW indices (same resolution as bufLayoutEdge's).
+// EdgeRow is Go-resolved EVERY snapshot (buildSnapshot, not load-once) to the buffer EDGE-ROW
+// index of the bead edge connecting this same pair (either direction), or -1 when no such
+// edge exists. The renderer draws the overlay segment along THAT edge's already-streamed,
+// always-current SX..EZ (bufLayoutEdge) — the same port-anchored endpoints the bead wire
+// itself uses — instead of duplicating endpoint geometry here. Recomputing EdgeRow's
+// resolution every snapshot (not once at load) is what keeps the overlay attached to the
+// ports as a node is dragged: the Edge block is re-emitted on every node/port move, and the
+// overlay rides along.
+//
+// Fallback (EdgeRow == -1, no bead edge for this layout-link pair): the renderer falls back
+// to the two nodes' CX/CY/CZ from the Node block. This is an honest degradation, not a
+// silent one — the renderer must not let a center-anchored fallback segment look identical
+// to a port-anchored one (dashed/dimmed or otherwise visually distinguished).
 type bufLayoutLayoutLink struct {
 	SrcNodeRow int32 `buf:"i32"` // one endpoint's buffer node-row index
 	DstNodeRow int32 `buf:"i32"` // the other endpoint's buffer node-row index
+	EdgeRow    int32 `buf:"i32"` // matching bead-edge's buffer edge-row index; -1 = no edge (fallback to node centers)
 }
 
 // bufLayoutPort defines one row of the ports column block.

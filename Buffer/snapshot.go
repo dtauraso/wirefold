@@ -1137,12 +1137,33 @@ func (s *SnapshotState) writeEdgeBlock(buf []byte, off int, b *snapshotBuild) in
 	return off + int(b.edgeCount)*BufEdgeStride
 }
 
+// edgeRowForPair returns the buffer edge-row index of the bead edge connecting node ids a/b
+// (in either direction), or -1 when no such edge exists. Recomputed fresh every buildSnapshot
+// call (not cached at load) so a layout link's overlay segment stays resolved to whichever
+// edge row currently connects that pair — the Edge block's SX..EZ are themselves re-emitted
+// on every node/port move, so riding along on the row index (rather than duplicating
+// endpoints here) is what keeps the overlay attached under a drag.
+func (s *SnapshotState) edgeRowForPair(a, b string) int32 {
+	for i, e := range s.edges {
+		if (e.srcNode == a && e.dstNode == b) || (e.srcNode == b && e.dstNode == a) {
+			return int32(i)
+		}
+	}
+	return -1
+}
+
 // writeLayoutLinkBlock writes the LayoutLink block: stable row order (insertion order of the
-// first-seen pair). Sourced from the LAYOUT model (LocalPolars), independent of the Edge block.
+// first-seen pair). Sourced from the LAYOUT model (LocalPolars), independent of the Edge block
+// for the PAIR itself; EdgeRow is resolved against the CURRENT Edge block each call (see
+// edgeRowForPair) so the overlay segment always draws along the live port-anchored edge
+// endpoints, not stale or center-anchored ones — -1 when the pair has no bead edge (renderer
+// fallback: node centers).
 func (s *SnapshotState) writeLayoutLinkBlock(buf []byte, off int, b *snapshotBuild) int {
 	llBuf := buf[off : off+int(b.layoutLinkCount)*BufLayoutLinkStride]
 	for i, ll := range s.layoutLinks {
-		SetLayoutLinkRow(llBuf, i, int32(s.nodeRowIndex(ll.srcNode)), int32(s.nodeRowIndex(ll.dstNode)))
+		SetLayoutLinkRow(llBuf, i,
+			int32(s.nodeRowIndex(ll.srcNode)), int32(s.nodeRowIndex(ll.dstNode)),
+			s.edgeRowForPair(ll.srcNode, ll.dstNode))
 	}
 	return off + int(b.layoutLinkCount)*BufLayoutLinkStride
 }
