@@ -64,15 +64,6 @@ window.addEventListener("message", (e) => {
       : { state: (RUN_STATES as readonly string[]).includes(msg.state)
             ? msg.state
             : "idle" });
-  } else if (msg.type === "load") {
-    // Fully Go/buffer-driven: NO spec store, NO pump. Everything the render needs arrives via
-    // buffer-snapshot ALONE — node labels ride the buffer node block (LabelOff/LabelLen),
-    // there is no id/label sidecar; label/badge visibility comes from the overlay columns.
-    // Overlays are Go-owned: Go's SeedOverlays reads view/scene.json on startup and streams
-    // the loaded visibilities into the buffer overlay columns the render path reads. TS must
-    // NOT push an overlay `set` on load — doing so overrode Go's persisted state with the
-    // (empty) viewerState defaults AND scheduled a persist that wrote those defaults back,
-    // wiping the saved overlay keys on every reload. There is nothing to do here.
   } else if (msg.type === "buffer-snapshot") {
     // Store the latest snapshot for buffer-scene rendering. EVERY snapshot is applied —
     // nothing dropped. The observability log is COALESCED to at most ~1/sec (with a running
@@ -86,10 +77,8 @@ window.addEventListener("message", (e) => {
       bufSnapCount = 0;
     }
   }
-  // load for 2D is fully handled inside App's message effect.
 });
 
-// Signal readiness after the message listener is registered so the host's
-// load response is guaranteed not missed.
+// Signal readiness after the message listener is registered.
 vscode.postMessage({ type: "ready" });
 postLog("lifecycle", { phase: "ready-sent" });

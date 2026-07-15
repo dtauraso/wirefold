@@ -205,7 +205,6 @@ export type TraceEvent =
   | { step: number; kind: "polar-locks"; polarLocks: { center: string; aNode: string; aCode: number; bNode: string; bCode: number; active: boolean }[]; selectedLockIndex: number };
 
 export type HostToWebviewMsg =
-  | { type: "load"; text: string; sceneText?: string }
   | { type: "run-status"; state: RunStatus["state"]; message?: string }
   | { type: "trace-event"; event: TraceEvent }
   // Phase 3: binary snapshot from Go's fd3 side channel.
@@ -226,7 +225,7 @@ export const WEBVIEW_TO_HOST_TYPES: ReadonlySet<WebviewToHostMsg["type"]> = new 
 ]);
 
 const HOST_TO_WEBVIEW_TYPES: ReadonlySet<HostToWebviewMsg["type"]> = new Set([
-  "load", "run-status", "trace-event", "buffer-snapshot",
+  "run-status", "trace-event", "buffer-snapshot",
 ]);
 
 // The editor→Go payload validators (parseEdit / parseUpdate / parseRawInput) were removed
@@ -280,13 +279,6 @@ export function parseHostToWebview(raw: unknown): HostToWebviewMsg | undefined {
     return undefined;
   }
   switch (t) {
-    case "load":
-      // text is fed to JSON.parse in store.load(); require it to be a string here
-      // (the single authoritative type check — store keeps its try/catch as
-      // defense-in-depth). sceneText is optional and, if present, must be a string.
-      if (typeof m.text !== "string") return undefined;
-      if (m.sceneText !== undefined && typeof m.sceneText !== "string") return undefined;
-      return m as unknown as HostToWebviewMsg;
     case "run-status":
       // state must be a documented RunStatus state; message (if present) a string.
       if (typeof m.state !== "string" || !RUN_STATUS_STATES.has(m.state)) return undefined;

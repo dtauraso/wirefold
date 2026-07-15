@@ -30,19 +30,8 @@ describe("parseHostToWebview", () => {
     ).toBeUndefined();
   });
 
-  it("accepts a load with a string text and validates sceneText", () => {
-    const msg = { type: "load", text: "{}", sceneText: "{}" };
-    expect(parseHostToWebview(msg)).toEqual(msg);
-  });
-
-  it("rejects a load whose text is not a string", () => {
-    expect(parseHostToWebview({ type: "load", text: 42 })).toBeUndefined();
-  });
-
-  it("rejects a load whose sceneText is a non-string", () => {
-    expect(
-      parseHostToWebview({ type: "load", text: "{}", sceneText: 7 }),
-    ).toBeUndefined();
+  it("rejects the removed load type (the render path is buffer-only; no spec/scene load message)", () => {
+    expect(parseHostToWebview({ type: "load", text: "{}", sceneText: "{}" })).toBeUndefined();
   });
 
   it("accepts run-status with a documented state", () => {

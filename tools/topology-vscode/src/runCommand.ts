@@ -244,7 +244,6 @@ export class BuildAndRunRunner {
   constructor(
     private readonly post: (s: RunStatus) => void,
     private readonly onTraceEvent?: (e: TraceEvent) => void,
-    private readonly onSpecEvent?: (spec: { nodes: unknown[]; edges: unknown[]; view?: unknown }) => void,
     private readonly onSnapshot?: (msg: HostToWebviewMsg & { type: "buffer-snapshot" }) => void,
   ) {}
 
@@ -379,12 +378,11 @@ export class BuildAndRunRunner {
     this.stdoutBuf = rest;
     for (const line of lines) {
       // Spec line — Go startup message carrying the full topology spec. Intercepted
-      // before the trace-event check (no step ordinal, not in TRACE_EVENT_KINDS).
-      const spec = tryParseSpecLine(line);
-      if (spec) {
-        this.onSpecEvent?.(spec);
-        continue;
-      }
+      // before the trace-event check (no step ordinal, not in TRACE_EVENT_KINDS) so it
+      // never falls through to the plain-stdout-line append below. Nothing consumes the
+      // parsed spec content today — the render path is buffer-only (no id/label sidecar,
+      // no spec store) — so this only keeps the recognized line out of the output channel.
+      if (tryParseSpecLine(line)) continue;
       // Breadcrumb lines are the Go-side DEBUG BREADCRUMB channel (Trace.Breadcrumb →
       // stdout {"kind":"breadcrumb",...}). They are logging-only (no step ordinal, outside
       // the closed trace vocabulary), so they are NEVER dispatched to the pump (its
