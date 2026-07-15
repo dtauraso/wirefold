@@ -100,15 +100,6 @@ func TestLoadTreeRoundTrip(t *testing.T) {
 		t.Errorf("node \"8\" type: got %q, want \"Pulse\"", n8.Type)
 	}
 
-	// View positions should be populated for all nodes (view.nodes is kept as
-	// auxiliary view data; node centers no longer derive from it — the lattice
-	// cell is the only node-position model).
-	for _, n := range spec.Nodes {
-		if _, ok := spec.View.Nodes[n.ID]; !ok {
-			t.Errorf("node %q missing from view.nodes", n.ID)
-		}
-	}
-
 	edgeByLabel := map[string]specEdge{}
 	for _, e := range spec.Edges {
 		edgeByLabel[e.Label] = e

@@ -68,14 +68,6 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 	// useful (which topology loaded, how many nodes). Sparse: once per run.
 	tr.Breadcrumb("topology-loaded", topologyPath, "", fmt.Sprintf("nodes=%d", len(nodes)))
 
-	// Emit the full spec to the TS webview before nodes start (Go startup message).
-	// TS intercepts this line and sends { type: "load", text } to the webview — it
-	// never reads topology/ files directly.
-	if err := W.EmitSpecLine(os.Stdout, topologyPath); err != nil {
-		fmt.Fprintf(os.Stderr, "emit spec: %v\n", err)
-		// non-fatal; continue
-	}
-
 	// Initial camera viewpoint = FILE DATA. Go reads the saved camera from
 	// <topologyPath>/view/scene.json itself and installs it into the gesture-FSM viewpoint,
 	// so the buffer camera columns carry a real, non-degenerate saved pose from the first

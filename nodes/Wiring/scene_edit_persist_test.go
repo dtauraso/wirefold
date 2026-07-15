@@ -43,7 +43,7 @@ func TestLoadOverlaysEmitsDefaultsWhenNoPersistedKeys(t *testing.T) {
 }
 
 // writeTree lays down a minimal directory-tree topology (two nodes + one edge) so
-// LoadTopology can build a real MoveDispatch. Positions come from meta.json x/y/z.
+// LoadTopology can build a real MoveDispatch. Positions come from meta.json scenePolar.
 func writeTree(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
@@ -61,8 +61,6 @@ func writeTree(t *testing.T) string {
 	mk("nodes/dst/meta.json", `{"id":"dst","type":"FanInSink","r":100,"scenePolarR":87.7496438739,"scenePolarTheta":0.96453035788,"scenePolarPhi":-2.15879893034}`)
 	mk("nodes/dst/inputs/In.json", `{"name":"In"}`)
 	mk("edges/e0.json", `{"label":"e0","kind":"data","source":"src","sourceHandle":"Out","target":"dst","targetHandle":"In"}`)
-	mk("view/nodes/src.json", `{"x":10,"y":20,"z":30}`)
-	mk("view/nodes/dst.json", `{"x":-40,"y":50,"z":-60}`)
 	return root
 }
 
