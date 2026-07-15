@@ -70,11 +70,56 @@ while IFS= read -r file; do
   done < <(grep -n "IsDir()" "$file" 2>/dev/null || true)
 done < <(find "$WIRING_DIR" -maxdepth 1 -name "*.go" -not -path "*/node_modules/*")
 
-if [[ $HITS -eq 0 ]]; then
-  echo "check-scene-path-resolution: clean ($GO_FILE_COUNT files scanned; all IsDir path-resolution lives in scene_paths.go)"
-  exit 0
+if [[ $HITS -ne 0 ]]; then
+  echo ""
+  echo "check-scene-path-resolution: $HITS hit(s) — resolve topologyPath via sceneTreeRoot/sceneJSONPath in scene_paths.go, not hand-rolled IsDir. Mark unrelated uses with '// path-resolution-ok:'"
+  exit 1
 fi
 
-echo ""
-echo "check-scene-path-resolution: $HITS hit(s) — resolve topologyPath via sceneTreeRoot/sceneJSONPath in scene_paths.go, not hand-rolled IsDir. Mark unrelated uses with '// path-resolution-ok:'"
-exit 1
+# POSITIVE ASSERTION #2 — the IsDir scan above only proves nobody hand-rolls os.Stat+IsDir.
+# It says nothing about whether the resolver functions themselves are actually CALLED
+# anywhere in the package outside their own definition file: a persister could resolve a
+# scene path with a hand-rolled filepath.Join("view", "scene.json") that never touches
+# os.Stat/IsDir at all and this guard would still report clean. Require at least one real
+# call site of sceneTreeRoot(/sceneJSONPath(/sceneCameraPath( outside scene_paths.go and
+# outside tests, proving the resolver is load-bearing, not dead code the IsDir scan
+# vacuously credits.
+CALL_SITES=0
+while IFS= read -r file; do
+  [[ "$file" == *"_test.go" ]] && continue
+  [[ "$(basename "$file")" == "scene_paths.go" ]] && continue
+  n=$(grep -cE "sceneTreeRoot\(|sceneJSONPath\(|sceneCameraPath\(" "$file" 2>/dev/null || true)
+  CALL_SITES=$((CALL_SITES + n))
+done < <(find "$WIRING_DIR" -maxdepth 1 -name "*.go" -not -path "*/node_modules/*")
+
+if [[ "$CALL_SITES" -eq 0 ]]; then
+  echo "check-scene-path-resolution: MISCONFIGURED — zero call sites of sceneTreeRoot()/sceneJSONPath()/sceneCameraPath() found outside scene_paths.go." >&2
+  echo "  The resolver exists but nothing calls it; the IsDir-only scan above would pass vacuously." >&2
+  exit 1
+fi
+
+# POSITIVE ASSERTION #3 — reject a persister that resolves scene.json by hand-rolling
+# filepath.Join with the literal path segments ("view", "scene.json") instead of calling
+# the shared resolver. This is the exact bug shape the resolver exists to make
+# unrepresentable, just spelled without IsDir: no os.Stat, no IsDir, straight Join — passes
+# the scan above clean while silently breaking the file-form topologyPath case.
+JOIN_HITS=0
+while IFS= read -r file; do
+  [[ "$file" == *"_test.go" ]] && continue
+  [[ "$(basename "$file")" == "scene_paths.go" ]] && continue
+  while IFS= read -r line; do
+    if [[ "$line" == *'"view"'* && "$line" == *'"scene.json"'* ]]; then
+      printf 'hand-rolled-join: %s: %s\n' "$file" "$line"
+      JOIN_HITS=$((JOIN_HITS + 1))
+    fi
+  done < <(grep -n "filepath.Join(" "$file" 2>/dev/null || true)
+done < <(find "$WIRING_DIR" -maxdepth 1 -name "*.go" -not -path "*/node_modules/*")
+
+if [[ "$JOIN_HITS" -ne 0 ]]; then
+  echo ""
+  echo "check-scene-path-resolution: $JOIN_HITS hand-rolled filepath.Join(\"view\", \"scene.json\") hit(s) outside scene_paths.go — call sceneJSONPath/sceneCameraPath instead."
+  exit 1
+fi
+
+echo "check-scene-path-resolution: clean ($GO_FILE_COUNT files scanned; $CALL_SITES resolver call site(s); all IsDir/Join path-resolution lives in scene_paths.go)"
+exit 0
