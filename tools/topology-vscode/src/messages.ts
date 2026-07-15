@@ -270,7 +270,8 @@ const RUN_STATUS_STATES: ReadonlySet<string> = new Set([
 // mirroring parseWebviewToHost's per-op shape checks. A malformed message (esp.
 // type="trace-event" with a missing/malformed event) is dropped (undefined) rather
 // than forwarded — the webview message listener drops undefined, so a bad envelope
-// can never reach pump.ts (`const {step,kind}=event`) and throw, blanking the editor.
+// can never reach a downstream consumer that destructures it and throw, blanking the
+// editor.
 // Only the ENVELOPE is checked here (event is a non-null object with numeric step +
 // string kind); full per-kind field validation lives in runCommand.ts/trace-event-fields.
 export function parseHostToWebview(raw: unknown): HostToWebviewMsg | undefined {
@@ -300,7 +301,7 @@ export function parseHostToWebview(raw: unknown): HostToWebviewMsg | undefined {
       // No payload.
       return m as unknown as HostToWebviewMsg;
     case "trace-event": {
-      // Minimal envelope pump.ts relies on: event is a non-null object carrying a
+      // Minimal envelope the consumer relies on: event is a non-null object carrying a
       // numeric step and a string kind. Per-kind fields are validated downstream.
       const ev = m.event;
       if (!ev || typeof ev !== "object") return undefined;

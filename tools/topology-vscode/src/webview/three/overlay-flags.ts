@@ -6,8 +6,7 @@
 // columns for widgets that must re-render when a flag flips (the overlay toggle
 // control, NavGuides gating). It is NOT a domain store — it authors nothing; it only
 // decodes the latest snapshot's Overlay row and subscribes to snapshot arrivals so a
-// toggle round-trips to the displayed state. The old path (flag off) never calls this;
-// those widgets keep reading useCameraStore, which pump fills from the trace stream.
+// toggle round-trips to the displayed state.
 
 import { useSyncExternalStore } from "react";
 import type { OverlayFlag } from "../../messages";
@@ -25,11 +24,12 @@ import {
   readOverlayOverlaysVis,
 } from "../../schema/buffer-layout";
 
-// Keyed by OverlayFlag, in the SAME polarity as the matching useCameraStore field so
-// the toggle-cfg active/label/title/payload logic is source-identical across paths:
-//   • most flags are visible-sense (true = shown), matching s.<x>Visible
-//   • labelsGlobal / badgesGlobal are HIDDEN-sense (true = hidden), matching
-//     s.labelsGlobalHidden / s.badgesHidden — the buffer stores visible-sense, so we
+// Keyed by OverlayFlag. Polarity is MIXED, matching the ViewerState key names in
+// state/viewer/types.ts so the toggle-cfg active/label/title/payload logic reads the same
+// at every use site:
+//   • most flags are visible-sense (true = shown) — <x>Visible
+//   • labelsGlobal / badgesGlobal are HIDDEN-sense (true = hidden) —
+//     labelsGlobalHidden / badgesHidden. The buffer stores visible-sense, so we
 //     invert those two here.
 export type OverlayFlagVals = Record<OverlayFlag, boolean>;
 

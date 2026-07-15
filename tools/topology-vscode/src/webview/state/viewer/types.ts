@@ -98,7 +98,7 @@ const VISIBLE_SENSE_SCENE_KEYS = [
 // Includes hidden-sense (labelsGlobalHidden, badgesHidden) and visible-sense keys.
 // NOTE: mixed polarity — labelsGlobalHidden/badgesHidden are hidden-sense (true = hidden),
 // while the remaining 7 are visible-sense (false = hidden). Renaming would require edits
-// in three/ (camera-store.ts, pump.ts, ThreeView.tsx, camera-ui.tsx) which are out of scope;
+// at every use site in three/ (ThreeView.tsx, camera-ui.tsx) which are out of scope;
 // polarity is documented at each use site in main.tsx.
 const MERGE_OPT_KEYS = [
   "labelsGlobalHidden", "badgesHidden",
