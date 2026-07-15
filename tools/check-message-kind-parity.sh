@@ -175,10 +175,45 @@ while IFS= read -r k; do
   [[ -z "$k" ]] && continue
   if ! grep -arE "type:[[:space:]]*\"$k\"" "$WEBVIEW_SRC_DIR" >/dev/null 2>&1; then
     echo "  no sender: \"$k\" is a LIVE_CASES handler in handle-message.ts but nothing under" \
-         "$WEBVIEW_SRC_DIR posts { type: \"$k\" } (move it to DECLARED_NOT_SENT if that's intended)"
+         "$WEBVIEW_SRC_DIR posts { type: \"$k\" } (move it to DECLARED_NOT_SENT ONLY if Go" \
+         "still dispatches it — that hatch is not a free pass, see check (4) below)"
     HITS=$((HITS + 1))
   fi
 done <<< "$LIVE_CASE_KINDS"
+
+# (4) DECLARED_NOT_SENT is a hatch for "no live TS sender, but Go still dispatches this kind"
+# — that is the ONLY legitimate reason to sit there. A kind declared-not-sent that Go's
+# MSG_TYPES switch does NOT recognize is dead on both sides: no sender, no real handler
+# reachable from Go, and nothing catches that today. Verify every DECLARED_NOT_SENT kind is
+# in GO_KINDS (Go-parity is checked, not just asserted in prose).
+kinds_from_declared_not_sent() {
+  awk '
+    /^[[:space:]]*\/\/[[:space:]]*DECLARED_NOT_SENT_START[[:space:]]*$/ { inblk=1; next }
+    /^[[:space:]]*\/\/[[:space:]]*DECLARED_NOT_SENT_END[[:space:]]*$/   { inblk=0 }
+    inblk
+  ' "$HANDLE_MESSAGE_TS" \
+    | grep -aoE 'case[[:space:]]+"[^"]+"' \
+    | grep -oE '"[^"]+"' \
+    | tr -d '"' \
+    | sort -u
+}
+
+DECLARED_NOT_SENT_KINDS=$(kinds_from_declared_not_sent) || true
+if [[ -z "$(printf '%s' "$DECLARED_NOT_SENT_KINDS" | tr -d '[:space:]')" ]]; then
+  echo "message-kind-parity: EMPTY extracted set for 'handle-message.ts DECLARED_NOT_SENT fence' — fence missing or renamed; refusing vacuous parity pass" >&2
+  exit 1
+fi
+
+NOT_GO_PARITY=$(comm -23 <(echo "$DECLARED_NOT_SENT_KINDS") <(echo "$GO_KINDS"))
+if [[ -n "$NOT_GO_PARITY" ]]; then
+  echo "message-kind-parity: kinds in DECLARED_NOT_SENT that Go's msg.Type switch does NOT dispatch:"
+  while IFS= read -r k; do
+    echo "  dead-on-both-sides: \"$k\" has no live TS sender AND stdin_reader.go does not" \
+         "recognize it — DECLARED_NOT_SENT is only for Go-parity kinds; remove this kind" \
+         "or wire a real sender/handler"
+    HITS=$((HITS + 1))
+  done <<< "$NOT_GO_PARITY"
+fi
 
 if [[ $HITS -eq 0 ]]; then
   echo "message-kind-parity: clean"
