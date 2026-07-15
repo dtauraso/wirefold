@@ -123,6 +123,6 @@ erase deleted the files they lived in:
 
 Dead-code cleanup candidates surfaced during this re-scope (still compiled,
 unmounted, react-flow-era) and since deleted: `webview/state/ops/rename.ts`, the
-`webview/state/adapter/*` tree, and `tools/topology-vscode/src/webview/types.ts`
-(zero importers, deleted alongside the dead `WireProps.kind`/`schema/index.ts`/
-`colors.ts` chain — see task/code-smell-audit-fixes).
+`webview/state/adapter/*` tree, and the webview's react-flow-era edge/node data
+types file (zero importers, deleted alongside the dead wire-prop kind chain and
+its barrel/color-map modules — see task/code-smell-audit-fixes).
