@@ -69,13 +69,17 @@ removed sidecar message is rejected; do not reintroduce one.)
   remove an edge; **`update` sets an ATTRIBUTE on a typed entity** (`kind` = node / edge /
   camera / overlays / scene) — there is no per-feature op. New *addressed* capability is a
   new entity kind or attribute, NOT a new op.
-- **Bare commands** — `play` / `pause`, `resend`, `fade-toggle` have live TS senders today.
+- **Bare commands** — `play` / `pause`, `fade-toggle` have live TS senders today.
   `save` is defined end-to-end (kind byte, Go decode + persist) but currently has **no live
   TS sender** — no UI affordance posts it yet; it stays in the vocabulary because Go's decode
   and the `INPUT_LAYOUT_FINGERPRINT` both carry it. All of these carry **no entity id on
   purpose**: they act on state **Go already owns** (the clock; the current selection), so
   there is nothing for TS to address. `fade-toggle` flips fade on the Go-owned selection —
-  TS cannot name the target, therefore it cannot be an `update`.
+  TS cannot name the target, therefore it cannot be an `update`. There is no `resend`
+  command: the ext host caches the last fd3 buffer-snapshot frame and replays it to a
+  remounted webview on `ready` instead (`BuildAndRunRunner.lastSnapshot`/`getLastSnapshot`
+  in `tools/topology-vscode/src/runCommand.ts`) — Go only ever emits a frame when
+  something changes, and that stays true.
 - **`raw-input`** — raw pointer/wheel + stateless raycast hit → Go's gesture FSM. Camera
   orbit, node moves, port-anchor moves and edge fade are produced **in-process** by the FSM
   from raw-input; they do not cross this seam as edits.

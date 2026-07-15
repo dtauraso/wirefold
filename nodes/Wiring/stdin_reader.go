@@ -3,7 +3,7 @@
 // The editor→Go bridge is a purely BINARY buffer (symmetric with the Go→TS content
 // buffer on fd 3): each message is a binary RECORD written FRAMED as [len:u32-LE][record]
 // to stdin. input_codec.go decodes a record into the stdinMsg below; the dispatch switch
-// and every handler (applyEdit / HandleRawInput / play-pause / resend) are UNCHANGED —
+// and every handler (applyEdit / HandleRawInput / play-pause) are UNCHANGED —
 // only the wire decode moved from newline-JSON to framed binary.
 //
 // The editor→Go bridge carries these top-level message kinds (all fully binary; no JSON
@@ -28,21 +28,21 @@
 //     The process starts halted; the first play message resumes bead delivery; pause
 //     re-halts.
 //
-//  3. "resend" — re-emits the full current node + edge geometry from the held
-//     authoritative state (MoveDispatch.ResendGeometry). A freshly-(re)mounted webview that
-//     lost its module-level edge-geometry store requests this to rebuild it without
-//     restarting Go. Safe to repeat / while running.
-//
-//  4. "save" — Go persists its OWN authoritative scene state (overlay visibility →
+//  3. "save" — Go persists its OWN authoritative scene state (overlay visibility →
 //     scene.json, preserving the Go-owned cameraPolar). Bare command, no payload; the
 //     editor holds no authoritative scene document.
 //
-//  5. "raw-input" — a raw pointer/wheel event + stateless raycast hit, handed to the
+//  4. "raw-input" — a raw pointer/wheel event + stateless raycast hit, handed to the
 //     gesture FSM.
 //
-//  6. "fade-toggle" — flips fade on the CURRENT SELECTION. A bare command carrying no
+//  5. "fade-toggle" — flips fade on the CURRENT SELECTION. A bare command carrying no
 //     entity id BY DESIGN: Go owns the selection, so there is nothing for TS to address.
 //     That is why fade is not an edit op=update on an entity.
+//
+// A remounted webview that has nothing new to render (Go paused/idle) is served from the
+// EXT HOST's cached last fd3 snapshot instead of asking Go to manufacture one — see
+// runCommand.ts's BuildAndRunRunner.lastSnapshot/getLastSnapshot. Go has no "resend"
+// concept: it emits a frame only when something changes, and that stays true here.
 //
 // MSG_TYPES_DOC_END
 //
@@ -84,7 +84,7 @@ type stdinCRUDPayload struct {
 // three values (create/update/delete). create/delete name a destination slot (Target/
 // TargetHandle). op=="update" sets an attribute on a typed entity — the sole live entity is
 // overlays: Attr=="toggle" (Flag names one overlay). The other top-level types are
-// raw-input (Event) and the bare commands (play/pause/resend/save/fade-toggle).
+// raw-input (Event) and the bare commands (play/pause/save/fade-toggle).
 //
 // These structs carry NO json tags: this seam is framed binary end to end and nothing
 // unmarshals them (input_codec.go decodes the record). The wire field order is the
@@ -242,8 +242,6 @@ func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *
 				handlePlayMsg(clk)
 			case "pause":
 				handlePauseMsg(clk)
-			case "resend":
-				handleResendMsg(ctx, md, tr)
 			case "raw-input":
 				handleRawInputMsg(msg, slotReg, md, tr)
 			case "save":
@@ -267,15 +265,6 @@ func handlePlayMsg(clk Clock) {
 func handlePauseMsg(clk Clock) {
 	if clk != nil {
 		clk.Halt()
-	}
-}
-
-// handleResendMsg re-emits the full current node + edge geometry from the held
-// authoritative state, for a freshly-(re)mounted webview recovering its edge-geometry
-// store without restarting Go.
-func handleResendMsg(ctx context.Context, md *MoveDispatch, tr *T.Trace) {
-	if md != nil {
-		md.ResendGeometry(ctx, tr)
 	}
 }
 
