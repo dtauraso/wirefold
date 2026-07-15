@@ -37,7 +37,11 @@ message), not shared-memory reads across goroutines. Keep the dragged node's own
 edge/aimed-port fan; only the lock-FOLLOWER propagation becomes the node-to-node cascade.
 
 There is no `links.go` or `locks.go` in the tree, and no `movementLink`/`applyPolarEqs`/
-`applyPortTorusColinearity` symbols exist as of this writing — an earlier version of this
-note named those; they were never real (or belonged to a design that was never merged).
-If you are trying to find where lock/follower math lives, grep `node_move.go` fresh
-rather than trusting any filename cited here.
+`applyPortTorusColinearity` symbols, as of 2026-07-14. They WERE real: `links.go` landed in
+`e82bf3d8` (declare the double-link movement graph) and `locks.go` in `81464a2e` (rebuild
+lock #1 on the double-link graph); the whole subsystem was deleted in `9e247aea`
+("phase 4 — delete the polar-lock/rule-builder subsystem; quantized compose is
+authoritative"). An earlier version of this note named them as live facts and went stale
+on that deletion, which cost real time: an audit agent read this file, trusted the section
+header "Go-layer facts", and reported a finding telling another agent to move code INTO
+`locks.go`. Grep `node_move.go` fresh rather than trusting any filename cited here.
