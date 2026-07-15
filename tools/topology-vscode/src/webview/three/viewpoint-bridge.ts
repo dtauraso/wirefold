@@ -8,17 +8,6 @@
 // Camera row (anglesToWorldOffset).
 
 import * as THREE from "three";
-import { worldDirToFrameAngles, Y_POLE_FRAME } from "./polar";
-
-/**
- * Convert a world unit direction vector to Go polar angles.
- * theta = acos(clamp(y, -1, 1))  (angle from +y pole)
- * phi   = atan2(z, x)            (longitude, x=0 axis)
- * Delegates to polar.worldDirToFrameAngles with Y_POLE_FRAME.
- */
-export function worldDirToAngles(v: THREE.Vector3): [number, number] {
-  return worldDirToFrameAngles(v, Y_POLE_FRAME);
-}
 
 /**
  * Convert Go polar angles + radius to a world-space offset vector.
