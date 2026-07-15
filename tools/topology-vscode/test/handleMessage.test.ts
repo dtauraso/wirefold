@@ -14,7 +14,7 @@ import { handleMessage, type MessageCtx } from "../src/extension/handle-message"
 
 type Call = { method: string; args: unknown[] };
 
-function fakeRunner(running: boolean) {
+function fakeRunner(running: boolean, lastSnapshot?: ArrayBuffer) {
   const calls: Call[] = [];
   const rec =
     (method: string) =>
@@ -28,15 +28,18 @@ function fakeRunner(running: boolean) {
     play: rec("play"),
     pause: rec("pause"),
     stop: rec("stop"),
-    resend: rec("resend"),
+    getLastSnapshot: () => {
+      calls.push({ method: "getLastSnapshot", args: [] });
+      return lastSnapshot;
+    },
     writeStdin: rec("writeStdin"),
   };
   return runner;
 }
 
-function ctxFor(runner: ReturnType<typeof fakeRunner>): MessageCtx {
+function ctxFor(runner: ReturnType<typeof fakeRunner>, post: MessageCtx["post"] = () => {}): MessageCtx {
   // Cast: the fake implements exactly the runner surface handleMessage touches.
-  return { logUri: undefined, runner: runner as unknown as MessageCtx["runner"], post: () => {} };
+  return { logUri: undefined, runner: runner as unknown as MessageCtx["runner"], post };
 }
 
 const names = (r: ReturnType<typeof fakeRunner>) => r.calls.map((c) => c.method);
@@ -72,14 +75,28 @@ describe("handleMessage dispatch — control signals", () => {
     expect(names(r)).toEqual(["run", "play"]);
   });
 
-  it("ready spawns; requests resend only when Go was ALREADY running", async () => {
-    const wasRunning = fakeRunner(true);
-    await handleMessage({ type: "ready" }, ctxFor(wasRunning));
-    expect(names(wasRunning)).toEqual(["run", "resend"]);
+  it("ready spawns; posts the cached last snapshot only when Go was ALREADY running", async () => {
+    const cached = new Uint8Array([1, 2, 3]).buffer;
+    const posted: unknown[] = [];
+    const wasRunning = fakeRunner(true, cached);
+    await handleMessage({ type: "ready" }, ctxFor(wasRunning, (m) => posted.push(m)));
+    expect(names(wasRunning)).toEqual(["run", "getLastSnapshot"]);
+    expect(posted).toEqual([{ type: "buffer-snapshot", buffer: cached }]);
 
-    const fresh = fakeRunner(false);
-    await handleMessage({ type: "ready" }, ctxFor(fresh));
+    // A just-spawned Go needs no cached frame — it emits its own startup geometry.
+    const fresh = fakeRunner(false, cached);
+    const freshPosted: unknown[] = [];
+    await handleMessage({ type: "ready" }, ctxFor(fresh, (m) => freshPosted.push(m)));
     expect(names(fresh)).toEqual(["run"]);
+    expect(freshPosted).toEqual([]);
+  });
+
+  it("ready + wasRunning but no cached snapshot yet → no post", async () => {
+    const wasRunning = fakeRunner(true, undefined);
+    const posted: unknown[] = [];
+    await handleMessage({ type: "ready" }, ctxFor(wasRunning, (m) => posted.push(m)));
+    expect(names(wasRunning)).toEqual(["run", "getLastSnapshot"]);
+    expect(posted).toEqual([]);
   });
 });
 

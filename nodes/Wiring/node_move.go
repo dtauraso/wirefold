@@ -48,7 +48,6 @@ const (
 	moveMsgKindAnchor  = "anchor"  // per-port anchor update (drag along the ring)
 	moveMsgKindCenter  = "center"  // polar-layout re-propagated world center for one node
 	moveMsgKindCenters = "centers" // batched centers for an edge: update both endpoints, recompute ONCE
-	moveMsgKindResend  = "resend"  // re-emit this mover's held geometry on its own goroutine
 	// moveMsgKindEqualize and moveMsgKindTrigger implement the STEP 1 decentralized
 	// node-5 cascade: node-to-node messages routed via
 	// sendMove instead of a central recursive rootMove. See ruleFollowers/ruleSource
@@ -184,7 +183,7 @@ type nodeMover struct {
 	// geomMu guards m.geom against the two remaining goroutines that touch it
 	// concurrently since SLICE 3: this node's OWN Update() goroutine (applyCenter,
 	// the sole writer of position fields) and nodeMover's own inbox-drain goroutine
-	// (handle's anchor/resend/default cases, the sole writer of port-anchor fields
+	// (handle's anchor/default cases, the sole writer of port-anchor fields
 	// and the reader for every re-emit). Position is still single-writer by
 	// construction (only applyCenter ever writes it); this mutex exists purely so
 	// emitGeometry's full-struct read on one goroutine never races a concurrent
@@ -324,14 +323,6 @@ func (m *nodeMover) handle(msg moveMsg) {
 			m.applyCenter(*msg.Center, msg.ReachR)
 			return
 		}
-		if m.tr != nil {
-			m.emitGeometry()
-		}
-		return
-	}
-	if msg.Kind == moveMsgKindResend {
-		// Re-emit this node's geometry on our own goroutine — the inbox-routed
-		// path used by ResendGeometry when movers are running.
 		if m.tr != nil {
 			m.emitGeometry()
 		}
@@ -684,29 +675,9 @@ func (m *edgeMover) handle(msg moveMsg) {
 		}
 		return
 	}
-	if msg.Kind == moveMsgKindResend {
-		// Re-emit this edge's segment on our own goroutine — the inbox-routed
-		// path used by ResendGeometry when movers are running.
-		m.emitGeometry()
-		return
-	}
 	// Plain "move" messages have no effect under the polar layout;
 	// position updates arrive as "center" messages instead.
 	_ = msg
-}
-
-// emitGeometry re-emits this edge's segment from its held endpoint geoms without
-// touching the source Out, revising in-flight beads, or updating latency aggregates.
-// Used by the inbox-routed resend path (ResendGeometry when movers are running) so
-// the emit happens on the edge's own goroutine without races on held geom.
-func (m *edgeMover) emitGeometry() {
-	if m.tr == nil {
-		return
-	}
-	seg := edgeSegment(m.srcGeom, m.dstGeom, m.srcH, m.dstH)
-	m.tr.Geometry(m.edgeID, m.srcID, m.dstID,
-		seg.Start.X, seg.Start.Y, seg.Start.Z,
-		seg.End.X, seg.End.Y, seg.End.Z)
 }
 
 // recomputeGeometry re-derives this edge's segment/arc/latency from its held endpoint
@@ -765,9 +736,6 @@ type MoveDispatch struct {
 	edgeMovers map[string]*edgeMover
 	// edgeOut: edgeId → source *Out, for read-only access by tests/verifiers.
 	edgeOut map[string]*Out
-	// started is set by Start; the synchronous façade uses the goroutine path when
-	// true and direct handler calls otherwise (unit tests that never Start).
-	started bool
 	// sceneSphere is the first-class scene reference every node's SCENE polar is measured
 	// about (polar-model.md, sphere_layout.go). Loaded from scene.json (or defaulted from
 	// the content-fit) at startup; its Center is the one cartesian anchor. Phase 1 stores
@@ -999,67 +967,11 @@ func (md *MoveDispatch) Bind(outSink map[string]*Out, slotReg SlotRegistry) {
 // Start launches every mover's goroutine. Each node and each edge drains its own
 // inbox until ctx is done — per-goroutine ownership, no central coordinator.
 func (md *MoveDispatch) Start(ctx context.Context) {
-	md.started = true
 	for _, nm := range md.nodeMovers {
 		go nm.run(ctx)
 	}
 	for _, em := range md.edgeMovers {
 		go em.run(ctx)
-	}
-}
-
-// ResendGeometry re-emits the full current geometry from the movers' held
-// authoritative state: each node's node-geometry (emitNodeGeometry) and each edge's
-// segment (tr.Geometry), recomputed from the edge's held endpoint geoms/handles. This
-// reproduces exactly what a fresh load streams on startup, so a freshly-(re)mounted
-// webview that lost its module-level edge-geometry store can rebuild it without
-// restarting Go.
-//
-// When movers are running (md.started), each mover emits its own geometry on its own
-// goroutine via a fire-and-forget moveMsgKindResend inbox message, removing all
-// cross-goroutine reads of mover geom. When movers are not started (test setup that
-// never calls Start), the direct read path is safe — no concurrent goroutines own the
-// geom yet.
-func (md *MoveDispatch) ResendGeometry(ctx context.Context, tr *T.Trace) {
-	if tr == nil {
-		return
-	}
-	if !md.started {
-		// Movers not running — direct read is safe (no concurrent goroutines own geom).
-		for _, nm := range md.nodeMovers {
-			emitNodeGeometryLocked(tr, nm.id, nm.geom, nm.partnerCenter)
-		}
-		for _, em := range md.edgeMovers {
-			seg := edgeSegment(em.srcGeom, em.dstGeom, em.srcH, em.dstH)
-			tr.Geometry(em.edgeID, em.srcID, em.dstID,
-				seg.Start.X, seg.Start.Y, seg.Start.Z,
-				seg.End.X, seg.End.Y, seg.End.Z)
-		}
-		return
-	}
-	// Movers running — hand each mover the news on its own inbox and return. Each one
-	// re-emits ITS OWN geometry on ITS OWN goroutine (moveMsgKindResend), so there is
-	// no cross-goroutine geom read and nothing here to collect: the send is
-	// fire-and-forget, like every other message on this path. Nothing needs to observe
-	// completion — the buffer snapshot is eventually-consistent by construction, and a
-	// remounted webview renders whatever the next snapshot carries.
-	for _, nm := range md.nodeMovers {
-		// NodeID is REQUIRED: nodeMover.handle drops any message whose NodeID is not
-		// its own on the first line. Omitting it made every node silently discard the
-		// resend (edges were unaffected — edgeMover.handle has no such guard), so a
-		// remounted webview got edges and no nodes.
-		select {
-		case nm.inbox <- moveMsg{Kind: moveMsgKindResend, NodeID: nm.id}:
-		case <-ctx.Done():
-			return
-		}
-	}
-	for _, em := range md.edgeMovers {
-		select {
-		case em.inbox <- moveMsg{Kind: moveMsgKindResend}:
-		case <-ctx.Done():
-			return
-		}
 	}
 }
 

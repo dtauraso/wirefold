@@ -135,7 +135,7 @@ export type WebviewToHostMsg =
   // host writes it FRAMED to Go's stdin. This is the TS→Go binary buffer (symmetric with
   // the fd-3 content buffer). The logical Go-bound kinds ("raw-input", "edit") are no
   // longer posted as JSON objects — they are encoded into this record (and the host builds
-  // play/pause/resend records directly) — but stay declared below (and EditMsg is kept in
+  // play/pause records directly) — but stay declared below (and EditMsg is kept in
   // this union) as the shared vocabulary the message-kind + edit-op parity guards check.
   | { type: "go-record"; record: ArrayBuffer }
   | { type: "raw-input"; event: RawInputEvent }
@@ -144,7 +144,6 @@ export type WebviewToHostMsg =
   | { type: "pause" }
   | { type: "resume" }
   | { type: "stop" }
-  | { type: "resend" }
   // The bare SAVE command (encoded as a single kind byte in schema/input-layout.ts and
   // sent via go-record). Go persists its OWN authoritative scene state — no payload. Kept
   // in this union + WEBVIEW_TO_HOST_TYPES so message-kind-parity tracks stdin_reader.go's
@@ -167,13 +166,8 @@ export type HostToWebviewMsg =
   // decoded row-keyed via buffer-decode nodeLabel.
   | { type: "buffer-snapshot"; buffer: ArrayBuffer };
 
-// Note: "resend" is host-originated (runner.resend() writes it straight to Go's
-// stdin) and is never emitted by the webview. It is kept in this set so the
-// message-kind-parity guard stays in lockstep with stdin_reader.go's "resend"
-// kind (every kind Go reads on stdin has a seam here); the webview simply never
-// sends it.
 export const WEBVIEW_TO_HOST_TYPES: ReadonlySet<WebviewToHostMsg["type"]> = new Set([
-  "ready", "run", "play", "pause", "resume", "stop", "webview-log", "edit", "resend", "save", "fade-toggle", "raw-input", "go-record",
+  "ready", "run", "play", "pause", "resume", "stop", "webview-log", "edit", "save", "fade-toggle", "raw-input", "go-record",
 ]);
 
 const HOST_TO_WEBVIEW_TYPES: ReadonlySet<HostToWebviewMsg["type"]> = new Set([

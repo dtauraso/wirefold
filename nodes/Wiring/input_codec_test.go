@@ -22,7 +22,6 @@ func TestDecodeControlRecords(t *testing.T) {
 	}{
 		{inKindResume, "play"},
 		{inKindPause, "pause"},
-		{inKindResend, "resend"},
 		{inKindSave, "save"},
 	}
 	for _, c := range cases {

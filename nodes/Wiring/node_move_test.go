@@ -10,10 +10,7 @@
 package Wiring
 
 import (
-	"bytes"
 	"context"
-	"encoding/binary"
-	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -21,7 +18,6 @@ import (
 	"testing"
 	"time"
 
-	B "github.com/dtauraso/wirefold/Buffer"
 	T "github.com/dtauraso/wirefold/Trace"
 )
 
@@ -166,70 +162,10 @@ func TestDecentralizedNodeMove(t *testing.T) {
 	}
 }
 
-// TestResendGeometry locks the remount-recovery path: ResendGeometry re-emits a
-// node-geometry event for every node and an edge-geometry event for every edge from
-// the held authoritative state, identical to what startup streams — so a remounted
-// webview can rebuild its edge-geometry store without restarting Go.
-func TestResendGeometry(t *testing.T) {
-	const topo = `{
-	  "nodes": [
-	    {"id":"src","type":"FanInSrc","outputs":[{"name":"Out"}]},
-	    {"id":"dst","type":"FanInSink","inputs":[{"name":"In"}]}
-	  ],
-	  "edges": [
-	    {"label":"e0","kind":"data","source":"src","sourceHandle":"Out","target":"dst","targetHandle":"In"}
-	  ],
-	  "view": {"nodes": {
-	    "src": {"x": 100, "y": 0, "z": 0},
-	    "dst": {"x": 0,   "y": 0, "z": 0}
-	  }}
-	}`
-
-	dir := t.TempDir()
-	path := filepath.Join(dir, "topo.json")
-	if err := os.WriteFile(path, []byte(topo), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	tr := T.New(256)
-	_, _, md, err := LoadTopology(ctx, path, tr, NewRealClock())
-	if err != nil {
-		t.Fatalf("LoadTopology: %v", err)
-	}
-
-	// Safe to call repeatedly; call twice to lock idempotency-while-running.
-	md.ResendGeometry(ctx, tr)
-	md.ResendGeometry(ctx, tr)
-
-	tr.Close()
-	events := tr.Events()
-	nodeGeoms := map[string]bool{}
-	edgeGeoms := map[string]bool{}
-	for _, e := range events {
-		if e.Kind == T.KindNodeGeometry {
-			nodeGeoms[e.Node] = true
-		}
-		if e.Kind == T.KindGeometry {
-			edgeGeoms[e.Edge] = true
-		}
-	}
-	for _, n := range []string{"src", "dst"} {
-		if !nodeGeoms[n] {
-			t.Fatalf("ResendGeometry did not re-emit node-geometry for %q", n)
-		}
-	}
-	if !edgeGeoms["e0"] {
-		t.Fatal("ResendGeometry did not re-emit edge-geometry for 'e0'")
-	}
-}
-
 // TestNodeGeometryLabelSidecar locks the new-system label sidecar contract at the Go
 // layer: every node-geometry event carries a Label field (data.label when present, else
 // the node id), and the labels arrive in node-row order (first-seen node-geometry order,
-// == Buffer.SnapshotState insertion order). ResendGeometry re-emits them so a remounted
-// webview repopulates its row-keyed label table. The webview host derives the {id,label}
+// == Buffer.SnapshotState insertion order). The webview host derives the {id,label}
 // sidecar message straight from these events.
 func TestNodeGeometryLabelSidecar(t *testing.T) {
 	// "src" carries an explicit human label; "dst" omits data.label → label falls back to id.
@@ -261,29 +197,32 @@ func TestNodeGeometryLabelSidecar(t *testing.T) {
 		t.Fatalf("LoadTopology: %v", err)
 	}
 
-	// Resend re-emits held geometry (the remount-recovery path the sidecar rides).
-	// Called twice to lock idempotent re-emission (matches TestResendGeometry).
-	md.ResendGeometry(ctx, tr)
-	md.ResendGeometry(ctx, tr)
+	// LoadTopology builds the movers' held geometry but the node-geometry EmitGeometry
+	// closure only fires from each node's OWN Update() goroutine (main.go), which this
+	// headless test never starts (md.Start only launches the MoveDispatch movers, not
+	// application node goroutines). Emit directly from the movers' held state — the same
+	// direct read the removed ResendGeometry(!started) path used — so this test can assert
+	// on Label/NodeKind without spinning up full node goroutines.
+	for _, nm := range md.nodeMovers {
+		emitNodeGeometryLocked(tr, nm.id, nm.geom, nm.partnerCenter)
+	}
 
 	tr.Close()
 
 	// Expected label per node id: explicit data.label for src, id fallback for dst.
 	wantLabel := map[string]string{"src": "Source Node", "dst": "dst"}
 	// Expected Go kind per node id: the node's `type` field, carried on node-geometry
-	// for the new-system kind→color sidecar (row-keyed, re-emitted on resend).
+	// for the new-system kind→color sidecar (row-keyed).
 	wantKind := map[string]string{"src": "FanInSrc", "dst": "FanInSink"}
 
 	// First-seen node id order == buffer node-row order. Collect it and verify each
-	// node-geometry event's Label matches, and that resend re-emitted every node.
+	// node-geometry event's Label matches.
 	var firstSeen []string
 	seen := map[string]bool{}
-	reemitted := map[string]int{}
 	for _, e := range tr.Events() {
 		if e.Kind != T.KindNodeGeometry {
 			continue
 		}
-		reemitted[e.Node]++
 		if !seen[e.Node] {
 			seen[e.Node] = true
 			firstSeen = append(firstSeen, e.Node)
@@ -298,113 +237,12 @@ func TestNodeGeometryLabelSidecar(t *testing.T) {
 	if len(firstSeen) != 2 {
 		t.Fatalf("first-seen node order = %v, want 2 distinct nodes", firstSeen)
 	}
-	for _, n := range []string{"src", "dst"} {
-		if reemitted[n] < 2 {
-			t.Fatalf("node %q re-emitted %d times, want >= 2 (startup + resend)", n, reemitted[n])
-		}
-	}
-}
-
-// TestResendGeometryEmitsFullBufferSnapshot locks the new-system (agnostic-content-buffer)
-// remount recovery: a freshly (re)loaded webview mounts AFTER Go's startup snapshot burst,
-// and an idle/paused sim emits no further buffer snapshots — so the fresh webview would
-// receive no node geometry and render nothing. The recovery is the existing "resend"
-// bridge kind: ResendGeometry re-emits held node/edge geometry through the Trace, whose
-// sink hook is Buffer.SnapshotState.Update (wired exactly as main.go does), so a single
-// resend produces a FULL buffer snapshot (full-state by construction) even though the sim
-// never advanced (no KindPosition events). This test wires that path end-to-end and asserts
-// a full framed snapshot containing the current node geometry lands on the fd3 sink.
-func TestResendGeometryEmitsFullBufferSnapshot(t *testing.T) {
-	const topo = `{
-	  "nodes": [
-	    {"id":"src","type":"FanInSrc","outputs":[{"name":"Out"}]},
-	    {"id":"dst","type":"FanInSink","inputs":[{"name":"In"}]}
-	  ],
-	  "edges": [
-	    {"label":"e0","kind":"data","source":"src","sourceHandle":"Out","target":"dst","targetHandle":"In"}
-	  ],
-	  "view": {"nodes": {
-	    "src": {"x": 100, "y": 0, "z": 0},
-	    "dst": {"x": 0,   "y": 0, "z": 0}
-	  }}
-	}`
-
-	dir := t.TempDir()
-	path := filepath.Join(dir, "topo.json")
-	if err := os.WriteFile(path, []byte(topo), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	// fd3 sink: the Buffer.SnapshotState writes framed binary snapshots here, exactly as
-	// main.go wires os.NewFile(3). Trace's onEvent hook is snapState.Update — the single
-	// seam through which geometry events become buffer snapshots.
-	var snapOut bytes.Buffer
-	snapState := B.NewSnapshotState(&snapOut)
-	tr := T.NewWithSinkHook(256, io.Discard, snapState.Update)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	_, _, md, err := LoadTopology(ctx, path, tr, NewRealClock())
-	if err != nil {
-		t.Fatalf("LoadTopology: %v", err)
-	}
-
-	// The sim is IDLE: no node ran, so there are zero
-	// KindPosition events — the ONLY snapshots come from geometry emits. Whatever startup
-	// burst preceded this, the resend re-emits held geometry, and we assert on the FINAL
-	// frame, whose full-state contents are exactly what a freshly mounted webview receives.
-	md.ResendGeometry(ctx, tr)
-
-	// Close flushes the drain goroutine: every onEvent hook has run and snapOut is safe to read.
-	tr.Close()
-
-	frames := splitBufferFrames(t, snapOut.Bytes())
-	if len(frames) == 0 {
-		t.Fatal("idle resend emitted no buffer snapshot frames; a fresh webview would render nothing")
-	}
-	// The final frame is full-state: assert it carries both nodes with their geometry.
-	last := frames[len(frames)-1]
-	if len(last) < B.BufHeaderSize {
-		t.Fatalf("final frame too short: %d bytes", len(last))
-	}
-	nodeCount := binary.LittleEndian.Uint32(last[8:])
-	if nodeCount != 2 {
-		t.Fatalf("final buffer snapshot nodeCount: got %d, want 2 (full node geometry not present)", nodeCount)
-	}
-	// Spot-check that node geometry is real (non-zero radius), i.e. actual held state was emitted.
-	if binary.LittleEndian.Uint32(last[4:]) != 0 {
-		t.Fatalf("idle sim should have 0 beads, got %d", binary.LittleEndian.Uint32(last[4:]))
-	}
-	nodeBlock := last[B.BufHeaderSize:] // beadCount is 0 (idle sim), so nodes start right after header
-	// Node row layout: [cx,cy,cz,radius,...] as float32; radius is column index 3.
-	radius := math.Float32frombits(binary.LittleEndian.Uint32(nodeBlock[3*4:]))
-	if radius <= 0 {
-		t.Fatalf("first node radius: got %v, want > 0 (geometry not populated in resend snapshot)", radius)
-	}
-}
-
-// splitBufferFrames decodes the [len:u32-LE][payload] framing that Buffer.emitSnapshot
-// writes, mirroring the extension host's splitFrames. Fails the test on a truncated frame.
-func splitBufferFrames(t *testing.T, buf []byte) [][]byte {
-	t.Helper()
-	var frames [][]byte
-	for len(buf) >= 4 {
-		n := int(binary.LittleEndian.Uint32(buf[:4]))
-		buf = buf[4:]
-		if len(buf) < n {
-			t.Fatalf("truncated buffer frame: need %d bytes, have %d", n, len(buf))
-		}
-		frames = append(frames, buf[:n])
-		buf = buf[n:]
-	}
-	return frames
 }
 
 // TestMoverCenterRace is a -race regression for the data race between the mover
 // goroutines writing geom.ScenePolar/ReachR and the stdin goroutine reading those fields
-// via centerOfNode/heldCenters/fanCenters/ResendGeometry. It hammers
-// RootMove (which triggers fanCenters and heldCenters) and ResendGeometry from one
+// via centerOfNode/heldCenters/fanCenters. It hammers
+// RootMove (which triggers fanCenters and heldCenters) from one
 // goroutine while center messages flow concurrently through the mover goroutines.
 // Must pass cleanly under `go test -race`.
 func TestMoverCenterRace(t *testing.T) {
@@ -438,7 +276,7 @@ func TestMoverCenterRace(t *testing.T) {
 	md.Start(ctx) // launch mover goroutines
 
 	// Hammer concurrently: center messages via RootMove (fanCenters + heldCenters)
-	// and ResendGeometry from the "stdin goroutine" side, while the mover goroutines
+	// from the "stdin goroutine" side, while the mover goroutines
 	// are writing geom.ScenePolar/ReachR on the other side.
 	const iters = 200
 	var wg sync.WaitGroup
@@ -448,7 +286,6 @@ func TestMoverCenterRace(t *testing.T) {
 		for i := 0; i < iters; i++ {
 			x := float64(i) * 0.5
 			md.RootMove("src", vec3{X: x, Y: 0, Z: 0})
-			md.ResendGeometry(ctx, tr)
 		}
 	}()
 	wg.Wait()

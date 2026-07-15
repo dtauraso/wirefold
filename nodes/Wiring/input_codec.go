@@ -17,9 +17,14 @@
 // into the shared orderings. There is NO JSON on the wire: every record is fully numeric.
 // The live editor→Go traffic is raw-input, overlays toggle (numeric flag-id),
 // the bare `save` COMMAND (Go persists its OWN authoritative scene state), and the
-// play/pause/resend control bytes. create/delete/edit-update record kinds stay defined (the
+// play/pause control bytes. create/delete/edit-update record kinds stay defined (the
 // 3-op create/update/delete concept), though the gesture FSM now produces edge create/delete
 // in-process from raw-input.
+//
+// Kind 3 was inKindResend (removed: the ext host now caches the last fd3 snapshot and
+// replays it on webview "ready" instead of asking Go to re-emit geometry — see
+// runCommand.ts's BuildAndRunRunner.lastSnapshot/getLastSnapshot). Left as an intentional
+// GAP rather than renumbered, so no other kind's wire value moves.
 
 package Wiring
 
@@ -34,14 +39,14 @@ import (
 // to INPUT_LAYOUT_FINGERPRINT in input-layout.ts (guarded by check-input-layout-parity.sh).
 // Bump on both sides whenever any record kind, field, or enum ordering changes.
 //
-// INPUT_LAYOUT_FINGERPRINT: v12 kinds=resume:1,pause:2,resend:3,save:4,fadeToggle:5,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays updateAttrs=toggle overlayFlags=tori,scenePoles,nodePoles,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays,doubleLinks
-const InputLayoutFingerprint = "v12 kinds=resume:1,pause:2,resend:3,save:4,fadeToggle:5,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays updateAttrs=toggle overlayFlags=tori,scenePoles,nodePoles,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays,doubleLinks"
+// INPUT_LAYOUT_FINGERPRINT: v13 kinds=resume:1,pause:2,save:4,fadeToggle:5,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays updateAttrs=toggle overlayFlags=tori,scenePoles,nodePoles,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays,doubleLinks
+const InputLayoutFingerprint = "v13 kinds=resume:1,pause:2,save:4,fadeToggle:5,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays updateAttrs=toggle overlayFlags=tori,scenePoles,nodePoles,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays,doubleLinks"
 
 // Record kind bytes (first byte of every record).
 const (
-	inKindResume     = 1  // play  — resume the clock gate
-	inKindPause      = 2  // pause — halt the clock gate
-	inKindResend     = 3  // resend — re-emit full geometry
+	inKindResume = 1 // play  — resume the clock gate
+	inKindPause  = 2 // pause — halt the clock gate
+	// Kind 3 (inKindResend) removed — intentional gap, see comment above.
 	inKindSave       = 4  // save  — Go persists its OWN scene state (bare command)
 	inKindFadeToggle = 5  // fade  — toggle fade on the Go-owned current selection (bare command)
 	inKindRawInput   = 10 // raw pointer/wheel/home event
@@ -162,8 +167,6 @@ func decodeInputRecord(rec []byte) (stdinMsg, bool) {
 		return stdinMsg{Type: "play"}, true
 	case inKindPause:
 		return stdinMsg{Type: "pause"}, true
-	case inKindResend:
-		return stdinMsg{Type: "resend"}, true
 	case inKindSave:
 		return stdinMsg{Type: "save"}, true
 	case inKindFadeToggle:
@@ -309,7 +312,7 @@ func enumIndex(list []string, s string) byte {
 	return 0
 }
 
-// encodeControl builds a payload-less control record (play/pause/resend).
+// encodeControl builds a payload-less control record (play/pause).
 func encodeControl(kind byte) []byte { return []byte{kind} }
 
 // encodeEditCreateDelete builds an edit create/delete record.

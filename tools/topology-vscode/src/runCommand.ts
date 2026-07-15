@@ -4,7 +4,7 @@ import * as fs from "fs";
 import * as path from "path";
 import type { RunStatus, HostToWebviewMsg } from "./messages";
 import { buildBinary, maxGoMtime, killOrphanedSims } from "./goBuild";
-import { encodePlay, encodePause, encodeResend, frameRecord } from "./schema/input-layout";
+import { encodePlay, encodePause, frameRecord } from "./schema/input-layout";
 import { PROBE_DIR, PROBE_FILES } from "./probe-files";
 import { decodeBufferLog } from "./buffer-log";
 
@@ -147,6 +147,16 @@ export class BuildAndRunRunner {
   private goDebugFile: string | undefined;
   private tsFile: string | undefined;
   private tsErrorsFile: string | undefined;
+  // Last fd3 buffer-snapshot frame, kept so a REMOUNTED webview (which holds no state)
+  // can be handed a full frame instantly on "ready" without round-tripping to Go — see
+  // getLastSnapshot(). This is a keyframe cache of Go's own bytes, not authored state.
+  // MUST be a COPY, not the ArrayBuffer instance handed to onSnapshot/postMessage: VS
+  // Code's webview.postMessage TRANSFERS (does not clone) ArrayBuffers to the webview
+  // process on engines >=1.57 (see the @types/vscode postMessage doc comment — "will be
+  // more efficiently transferred to the webview"), which DETACHES the source buffer
+  // (byteLength -> 0) once posted. Caching the same reference would silently hand a
+  // later "ready" an empty buffer. See runCommand.test.ts for the byteLength assertion.
+  private lastSnapshot: ArrayBuffer | undefined;
 
   private topologyPath: string | undefined;
 
@@ -322,6 +332,9 @@ export class BuildAndRunRunner {
           } catch { /* swallow */ }
         }
       }
+      // Cache a COPY before handing `ab` off — see the lastSnapshot field comment for why
+      // the reference itself cannot be cached (postMessage may transfer/detach it).
+      this.lastSnapshot = ab.slice(0);
       // Transfer zero-copy to the webview (if a snapshot consumer is registered).
       if (this.onSnapshot) {
         this.onSnapshot({ type: "buffer-snapshot", buffer: ab });
@@ -368,12 +381,17 @@ export class BuildAndRunRunner {
     return this.proc !== undefined;
   }
 
-  /** Ask the running Go to re-emit its full current node + edge geometry. Used after a
-   *  webview remount (e.g. hot-reload), which resets the TS edge-geometry store but
-   *  leaves Go running. Fire-and-forget; no-op if not running. */
-  resend(): void {
-    if (!this.proc) return;
-    this.writeStdin(encodeResend());
+  /** The most recent fd3 buffer-snapshot frame, or undefined if none has arrived yet.
+   *  Used by the "ready" handler to hand a remounted webview a full frame instantly
+   *  (see the lastSnapshot field comment).
+   *
+   *  Returns a FRESH COPY on every call, because the caller posts what it gets and
+   *  webview.postMessage TRANSFERS ArrayBuffers — handing out the cached reference
+   *  would detach our own cache on the first serve. That breaks the exact case this
+   *  cache exists for: while PAUSED no new frame ever arrives to repopulate it, so a
+   *  second remount would be served a zero-length buffer. The copy is one per remount. */
+  getLastSnapshot(): ArrayBuffer | undefined {
+    return this.lastSnapshot?.slice(0);
   }
 
   stop() {
