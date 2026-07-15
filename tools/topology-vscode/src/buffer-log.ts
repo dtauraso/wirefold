@@ -70,14 +70,7 @@ export type DecodedEventLine =
   // Go-owned click-selection: the currently-selected node id (node="" clears it).
   | { step: number; kind: "select"; node: string }
   | { step: number; kind: "fade"; fadedNodes: string[]; fadedEdges: string[] }
-  | { step: number; kind: "hover"; node: string; port?: string; value?: number }
-  // Go-owned polar rule-builder session state (gesture.go trySelectSphereRule); full-mirror
-  // on every state change, like fade above.
-  | { step: number; kind: "rule-builder"; ruleCenter: string; ruleHasPending: boolean; rulePendingCode: number; ruleTerms: { node: string; code: number }[] }
-  // Go-owned COMMITTED polar-equation lock list (locks.go, md.polarEqs) + the panel's
-  // focused row (selectedLockIndex=-1 = none); full-mirror on every mutation (rule
-  // completion, toggle, select, delete, load), like rule-builder above.
-  | { step: number; kind: "polar-locks"; polarLocks: { center: string; aNode: string; aCode: number; bNode: string; bCode: number; active: boolean }[]; selectedLockIndex: number };
+  | { step: number; kind: "hover"; node: string; port?: string; value?: number };
 
 /**
  * Decode a snapshot into `.probe/go.jsonl` lines (one JSON object per line, trailing \n each).
