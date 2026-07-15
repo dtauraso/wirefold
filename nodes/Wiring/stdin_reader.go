@@ -7,32 +7,44 @@
 // only the wire decode moved from newline-JSON to framed binary.
 //
 // The editor→Go bridge carries these top-level message kinds (all fully binary; no JSON
-// on the wire — see input_codec.go):
+// on the wire — see input_codec.go). This list is the AUTHORITATIVE doc for the dispatch
+// switch below and is checked against it by tools/check-message-kind-parity.sh: every type
+// fenced by MSG_TYPES_START/END must be declared here and vice versa. Adding a case without
+// adding a numbered entry (or the reverse) fails the guard.
 //
-//  1. Geometry-CRUD edits (type=="edit") — EXACTLY THREE ops: create/update/delete.
+// MSG_TYPES_DOC_START
+//
+//  1. "edit" — geometry-CRUD. EXACTLY THREE ops: create/update/delete.
 //     create/delete add or remove an edge by destination slot. update sets an ATTRIBUTE on
 //     a typed entity; the sole live entity is overlays:
 //       create (record 20): un-silence the destination slot's wire.
 //       delete (record 21): silence it + cancel any in-flight bead.
 //       update overlays attr=toggle: flip one named overlay flag.
-//     (Camera / node-move / port-anchor / edge-fade edits are produced in-process by the
-//     gesture FSM from raw-input, so they no longer cross this seam.)
+//     Camera / node-move / port-anchor / edge-fade are NOT edits: the gesture FSM produces
+//     them in-process from raw-input, so they never cross this seam as an edit op. (Fade
+//     still crosses — as the bare fade-toggle command in 6, not as an edit.)
 //
-//  2. Play/pause control (type=="play" / type=="pause") — routes directly to the
-//     clock's global gate (Halt/Resume). The process starts halted; the first
-//     "play" message resumes bead delivery. "pause" re-halts.
+//  2. "play" / "pause" — control. Routes directly to the clock's global gate (Halt/Resume).
+//     The process starts halted; the first play message resumes bead delivery; pause
+//     re-halts.
 //
-//  3. Geometry resend (type=="resend") — re-emits the full current node + edge
-//     geometry from the held authoritative state (MoveDispatch.ResendGeometry).
-//     A freshly-(re)mounted webview that lost its module-level edge-geometry store
-//     requests this to rebuild it without restarting Go. Safe to repeat / while running.
+//  3. "resend" — re-emits the full current node + edge geometry from the held
+//     authoritative state (MoveDispatch.ResendGeometry). A freshly-(re)mounted webview that
+//     lost its module-level edge-geometry store requests this to rebuild it without
+//     restarting Go. Safe to repeat / while running.
 //
-//  4. Save (type=="save") — Go persists its OWN authoritative scene state (overlay
-//     visibility → scene.json, preserving the Go-owned cameraPolar). Bare command, no
-//     payload; the editor holds no authoritative scene document.
+//  4. "save" — Go persists its OWN authoritative scene state (overlay visibility →
+//     scene.json, preserving the Go-owned cameraPolar). Bare command, no payload; the
+//     editor holds no authoritative scene document.
 //
-//  5. Raw input (type=="raw-input") — a raw pointer/wheel event + stateless raycast hit,
-//     handed to the gesture FSM.
+//  5. "raw-input" — a raw pointer/wheel event + stateless raycast hit, handed to the
+//     gesture FSM.
+//
+//  6. "fade-toggle" — flips fade on the CURRENT SELECTION. A bare command carrying no
+//     entity id BY DESIGN: Go owns the selection, so there is nothing for TS to address.
+//     That is why fade is not an edit op=update on an entity.
+//
+// MSG_TYPES_DOC_END
 //
 // Go owns the clock and delivery; nothing on this seam triggers delivery or
 // carries animation internals.
@@ -64,47 +76,52 @@ type EdgeEndpoints struct {
 
 // stdinCRUDPayload holds the destination-slot fields for the create/delete ops.
 type stdinCRUDPayload struct {
-	Target       string `json:"target"`
-	TargetHandle string `json:"targetHandle"`
+	Target       string
+	TargetHandle string
 }
 
 // stdinMsg is the single editor→Go bridge shape. For type=="edit", op is one of exactly
 // three values (create/update/delete). create/delete name a destination slot (Target/
 // TargetHandle). op=="update" sets an attribute on a typed entity — the sole live entity is
 // overlays: Attr=="toggle" (Flag names one overlay). The other top-level types are
-// raw-input (Event), the bare save command, and play/pause/resend.
+// raw-input (Event) and the bare commands (play/pause/resend/save/fade-toggle).
+//
+// These structs carry NO json tags: this seam is framed binary end to end and nothing
+// unmarshals them (input_codec.go decodes the record). The wire field order is the
+// INPUT_LAYOUT_FINGERPRINT, not a struct tag.
 type stdinMsg struct {
-	Type string `json:"type"`
-	Op   string `json:"op"`
-	Kind string `json:"kind"`
-	Attr string `json:"attr"`
-	Flag string `json:"flag"`
+	Type string
+	Op   string
+	Kind string
+	Attr string
+	Flag string
 	// Event is the payload for the top-level type=="raw-input" message; nil otherwise.
-	Event *rawInputMsg `json:"event,omitempty"`
+	Event *rawInputMsg
 	stdinCRUDPayload
 }
 
 // rawInputMsg carries the payload for a top-level type=="raw-input" message (Phase 6):
 // a single RAW pointer/wheel event plus the stateless three.js raycast hit. Go's gesture
 // state machine (gesture.go) decides what it means — TS does not interpret it. Mirrors the
-// TS RawInputEvent (messages.ts). Field names match the JSON wire format exactly.
+// TS RawInputEvent (messages.ts); the field ORDER is pinned by INPUT_LAYOUT_FINGERPRINT
+// (input_codec.go), not by struct tags — this seam is framed binary, never JSON.
 type rawInputMsg struct {
-	Kind       string  `json:"kind"` // pointerdown | pointermove | pointerup | wheel | home
-	X          float64 `json:"x"`    // client pixel X
-	Y          float64 `json:"y"`    // client pixel Y
-	RectLeft   float64 `json:"rectLeft"`
-	RectTop    float64 `json:"rectTop"`
-	RectWidth  float64 `json:"rectWidth"`
-	RectHeight float64 `json:"rectHeight"`
-	Button     int     `json:"button"` // 0 primary, 2 secondary; -1 for move/wheel
-	Ctrl       bool    `json:"ctrl"`
-	Shift      bool    `json:"shift"`
-	Alt        bool    `json:"alt"`
-	Meta       bool    `json:"meta"`
-	DeltaX     float64 `json:"deltaX"`
-	DeltaY     float64 `json:"deltaY"`
-	Fov        float64 `json:"fov"`
-	Hit        rawHit  `json:"hit"`
+	Kind       string // pointerdown | pointermove | pointerup | wheel | home
+	X          float64
+	Y          float64 // client pixel X/Y
+	RectLeft   float64
+	RectTop    float64
+	RectWidth  float64
+	RectHeight float64
+	Button     int // 0 primary, 2 secondary; -1 for move/wheel
+	Ctrl       bool
+	Shift      bool
+	Alt        bool
+	Meta       bool
+	DeltaX     float64
+	DeltaY     float64
+	Fov        float64
+	Hit        rawHit
 }
 
 // rawHit is the classified raycast hit: which rendered entity is under the pointer and its
@@ -112,33 +129,33 @@ type rawInputMsg struct {
 // "nodeId:in|out:portName" for a port). Topology facts (e.g. connected?) are NOT carried —
 // Go's FSM decides those from its own held state.
 type rawHit struct {
-	Kind string `json:"kind"`
-	Id   string `json:"id"`
+	Kind string
+	Id   string
 	// PortRow is the numeric buffer PORT-ROW index for a new-system port hit (the port
 	// InstancedMesh instanceId == its buffer port row). -1 (or absent) on the old path, whose
 	// port identity rides the Id string ("nodeId:in|out:portName") instead. Go resolves this
 	// row → (node, port) via its own port-row table (portFromHit); no port name crosses the
 	// bridge.
-	PortRow int `json:"portRow"`
+	PortRow int
 	// EdgeRow is the numeric buffer EDGE-ROW index for a new-system edge hit (the edge's
 	// pick-halo carries its buffer edge row). -1 (or absent) when not an edge hit. Go
 	// resolves this row → edge label via its own edge-row table (edgeFromHit); no edge
 	// label crosses the bridge.
-	EdgeRow int `json:"edgeRow"`
+	EdgeRow int
 	// NodeRow is the numeric buffer NODE-ROW index for a new-system node hit (the node
 	// InstancedMesh instanceId == its buffer node row). -1 (or absent) on the old path /
 	// unit tests, which carry the node id in the Id string instead. Go resolves this row →
 	// node id via its own node-row table (nodeFromHit); no node id crosses the bridge on the
 	// new-system path.
-	NodeRow int `json:"nodeRow"`
+	NodeRow int
 	// HandholdTerm is the term-id for a handhold hit (+θ=0, +φ=1, -θ=2, -φ=3; see
 	// NavGuides.tsx HANDHOLD_TERM_TAG); -1 (or absent) when not a handhold hit. Decoded into
 	// (comp, sign) by the gesture FSM's rule-builder (gesture.go).
-	HandholdTerm int     `json:"handholdTerm"`
-	IsInput      bool    `json:"isInput"`
-	X            float64 `json:"x"`
-	Y            float64 `json:"y"`
-	Z            float64 `json:"z"`
+	HandholdTerm int
+	IsInput      bool
+	X            float64
+	Y            float64
+	Z            float64
 }
 
 // SlotRegistry maps "targetNodeId.targetHandle" → *PacedWire.
@@ -214,11 +231,10 @@ func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *
 			if !decoded {
 				continue
 			}
-			// Two top-level bridge kinds:
-			//   "edit"  — geometry-CRUD; op discriminates the operation (internal axis).
-			//   "play"   — resume the clock's global gate (bead delivery starts).
-			//   "pause"  — halt the clock's global gate (bead delivery freezes).
-			//   "resend" — re-emit full current node + edge geometry (remount recovery).
+			// The authoritative per-type doc is the MSG_TYPES_DOC block in this file's
+			// header. check-message-kind-parity.sh holds the two in parity — do not
+			// document a type only here, and do not add a case without a doc entry.
+			// MSG_TYPES_START
 			switch msg.Type {
 			case "edit":
 				applyEdit(msg, slotReg, md, tr, treeRoot)
@@ -235,6 +251,7 @@ func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *
 			case "fade-toggle":
 				handleFadeToggleMsg(md, tr)
 			}
+			// MSG_TYPES_END
 		}
 	}
 }

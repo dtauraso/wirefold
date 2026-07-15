@@ -1,10 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Verifies that every message-type discriminator recognized by Go's
-# stdin_reader.go (the Go↔TS webview-to-host seam) is also declared in
-# WEBVIEW_TO_HOST_TYPES in messages.ts.
+# Verifies TWO parities for the editor→Go seam:
+#   1. every message type dispatched by stdin_reader.go is declared in
+#      WEBVIEW_TO_HOST_TYPES in messages.ts;
+#   2. every message type dispatched by stdin_reader.go is DOCUMENTED in that file's own
+#      MSG_TYPES_DOC block, and vice versa — so the header cannot undercount its switch.
 # Exit 0 if clean; exit 1 with a report if they diverge.
+#
+# (2) exists because the header once enumerated five types while the switch had seven; the
+# undocumented one (fade-toggle) then read as contradicting the header. Prose describing a
+# dispatch is only true if something fails when it stops being true.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -22,25 +28,43 @@ done
 # Extract string literals compared against msg.Type in stdin_reader.go.
 # Patterns matched:
 #   msg.Type != "..." or msg.Type == "..."  (if-style comparisons)
-#   case "...":  inside a switch msg.Type block
+#   case "...":  inside the MSG_TYPES_START/END fence
 kinds_from_go() {
   {
     grep -aoE 'msg\.Type[[:space:]]*[!=]=[[:space:]]*"[^"]+"' "$STDIN_READER" \
       | grep -oE '"[^"]+"' \
       | tr -d '"'
-    # Extract case literals from ONLY the `switch msg.Type` block. Bound the window
-    # to that switch (stop at the next `switch`), so nested op/sub-kind switches like
-    # `switch vp.Kind` (the op="viewpoint" payload kinds set/orbit/zoom/...) are NOT
-    # mistaken for top-level message types. (A fixed -A window spilled into them.)
+    # Extract case literals from the FENCED dispatch switch only. The fence is explicit
+    # rather than a heuristic window, so nested op/sub-kind switches can never be mistaken
+    # for top-level types. Same pattern as EDIT_OPS_START/END in applyEdit.
+    #
+    # Markers are matched ANCHORED (a comment line containing the marker and nothing else).
+    # An unanchored match is a trap: this file's own header PROSE names the markers, and a
+    # loose /MARKER/ match opens the fence on that prose line — which made a deleted marker
+    # still "pass". Anchoring is what makes deleting the fence fail loudly.
     awk '
-      /switch[[:space:]]+msg\.Type/ { inblk=1; next }
-      inblk && /switch[[:space:]]/  { inblk=0 }
+      /^[[:space:]]*\/\/[[:space:]]*MSG_TYPES_START[[:space:]]*$/ { inblk=1; next }
+      /^[[:space:]]*\/\/[[:space:]]*MSG_TYPES_END[[:space:]]*$/   { inblk=0 }
       inblk
     ' "$STDIN_READER" \
       | grep -aoE 'case[[:space:]]+"[^"]+"' \
       | grep -oE '"[^"]+"' \
       | tr -d '"'
   } | sort -u
+}
+
+# Extract the types DECLARED in stdin_reader.go's own MSG_TYPES_DOC block. Only numbered
+# entry lines are read (`//  N. "type" [/ "type"] — prose`), so prose on continuation lines
+# can quote freely without being mistaken for a declaration.
+kinds_from_go_doc() {
+  awk '
+    /^[[:space:]]*\/\/[[:space:]]*MSG_TYPES_DOC_START[[:space:]]*$/ { inblk=1; next }
+    /^[[:space:]]*\/\/[[:space:]]*MSG_TYPES_DOC_END[[:space:]]*$/   { inblk=0 }
+    inblk && /^\/\/[[:space:]]+[0-9]+\.[[:space:]]+"/
+  ' "$STDIN_READER" \
+    | grep -oE '"[^"]+"' \
+    | tr -d '"' \
+    | sort -u
 }
 
 # Extract the string literals inside WEBVIEW_TO_HOST_TYPES in messages.ts.
@@ -55,12 +79,15 @@ kinds_from_ts() {
 }
 
 GO_KINDS=$(kinds_from_go)
+GO_DOC_KINDS=$(kinds_from_go_doc)
 TS_KINDS=$(kinds_from_ts)
 
-# Refuse a vacuous pass: if either extractor returns an EMPTY set (the switch/const was
-# renamed or removed), comm would compare empty-to-empty and "pass". Both sides must be
+# Refuse a vacuous pass: if any extractor returns an EMPTY set (the switch/fence/const was
+# renamed or removed), comm would compare empty-to-empty and "pass". All must be
 # non-empty. (Positive-assertion pattern, per check-ts-shading-from-go.sh.)
-for pair in "GO_KINDS:stdin_reader.go msg.Type kinds" "TS_KINDS:WEBVIEW_TO_HOST_TYPES kinds"; do
+for pair in "GO_KINDS:stdin_reader.go MSG_TYPES fenced switch" \
+            "GO_DOC_KINDS:stdin_reader.go MSG_TYPES_DOC header list" \
+            "TS_KINDS:WEBVIEW_TO_HOST_TYPES kinds"; do
   var="${pair%%:*}"; label="${pair#*:}"
   if [[ -z "$(printf '%s' "${!var}" | tr -d '[:space:]')" ]]; then
     echo "message-kind-parity: EMPTY extracted set for '$label' — switch/const missing or renamed; refusing vacuous parity pass" >&2
@@ -78,6 +105,26 @@ if [[ -n "$MISSING" ]]; then
     echo "  missing: \"$k\""
     HITS=$((HITS + 1))
   done <<< "$MISSING"
+fi
+
+# (2) The file's own header must document exactly what it dispatches — both directions.
+UNDOCUMENTED=$(comm -23 <(echo "$GO_KINDS") <(echo "$GO_DOC_KINDS"))
+PHANTOM=$(comm -13 <(echo "$GO_KINDS") <(echo "$GO_DOC_KINDS"))
+
+if [[ -n "$UNDOCUMENTED" ]]; then
+  echo "message-kind-parity: types dispatched in the MSG_TYPES fence but NOT documented in MSG_TYPES_DOC:"
+  while IFS= read -r k; do
+    echo "  undocumented: \"$k\"  (add a numbered entry to the header)"
+    HITS=$((HITS + 1))
+  done <<< "$UNDOCUMENTED"
+fi
+
+if [[ -n "$PHANTOM" ]]; then
+  echo "message-kind-parity: types documented in MSG_TYPES_DOC that the switch does NOT dispatch:"
+  while IFS= read -r k; do
+    echo "  phantom: \"$k\"  (the header describes a type that no longer exists)"
+    HITS=$((HITS + 1))
+  done <<< "$PHANTOM"
 fi
 
 # Extra TS kinds that Go doesn't recognize are fine (TS handles more message
