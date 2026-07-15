@@ -737,6 +737,46 @@ func TestSelectionPersistsAndIsExclusive(t *testing.T) {
 	}
 }
 
+// TestLatchedSelPersistsThroughDeselect verifies the Go-owned LatchedSel column: it moves
+// with Selected when a DIFFERENT node is selected, but — unlike Selected — does NOT clear
+// when the node is deselected (Node=""). This is the replacement for the old TS-owned
+// `latchedSel` React state in NavGuides.tsx (see Buffer/layout.go LatchedSel).
+func TestLatchedSelPersistsThroughDeselect(t *testing.T) {
+	s := NewSnapshotState(nil)
+	s.Update(T.Event{Kind: T.KindNodeGeometry, Node: "n1", Radius: 1})
+	s.Update(T.Event{Kind: T.KindNodeGeometry, Node: "n2", Radius: 1})
+
+	n1 := BufHeaderSize
+	n2 := n1 + BufNodeStride
+
+	// Select n1: both Selected and LatchedSel move to n1.
+	s.Update(T.Event{Kind: T.KindSelect, Node: "n1"})
+	snap := s.BuildSnapshot()
+	if snap[n1+BufNodeColSelected] != 1 || snap[n1+BufNodeColLatchedSel] != 1 {
+		t.Fatalf("after select n1: Selected=%d LatchedSel=%d want 1,1", snap[n1+BufNodeColSelected], snap[n1+BufNodeColLatchedSel])
+	}
+
+	// Deselect (Node=""): Selected clears, but LatchedSel STAYS on n1.
+	s.Update(T.Event{Kind: T.KindSelect, Node: ""})
+	snap = s.BuildSnapshot()
+	if snap[n1+BufNodeColSelected] != 0 {
+		t.Fatalf("after deselect: n1.Selected=%d want 0", snap[n1+BufNodeColSelected])
+	}
+	if snap[n1+BufNodeColLatchedSel] != 1 {
+		t.Fatalf("after deselect: n1.LatchedSel=%d want 1 (latch persists through deselect)", snap[n1+BufNodeColLatchedSel])
+	}
+
+	// Selecting a DIFFERENT node (n2) moves the latch to n2 and clears it on n1.
+	s.Update(T.Event{Kind: T.KindSelect, Node: "n2"})
+	snap = s.BuildSnapshot()
+	if snap[n2+BufNodeColSelected] != 1 || snap[n2+BufNodeColLatchedSel] != 1 {
+		t.Fatalf("after select n2: n2.Selected=%d n2.LatchedSel=%d want 1,1", snap[n2+BufNodeColSelected], snap[n2+BufNodeColLatchedSel])
+	}
+	if snap[n1+BufNodeColLatchedSel] != 0 {
+		t.Fatalf("after select n2: n1.LatchedSel=%d want 0 (latch moved off n1)", snap[n1+BufNodeColLatchedSel])
+	}
+}
+
 // TestEdgeSelectionExclusiveWithNode verifies KindSelect with the Edge field marks exactly
 // one edge's Selected column, persists it, moves it exclusively to another edge, and that
 // node/edge selection is MUTUALLY exclusive (selecting an edge clears the node, and vice

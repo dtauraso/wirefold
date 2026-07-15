@@ -22,7 +22,7 @@ import * as THREE from "three";
 import { type DecodedSnapshot, nodeLabel } from "./buffer-decode";
 import {
   readNodeCX, readNodeCY, readNodeCZ,
-  readNodeRadius, readNodeSphereR, readNodeSelected,
+  readNodeRadius, readNodeSphereR, readNodeSelected, readNodeLatchedSel,
 } from "../../schema/buffer-layout";
 
 /** One node's nav-overlay geometry, decoded from the buffer. Identity is `row` (its buffer
@@ -37,6 +37,9 @@ export interface NavNode {
   /** Go's per-node sphere radius. 0 means "not yet populated" (pre-first-geometry). */
   sphereR: number | undefined;
   selected: boolean;
+  /** Go-owned: 1 marks the LAST node that was click-selected, persisting through a
+   *  deselect (see LatchedSel in Buffer/layout.go / setSelected in Buffer/snapshot.go). */
+  latchedSel: boolean;
 }
 
 // ── Pure decode ───────────────────────────────────────────────────────────────
@@ -64,6 +67,7 @@ export function decodeNavNodes(decoded: DecodedSnapshot): NavNode[] {
       // absent by callers (lockArc `if(!pr)`, sel-poles `sphereR || radius`).
       sphereR: sphereR || undefined,
       selected: readNodeSelected(nodeView, i) !== 0,
+      latchedSel: readNodeLatchedSel(nodeView, i) !== 0,
     });
   }
   return out;

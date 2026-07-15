@@ -185,6 +185,10 @@ type nodeSnapState struct {
 	// hovered is PERSISTENT (not a transient event flag): 1 marks this node as the one under
 	// the pointer. Set/cleared by KindHover; NOT reset in clearTransients.
 	hovered uint8
+	// latchedSel is PERSISTENT: 1 marks this node as the LAST node that was click-selected.
+	// Unlike selected, it does NOT clear when the node is deselected (clicking empty space) —
+	// only selecting a DIFFERENT node moves it. Set alongside selected in setSelected.
+	latchedSel uint8
 	// kindID is the node's kind as its index into NODE_DEFS_ARRAY (from NodeKindID).
 	// Set once on first KindNodeGeometry; subsequent re-emits don't change kind.
 	kindID uint8
@@ -629,8 +633,15 @@ func (s *SnapshotState) setSelected(nodeID string) {
 	for i := range s.nodes {
 		if i == sel {
 			s.nodes[i].selected = 1
+			// latchedSel moves to the newly-selected node; a deselect (sel == -1) leaves
+			// every node's latchedSel untouched here (the loop below never sets latchedSel
+			// on i == -1), so the PREVIOUSLY latched node stays latched through deselect.
+			s.nodes[i].latchedSel = 1
 		} else {
 			s.nodes[i].selected = 0
+			if sel >= 0 {
+				s.nodes[i].latchedSel = 0
+			}
 		}
 	}
 	// Node selection is exclusive with edge selection: selecting/clearing a node clears
@@ -1000,7 +1011,7 @@ func (s *SnapshotState) writeNodeBlock(buf []byte, off int, b *snapshotBuild) in
 			float32(n.vrx), float32(n.vry), float32(n.vrz),
 			float32(n.frx), float32(n.fry), float32(n.frz),
 			n.evRecv, n.evFire, n.evSend, n.evArrive, n.evDone, n.selected, n.kindID,
-			b.labelOffs[i], b.labelLens[i], boolU8(b.fadedNodes[s.nodeIDs[i]]), n.hovered)
+			b.labelOffs[i], b.labelLens[i], boolU8(b.fadedNodes[s.nodeIDs[i]]), n.hovered, n.latchedSel)
 	}
 	return off + int(b.nodeCount)*BufNodeStride
 }

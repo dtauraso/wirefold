@@ -28,7 +28,7 @@ export const HANDHOLD_TERM_TAG = "handholdTerm";
 function navSignature(nav: NavNode[]): string {
   let s = "";
   for (const n of nav) {
-    s += `${n.row}:${Math.round(n.center.x)},${Math.round(n.center.y)},${Math.round(n.center.z)},${Math.round(n.radius)},${Math.round(n.sphereR ?? 0)},${n.selected ? 1 : 0};`;
+    s += `${n.row}:${Math.round(n.center.x)},${Math.round(n.center.y)},${Math.round(n.center.z)},${Math.round(n.radius)},${Math.round(n.sphereR ?? 0)},${n.selected ? 1 : 0},${n.latchedSel ? 1 : 0};`;
   }
   return s;
 }
@@ -393,17 +393,13 @@ export function NavGuides() {
     [navTick],
   );
 
-  // Selection: Go-owned Selected column from the buffer. Identity is the node ROW.
-  const effectiveSelectedId = navNodes.find((n) => n.selected)?.row ?? null;
-
-  // Latch the last selected node. Selection only DECIDES which sphere the
-  // sel-highlight frames; it does not have to stay selected to keep the frame shown.
-  // So DEselecting the node (clicking empty space) leaves the latched sphere framed —
-  // only selecting a different node replaces it. The sel toggle still gates visibility.
-  const [latchedSel, setLatchedSel] = useState<number | null>(effectiveSelectedId);
-  useEffect(() => {
-    if (effectiveSelectedId !== null) setLatchedSel(effectiveSelectedId);
-  }, [effectiveSelectedId]);
+  // Latched selection: Go-owned LatchedSel column (see Buffer/layout.go / setSelected in
+  // Buffer/snapshot.go). Selection only DECIDES which sphere the sel-highlight frames; it
+  // does not have to stay selected to keep the frame shown. So DEselecting the node
+  // (clicking empty space) leaves the latched sphere framed — only selecting a different
+  // node replaces it. The sel toggle still gates visibility. This is read-only reflection
+  // of Go's own latch state — NavGuides authors nothing.
+  const latchedSel = navNodes.find((n) => n.latchedSel)?.row ?? null;
 
   // WORLD-FIXED content sphere (= the arcball, matching interaction-controls), so it
   // zooms WITH the diagram. Tube thickness matches the node spheres' tori

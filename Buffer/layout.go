@@ -24,7 +24,7 @@
 package Buffer
 
 // BufLayoutVersion is the schema version. Bump when any column changes.
-const BufLayoutVersion = 20
+const BufLayoutVersion = 21
 
 // BufInteriorSlotsPerNode is the fixed number of interior grid slots reserved per
 // node in the Interior block (a 2x2 held/interior-bead grid: slot = row*2 + col).
@@ -109,6 +109,13 @@ type bufLayoutNode struct {
 	// hover style: #aaddff, r*0.14). Persistent-until-next-move; NOT a transient event flag.
 	// Selection styling takes precedence over hover where both apply (renderer-side).
 	Hovered uint8 `buf:"u8"` // 1 = node is pointer-hovered
+	// LatchedSel is Go-owned: 1 marks the LAST node that was click-selected, and stays 1
+	// through a deselect (clicking empty space clears Selected but NOT LatchedSel; selecting
+	// a DIFFERENT node moves LatchedSel to it). Set by setSelected alongside Selected — see
+	// nodeSnapState.latchedSel in Buffer/snapshot.go. Replaces the old TS-owned
+	// `latchedSel` React state in NavGuides.tsx (that was a second, TS-invented selection
+	// concept unreachable from Go); the render path now just reads this column.
+	LatchedSel uint8 `buf:"u8"` // 1 = this is the last-selected node (persists through deselect)
 }
 
 // bufLayoutInterior defines one row of the interior-bead column block.

@@ -122,9 +122,9 @@ describe("buffer-layout — Node block", () => {
   it("stride equals packed field sizes", () => {
     // 5×f32 + 6×f32 (vr/fr normals) + 5×u8 (events) + 1×u8 (selected)
     //   + 1×u8 (kindId) + 2×u32 (label off/len)
-    //   + 1×u8 (faded) + 1×u8 (hovered)
-    //   = (5+6)×4 + 5 + 1 + 1 + 8 + 1 + 1 = 61
-    expect(NODE_STRIDE).toBe(61);
+    //   + 1×u8 (faded) + 1×u8 (hovered) + 1×u8 (latchedSel)
+    //   = (5+6)×4 + 5 + 1 + 1 + 8 + 1 + 1 + 1 = 62
+    expect(NODE_STRIDE).toBe(62);
   });
 
   it("read helpers decode known bytes correctly", () => {
@@ -350,8 +350,8 @@ describe("buffer-layout — event enum", () => {
 // ─ Meta ───────────────────────────────────────────────────────────────────────
 
 describe("buffer-layout — meta", () => {
-  it("schema version is 20", () => {
-    expect(BUF_LAYOUT_VERSION).toBe(20);
+  it("schema version is 21", () => {
+    expect(BUF_LAYOUT_VERSION).toBe(21);
   });
 
   it("header size is 36 bytes (9×u32)", () => {
