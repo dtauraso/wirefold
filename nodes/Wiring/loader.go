@@ -70,12 +70,22 @@ type specNode struct {
 	// LocalPolar) — one per domain double-link this node is an endpoint of, measured
 	// with ITSELF as center. Absent (nil) → computed fresh at load (computeLocalPolars).
 	LocalPolars []specLocalPolar `json:"localPolars,omitempty"`
+	// Gate marks this node as a two-neighbor GATE node (node_move.go): on a direct
+	// drag it solves its own equal-radii landing position against its two domain
+	// neighbors (derived from LocalPolars, in the same order), commits, and
+	// self-triggers its own edge-c equalize. NOT derivable from degree (other
+	// 2-link nodes exist that are plain leaves) — authored in the spec.
+	Gate bool `json:"gate,omitempty"`
 }
 
 // specLocalPolar mirrors one entry of a node's persisted localPolars list
 // (loader_tree.go jsonMeta.LocalPolars carries the same shape).
 type specLocalPolar struct {
-	To          string  `json:"to"`
+	To string `json:"to"`
+	// Role names this neighbor's part in the decentralized cascade rule
+	// (node_move.go) — "source" / "follower" / "" (neither). See
+	// layout_holder.go LocalPolar.Role's doc.
+	Role        string  `json:"role,omitempty"`
 	QuantITheta int     `json:"quantITheta"`
 	QuantIPhi   int     `json:"quantIPhi"`
 	QuantIR     int     `json:"quantIR"`
@@ -506,7 +516,7 @@ func (b *buildCtx) computeLocalPolars() {
 			if sm, ok := stored[n.ID]; ok {
 				if lp, ok2 := sm[mid]; ok2 {
 					list = append(list, LocalPolar{
-						To: mid, QuantITheta: lp.QuantITheta, QuantIPhi: lp.QuantIPhi, QuantIR: lp.QuantIR,
+						To: mid, Role: lp.Role, QuantITheta: lp.QuantITheta, QuantIPhi: lp.QuantIPhi, QuantIR: lp.QuantIR,
 						StepTheta: lp.StepTheta, StepPhi: lp.StepPhi, StepR: lp.StepR,
 					})
 					continue
@@ -528,6 +538,59 @@ func (b *buildCtx) computeLocalPolars() {
 		result[n.ID] = list
 	}
 	b.localPolars = result
+}
+
+// deriveCascadeRoles builds the per-node cascadeRoleSpec map node_move.go's
+// ApplyCascadeRoles wants, from each node's own LocalPolars entries (Role:
+// "source"/"follower"/"anchor", authored in the spec) and its own Gate flag — the
+// decentralization of what used to be three hardcoded package-level tables
+// (ruleSource/ruleFollowers/gateNeighbors). A gate node's two fixed neighbors are
+// its LocalPolars list IN ORDER (computeLocalPolars sorts ids alphabetically),
+// reproducing the historical gateNeighbors table's (a,b) ordering for nodes 1/9/10
+// exactly. A SECOND pass reads Role=="anchor" off a GATE node's own LocalPolars
+// entries and appends that gate's id to the NAMED neighbor's AnchoredGates —
+// EXPLICIT per gate-neighbor-pair authoring, deliberately NOT "every neighbor of
+// every gate": a node can be one of a gate's two fixed neighbors without being its
+// anchor (nodes 2/3 are gate 1's neighbors but neither is its anchor; only node 6 is
+// marked anchor on gates 9 and 10 — the historical node-6-shaped relationship). Must
+// run AFTER computeLocalPolars (b.localPolars populated).
+func (b *buildCtx) deriveCascadeRoles() map[string]cascadeRoleSpec {
+	gateSet := map[string]bool{}
+	for _, n := range b.spec.Nodes {
+		if n.Gate {
+			gateSet[n.ID] = true
+		}
+	}
+	roles := map[string]cascadeRoleSpec{}
+	for id, lps := range b.localPolars {
+		spec := cascadeRoleSpec{}
+		for _, lp := range lps {
+			switch lp.Role {
+			case "source":
+				spec.SourceID = lp.To
+			case "follower":
+				spec.Followers = append(spec.Followers, lp.To)
+			}
+		}
+		if gateSet[id] {
+			spec.Gate = true
+			if len(lps) >= 2 {
+				spec.GateA, spec.GateB = lps[0].To, lps[1].To
+			}
+		}
+		roles[id] = spec
+	}
+	for gID := range gateSet {
+		for _, lp := range b.localPolars[gID] {
+			if lp.Role != "anchor" {
+				continue
+			}
+			anchor := roles[lp.To]
+			anchor.AnchoredGates = append(anchor.AnchoredGates, gID)
+			roles[lp.To] = anchor
+		}
+	}
+	return roles
 }
 
 // computeReachRadii computes each node's REACH radius (max distance from its
@@ -624,6 +687,7 @@ func (b *buildCtx) allocateWires() {
 // geometry) and installs the aimed-port registry for drag-time aiming.
 func (b *buildCtx) buildMoveDispatch() {
 	md := newMoveDispatch(b.nodeGeoms, b.edgeEndpoints, b.tr)
+	md.ApplyCascadeRoles(b.deriveCascadeRoles())
 	if b.hasScene {
 		// Persisted scene sphere: install it now so md.sceneSphere is consistent straight out
 		// of LoadTopology (a fresh/legacy scene has none — main.go's LoadSceneSphere then

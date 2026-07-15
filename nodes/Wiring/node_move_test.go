@@ -690,6 +690,7 @@ func TestRootMoveNode2CascadesToSource(t *testing.T) {
 	md.layoutHolders = map[string]*LayoutHolder{
 		"2": {}, "5": {}, "7": {}, "8": {},
 	}
+	md.ApplyCascadeRoles(productionCascadeRoles())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	md.Start(ctx)
@@ -803,6 +804,7 @@ func TestRootMoveNode5DragCascadesToNode6(t *testing.T) {
 	md.layoutHolders = map[string]*LayoutHolder{
 		"5": {}, "2": {}, "7": {}, "8": {}, "6": {},
 	}
+	md.ApplyCascadeRoles(productionCascadeRoles())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	md.Start(ctx)
@@ -891,6 +893,7 @@ func TestRootMoveNode2CascadeKeepsNode1EdgesEqual(t *testing.T) {
 	md.layoutHolders = map[string]*LayoutHolder{
 		"1": {}, "2": {}, "3": {}, "5": {},
 	}
+	md.ApplyCascadeRoles(productionCascadeRoles())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	md.Start(ctx)
@@ -982,6 +985,7 @@ func TestRootMoveNode9DragKeepsRadiiEqual(t *testing.T) {
 	md.layoutHolders = map[string]*LayoutHolder{
 		"9": {}, "3": {}, "6": {},
 	}
+	md.ApplyCascadeRoles(productionCascadeRoles())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	md.Start(ctx)
@@ -1124,6 +1128,7 @@ func TestRootMoveNode10DragKeepsRadiiEqual(t *testing.T) {
 	md.layoutHolders = map[string]*LayoutHolder{
 		"10": {}, "6": {}, "8": {},
 	}
+	md.ApplyCascadeRoles(productionCascadeRoles())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	md.Start(ctx)
@@ -1275,6 +1280,7 @@ func TestRootMoveNode6MakesFourEdgesEqual(t *testing.T) {
 	md.layoutHolders = map[string]*LayoutHolder{
 		"6": {}, "9": {}, "3": {}, "10": {}, "8": {},
 	}
+	md.ApplyCascadeRoles(productionCascadeRoles())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	md.Start(ctx)
@@ -1526,6 +1532,7 @@ func TestRootMoveNode6TriggersNode2MovesNode5(t *testing.T) {
 		"6": {}, "9": {}, "3": {}, "10": {}, "8": {},
 		"2": {}, "1": {}, "5": {}, "7": {},
 	}
+	md.ApplyCascadeRoles(productionCascadeRoles())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	md.Start(ctx)
@@ -1673,6 +1680,7 @@ func TestNode6DragNoDataRace(t *testing.T) {
 	md.layoutHolders = map[string]*LayoutHolder{
 		"6": {}, "9": {}, "3": {}, "10": {}, "8": {},
 	}
+	md.ApplyCascadeRoles(productionCascadeRoles())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	md.Start(ctx)

@@ -8,6 +8,23 @@ import (
 	"time"
 )
 
+// productionCascadeRoles mirrors the real 10-node topology's authored cascade roles
+// (topology/nodes/*/meta.json localPolars[].role + gate) — node_move.go's
+// ApplyCascadeRoles ignores any id not present in the caller's MoveDispatch, so every
+// test below can pass this same map regardless of which subset of nodes its own mini
+// graph builds. This is test-side data mirroring the spec; loader.go derives the
+// identical map from disk for the real topology (deriveCascadeRoles).
+func productionCascadeRoles() map[string]cascadeRoleSpec {
+	return map[string]cascadeRoleSpec{
+		"1":  {SourceID: "2", Followers: []string{"3"}, Gate: true, GateA: "2", GateB: "3"},
+		"2":  {SourceID: "5", Followers: []string{"6"}},
+		"5":  {SourceID: "2", Followers: []string{"7", "8"}},
+		"6":  {AnchoredGates: []string{"9", "10"}},
+		"9":  {Gate: true, GateA: "3", GateB: "6"},
+		"10": {Gate: true, GateA: "6", GateB: "8"},
+	}
+}
+
 // pollNode5Converged waits until node 5's local-polar-radial distances to peers 2, 7, 8
 // (all measured in node 5's own frame) have converged and are pairwise equal, since the
 // nodeMover goroutines apply center messages asynchronously.
@@ -54,6 +71,7 @@ func TestNode5DragEqualizesNeighborDistances(t *testing.T) {
 	md.layoutHolders = map[string]*LayoutHolder{
 		"2": {}, "5": {}, "7": {}, "8": {},
 	}
+	md.ApplyCascadeRoles(productionCascadeRoles())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	md.Start(ctx)
@@ -77,16 +95,18 @@ func TestNode5DragEqualizesNeighborDistances(t *testing.T) {
 // decentralized node-5 chain (node5-decentralized-cascade.md): dragging node 5 must
 // cascade — via node-to-node moveMsgKindTrigger/Equalize messages, not a central
 // recursion — into rule-neighbor node 2, which repositions ITS follower node 6 to hold
-// dist(2,6) == dist(2,5), while node 2 itself and node 1/node 3 (across the edge that did
-// NOT change) stay put. This proves both the cascade-into-2 and the delta-gated stop
-// before node 1.
+// dist(2,6) == dist(2,5), while node 2 and node 1 (which never move) stay put. Node 2
+// ALWAYS forwards to node 1 (no delta-gate — project_lock_propagation_decentralized);
+// node 1 in turn Equalizes its follower node 3, but since dist(1,2) never changes and
+// this fixture pre-equalizes node 3 to it, node 3's landing is IDEMPOTENT (a no-op),
+// not a skip — termination-by-idempotence, not a sender-side change check.
 func TestNode5DragCascadesToNode2Follower6AndStopsBeforeNode1(t *testing.T) {
 	geoms := map[string]nodeGeom{
 		"1": {Kind: "Input", HasPos: true, ScenePolar: cart2polar(vec3{80, 0, 0}), Outputs: []portGeom{{Name: "out"}}},
 		"2": {Kind: "Input", HasPos: true, ScenePolar: cart2polar(vec3{40, 0, 0}),
 			Inputs:  []portGeom{{Name: "in1"}},
 			Outputs: []portGeom{{Name: "out5"}, {Name: "out6"}}},
-		"3": {Kind: "Input", HasPos: true, ScenePolar: cart2polar(vec3{100, 10, 0}), Inputs: []portGeom{{Name: "in"}}},
+		"3": {Kind: "Input", HasPos: true, ScenePolar: cart2polar(vec3{80, 40, 0}), Inputs: []portGeom{{Name: "in"}}}, // dist(1,3)==dist(1,2)==40, pre-equalized: node 1's always-forward Trigger (no delta-gate) is idempotent here
 		"5": {Kind: "Input", HasPos: true, ScenePolar: cart2polar(vec3{0, 0, 0}),
 			Inputs:  []portGeom{{Name: "in2"}},
 			Outputs: []portGeom{{Name: "out7"}, {Name: "out8"}}},
@@ -106,6 +126,7 @@ func TestNode5DragCascadesToNode2Follower6AndStopsBeforeNode1(t *testing.T) {
 	md.layoutHolders = map[string]*LayoutHolder{
 		"1": {}, "2": {}, "3": {}, "5": {}, "6": {}, "7": {}, "8": {},
 	}
+	md.ApplyCascadeRoles(productionCascadeRoles())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	md.Start(ctx)
@@ -169,7 +190,7 @@ func newNode5ChainDispatch() *MoveDispatch {
 		"2": {Kind: "Input", HasPos: true, ScenePolar: cart2polar(vec3{40, 0, 0}),
 			Inputs:  []portGeom{{Name: "in1"}},
 			Outputs: []portGeom{{Name: "out5"}, {Name: "out6"}}},
-		"3": {Kind: "Input", HasPos: true, ScenePolar: cart2polar(vec3{100, 10, 0}), Inputs: []portGeom{{Name: "in"}}},
+		"3": {Kind: "Input", HasPos: true, ScenePolar: cart2polar(vec3{80, 40, 0}), Inputs: []portGeom{{Name: "in"}}}, // dist(1,3)==dist(1,2)==40, pre-equalized: node 1's always-forward Trigger (no delta-gate) is idempotent here
 		"5": {Kind: "Input", HasPos: true, ScenePolar: cart2polar(vec3{0, 0, 0}),
 			Inputs:  []portGeom{{Name: "in2"}},
 			Outputs: []portGeom{{Name: "out7"}, {Name: "out8"}}},
@@ -189,6 +210,7 @@ func newNode5ChainDispatch() *MoveDispatch {
 	md.layoutHolders = map[string]*LayoutHolder{
 		"1": {}, "2": {}, "3": {}, "5": {}, "6": {}, "7": {}, "8": {},
 	}
+	md.ApplyCascadeRoles(productionCascadeRoles())
 	return md
 }
 
@@ -315,23 +337,34 @@ func TestNode5DragEmitsDecentralizedMessages(t *testing.T) {
 		t.Errorf("expected Equalize routed to node 6; got %+v", trace)
 	}
 
-	// 5. THE KEY ANTI-DRIFT ASSERTION: no Equalize or Trigger is EVER routed to node 1 or
-	// node 3 — the delta-gated stop before node 1 (node5-decentralized-cascade.md "no
-	// message to 1"). A reversion to the unconditional central cascade (which visits node
-	// 1 as a no-op via equalizeNeighborDistancesWithSourceCenter) would, if it were also
-	// wired to route THROUGH sendMove with these kinds, break this assertion; the current
-	// central path doesn't emit these kinds at all, which assertion 6 below also catches.
+	// 5. Node 2 ALWAYS forwards (no delta-gate, project_lock_propagation_decentralized):
+	// receiving a forwarded Trigger (SenderID=="5") still forwards to node 1 (whose own
+	// sourceID is "2"), which in turn Equalizes its follower node 3. Termination is by
+	// IDEMPOTENCE — node1/node2 never move here, so dist(1,2) is unchanged and node 3
+	// (pre-equalized to dist(1,2) by this test's fixture geometry) lands at the SAME
+	// position it started at, even though the message is sent.
+	found1Trigger, found3Equalize := false, false
 	for _, m := range trace {
-		if m.destID == "1" || m.destID == "3" {
-			t.Errorf("node %s must never receive an Equalize/Trigger message; got %+v", m.destID, m)
+		if m.destID == "1" && m.kind == moveMsgKindTrigger && m.senderID == "2" {
+			found1Trigger = true
+		}
+		if m.destID == "3" && m.kind == moveMsgKindEqualize {
+			found3Equalize = true
 		}
 	}
+	if !found1Trigger {
+		t.Errorf("expected a Trigger forwarded to node 1 (SenderID==\"2\"); got %+v", trace)
+	}
+	if !found3Equalize {
+		t.Errorf("expected Equalize routed to node 3 (idempotent no-op); got %+v", trace)
+	}
 
-	// 6. Exact message count: self-trigger to 5 (1) + Equalize to 7,8 (2) +
-	// forwarded trigger to 2 (1) + Equalize to 6 (1) = 5. A reversion to the central
-	// rootMove recursion sends ZERO of these messages and fails this count outright
-	// (0 != 5), making silent drift back to the central coordinator impossible to pass.
-	const wantCount = 5
+	// 6. Exact message count: self-trigger to 5 (1) + Equalize to 7,8 (2) + forwarded
+	// trigger to 2 (1) + Equalize to 6 (1) + forwarded trigger to 1 (1) + Equalize to 3
+	// (1) = 7. A reversion to the central rootMove recursion sends ZERO of these
+	// messages and fails this count outright (0 != 7), making silent drift back to the
+	// central coordinator impossible to pass.
+	const wantCount = 7
 	if len(trace) != wantCount {
 		t.Errorf("expected exactly %d Equalize/Trigger messages, got %d: %+v", wantCount, len(trace), trace)
 	}
@@ -374,6 +407,7 @@ func newFullChainDispatch() *MoveDispatch {
 	md.layoutHolders = map[string]*LayoutHolder{
 		"1": {}, "2": {}, "3": {}, "5": {}, "6": {}, "7": {}, "8": {}, "9": {}, "10": {},
 	}
+	md.ApplyCascadeRoles(productionCascadeRoles())
 	return md
 }
 

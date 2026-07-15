@@ -32,6 +32,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"sort"
 	"sync"
 	"sync/atomic"
 
@@ -74,35 +75,15 @@ const (
 	moveMsgKindDrag = "drag"
 )
 
-// ruleSource maps a rule-node id to its designated SOURCE neighbor ("per-node rule").
-// HARDCODED to the current 10-node topology: a graph without these ids silently gets no
-// cascade, because the rule lives here rather than in the spec the graph came from.
-var ruleSource = map[string]string{
-	"5": "2",
-	"2": "5",
-	"1": "2",
-}
-
-// ruleFollowers maps a rule-node id to the FOLLOWER neighbors it repositions (via an
-// Equalize message) whenever it is triggered. Followers have no rule of their own — they
-// move themselves to the new length and stop.
-var ruleFollowers = map[string][]string{
-	"5": {"7", "8"},
-	"2": {"6"},
-	"1": {"3"},
-}
-
-// gateNeighbors maps a two-neighbor GATE node id to its two FIXED neighbors (a,b), for
-// the decentralized gate self-trigger path. A gate node
-// is NOT a ruleSource/follower node: on a direct drag it solves its own equal-radii
-// landing position, commits itself, and self-triggers its OWN goroutine to run its
-// own edge-c equalize (equalizeEdgeCLocal) — no forward, no neighbor move. Scoped to
-// nodes 9 and 10 (mirroring node9's widening).
-var gateNeighbors = map[string][2]string{
-	"1":  {"2", "3"},
-	"9":  {"3", "6"},
-	"10": {"6", "8"},
-}
+// Per-node cascade rule data (sourceID, followers, forwardTargets, isGate,
+// gateA/gateB, anchoredGates, followerOwner — the nodeMover fields below) replaces
+// what used to be three package-level maps (ruleSource/ruleFollowers/gateNeighbors)
+// HARDCODED to the current 10-node topology. Each is now DERIVED once at load
+// (loader.go deriveCascadeRules) from the spec each node carries on its own
+// LocalPolars entries (layout_holder.go LocalPolar.Role: "source"/"follower"/"")
+// and its own Gate flag (loader.go specNode.Gate) — a graph without these markers
+// simply gets no cascade for that node, instead of silently missing an id from a
+// table that lived here.
 
 // centerSnap is an immutable snapshot of a node's position published by the nodeMover
 // via an atomic.Pointer so readers on other goroutines (stdin reader, etc.) can observe
@@ -263,6 +244,36 @@ type nodeMover struct {
 	// node) so the equal-radii solve, like the commit, runs on the node's own
 	// goroutine rather than the stdin goroutine.
 	placeEqualRadii func(target vec3) vec3
+	// Cascade rule fields — DERIVED once at load (loader.go deriveCascadeRules) from
+	// this node's own LocalPolars roles and Gate flag; see the package doc comment
+	// above where the old ruleSource/ruleFollowers/gateNeighbors maps used to live.
+	//
+	// sourceID: the ONE neighbor this node measures its reference length L against
+	// ("" if this node has no source role — not a rule-node).
+	sourceID string
+	// followers: the neighbors this node repositions (Equalize to L) when triggered.
+	followers []string
+	// forwardTargets: every OTHER node Y whose OWN sourceID is this node's id — the
+	// inverse of sourceID, so this node's self-trigger can forward without knowing
+	// the whole graph's rule table.
+	forwardTargets []string
+	// isGate: this node is a two-neighbor GATE node (solves equal-radii against
+	// gateA/gateB on a direct drag, self-triggers its own edge-c equalize).
+	isGate bool
+	// gateA / gateB: this node's two FIXED neighbors (only meaningful when isGate),
+	// in the same order as its own LocalPolars list.
+	gateA, gateB string
+	// anchoredGates: every gate node g (isGate) whose gateA/gateB names THIS node —
+	// i.e. gate nodes anchored on this node's position. Used when this node moves
+	// independently (not via its own rule cascade) to re-solve each anchored gate's
+	// landing point (the decentralized replacement for the old node-6-shaped
+	// GatePlace fan-out, generalized off which node the gates are anchored to).
+	anchoredGates []string
+	// followerOwner: the rule-node R such that this node appears in R.followers (the
+	// inverse of followers), or "" if none. Used so a node with anchoredGates>0 can
+	// forward its own re-trigger to whichever rule-node treats it as a follower,
+	// without a hardcoded target id.
+	followerOwner string
 }
 
 func newNodeMover(id string, geom nodeGeom, tr *T.Trace) *nodeMover {
@@ -378,104 +389,33 @@ func (m *nodeMover) handle(msg moveMsg) {
 	}
 }
 
-// handleTrigger runs this rule-node's OWN rule ("per-node rule") on receiving a
-// moveMsgKindTrigger: its source edge changed, so it re-derives L =
-// dist(self, source), sends each of its followers an Equalize to L, and — delta-gated —
-// forwards the trigger to any further node whose OWN source is this node (excluding
-// whoever just sent this trigger, to avoid bouncing back). This node does NOT move itself;
-// only the source moved (or, for the top-level drag, the dragged node called this via
-// triggerSelf below, having already committed its own new position).
+// handleTrigger runs this node's OWN cascade rule on receiving a moveMsgKindTrigger,
+// entirely from fields this node's own mover carries (sourceID/followers/
+// forwardTargets/isGate/gateA/gateB/anchoredGates/followerOwner — all DERIVED once at
+// load, loader.go deriveCascadeRules, from this node's own LocalPolars roles and Gate
+// flag; see the package doc comment above node_move.go's cascade-rule fields).
+//
+// Four shapes, tried in order — each keyed off this node's OWN derived fields, never
+// an id literal:
+//
+//  1. anchoredGates>0: this node is the FIXED ANCHOR one or more gate nodes solve
+//     their equal-radii landing against. It moved freely to its new committed
+//     position; re-solve each anchored gate's shortest c-distance and GatePlace it,
+//     then forward a Trigger (SenderID = this node) to whichever rule-node treats
+//     this node as a follower (followerOwner), if any.
+//  2. msg.SenderID is one of THIS node's own followers (it moved independently, not
+//     via this node's own Equalize): treat the sender as the effective source and
+//     this node's OWN sourceID as the effective follower for this one re-trigger,
+//     then STOP (no further forward) — the follower-owner reacting to its follower's
+//     own independent move, not a normal drag cascade.
+//  3. isGate && msg.SenderID == "": self-trigger only, run this node's OWN edge-c
+//     equalize. A FORWARDED trigger (SenderID != "") is not a direct drag of this
+//     node, so a node that is ALSO a rule-node (sourceID/followers set) falls
+//     through to shape 4 instead of gating here.
+//  4. Generic rule-node cascade: re-derive L = dist(self, source), Equalize every
+//     follower to L, and ALWAYS forward to every forwardTarget (no delta-gate — see
+//     the package doc comment: termination is by idempotence, not a change check).
 func (m *nodeMover) handleTrigger(msg moveMsg) {
-	if m.id == "6" {
-		// Node 6 is neither a ruleSource/ruleFollowers rule-node nor a gateNeighbors
-		// gate node: it is the FIXED ANCHOR of its own cascade (// propagateShortestCFrom6's decentralized replacement). It moved freely (no
-		// equal-radii solve) to its new committed position; this self-trigger computes
-		// the SHORTER of its two c-distances (to 9, to 10, each rounded to a whole tick
-		// of localStepR against their CURRENT centers) and sends each gate neighbor a
-		// GatePlace message carrying its own fresh center + that shortest distance, so 9
-		// and 10 each re-solve placeAtDistanceFromBoth on their OWN goroutines. It also
-		// forwards a Trigger (SenderID=="6") to node 2, whose handleTrigger special-cases
-		// SenderID=="6" below to re-equalize ITS remaining peer (node 5) against the
-		// fresh 2<->6 distance — mirroring the old central case "6"'s cascade into node 2.
-		if m.centerOf == nil || m.sendMove == nil {
-			return
-		}
-		s := m.snap.Load()
-		if s == nil {
-			return
-		}
-		selfCenter := s.c
-		step := localStepR
-		c9, ok9 := m.centerOf("9")
-		c10, ok10 := m.centerOf("10")
-		if !ok9 && !ok10 {
-			return
-		}
-		var cTo9, cTo10 float64
-		if ok9 {
-			cTo9 = math.Round(c9.sub(selfCenter).length() / step)
-		}
-		if ok10 {
-			cTo10 = math.Round(c10.sub(selfCenter).length() / step)
-		}
-		var shortest float64
-		switch {
-		case ok9 && ok10:
-			shortest = math.Min(cTo9, cTo10)
-		case ok9:
-			shortest = cTo9
-		default:
-			shortest = cTo10
-		}
-		d := shortest * step
-		m.tr.Breadcrumb("cascade.node6.trigger", m.id, "", fmt.Sprintf("d=%.4f", d))
-		if ok9 {
-			m.sendMove("9", moveMsg{Kind: moveMsgKindGatePlace, NodeID: "9", SenderID: "6", FromCenter: selfCenter, TargetC: d, SnapC: int(shortest)})
-		}
-		if ok10 {
-			m.sendMove("10", moveMsg{Kind: moveMsgKindGatePlace, NodeID: "10", SenderID: "6", FromCenter: selfCenter, TargetC: d, SnapC: int(shortest)})
-		}
-		m.sendMove("2", moveMsg{Kind: moveMsgKindTrigger, NodeID: "2", SenderID: "6"})
-		return
-	}
-	if m.id == "2" && msg.SenderID == "6" {
-		// Node 2 was NOT dragged — node 6's cascade re-triggered it (its 2<->6 distance
-		// changed). Mirrors the old central case "2" origin=="6" branch: source on node
-		// 6 (not node 2's normal ruleSource, node 5) and reposition ONLY the remaining
-		// peer (node 5 — node 1 is permanently excluded from node 2's peer set, node 6
-		// is the source so it is untouched), then STOP — no forward to 5 or 1's own
-		// cascades (the old code `break`s before that tail).
-		if m.centerOf == nil || m.sendMove == nil {
-			return
-		}
-		s := m.snap.Load()
-		if s == nil {
-			return
-		}
-		sourceCenter, ok := m.centerOf("6")
-		if !ok {
-			return
-		}
-		L := sourceCenter.sub(s.c).length()
-		m.sendMove("5", moveMsg{Kind: moveMsgKindEqualize, NodeID: "5", FromCenter: s.c, TargetC: L})
-		m.tr.Breadcrumb("cascade.node2.from6", "5", "", fmt.Sprintf("targetC=%.4f", L))
-		return
-	}
-	if _, isGate := gateNeighbors[m.id]; isGate && msg.SenderID == "" {
-		// Gate node (self-trigger only): run this node's OWN edge-c equalize on
-		// this node's OWN goroutine. No ruleSource/ruleFollowers logic applies, no
-		// forward, no neighbor message — the position was already solved and
-		// committed by rootMoveViaMessages before this self-trigger was sent. Node
-		// 1 is ALSO a ruleSource/ruleFollowers rule-node (unlike 9/10): a FORWARDED
-		// trigger into node 1 (SenderID != "", e.g. node 2's cascade) is NOT a
-		// direct node-1 drag, so it must fall through to the generic ruleSource
-		// logic below (equalize follower 3) instead of gating here.
-		if m.gateEqualize != nil {
-			m.gateEqualize(m.id)
-			m.tr.Breadcrumb("gate.equalize", m.id, "", fmt.Sprintf("senderID=%q", msg.SenderID))
-		}
-		return
-	}
 	if m.centerOf == nil || m.sendMove == nil {
 		return
 	}
@@ -484,36 +424,108 @@ func (m *nodeMover) handleTrigger(msg moveMsg) {
 		return
 	}
 	selfCenter := s.c
-	sourceID, ok := ruleSource[m.id]
-	if !ok {
+
+	// The anchor-fanout only applies to a node with NO rule role of its own (mirrors
+	// the historical node-6 special case: "neither a ruleSource/ruleFollowers
+	// rule-node nor a gateNeighbors gate node"). A node that IS a rule-node (e.g.
+	// node 2, itself adjacent to gate node 1) does NOT re-solve its adjacent gates
+	// on its own trigger — only a pure anchor does; a rule-node's own trigger goes
+	// through the swap/generic branches below instead.
+	isRuleNode := m.sourceID != "" || len(m.followers) > 0
+	if len(m.anchoredGates) > 0 && !isRuleNode {
+		step := localStepR
+		type cand struct {
+			id string
+			c  vec3
+			ok bool
+		}
+		cands := make([]cand, 0, len(m.anchoredGates))
+		anyOk := false
+		for _, g := range m.anchoredGates {
+			c, ok := m.centerOf(g)
+			cands = append(cands, cand{id: g, c: c, ok: ok})
+			anyOk = anyOk || ok
+		}
+		if !anyOk {
+			return
+		}
+		shortest := math.Inf(1)
+		for _, cd := range cands {
+			if !cd.ok {
+				continue
+			}
+			d := math.Round(cd.c.sub(selfCenter).length() / step)
+			if d < shortest {
+				shortest = d
+			}
+		}
+		d := shortest * step
+		m.tr.Breadcrumb("cascade.anchor.trigger", m.id, "", fmt.Sprintf("d=%.4f", d))
+		for _, cd := range cands {
+			if !cd.ok {
+				continue
+			}
+			m.sendMove(cd.id, moveMsg{Kind: moveMsgKindGatePlace, NodeID: cd.id, SenderID: m.id, FromCenter: selfCenter, TargetC: d, SnapC: int(shortest)})
+		}
+		if m.followerOwner != "" {
+			m.sendMove(m.followerOwner, moveMsg{Kind: moveMsgKindTrigger, NodeID: m.followerOwner, SenderID: m.id})
+		}
 		return
 	}
-	sourceCenter, ok := m.centerOf(sourceID)
+
+	isMyFollower := false
+	for _, f := range m.followers {
+		if f == msg.SenderID {
+			isMyFollower = true
+			break
+		}
+	}
+	if isMyFollower {
+		// The sender is my own follower, but it moved on its OWN (it triggered ME,
+		// which only happens via anchoredGates' followerOwner forward above) — swap
+		// roles for this one re-trigger: re-equalize MY source-peer to the fresh
+		// distance to the sender, holding the sender fixed.
+		if m.sourceID == "" {
+			return
+		}
+		senderCenter, ok := m.centerOf(msg.SenderID)
+		if !ok {
+			return
+		}
+		L := senderCenter.sub(selfCenter).length()
+		m.sendMove(m.sourceID, moveMsg{Kind: moveMsgKindEqualize, NodeID: m.sourceID, FromCenter: selfCenter, TargetC: L})
+		m.tr.Breadcrumb("cascade.swap", m.sourceID, "", fmt.Sprintf("targetC=%.4f", L))
+		return
+	}
+
+	if m.isGate && msg.SenderID == "" {
+		if m.gateEqualize != nil {
+			m.gateEqualize(m.id)
+			m.tr.Breadcrumb("gate.equalize", m.id, "", fmt.Sprintf("senderID=%q", msg.SenderID))
+		}
+		return
+	}
+
+	if m.sourceID == "" {
+		return
+	}
+	sourceCenter, ok := m.centerOf(m.sourceID)
 	if !ok {
 		return
 	}
 	L := sourceCenter.sub(selfCenter).length()
-	m.tr.Breadcrumb("cascade.trigger", m.id, "", fmt.Sprintf("source=%s L=%.4f senderID=%q", sourceID, L, msg.SenderID))
-	for _, f := range ruleFollowers[m.id] {
+	m.tr.Breadcrumb("cascade.trigger", m.id, "", fmt.Sprintf("source=%s L=%.4f senderID=%q", m.sourceID, L, msg.SenderID))
+	for _, f := range m.followers {
 		m.sendMove(f, moveMsg{Kind: moveMsgKindEqualize, NodeID: f, FromCenter: selfCenter, TargetC: L})
 		m.tr.Breadcrumb("cascade.equalize", f, "", fmt.Sprintf("targetC=%.4f", L))
 	}
-	// Delta-gated forward: notify any Y whose OWN source is this node, unless Y is
-	// whoever just triggered us (no bounce). This node's own center only changes
-	// between this handler's calls when THIS message is the top-level self-trigger
-	// issued right after a direct drag committed this node's new position
-	// (SenderID == "", see rootMoveViaMessages) — a message forwarded FROM another rule-
-	// node (SenderID != "") never carries a change to this node's own position, so
-	// this node's edge to any Y is provably unchanged and there is nothing to
-	// forward (the spec's "no message to 1" termination case). Scoped to the
-	// node-5 chain (step 1): only node 5 currently self-triggers.
-	selfMoved := msg.SenderID == ""
-	for y, src := range ruleSource {
-		if src != m.id || y == msg.SenderID {
-			continue
-		}
-		if !selfMoved {
-			m.tr.Breadcrumb("cascade.stop", m.id, "", fmt.Sprintf("target=%s reason=no-change senderID=%q", y, msg.SenderID))
+	// Always forward — no delta-gate. Termination is by IDEMPOTENCE (the receiver
+	// recomputes its own source length and equalizes its followers to it; if
+	// nothing moved, the followers are already at that length, so the re-broadcast
+	// is a no-op), not a sender-side "did anything change?" check. See the
+	// project_lock_propagation_decentralized memory note this mirrors.
+	for _, y := range m.forwardTargets {
+		if y == msg.SenderID {
 			continue
 		}
 		m.sendMove(y, moveMsg{Kind: moveMsgKindTrigger, NodeID: y, SenderID: m.id})
@@ -922,12 +934,6 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 		nm.commitLocal = md.commitNodeMoveLocal
 		nm.gateEqualize = md.gateEqualizeNode
 		nm.gatePlace = md.gatePlaceNode
-		if nb, ok := gateNeighbors[id]; ok {
-			aID, bID := nb[0], nb[1]
-			nm.placeEqualRadii = func(target vec3) vec3 {
-				return md.placeEqualRadii(target, aID, bID)
-			}
-		}
 		md.nodeMovers[id] = nm
 		md.dispatch[id] = nm.inbox
 	}
@@ -1086,6 +1092,88 @@ func (md *MoveDispatch) sendMove(id string, msg moveMsg) {
 	}
 	if ch, ok := md.dispatch[id]; ok {
 		ch <- msg
+	}
+}
+
+// cascadeRoleSpec is one node's authored cascade role — the per-node replacement for
+// what used to be entries in three hardcoded package-level tables
+// (ruleSource/ruleFollowers/gateNeighbors). loader.go's deriveCascadeRoles builds
+// these from each node's own LocalPolars entries (Role: "source"/"follower"/"") and
+// its own Gate flag; tests that build a MoveDispatch directly (bypassing the
+// loader) declare the same data explicitly via ApplyCascadeRoles.
+type cascadeRoleSpec struct {
+	SourceID  string   // the ONE neighbor this node measures its reference length against.
+	Followers []string // neighbors this node repositions (Equalize) when triggered.
+	Gate      bool     // this node is a two-neighbor GATE node.
+	GateA     string   // gate's first fixed neighbor (only meaningful when Gate).
+	GateB     string   // gate's second fixed neighbor (only meaningful when Gate).
+	// AnchoredGates: gate nodes that name THIS node as their "anchor" neighbor (a
+	// gate's LocalPolar entry to this node has Role=="anchor" — loader.go
+	// deriveCascadeRoles' second pass). EXPLICITLY authored per gate-neighbor pair,
+	// NOT derived from mere gate-adjacency: a node can be one of a gate's two fixed
+	// neighbors WITHOUT being its anchor (e.g. nodes 2 and 3 are gate 1's two fixed
+	// neighbors, but neither is marked anchor — gate 1 only re-solves on its OWN
+	// drag; only the historical node-6-shaped relationship to gates 9/10 is marked
+	// anchor). Getting this wrong by deriving it from adjacency alone was a real bug
+	// caught by the A/B drag proof (dragging node 3 wrongly re-solved gate 1).
+	AnchoredGates []string
+}
+
+// ApplyCascadeRoles sets every named node's own cascade-role fields (sourceID,
+// followers, isGate/gateA/gateB, anchoredGates) from roles, wires each gate node's
+// placeEqualRadii closure, then derives the one CROSS-node field that isn't already
+// explicit in roles: forwardTargets (the inverse of sourceID — every Y whose own
+// source is this node) and followerOwner (the inverse of followers — the one
+// rule-node, if any, that treats this node as a follower). anchoredGates is NOT
+// derived from gate-adjacency (a node can be one of a gate's two fixed neighbors
+// without being its anchor — see cascadeRoleSpec.AnchoredGates's doc) — it is taken
+// verbatim from roles. Call once, after every node's mover exists (newMoveDispatch)
+// and before Start. Unknown node ids in roles are ignored (a node absent from roles
+// keeps its zero-value fields — no rule, not a gate, anchors nothing).
+func (md *MoveDispatch) ApplyCascadeRoles(roles map[string]cascadeRoleSpec) {
+	ids := make([]string, 0, len(md.nodeMovers))
+	for id := range md.nodeMovers {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids) // deterministic derivation order
+
+	for _, id := range ids {
+		nm := md.nodeMovers[id]
+		r, ok := roles[id]
+		if !ok {
+			continue
+		}
+		nm.sourceID = r.SourceID
+		nm.followers = append([]string(nil), r.Followers...)
+		nm.isGate = r.Gate
+		nm.gateA, nm.gateB = r.GateA, r.GateB
+		nm.anchoredGates = append([]string(nil), r.AnchoredGates...)
+		if nm.isGate {
+			aID, bID := nm.gateA, nm.gateB
+			nm.placeEqualRadii = func(target vec3) vec3 {
+				return md.placeEqualRadii(target, aID, bID)
+			}
+		}
+	}
+	for _, id := range ids {
+		md.nodeMovers[id].forwardTargets = nil
+		md.nodeMovers[id].followerOwner = ""
+	}
+	for _, yID := range ids {
+		src := md.nodeMovers[yID].sourceID
+		if src == "" {
+			continue
+		}
+		if sm, ok := md.nodeMovers[src]; ok {
+			sm.forwardTargets = append(sm.forwardTargets, yID)
+		}
+	}
+	for _, rID := range ids {
+		for _, f := range md.nodeMovers[rID].followers {
+			if fol, ok := md.nodeMovers[f]; ok {
+				fol.followerOwner = rID
+			}
+		}
 	}
 }
 
@@ -1426,15 +1514,15 @@ func (md *MoveDispatch) commitNodeMoveLocal(nodeID string, newPos vec3) {
 // the old central rootMove ran synchronously on the drag call stack
 // . No-op for an unknown gate id or unresolved center.
 func (md *MoveDispatch) gateEqualizeNode(nodeID string) {
-	nb, ok := gateNeighbors[nodeID]
-	if !ok {
+	nm, ok := md.nodeMovers[nodeID]
+	if !ok || !nm.isGate {
 		return
 	}
 	c, ok := md.centerOfNode(nodeID)
 	if !ok {
 		return
 	}
-	md.equalizeEdgeCLocal(nodeID, nb[0], nb[1], c)
+	md.equalizeEdgeCLocal(nodeID, nm.gateA, nm.gateB, c)
 }
 
 // gatePlaceNode runs a gate node's (9 or 10) placeAtDistanceFromBoth + moveNodeAndSetEdgeCs
@@ -1447,20 +1535,21 @@ func (md *MoveDispatch) gateEqualizeNode(nodeID string) {
 // otherNeighbor) == (6, 8)) so behavior is bit-for-bit identical. No-op for an unknown
 // gate id, an anchorID that isn't one of its two gateNeighbors, or an unresolved center.
 func (md *MoveDispatch) gatePlaceNode(nodeID, anchorID string, anchorCenter vec3, d float64, snapC int) {
-	nb, ok := gateNeighbors[nodeID]
-	if !ok {
+	nm, ok := md.nodeMovers[nodeID]
+	if !ok || !nm.isGate {
 		return
 	}
+	gA, gB := nm.gateA, nm.gateB
 	var a, b vec3
 	switch anchorID {
-	case nb[0]:
-		other, okc := md.centerOfNode(nb[1])
+	case gA:
+		other, okc := md.centerOfNode(gB)
 		if !okc {
 			return
 		}
 		a, b = anchorCenter, other
-	case nb[1]:
-		other, okc := md.centerOfNode(nb[0])
+	case gB:
+		other, okc := md.centerOfNode(gA)
 		if !okc {
 			return
 		}
@@ -1472,7 +1561,7 @@ func (md *MoveDispatch) gatePlaceNode(nodeID, anchorID string, anchorCenter vec3
 	if !ok {
 		return
 	}
-	md.moveNodeAndSetEdgeCs(nodeID, newPos, nb[0], nb[1], snapC)
+	md.moveNodeAndSetEdgeCs(nodeID, newPos, gA, gB, snapC)
 }
 
 // RootMove handles a node-drag under the flat absolute scene-polar layout: every node

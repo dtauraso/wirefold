@@ -48,6 +48,8 @@ type jsonMeta struct {
 	StepR     *float64 `json:"stepR,omitempty"`
 	// LocalPolars — see specNode's field doc (loader.go).
 	LocalPolars []specLocalPolar `json:"localPolars,omitempty"`
+	// Gate — see specNode's field doc (loader.go).
+	Gate bool `json:"gate,omitempty"`
 }
 
 // loadTree reads the directory-tree topology rooted at root and assembles a
@@ -91,6 +93,7 @@ func loadTree(root string) (topoSpec, error) {
 			StepPhi:         meta.StepPhi,
 			StepR:           meta.StepR,
 			LocalPolars:     meta.LocalPolars,
+			Gate:            meta.Gate,
 		}
 
 		// data.json — optional
