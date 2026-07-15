@@ -595,22 +595,31 @@ func emitNodeBeads(tr *T.Trace, nodeName string, working, backup []int) {
 
 // emitHeldBead streams the HoldNewSendOld node's interior as a SINGLE centered
 // bead (row 0, col 0) at the node center (offset 0,0,0). The bead is PRESENT when
-// held != -1 and colored by the held value (0 = white, 1 = black per the existing
-// node-bead convention); held == -1 (no value seen yet) → present=false so the
-// interior renders empty. Called from the node's injected EmitHeldBead closure
-// only when the held value changes.
+// NoValue is the sentinel meaning "no value yet" / "no real bead". Real values
+// are non-negative indices so NoValue (-1) never collides with a legitimate
+// value. Lives here (not gatecommon) because gatecommon imports Wiring —
+// gatecommon.NoValue aliases THIS constant, not the reverse, so every package
+// that needs the sentinel (including this one, which cannot import gatecommon)
+// shares one definition.
+const NoValue = -1
+
+// held != NoValue and colored by the held value (0 = white, 1 = black per the
+// existing node-bead convention); held == NoValue (no value seen yet) →
+// present=false so the interior renders empty. Called from the node's injected
+// EmitHeldBead closure only when the held value changes.
 func emitHeldBead(tr *T.Trace, nodeName string, held int) {
-	tr.NodeBead(nodeName, 0, 0, held != -1, held, 0, 0, 0)
+	tr.NodeBead(nodeName, 0, 0, held != NoValue, held, 0, 0, 0)
 }
 
 // emitInputBeads streams a gate's two held inputs as interior beads: the LEFT
 // input on the left of the node (negative x), the RIGHT input on the right
-// (positive x), vertically centered. -1 = not held → present=false. Slot keys
-// (0,0)=left, (0,1)=right. Offsets use interiorSlot so they sit inside the sphere.
+// (positive x), vertically centered. NoValue = not held → present=false. Slot
+// keys (0,0)=left, (0,1)=right. Offsets use interiorSlot so they sit inside the
+// sphere.
 func emitInputBeads(tr *T.Trace, nodeName string, left, right int) {
 	s := interiorSlot
-	tr.NodeBead(nodeName, 0, 0, left != -1, left, -s, 0, 0)
-	tr.NodeBead(nodeName, 0, 1, right != -1, right, s, 0, 0)
+	tr.NodeBead(nodeName, 0, 0, left != NoValue, left, -s, 0, 0)
+	tr.NodeBead(nodeName, 0, 1, right != NoValue, right, s, 0, 0)
 }
 
 // emitRefillSlide runs the clock-paced animated refill for the Input node's

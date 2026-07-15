@@ -27,9 +27,11 @@ const PollIntervalTicks = 1
 // second-arriving interior bead only flashes for ~1ms before the fire clears it.
 const FireDwellMs = 800
 
-// NoValue is the sentinel meaning "no value yet" / "no real bead". Real values
-// are non-negative indices so NoValue (-1) never collides with a legitimate value.
-const NoValue = -1
+// NoValue aliases Wiring.NoValue, the sentinel meaning "no value yet" / "no real
+// bead". Defined in Wiring (not here) because gatecommon imports Wiring, not the
+// reverse — Wiring.NoValue is the one definition; this is just gatecommon's name
+// for it.
+const NoValue = Wiring.NoValue
 
 // GateNode holds all the fields shared between the two gate node kinds.
 // Each kind embeds GateNode so its init/Update can delegate here.
