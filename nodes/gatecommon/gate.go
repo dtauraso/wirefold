@@ -16,10 +16,6 @@ import (
 // while staying under the input cadence (~3104 ms).
 const WindowMs = 3000
 
-// WindowWu is derived from WindowMs and the one pulse speed so it stays correct
-// if PulseSpeedWuPerMs is retuned: WindowWu = WindowMs × PulseSpeedWuPerMs.
-const WindowWu = WindowMs * Wiring.PulseSpeedWuPerMs // = 120 wu at PulseSpeedWuPerMs=0.04
-
 // PollIntervalTicks bounds the busy-spin of the window loop. It is a free
 // scheduling choice (not derivable from pulse speed or fire-dwell) that trades
 // CPU burn against reaction latency between window polls. One tick is the finest
