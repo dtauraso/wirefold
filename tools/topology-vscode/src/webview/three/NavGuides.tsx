@@ -11,7 +11,7 @@ import { getLatestSnapshot } from "../snapshot-buffer";
 import { useOverlayFlags } from "./overlay-flags";
 import { decodeSnapshot } from "./buffer-decode";
 import {
-  type NavNode, decodeNavNodes, contentSphereFromCenters,
+  type NavNode, decodeNavNodes, sceneSphereFromSnapshot,
 } from "./buffer-nav";
 
 // HANDHOLD_TERM_TAG — userData key stamped on the octant angle handhold meshes and the
@@ -372,12 +372,17 @@ export function NavGuides() {
   const [navTick, setNavTick] = useState(0);
   const bufNavRef = useRef<NavNode[]>([]);
   const bufSigRef = useRef("");
+  // Scene sphere: Go-owned, established once at load and never moved (see
+  // sceneSphereFromSnapshot) — sampled alongside navNodes but not part of navSignature
+  // since it is constant after the first snapshot.
+  const sceneSphereRef = useRef<{ center: THREE.Vector3; radius: number }>({ center: new THREE.Vector3(), radius: 100 });
   useFrame(() => {
     const snap = getLatestSnapshot();
     if (!snap) return;
     const decoded = decodeSnapshot(snap);
     if (!decoded) return;
     bufNavRef.current = decodeNavNodes(decoded);
+    sceneSphereRef.current = sceneSphereFromSnapshot(decoded);
     const sig = navSignature(bufNavRef.current);
     if (sig !== bufSigRef.current) {
       bufSigRef.current = sig;
@@ -401,10 +406,10 @@ export function NavGuides() {
   // of Go's own latch state — NavGuides authors nothing.
   const latchedSel = navNodes.find((n) => n.latchedSel)?.row ?? null;
 
-  // WORLD-FIXED content sphere (= the arcball, matching interaction-controls), so it
-  // zooms WITH the diagram. Tube thickness matches the node spheres' tori
-  // (scene-content SphereRing: max(0.5, nodeRadius·0.08)).
-  const cs = contentSphereFromCenters(navNodes.map((n) => n.center));
+  // WORLD-FIXED scene sphere (Go-owned, established once at load — see
+  // sceneSphereFromSnapshot), so it zooms WITH the diagram. Tube thickness matches the node
+  // spheres' tori (scene-content SphereRing: max(0.5, nodeRadius·0.08)).
+  const cs = sceneSphereRef.current;
   const tube = navNodes.length > 0 ? Math.max(0.5, navNodes[0]!.radius * 0.08) : 1;
   // Build geometry ONLY when the sphere actually changes (rounded radius/tube), not on
   // every render — rebuilding each frame under node-geometry churn made the tori flicker

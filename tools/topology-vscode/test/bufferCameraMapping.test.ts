@@ -10,7 +10,7 @@ import { describe, it, expect } from "vitest";
 import * as THREE from "three";
 import { decodeSnapshot } from "../src/webview/three/buffer-decode";
 import {
-  BUF_HEADER_SIZE, CAMERA_STRIDE, OVERLAY_STRIDE,
+  BUF_HEADER_SIZE, CAMERA_STRIDE, OVERLAY_STRIDE, SCENE_STRIDE,
   CAMERA_COL_PX, CAMERA_COL_PY, CAMERA_COL_PZ, CAMERA_COL_R,
   CAMERA_COL_POS_THETA, CAMERA_COL_POS_PHI, CAMERA_COL_UP_THETA, CAMERA_COL_UP_PHI,
   readCameraPX, readCameraPY, readCameraPZ, readCameraR,
@@ -35,7 +35,7 @@ function makeCameraSnapshot(cam: {
   px: number; py: number; pz: number; r: number;
   posTheta: number; posPhi: number; upTheta: number; upPhi: number;
 }): ArrayBuffer {
-  const total = BUF_HEADER_SIZE + CAMERA_STRIDE + OVERLAY_STRIDE;
+  const total = BUF_HEADER_SIZE + CAMERA_STRIDE + OVERLAY_STRIDE + SCENE_STRIDE;
   const buf = new ArrayBuffer(total);
   const dv = new DataView(buf);
   // header: tick=0, beadCount=0, nodeCount=0, edgeCount=0

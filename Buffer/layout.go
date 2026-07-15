@@ -24,7 +24,7 @@
 package Buffer
 
 // BufLayoutVersion is the schema version. Bump when any column changes.
-const BufLayoutVersion = 21
+const BufLayoutVersion = 22
 
 // BufInteriorSlotsPerNode is the fixed number of interior grid slots reserved per
 // node in the Interior block (a 2x2 held/interior-bead grid: slot = row*2 + col).
@@ -240,6 +240,19 @@ type bufLayoutOverlay struct {
 	SelMode uint8 `buf:"u8"`
 }
 
+// bufLayoutScene defines the scene-sphere column block (always 1 row).
+// Matched from KindSceneSphere trace events. The scene sphere is the persisted, first-class
+// world anchor every node's scene polar is measured about (nodes/Wiring/sphere_layout.go
+// sceneSphere) — established ONCE at load and never moved. Replaces the TS-side
+// contentSphereFromCenters (a derived, non-authoritative content-sphere centroid recomputed
+// from live node positions every frame) as the sphere NavGuides draws its polar tori around.
+type bufLayoutScene struct {
+	CX     float32 `buf:"f32"` // scene-sphere center x (world)
+	CY     float32 `buf:"f32"` // scene-sphere center y (world)
+	CZ     float32 `buf:"f32"` // scene-sphere center z (world)
+	Radius float32 `buf:"f32"` // scene-sphere radius
+}
+
 // bufLayoutEvent defines one row of the per-tick EVENT column block.
 // The block is self-sizing via an eventCount field in the snapshot header; it carries
 // the causal trace events that occurred since the previous snapshot (recv/fire/send/done/
@@ -278,5 +291,6 @@ var _ = [...]any{
 	bufLayoutPort{},
 	bufLayoutCamera{},
 	bufLayoutOverlay{},
+	bufLayoutScene{},
 	bufLayoutEvent{},
 }

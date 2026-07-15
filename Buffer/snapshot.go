@@ -19,6 +19,7 @@
 //	Port     portCount × BufPortStride bytes   (flattened over nodes in node-row order; + port-name off/len)
 //	Camera   BufCameraStride bytes             (always 1 row)
 //	Overlay  BufOverlayStride bytes            (always 1 row)
+//	Scene    BufSceneStride bytes              (always 1 row; persisted scene-sphere center+radius)
 //	Label    labelBytesCount bytes             (node labels' UTF-8 bytes, node-row order)
 //	Event    eventCount × BufEventStride bytes (per-tick causal trace events; .probe log only)
 //	PortName portNameBytesCount bytes          (port names' UTF-8 bytes, flattened port-row order)
@@ -80,9 +81,10 @@ type SnapshotState struct {
 	directlyFadedNodes map[string]bool
 	directlyFadedEdges map[string]bool
 
-	// Camera and overlay singletons (always one row each in the snapshot).
+	// Camera, overlay, and scene-sphere singletons (always one row each in the snapshot).
 	camera  cameraSnapState
 	overlay overlaySnapState
+	scene   sceneSnapState
 
 	// tick is the monotonic snapshot sequence counter.
 	tick uint32
@@ -255,6 +257,15 @@ type cameraSnapState struct {
 	upTheta, upPhi   float64
 }
 
+// sceneSnapState mirrors the scene-sphere block (single row): the persisted world anchor
+// every node's scene polar is measured about. Established ONCE at load and never moved
+// (see KindSceneSphere); zero-value (radius 0) until that one-time startup event arrives,
+// mirroring the sphereR "0 = not yet populated" convention used elsewhere in this file.
+type sceneSnapState struct {
+	cx, cy, cz float64
+	radius     float64
+}
+
 // overlaySnapState mirrors the overlay block (single row).
 type overlaySnapState struct {
 	sceneTori      uint8
@@ -331,6 +342,12 @@ func (s *SnapshotState) Update(ev T.Event) {
 			upTheta: ev.UpTheta, upPhi: ev.UpPhi,
 		}
 		s.emitSnapshot() // state-change point: emit on camera changes
+	case T.KindSceneSphere:
+		// The scene sphere is established ONCE at load and never moves (MODEL.md); Go emits
+		// this a single time at startup, so a plain assign (not a merge) is correct.
+		s.scene = sceneSnapState{cx: ev.PX, cy: ev.PY, cz: ev.PZ, radius: ev.R}
+		s.emitSnapshot()
+
 	case T.KindSceneTori, T.KindScenePoles, T.KindNodePoles, T.KindAngleLabels,
 		T.KindSelSpherePoles, T.KindHandholds, T.KindLabelsGlobal, T.KindBadgesGlobal,
 		T.KindOverlaysVis:
@@ -947,6 +964,7 @@ func (s *SnapshotState) newSnapshotBuild() *snapshotBuild {
 		b.portCount*BufPortStride +
 		BufCameraStride +
 		BufOverlayStride +
+		BufSceneStride +
 		b.labelBytesCount +
 		b.eventCount*BufEventStride +
 		b.portNameBytesCount +
@@ -1087,6 +1105,14 @@ func (s *SnapshotState) writeOverlayBlock(buf []byte, off int) int {
 	return off + BufOverlayStride
 }
 
+// writeSceneBlock writes the Scene block (always 1 row): the persisted scene-sphere center +
+// radius, established once at load and never moved (see KindSceneSphere / sceneSnapState).
+func (s *SnapshotState) writeSceneBlock(buf []byte, off int) int {
+	sc := s.scene
+	SetSceneRow(buf[off:], float32(sc.cx), float32(sc.cy), float32(sc.cz), float32(sc.radius))
+	return off + BufSceneStride
+}
+
 // writeLabelBytesSection writes the Label bytes section (self-sizing via header
 // labelBytesCount): every node's label UTF-8 bytes concatenated in node-row order. Each
 // node's LabelOff/LabelLen columns slice into this section; the numeric node row carries its
@@ -1136,6 +1162,7 @@ func (s *SnapshotState) buildSnapshot() []byte {
 	off = s.writePortBlock(buf, off, b)
 	off = s.writeCameraBlock(buf, off)
 	off = s.writeOverlayBlock(buf, off)
+	off = s.writeSceneBlock(buf, off)
 	off = s.writeLabelBytesSection(buf, off, b)
 	off = s.writeEventBlockSection(buf, off, b)
 	off = s.writePortNameBytesSection(buf, off, b)

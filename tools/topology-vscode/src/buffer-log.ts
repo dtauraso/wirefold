@@ -37,6 +37,7 @@ import {
   readEventKind, readEventNodeRow, readEventPortRow, readEventTargetRow, readEventTargetPortRow,
   readEventEdgeRow, readEventSlot, readEventValue, readEventBead,
   readEventArcLength, readEventSimLatencyMs, readEventX, readEventY, readEventZ, readEventF,
+  readSceneCX, readSceneCY, readSceneCZ, readSceneRadius,
   UNKNOWN_KIND_ID,
 } from "./schema/buffer-layout";
 
@@ -58,6 +59,7 @@ export type DecodedEventLine =
   | { step: number; kind: "node-geometry"; node: string; label?: string; nodeKind?: string; nx: number; ny: number; nz: number; radius: number; sphereR?: number; vrx: number; vry: number; vrz: number; frx: number; fry: number; frz: number; ports: { name: string; isInput: boolean; px: number; py: number; pz: number; dx: number; dy: number; dz: number }[] }
   | { step: number; kind: "node-bead"; node: string; row: number; col: number; present: boolean; value: number; x: number; y: number; z: number }
   | { step: number; kind: "camera"; px: number; py: number; pz: number; r: number; posTheta: number; posPhi: number; upTheta: number; upPhi: number }
+  | { step: number; kind: "scene-sphere"; cx: number; cy: number; cz: number; radius: number }
   | { step: number; kind: "scene-tori"; visible: boolean }
   | { step: number; kind: "scene-poles"; visible: boolean }
   | { step: number; kind: "node-poles"; visible: boolean }
@@ -185,6 +187,10 @@ function decodeEventLine(d: DecodedSnapshot, i: number): Line | null {
         posTheta: readCameraPosTheta(c), posPhi: readCameraPosPhi(c),
         upTheta: readCameraUpTheta(c), upPhi: readCameraUpPhi(c),
       };
+    }
+    case "scene-sphere": {
+      const sc = d.sceneView;
+      return { kind, cx: readSceneCX(sc), cy: readSceneCY(sc), cz: readSceneCZ(sc), radius: readSceneRadius(sc) };
     }
     case "select":
       // stdout marshals select via the default {node,port,value} shape (edge label not emitted).

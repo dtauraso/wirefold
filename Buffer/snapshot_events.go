@@ -40,6 +40,8 @@ func (s *SnapshotState) recordEvent(ev T.Event) {
 		r.slot = ev.Row*2 + ev.Col
 	case T.KindCamera:
 		// All fields read from the Camera block at decode time.
+	case T.KindSceneSphere:
+		// All fields read from the Scene block at decode time (same pattern as Camera).
 	case T.KindSceneTori, T.KindScenePoles, T.KindNodePoles, T.KindAngleLabels,
 		T.KindSelSpherePoles, T.KindHandholds, T.KindLabelsGlobal, T.KindBadgesGlobal,
 		T.KindOverlaysVis:

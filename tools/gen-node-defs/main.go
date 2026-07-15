@@ -2213,7 +2213,7 @@ func writeBufferLayoutGo(outPath string, schema bufLayoutSchema) error {
 
 		// Writer function.
 		var params []string
-		if blk.name == "Camera" || blk.name == "Overlay" || blk.name == "RuleBuilder" {
+		if blk.name == "Camera" || blk.name == "Overlay" || blk.name == "RuleBuilder" || blk.name == "Scene" {
 			// Camera and Overlay always have exactly 1 row; omit row param.
 			for _, c := range blk.columns {
 				pname := strings.ToLower(c.name[:1]) + c.name[1:]
@@ -2303,7 +2303,7 @@ func writeBufferLayoutTS(outPath string, schema bufLayoutSchema) error {
 			getter := tsDataViewGetter(c.bufType)
 			le := tsDataViewLE(c.bufType)
 			fnName := readerFnTSName(blk.name, c.name)
-			if blk.name == "Camera" || blk.name == "Overlay" || blk.name == "RuleBuilder" {
+			if blk.name == "Camera" || blk.name == "Overlay" || blk.name == "RuleBuilder" || blk.name == "Scene" {
 				// Single-row blocks: no row param.
 				fmt.Fprintf(w, "export function %s(view: DataView): number { return view.%s(%s%s); }\n",
 					fnName, getter, colConst, le)

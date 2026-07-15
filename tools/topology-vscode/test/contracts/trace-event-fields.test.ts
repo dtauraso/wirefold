@@ -30,7 +30,7 @@ describe("trace-event-fields contract", () => {
 
   it("fixture has one event for each kind variant", () => {
     const kinds = new Set(events.map((e) => e.kind));
-    expect(kinds).toEqual(new Set(["recv", "fire", "send", "done", "edge-bead", "geometry", "pulse-cancelled", "node-geometry", "arrive", "node-bead", "camera", "scene-tori", "scene-poles", "node-poles", "angle-labels", "sel-sphere-poles", "handholds", "labels-global", "badges-global", "overlays-vis", "select", "fade", "hover"]));
+    expect(kinds).toEqual(new Set(["recv", "fire", "send", "done", "edge-bead", "geometry", "pulse-cancelled", "node-geometry", "arrive", "node-bead", "camera", "scene-tori", "scene-poles", "node-poles", "angle-labels", "sel-sphere-poles", "handholds", "labels-global", "badges-global", "overlays-vis", "select", "fade", "hover", "scene-sphere"]));
   });
 
   it("every fixture event kind is in TRACE_EVENT_KINDS", () => {
@@ -141,6 +141,16 @@ describe("trace-event-fields contract", () => {
     expect(typeof e.x).toBe("number");
     expect(typeof e.y).toBe("number");
     expect(typeof e.z).toBe("number");
+  });
+
+  it("scene-sphere event has step, kind, cx, cy, cz, radius", () => {
+    const e = events.find((ev) => ev.kind === "scene-sphere")! as Extract<DecodedEventLine, { kind: "scene-sphere" }>;
+    expect(typeof e.step).toBe("number");
+    expect(e.kind).toBe("scene-sphere");
+    expect(typeof e.cx).toBe("number");
+    expect(typeof e.cy).toBe("number");
+    expect(typeof e.cz).toBe("number");
+    expect(typeof e.radius).toBe("number");
   });
 
 });
