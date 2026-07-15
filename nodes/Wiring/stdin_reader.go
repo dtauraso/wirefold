@@ -173,7 +173,7 @@ type SlotRegistry map[string]*PacedWire
 // drive an unbounded allocation. Matches the 1 MB headroom of the pre-frame line buffer.
 const maxFrameBytes = 1 << 20
 
-func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace, clk Clock, treeRoot string) {
+func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace, clk Clock) {
 	// Framed-binary reader: each record is [len:u32-LE][record bytes]. A background
 	// goroutine reads whole frames (io.ReadFull handles partial reads — a frame split
 	// across TCP/pipe chunks is reassembled before the record is decoded) and hands the
@@ -233,7 +233,7 @@ func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *
 			// MSG_TYPES_START
 			switch msg.Type {
 			case "edit":
-				applyEdit(msg, slotReg, md, tr, treeRoot)
+				applyEdit(msg, slotReg, md, tr)
 			case "play":
 				handlePlayMsg(clk)
 			case "pause":
@@ -356,7 +356,7 @@ func createEdgeInSlot(slotReg SlotRegistry, dstNode, dstPort string, tr *T.Trace
 	return true
 }
 
-func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace, treeRoot string) {
+func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace) {
 	// EDIT_OPS_START
 	switch msg.Op {
 	case "create":
@@ -378,7 +378,7 @@ func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace
 		tr.Breadcrumb("delete", pw.Target, pw.TargetHandle, destKey)
 		pw.Delete()
 	case "update":
-		applyUpdate(msg, md, tr, treeRoot)
+		applyUpdate(msg, md, tr)
 	}
 	// EDIT_OPS_END
 }
@@ -386,8 +386,7 @@ func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace
 // applyUpdate routes an op=="update" edit to the entity named by msg.Kind, setting the
 // requested attribute. The sole live entity is overlays (toggle one flag).
 // Unknown kinds/attrs are ignored (forward-compat).
-func applyUpdate(msg stdinMsg, md *MoveDispatch, tr *T.Trace, treeRoot string) {
-	_ = treeRoot // overlay persistence rides the armed overlaysPersist writer, not treeRoot here.
+func applyUpdate(msg stdinMsg, md *MoveDispatch, tr *T.Trace) {
 	// EDIT_UPDATE_KINDS_START
 	switch msg.Kind {
 	case "overlays":
