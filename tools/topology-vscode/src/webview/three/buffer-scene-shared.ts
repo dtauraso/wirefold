@@ -13,12 +13,12 @@ import { NODE_DEFS_ARRAY } from "../../schema/node-defs";
 export interface BufferLabelPos { row: number; label: string; px: number; py: number; cx: number; cy: number; }
 
 // userData tag marking the NodeInstances body InstancedMesh as the pickable node
-// target under the new system. RaycasterHelper (scene-content.tsx) sees this tag on a
+// target. RaycasterHelper (scene-content.tsx) sees this tag on a
 // hit and resolves hit.instanceId → node id via the buffer-nav id table, since the
 // buffer-rendered nodes carry no per-node userData.nodeId the old raycast path relies on.
 export const BUFFER_NODE_TAG = "bufferNode";
 // userData tag marking the PortInstances InstancedMesh as the pickable PORT target under the
-// new system. On a hit, RaycasterHelper (scene-content.tsx) reads intersection.instanceId —
+// On a hit, RaycasterHelper (scene-content.tsx) reads intersection.instanceId —
 // which IS the buffer PORT-ROW index (PortInstances draws ports in buffer row order) — and
 // forwards that numeric row to Go, which resolves it back to a (node, port). No port-name
 // string is rendered or sent.
@@ -29,7 +29,7 @@ export const BUFFER_PORT_TAG = "bufferPort";
 // the owning node id exactly like BUFFER_NODE_TAG.
 export const BUFFER_RING_TAG = "bufferRing";
 // userData key marking a per-edge wide pick-halo mesh (EdgeTube.tsx) as the pickable
-// EDGE target under the new system. Unlike the node/port tags (a boolean, resolved via the
+// EDGE target. Unlike the node/port tags (a boolean, resolved via the
 // InstancedMesh instanceId), edges are individual meshes, so this key HOLDS the numeric buffer
 // EDGE-ROW index directly. On a hit, RaycasterHelper (scene-content.tsx pickBufferEdge) reads
 // userData[BUFFER_EDGE_TAG] as the edge row and forwards it to Go, which resolves the row back to

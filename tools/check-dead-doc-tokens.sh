@@ -1,8 +1,16 @@
 #!/usr/bin/env bash
 # check-dead-doc-tokens.sh — fail if retired architecture tokens reappear in CLAUDE.md or MODEL.md.
 # Run from repo root: bash scripts/check-dead-doc-tokens.sh
-set -u
-cd "$(git rev-parse --show-toplevel)" || exit 1
+set -euo pipefail
+
+# Lives in tools/ with every other guard, and resolves the repo root the way they all do
+# (SCRIPT_DIR/REPO_ROOT). It used to sit in scripts/ and cd via git rev-parse — which forced
+# stop-checks to invoke it as a special case OUTSIDE its guard loop, purely because of the
+# directory. Repo-root resolution was being done two different ways depending on where a
+# script happened to live.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$REPO_ROOT"
 
 DOCS=(CLAUDE.md MODEL.md)
 

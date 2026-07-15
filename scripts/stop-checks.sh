@@ -121,17 +121,36 @@ if [ -n "$ts_changed" ]; then
   fi
 fi
 
-for chk in check-message-kind-parity check-edit-op-parity check-bridge-literal-parity check-input-layout-parity check-generated check-no-camera-roundtrip check-polar-only-nav check-no-await-on-bridge check-ts-computes-no-geometry check-ts-shading-from-go check-send-rule-parity check-gofmt check-buffer-layout-parity check-no-webview-state check-scene-path-resolution check-doc-symbols check-doc-citations check-uniform-pulse-speed; do
-  if ! chk_out=$(bash "tools/$chk.sh" 2>&1); then
+# DISCOVER the guard suite; do not hand-list it. The list used to be hardcoded here, which
+# meant a new tools/check-*.sh was simply not run until someone remembered to edit this line
+# — a guard nobody invokes is a guard that cannot fail. Globbing makes "written" and "run"
+# the same fact.
+#
+# EXCLUDED, deliberately:
+#   check-staticcheck / check-eslint / check-vitest — expensive; invoked above under their
+#     language gate, not in this fast unconditional loop.
+#   check-no-foreground-sim — a PreToolUse hook, not a check; it must always exit 0.
+GUARD_EXCLUDE="check-staticcheck|check-eslint|check-vitest|check-no-foreground-sim"
+
+shopt -s nullglob
+guards=(tools/check-*.sh)
+shopt -u nullglob
+
+if [ ${#guards[@]} -eq 0 ]; then
+  echo "stop-checks: MISCONFIGURED — no tools/check-*.sh found; refusing to report success." >&2
+  exit 1
+fi
+
+for chk_path in "${guards[@]}"; do
+  chk=$(basename "$chk_path" .sh)
+  case "$chk" in
+    *) if echo "$chk" | grep -qE "^($GUARD_EXCLUDE)$"; then continue; fi ;;
+  esac
+  if ! chk_out=$(bash "$chk_path" 2>&1); then
     out+="$chk failed:\n$chk_out\n\n"
     fail=1
   fi
 done
-
-if ! chk_out=$(bash "scripts/check-dead-doc-tokens.sh" 2>&1); then
-  out+="check-dead-doc-tokens failed:\n$chk_out\n\n"
-  fail=1
-fi
 
 if [ $fail -ne 0 ]; then
   python3 -c "

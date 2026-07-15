@@ -37,8 +37,13 @@ rules_from_ts() {
     | sort
 }
 
-GO_RULES=$(rules_from_go)
-TS_RULES=$(rules_from_ts)
+# NOTE `|| true` on every extractor assignment below. Without it, `set -euo pipefail` kills
+# the script AT THE ASSIGNMENT whenever an extractor's grep legitimately matches nothing —
+# so the assert_nonempty diagnostic underneath, which exists precisely to explain that case,
+# could never print. The script still exited nonzero, so it failed SAFE but SILENTLY,
+# defeating the message. Verified with a minimal repro.
+GO_RULES=$(rules_from_go) || true
+TS_RULES=$(rules_from_ts) || true
 
 # Refuse a vacuous pass: if either extractor returns an EMPTY set (a SendRule const
 # rename in ports.go or a SEND_RULES rename in types.ts), comm would compare
