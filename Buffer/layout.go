@@ -30,8 +30,12 @@ const BufLayoutVersion = 23
 // node in the Interior block (a 2x2 held/interior-bead grid: slot = row*2 + col).
 // The Interior block carries exactly nodeCount*BufInteriorSlotsPerNode rows in
 // stable node order, so it needs no separate count in the header — the decoder
-// derives its length from nodeCount. Not a generated column; kept in sync with the
-// TS INTERIOR_SLOTS_PER_NODE by the interior-block decode test.
+// derives its length from nodeCount. Not a per-column generated field (there is no
+// bufLayoutInterior column for it), but gen-node-defs DOES read this const directly
+// (parseBufferLayout) and emits it as generated TS (INTERIOR_SLOTS_PER_NODE in
+// buffer-layout.ts) and Go (BufInteriorSlotsPerNodeGenerated) constants, folded into
+// BUF_LAYOUT_FINGERPRINT — so a drift here fails check-buffer-layout-parity.sh, not
+// just a same-symbolic-constant-on-both-sides test that could never catch a value change.
 const BufInteriorSlotsPerNode = 4
 
 // --- Semantic event enum ------------------------------------------------

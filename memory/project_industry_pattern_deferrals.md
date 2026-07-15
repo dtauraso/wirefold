@@ -122,6 +122,7 @@ erase deleted the files they lived in:
 - `MiniMap` — GONE (no match).
 
 Dead-code cleanup candidates surfaced during this re-scope (still compiled,
-unmounted, react-flow-era) and since deleted: `webview/state/ops/rename.ts` and the
-`webview/state/adapter/*` tree. `tools/topology-vscode/src/webview/types.ts`
-(still imports reactflow as of this writing) remained; delete when convenient, not load-bearing.
+unmounted, react-flow-era) and since deleted: `webview/state/ops/rename.ts`, the
+`webview/state/adapter/*` tree, and `tools/topology-vscode/src/webview/types.ts`
+(zero importers, deleted alongside the dead `WireProps.kind`/`schema/index.ts`/
+`colors.ts` chain — see task/code-smell-audit-fixes).

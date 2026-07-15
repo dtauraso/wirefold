@@ -23,6 +23,7 @@ import {
   BEAD_STRIDE,
   NODE_STRIDE,
   INTERIOR_STRIDE,
+  INTERIOR_SLOTS_PER_NODE,
   EDGE_STRIDE,
   PORT_STRIDE,
   CAMERA_STRIDE,
@@ -36,17 +37,13 @@ import {
   readEdgeEdgeLabelOff,
   readEdgeEdgeLabelLen,
 } from "../../schema/buffer-layout";
+// Generated (part of BUF_LAYOUT_FINGERPRINT) — re-exported here so existing consumers
+// (buffer-scene.tsx, InteriorBeadInstances.tsx, buffer-log.ts) keep importing it from the
+// decode module rather than reaching into schema/buffer-layout directly.
+export { INTERIOR_SLOTS_PER_NODE } from "../../schema/buffer-layout";
 
 /** Shared UTF-8 decoder for the label / port-name / edge-label sections. */
 const STR_DECODER = new TextDecoder();
-
-/**
- * Fixed interior grid slots per node in the Interior block. MUST match
- * BufInteriorSlotsPerNode in Buffer/layout.go — the Interior block carries exactly
- * nodeCount × INTERIOR_SLOTS_PER_NODE rows (slot = gridRow*2 + gridCol), so it has no
- * separate header count. Locked in parity by the interior-block decode test.
- */
-export const INTERIOR_SLOTS_PER_NODE = 4;
 
 export interface DecodedSnapshot {
   tick: number;
