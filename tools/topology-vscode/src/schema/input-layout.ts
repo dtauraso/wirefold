@@ -14,18 +14,23 @@
 // There is NO JSON on the wire: every record is fully numeric. The live editor→Go traffic
 // is raw-input (numeric), overlays toggle (numeric flag-id), the bare save
 // COMMAND (kind byte only — Go persists its OWN authoritative scene state), and the
-// play/pause/resend control bytes. The create/delete/edit-update record kinds stay defined
+// play/pause control bytes. The create/delete/edit-update record kinds stay defined
 // (the 3-op create/update/delete concept) though the gesture FSM now produces edge
 // create/delete in-process from raw-input, so TS sends no create/delete today.
+//
+// Kind 3 was IN_KIND_RESEND (removed: the ext host now caches the last fd3 snapshot and
+// replays it on webview "ready" instead of asking Go to re-emit geometry — see
+// BuildAndRunRunner.lastSnapshot / getLastSnapshot in runCommand.ts). Left as an
+// intentional GAP rather than renumbered, so no other kind's wire value moves.
 
-// INPUT_LAYOUT_FINGERPRINT: v12 kinds=resume:1,pause:2,resend:3,save:4,fadeToggle:5,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays updateAttrs=toggle overlayFlags=tori,scenePoles,nodePoles,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays,doubleLinks
+// INPUT_LAYOUT_FINGERPRINT: v13 kinds=resume:1,pause:2,save:4,fadeToggle:5,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays updateAttrs=toggle overlayFlags=tori,scenePoles,nodePoles,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays,doubleLinks
 export const INPUT_LAYOUT_FINGERPRINT =
-  "v12 kinds=resume:1,pause:2,resend:3,save:4,fadeToggle:5,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays updateAttrs=toggle overlayFlags=tori,scenePoles,nodePoles,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays,doubleLinks";
+  "v13 kinds=resume:1,pause:2,save:4,fadeToggle:5,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays updateAttrs=toggle overlayFlags=tori,scenePoles,nodePoles,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays,doubleLinks";
 
 // Record kind bytes (first byte of every record). Must match input_codec.go.
 export const IN_KIND_RESUME = 1;
 export const IN_KIND_PAUSE = 2;
-export const IN_KIND_RESEND = 3;
+// Kind 3 (IN_KIND_RESEND) removed — intentional gap, see comment above.
 export const IN_KIND_SAVE = 4;
 export const IN_KIND_FADE_TOGGLE = 5;
 export const IN_KIND_RAW_INPUT = 10;
@@ -115,7 +120,7 @@ class ByteWriter {
   }
 }
 
-/** Build a payload-less control/command record (play / pause / resend / save). */
+/** Build a payload-less control/command record (play / pause / save). */
 export function encodeControl(kind: number): ArrayBuffer {
   const w = new ByteWriter();
   w.u8(kind);
@@ -124,7 +129,6 @@ export function encodeControl(kind: number): ArrayBuffer {
 
 export const encodePlay = () => encodeControl(IN_KIND_RESUME);
 export const encodePause = () => encodeControl(IN_KIND_PAUSE);
-export const encodeResend = () => encodeControl(IN_KIND_RESEND);
 /** Bare FADE-TOGGLE command: toggle fade on Go's CURRENT selection (the "f" key press).
  *  Go owns selection + topology, so no id crosses the wire — just the kind byte. */
 export const encodeFadeToggle = () => encodeControl(IN_KIND_FADE_TOGGLE);
@@ -233,7 +237,7 @@ class ByteReader {
 }
 
 export type DecodedInput =
-  | { kind: "play" | "pause" | "resend" | "save" | "fade-toggle" }
+  | { kind: "play" | "pause" | "save" | "fade-toggle" }
   | { kind: "raw-input"; event: RawInputEvent }
   | { kind: "edit-create" | "edit-delete"; target: string; targetHandle: string }
   | { kind: "edit-update"; entity: "overlays"; attr: "toggle"; flag: OverlayFlag };
@@ -248,8 +252,6 @@ export function decodeInputRecord(record: ArrayBuffer): DecodedInput | undefined
       return { kind: "play" };
     case IN_KIND_PAUSE:
       return { kind: "pause" };
-    case IN_KIND_RESEND:
-      return { kind: "resend" };
     case IN_KIND_SAVE:
       return { kind: "save" };
     case IN_KIND_FADE_TOGGLE:

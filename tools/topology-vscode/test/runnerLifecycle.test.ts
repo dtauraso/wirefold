@@ -121,6 +121,71 @@ describe("pendingStdin drain", () => {
   });
 });
 
+describe("lastSnapshot cache (getLastSnapshot) — resend replacement", () => {
+  // The ext host caches the last fd3 buffer-snapshot frame so a webview "ready" (after a
+  // remount) can be served instantly instead of asking Go to manufacture a frame (resend,
+  // removed). THE TRAP: runCommand.ts hands onSnapshot the SAME ArrayBuffer it forwards to
+  // postMessage, and VS Code's webview.postMessage TRANSFERS (not clones) ArrayBuffers on
+  // engines >=1.57 — a real transfer DETACHES the source (byteLength -> 0). This test proves
+  // the cache survives that by actually detaching the posted buffer via the real structured-
+  // clone transfer primitive (Node's structuredClone with a transfer list — the same
+  // detach semantics a MessagePort/Electron IPC transfer performs), then asserting
+  // getLastSnapshot() still returns the untouched bytes.
+  function framed(bytes: number[]): Uint8Array {
+    const body = new Uint8Array(bytes);
+    const out = new Uint8Array(4 + body.length);
+    new DataView(out.buffer).setUint32(0, body.length, true);
+    out.set(body, 4);
+    return out;
+  }
+
+  it("cached buffer survives the posted buffer being TRANSFER-detached", () => {
+    const posted: ArrayBuffer[] = [];
+    const r = new BuildAndRunRunner(
+      () => {},
+      (snap) => {
+        posted.push(snap.buffer);
+        // Simulate exactly what a real postMessage transfer does to its source buffer.
+        structuredClone(snap.buffer, { transfer: [snap.buffer] });
+      },
+    );
+    r.run();
+    const proc = spawned[0];
+    const fd3 = proc.stdio[3] as { on: ReturnType<typeof vi.fn> };
+    const dataCall = fd3.on.mock.calls.find((c) => c[0] === "data");
+    if (!dataCall) throw new Error("fd3 'data' handler was never registered");
+    const onFd3Data = dataCall[1] as (d: Buffer) => void;
+
+    onFd3Data(Buffer.from(framed([1, 2, 3]).buffer));
+
+    // The buffer handed to onSnapshot is now detached (byteLength 0) — proving the trap is
+    // real and the test isn't vacuously passing.
+    expect(posted[0].byteLength).toBe(0);
+
+    // The CACHE, independent of that reference, must still hold the original 3 bytes.
+    const cached = r.getLastSnapshot();
+    expect(cached).toBeDefined();
+    expect(cached!.byteLength).toBe(3);
+    expect(new Uint8Array(cached!)).toEqual(new Uint8Array([1, 2, 3]));
+  });
+
+  it("cache is overwritten by each new frame; getLastSnapshot reflects the LATEST one", () => {
+    const r = new BuildAndRunRunner(() => {}); // no onSnapshot — cache still populates
+    r.run();
+    const proc = spawned[0];
+    const fd3 = proc.stdio[3] as { on: ReturnType<typeof vi.fn> };
+    const onFd3Data = fd3.on.mock.calls.find((c) => c[0] === "data")![1] as (d: Buffer) => void;
+
+    expect(r.getLastSnapshot()).toBeUndefined();
+
+    onFd3Data(Buffer.from(framed([9]).buffer));
+    expect(new Uint8Array(r.getLastSnapshot()!)).toEqual(new Uint8Array([9]));
+
+    onFd3Data(Buffer.from(framed([1, 2, 3, 4]).buffer));
+    expect(new Uint8Array(r.getLastSnapshot()!)).toEqual(new Uint8Array([1, 2, 3, 4]));
+  });
+});
+
 describe("respawn / looping", () => {
   it("a natural exit while looping respawns", () => {
     const r = newRunner();

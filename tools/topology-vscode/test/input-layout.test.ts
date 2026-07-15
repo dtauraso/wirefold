@@ -5,7 +5,6 @@ import { describe, it, expect } from "vitest";
 import {
   IN_KIND_RESUME,
   IN_KIND_PAUSE,
-  IN_KIND_RESEND,
   IN_KIND_SAVE,
   IN_KIND_FADE_TOGGLE,
   IN_KIND_RAW_INPUT,
@@ -15,7 +14,6 @@ import {
   INPUT_LAYOUT_FINGERPRINT,
   encodePlay,
   encodePause,
-  encodeResend,
   encodeFadeToggle,
   encodeOverlaysToggle,
   decodeInputRecord,
@@ -47,10 +45,9 @@ function createDeleteBytes(kind: number, target: string, targetHandle: string): 
 }
 
 describe("control records — exact bytes", () => {
-  it("play/pause/resend/save are a single kind byte", () => {
+  it("play/pause/save are a single kind byte", () => {
     expect(new Uint8Array(encodePlay())).toEqual(new Uint8Array([IN_KIND_RESUME]));
     expect(new Uint8Array(encodePause())).toEqual(new Uint8Array([IN_KIND_PAUSE]));
-    expect(new Uint8Array(encodeResend())).toEqual(new Uint8Array([IN_KIND_RESEND]));
     expect(new Uint8Array(controlBytes(IN_KIND_SAVE))).toEqual(new Uint8Array([IN_KIND_SAVE]));
     expect(new Uint8Array(encodeFadeToggle())).toEqual(new Uint8Array([IN_KIND_FADE_TOGGLE]));
   });
@@ -66,7 +63,6 @@ describe("control records — exact bytes", () => {
   it("decode control", () => {
     expect(decodeInputRecord(encodePlay())).toEqual({ kind: "play" });
     expect(decodeInputRecord(encodePause())).toEqual({ kind: "pause" });
-    expect(decodeInputRecord(encodeResend())).toEqual({ kind: "resend" });
     expect(decodeInputRecord(controlBytes(IN_KIND_SAVE))).toEqual({ kind: "save" });
     expect(decodeInputRecord(encodeFadeToggle())).toEqual({ kind: "fade-toggle" });
   });
@@ -121,7 +117,7 @@ describe("fingerprint self-consistency", () => {
     // Built from the live constants, not typed in by hand — if any IN_KIND_* value drifts
     // from the fingerprint's hardcoded numbers, this fails instead of silently passing.
     const expected =
-      `kinds=resume:${IN_KIND_RESUME},pause:${IN_KIND_PAUSE},resend:${IN_KIND_RESEND},` +
+      `kinds=resume:${IN_KIND_RESUME},pause:${IN_KIND_PAUSE},` +
       `save:${IN_KIND_SAVE},fadeToggle:${IN_KIND_FADE_TOGGLE},raw-input:${IN_KIND_RAW_INPUT},` +
       `edit-create:${IN_KIND_EDIT_CREATE},edit-delete:${IN_KIND_EDIT_DELETE},edit-update:${IN_KIND_EDIT_UPDATE}`;
     expect(INPUT_LAYOUT_FINGERPRINT).toContain(expected);

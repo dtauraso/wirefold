@@ -73,16 +73,21 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
     case "ready": {
       // Spawn Go immediately so edges render from geometry events before the
       // user presses Run. Go starts HALTED — the clock won't tick until play().
-      // A remount (hot-reload after npm run build) resets the webview's module-level
-      // edge-geometry store but leaves Go running; run() is then idempotent (no-op),
-      // so geometry is never re-streamed and edges vanish until Reload Window.
-      // If Go was ALREADY running before this run(), request a geometry resend so the
-      // remounted webview rebuilds its store. A just-spawned Go needs no resend — it
-      // emits startup geometry on its own — so this also dodges any post-spawn
-      // stdin-readiness race (we only send resend when stdin was already live).
+      // A remount (hot-reload after npm run build) leaves Go running but the fresh
+      // webview holds no state (see check-no-webview-state.sh) — it has nothing to
+      // draw until the next frame Go happens to emit, which may be a long wait while
+      // paused/idle. run() is idempotent (no-op if already running).
+      // If Go was ALREADY running before this run(), hand the remounted webview the
+      // ext host's cached last snapshot (see BuildAndRunRunner.lastSnapshot) so it
+      // renders instantly without round-tripping to Go. A just-spawned Go needs no
+      // cached frame — it emits its own startup geometry — so this also dodges any
+      // post-spawn stdin-readiness race.
       const wasRunning = runner.isRunning();
       runner.run();
-      if (wasRunning) runner.resend();
+      if (wasRunning) {
+        const cached = runner.getLastSnapshot();
+        if (cached) ctx.post({ type: "buffer-snapshot", buffer: cached });
+      }
       return;
     }
     case "run":
@@ -120,12 +125,11 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
     // LIVE_CASES_END
     // The following kinds are declared in WebviewToHostMsg (and WEBVIEW_TO_HOST_TYPES) so
     // message-kind-parity tracks stdin_reader.go's msg.Type switch, but no live webview code
-    // path posts them as a bare JS object: "resend" is host-originated only (never sent by
-    // the webview); "raw-input"/"edit"/"save"/"fade-toggle" are always encoded into a binary
-    // record and sent as "go-record" (see schema/input-layout.ts), never posted directly;
-    // "play" is declared only so this union tracks Go's binary-record "play" kind — the
-    // ext-host builds that record itself (BuildAndRunRunner.play(), invoked by the "run"
-    // and "resume" cases above), so no webview code ever posts a bare {type:"play"}.
+    // path posts them as a bare JS object: "raw-input"/"edit"/"save"/"fade-toggle" are always
+    // encoded into a binary record and sent as "go-record" (see schema/input-layout.ts),
+    // never posted directly; "play" is declared only so this union tracks Go's binary-record
+    // "play" kind — the ext-host builds that record itself (BuildAndRunRunner.play(), invoked
+    // by the "run" and "resume" cases above), so no webview code ever posts a bare {type:"play"}.
     // If one somehow arrives, this is a bug upstream — log it rather than silently drop it.
     //
     // The ONLY legitimate reason for a kind to sit here is Go-parity: it must be one of the
@@ -133,7 +137,6 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
     // that Go does not recognize would be dead on both sides and is checked for by
     // check-message-kind-parity.sh — it fails the guard, it does not pass silently.
     // DECLARED_NOT_SENT_START
-    case "resend":
     case "raw-input":
     case "save":
     case "fade-toggle":
