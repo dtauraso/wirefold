@@ -106,13 +106,34 @@ while IFS= read -r path; do
   #     # surface"
   # into the citation `CLAUDE.md "Bridge # surface"` — a false positive manufactured by the
   # normalizer itself. Markdown/HTML keep their '#' (headers).
+  # NOTE the '%' delimiter. With '|' as the delimiter, `s|...(//|\*)...|` puts a '|' INSIDE
+  # the alternation, so sed reads it as the delimiter and dies "parentheses not balanced" —
+  # on every .go/.ts file. Piped through `|| true`, that failure was SILENT: those files
+  # produced no output, contributed no citations, and the guard cheerfully reported clean
+  # while scanning markdown only. A guard that quietly checks less than it claims is the
+  # exact bug class this file exists to catch. Verified after fixing: Go/TS citations are
+  # extracted again.
   case "$path" in
-    *.go|*.ts|*.tsx) strip='s|^[[:space:]]*(//|\*)[[:space:]]?||' ;;
-    *.sh|*.py)       strip='s|^[[:space:]]*#[[:space:]]?||' ;;
+    *.go|*.ts|*.tsx) strip='s%^[[:space:]]*(//|\*)[[:space:]]?%%' ;;
+    *.sh|*.py)       strip='s%^[[:space:]]*#[[:space:]]?%%' ;;
     *)               strip='' ;;
   esac
 
-  { if [[ -n "$strip" ]]; then sed -E "$strip" "$path"; else cat "$path"; fi; } \
+  # Assert the normalizer actually produced text. Without this, ANY breakage in the strip
+  # expression degrades to "this file has no citations" instead of an error — which is how
+  # the '|' delimiter bug above went unnoticed through a full green stop-checks run.
+  if [[ -n "$strip" ]]; then
+    stripped=$(sed -E "$strip" "$path" 2>/dev/null) || stripped=""
+    if [[ -z "$stripped" ]]; then
+      echo "doc-citations: MISCONFIGURED — normalizer produced no text for $path" >&2
+      echo "  (a broken strip expression would silently skip this file; refusing that)" >&2
+      exit 1
+    fi
+  else
+    stripped=$(cat "$path")
+  fi
+
+  printf '%s' "$stripped" \
     | tr '\n' ' ' \
     | sed -e 's/"[[:space:]]*"//g' -e 's/\\"/"/g' \
     | grep -oE '.{0,110}(CLAUDE|MODEL)\.md'"'"'?s?[[:space:]]+"[^"]{3,}"' 2>/dev/null \
