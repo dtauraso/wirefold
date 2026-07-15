@@ -131,6 +131,32 @@ type SnapshotState struct {
 	// Built once in NewSnapshotState (pointers into s.overlay, valid for the state's
 	// lifetime since overlay is a fixed-offset struct field, not reallocated).
 	overlayFlagFields map[string]*uint8
+
+	// tickSource, when non-nil, is the network's one human-speed clock (Wiring.Clock.Tick),
+	// injected via SetTickSource. It coalesces the high-volume KindPosition stream (one event
+	// PER BEAD per tick, so beads_in_flight events per tick) down to at most one emit per tick,
+	// matching "the tick IS the animation clock" (clock.go) instead of publishing once per bead.
+	// Buffer must not import nodes/Wiring (one-way dependency), so this is injected as a plain
+	// func, not a Wiring.Clock. Nil (the default, e.g. bare NewSnapshotState in tests) preserves
+	// the original per-event emit behavior exactly.
+	tickSource func() int64
+
+	// lastPosEmitTick is the tick at which a KindPosition event last actually triggered an
+	// emitSnapshot; -1 = none yet (so the first position event on a fresh tick always emits).
+	lastPosEmitTick int64
+
+	// positionDirty is true when bead state has changed since the last emitSnapshot call for
+	// any reason. Set on every KindPosition update; cleared inside emitSnapshot (which publishes
+	// the current bead state regardless of what triggered it). FinalFlush checks this so a
+	// coalesced-away final tick's bead positions are never dropped at shutdown.
+	positionDirty bool
+}
+
+// SetTickSource injects the network's tick function so the KindPosition stream coalesces to
+// at most one emit per tick. Call once at startup (main.go, after both the clock and
+// SnapshotState exist); leave unset (nil) to keep tests' original per-event emit semantics.
+func (s *SnapshotState) SetTickSource(f func() int64) {
+	s.tickSource = f
 }
 
 // eventRec is one buffered causal event, holding string identities that buildSnapshot
@@ -292,6 +318,7 @@ func NewSnapshotState(out io.Writer) *SnapshotState {
 		directlyFadedEdges: map[string]bool{},
 		out:                out,
 		kindID:             buildKindIDMap(),
+		lastPosEmitTick:    -1,
 	}
 	s.overlayFlagFields = map[string]*uint8{
 		T.KindSceneTori:      &s.overlay.sceneTori,
@@ -353,13 +380,23 @@ func (s *SnapshotState) Update(ev T.Event) {
 		s.emitSnapshot()
 
 	case T.KindPosition:
-		// Update the live bead state AND trigger a snapshot on the position cadence (~16ms).
+		// Update the live bead state. Every bead steps once per tick (paced_wire.go), so with
+		// N beads in flight this event fires N times per tick — but the tick, not the event, is
+		// the animation clock (clock.go), so coalesce to at most one emit per tick: emit only
+		// when tickSource reports a tick we have not yet emitted for this stream. positionDirty
+		// tracks any update an emit skip left unpublished, so FinalFlush cannot drop it.
 		k := beadSnapKey{ev.Node, ev.Port, ev.Bead}
 		s.beads[k] = beadSnapState{
 			x: ev.X, y: ev.Y, z: ev.Z,
 			value: ev.Value,
 		}
-		s.emitSnapshot()
+		s.positionDirty = true
+		if s.tickSource == nil {
+			s.emitSnapshot()
+		} else if t := s.tickSource(); t != s.lastPosEmitTick {
+			s.lastPosEmitTick = t
+			s.emitSnapshot()
+		}
 
 	case T.KindArrive:
 		// Bead completed traversal: remove it from live beads.
@@ -801,6 +838,9 @@ func (s *SnapshotState) emitSnapshot() {
 	s.clearTransients()
 	// Restore the deferred events (clearTransients truncated pendingEvents to empty).
 	s.pendingEvents = append(s.pendingEvents, deferred...)
+	// This emit just published the current bead state (buildSnapshot always packs s.beads),
+	// regardless of what triggered it — clear the coalesce-tracking flag.
+	s.positionDirty = false
 }
 
 // eventReady reports whether every node/edge identity an event references is registered, so

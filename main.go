@@ -43,6 +43,10 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 		}
 	}
 	snapState := B.NewSnapshotState(snapOut)
+	// Coalesce the high-volume KindPosition stream to at most one emit per tick (clock.go: "the
+	// tick IS the animation clock", not per-bead-event). clk already exists here (runTopology's
+	// parameter), so wire it in directly rather than reordering construction.
+	snapState.SetTickSource(clk.Tick)
 	// sink=nil: the JSON-trace-on-stdout emitter is REMOVED. Trace still assigns Step, buffers
 	// events (WriteJSONL -trace file), and drives snapState.Update (the onEvent hook) which packs
 	// the binary content buffer's EVENT block. The .probe log is now the ext-host DECODE of that
