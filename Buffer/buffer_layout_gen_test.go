@@ -154,17 +154,16 @@ func TestSetCameraRow(t *testing.T) {
 
 func TestSetOverlayRow(t *testing.T) {
 	buf := make([]byte, BufOverlayStride)
-	SetOverlayRow(buf, 1, 0, 1, 0, 1, 0, 1, 0, 1, 1)
+	SetOverlayRow(buf, 1, 0, 1, 0, 1, 0, 1, 0, 1)
 
 	assertU8At(t, buf, BufOverlayColSceneTori, 1, "SceneTori")
 	assertU8At(t, buf, BufOverlayColScenePoles, 0, "ScenePoles")
 	assertU8At(t, buf, BufOverlayColNodePoles, 1, "NodePoles")
-	assertU8At(t, buf, BufOverlayColAngleLabels, 0, "AngleLabels")
-	assertU8At(t, buf, BufOverlayColSelSpherePoles, 1, "SelSpherePoles")
-	assertU8At(t, buf, BufOverlayColHandholds, 0, "Handholds")
-	assertU8At(t, buf, BufOverlayColLabelsGlobal, 1, "LabelsGlobal")
-	assertU8At(t, buf, BufOverlayColBadgesGlobal, 0, "BadgesGlobal")
-	assertU8At(t, buf, BufOverlayColOverlaysVis, 1, "OverlaysVis")
+	assertU8At(t, buf, BufOverlayColSelSpherePoles, 0, "SelSpherePoles")
+	assertU8At(t, buf, BufOverlayColHandholds, 1, "Handholds")
+	assertU8At(t, buf, BufOverlayColLabelsGlobal, 0, "LabelsGlobal")
+	assertU8At(t, buf, BufOverlayColBadgesGlobal, 1, "BadgesGlobal")
+	assertU8At(t, buf, BufOverlayColOverlaysVis, 0, "OverlaysVis")
 	assertU8At(t, buf, BufOverlayColSelMode, 1, "SelMode")
 }
 
@@ -202,8 +201,8 @@ func TestCameraStrideIsPackedSize(t *testing.T) {
 }
 
 func TestOverlayStrideIsPackedSize(t *testing.T) {
-	// Overlay block: 10×u8 = 10 (9 overlay flags + SelMode)
-	want := 10
+	// Overlay block: 9×u8 = 9 (8 overlay flags + SelMode)
+	want := 9
 	if BufOverlayStride != want {
 		t.Errorf("BufOverlayStride = %d, want %d (packed size)", BufOverlayStride, want)
 	}
