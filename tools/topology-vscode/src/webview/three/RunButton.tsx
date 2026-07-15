@@ -9,12 +9,10 @@ export function RunButton() {
   const mount = document.getElementById("run-mount");
   if (!mount) return null;
 
-  // isActive ("a Go process is spawned") is the ext-host's genuine, instant status fact —
-  // see messages.ts RunStatus. Running-vs-paused is Go's own truth, streamed in the binary
-  // buffer's Clock block and reflected here via useClockHalted — NOT predicted from the
-  // stdin play/pause write. When no process is alive there is no buffer and no clock, so
-  // clockHalted (possibly stale from a PRIOR run's cached snapshot — the ext host never
-  // clears lastSnapshot on stop) must be ignored unless isActive is also true.
+  // Two facts, each owned by the only side that can know it. isActive ("a Go process is
+  // spawned") is the ext host's: a dead process cannot report that it is dead. clockHalted
+  // is Go's, streamed in the buffer's Clock block — NOT predicted from the stdin play/pause
+  // write. The buffer describes a live process, so it means nothing without isActive.
   const isActive = status.state === "active"; // process is alive
   const isRunning = isActive && clockHalted === false;
   const isPaused = isActive && clockHalted !== false; // includes clockHalted===true and
