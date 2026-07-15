@@ -32,7 +32,7 @@ import {
   readCameraPosTheta, readCameraPosPhi, readCameraUpTheta, readCameraUpPhi,
   readOverlaySceneTori, readOverlayScenePoles, readOverlayNodePoles,
   readOverlaySelSpherePoles, readOverlayHandholds, readOverlayLabelsGlobal,
-  readOverlayBadgesGlobal, readOverlayOverlaysVis,
+  readOverlayBadgesGlobal, readOverlayOverlaysVis, readOverlayDoubleLinks,
   readPortPX, readPortPY, readPortPZ,
   readEventKind, readEventNodeRow, readEventPortRow, readEventTargetRow, readEventTargetPortRow,
   readEventEdgeRow, readEventSlot, readEventValue, readEventBead,
@@ -68,6 +68,9 @@ export type DecodedEventLine =
   | { step: number; kind: "labels-global"; visible: boolean }
   | { step: number; kind: "badges-global"; visible: boolean }
   | { step: number; kind: "overlays-vis"; visible: boolean }
+  | { step: number; kind: "double-links"; visible: boolean }
+  // Layout-link pair, from LocalPolars — NOT the Edge block (see Buffer/layout.go LayoutLink).
+  | { step: number; kind: "layout-link"; node: string; target: string }
   // Go-owned click-selection: the currently-selected node id (node="" clears it).
   | { step: number; kind: "select"; node: string }
   | { step: number; kind: "fade"; fadedNodes: string[]; fadedEdges: string[] }
@@ -102,13 +105,14 @@ function overlayFlag(d: DecodedSnapshot, kind: string): number {
     case "labels-global": return readOverlayLabelsGlobal(v);
     case "badges-global": return readOverlayBadgesGlobal(v);
     case "overlays-vis": return readOverlayOverlaysVis(v);
+    case "double-links": return readOverlayDoubleLinks(v);
     default: return 0;
   }
 }
 
 const OVERLAY_KINDS = new Set([
   "scene-tori", "scene-poles", "node-poles", "sel-sphere-poles",
-  "handholds", "labels-global", "badges-global", "overlays-vis",
+  "handholds", "labels-global", "badges-global", "overlays-vis", "double-links",
 ]);
 
 function decodeEventLine(d: DecodedSnapshot, i: number): Line | null {
@@ -189,6 +193,10 @@ function decodeEventLine(d: DecodedSnapshot, i: number): Line | null {
     case "scene-sphere": {
       const sc = d.sceneView;
       return { kind, cx: readSceneCX(sc), cy: readSceneCY(sc), cz: readSceneCZ(sc), radius: readSceneRadius(sc) };
+    }
+    case "layout-link": {
+      const target = targetRow >= 0 ? nodeLabel(d, targetRow) : "";
+      return { kind, node, target };
     }
     case "select":
       // stdout marshals select via the default {node,port,value} shape (edge label not emitted).

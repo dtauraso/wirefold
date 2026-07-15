@@ -40,6 +40,7 @@ const OVERLAY_FLAG_NAMES = [
   "labelsGlobal",
   "badgesGlobal",
   "overlays",
+  "doubleLinks",
 ] as const;
 // OVERLAY_FLAGS_END
 

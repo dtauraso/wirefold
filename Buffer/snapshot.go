@@ -11,11 +11,13 @@
 //
 // Snapshot layout (little-endian, packed):
 //
-//	Header   36 bytes: [tick][beadCount][nodeCount][edgeCount][portCount][labelBytesCount][eventCount][portNameBytesCount][edgeLabelBytesCount] (u32 each)
+//	Header   40 bytes: [tick][beadCount][nodeCount][edgeCount][portCount][labelBytesCount][eventCount][portNameBytesCount][edgeLabelBytesCount][layoutLinkCount] (u32 each)
 //	Bead     beadCount × BufBeadStride bytes
 //	Node     nodeCount × BufNodeStride bytes   (persistent geom + transient event flags + label off/len)
 //	Interior nodeCount × BufInteriorSlotsPerNode × BufInteriorStride bytes
 //	Edge     edgeCount × BufEdgeStride bytes   (+ edge-label off/len)
+//	LayoutLink layoutLinkCount × BufLayoutLinkStride bytes (the LAYOUT double-link overlay pairs,
+//	           from LocalPolars — NOT the Edge block; see bufLayoutLayoutLink in layout.go)
 //	Port     portCount × BufPortStride bytes   (flattened over nodes in node-row order; + port-name off/len)
 //	Camera   BufCameraStride bytes             (always 1 row)
 //	Overlay  BufOverlayStride bytes            (always 1 row)
@@ -64,6 +66,13 @@ type SnapshotState struct {
 	edgeLabels []string
 	edgeIndex  map[string]int
 	edges      []edgeSnapState
+
+	// LayoutLink rows: stable-ordered by first KindLayoutLink event. Distinct from edges —
+	// sourced from the LAYOUT model (LocalPolars), not the bead-edge graph. Keyed by
+	// "src\x00dst" so a re-emit of the same pair (e.g. a respawn re-running load) is idempotent
+	// rather than appending a duplicate row.
+	layoutLinkIndex map[string]int
+	layoutLinks     []layoutLinkSnapState
 
 	// Live in-flight beads, keyed by (sourceNode, sourcePort, gen).
 	beads map[beadSnapKey]beadSnapState
@@ -267,6 +276,13 @@ type edgeSnapState struct {
 	selected uint8
 }
 
+// layoutLinkSnapState holds one LAYOUT-link pair's endpoint node ids. Resolved to node-row
+// indices at buildSnapshot time, same as edgeSnapState's srcNode/dstNode.
+type layoutLinkSnapState struct {
+	srcNode string
+	dstNode string
+}
+
 // beadSnapState holds current position + metadata for one in-flight bead.
 type beadSnapState struct {
 	x, y, z float64
@@ -300,6 +316,7 @@ type overlaySnapState struct {
 	labelsGlobal   uint8
 	badgesGlobal   uint8
 	overlaysVis    uint8
+	doubleLinks    uint8
 	// selMode is the current select mode (1 = own, 0 = surface), set by KindSelect.
 	// Not an overlay flag — rides the overlay singleton row for the on-surface highlight.
 	selMode uint8
@@ -312,6 +329,7 @@ func NewSnapshotState(out io.Writer) *SnapshotState {
 	s := &SnapshotState{
 		nodeIndex:          map[string]int{},
 		edgeIndex:          map[string]int{},
+		layoutLinkIndex:    map[string]int{},
 		beads:              map[beadSnapKey]beadSnapState{},
 		srcToDest:          map[srcPortKey]string{},
 		directlyFadedNodes: map[string]bool{},
@@ -329,6 +347,7 @@ func NewSnapshotState(out io.Writer) *SnapshotState {
 		T.KindLabelsGlobal:   &s.overlay.labelsGlobal,
 		T.KindBadgesGlobal:   &s.overlay.badgesGlobal,
 		T.KindOverlaysVis:    &s.overlay.overlaysVis,
+		T.KindDoubleLinks:    &s.overlay.doubleLinks,
 	}
 	return s
 }
@@ -357,6 +376,9 @@ func (s *SnapshotState) Update(ev T.Event) {
 	case T.KindGeometry:
 		s.onEdgeGeometry(ev)
 		s.emitSnapshot() // state-change point: emit on edge geometry updates
+	case T.KindLayoutLink:
+		s.onLayoutLink(ev)
+		s.emitSnapshot() // state-change point: emit on layout-link registration
 	case T.KindCamera:
 		s.camera = cameraSnapState{
 			px: ev.PX, py: ev.PY, pz: ev.PZ,
@@ -373,7 +395,7 @@ func (s *SnapshotState) Update(ev T.Event) {
 
 	case T.KindSceneTori, T.KindScenePoles, T.KindNodePoles,
 		T.KindSelSpherePoles, T.KindHandholds, T.KindLabelsGlobal, T.KindBadgesGlobal,
-		T.KindOverlaysVis:
+		T.KindOverlaysVis, T.KindDoubleLinks:
 		if field, ok := s.overlayFlagFields[ev.Kind]; ok {
 			*field = boolU8(ev.Visible)
 		}
@@ -630,6 +652,18 @@ func (s *SnapshotState) onEdgeGeometry(ev T.Event) {
 	}
 }
 
+// onLayoutLink registers one LAYOUT-link pair (Node=one endpoint, Target=the other), sourced
+// from LocalPolars (nodes/Wiring/loader.go emitLayoutLinks) — NOT the bead-edge graph. Idempotent
+// on the unordered pair key so a re-emit does not append a duplicate row.
+func (s *SnapshotState) onLayoutLink(ev T.Event) {
+	key := ev.Node + "\x00" + ev.Target
+	if _, exists := s.layoutLinkIndex[key]; exists {
+		return
+	}
+	s.layoutLinkIndex[key] = len(s.layoutLinks)
+	s.layoutLinks = append(s.layoutLinks, layoutLinkSnapState{srcNode: ev.Node, dstNode: ev.Target})
+}
+
 // setNodeEvent sets one transient event flag on a node by BufEvent* id.
 func (s *SnapshotState) setNodeEvent(nodeID string, eventID int) {
 	idx, ok := s.nodeIndex[nodeID]
@@ -866,6 +900,7 @@ func (s *SnapshotState) eventReady(e eventRec) bool {
 // newSnapshotBuild; the block writers never recompute it.
 type snapshotBuild struct {
 	beadCount, nodeCount, edgeCount uint32
+	layoutLinkCount                 uint32
 	interiorCount, portCount        int
 	eventCount                      int
 
@@ -966,9 +1001,10 @@ func (s *SnapshotState) buildEdgeLabelSection() ([]byte, []uint32, []uint32) {
 // the returned struct only — none of them recompute this data.
 func (s *SnapshotState) newSnapshotBuild() *snapshotBuild {
 	b := &snapshotBuild{
-		beadCount: uint32(len(s.beads)),
-		nodeCount: uint32(len(s.nodes)),
-		edgeCount: uint32(len(s.edges)),
+		beadCount:       uint32(len(s.beads)),
+		nodeCount:       uint32(len(s.nodes)),
+		edgeCount:       uint32(len(s.edges)),
+		layoutLinkCount: uint32(len(s.layoutLinks)),
 	}
 	b.interiorCount = int(b.nodeCount) * BufInteriorSlotsPerNode
 
@@ -995,6 +1031,7 @@ func (s *SnapshotState) newSnapshotBuild() *snapshotBuild {
 		int(b.nodeCount)*BufNodeStride +
 		b.interiorCount*BufInteriorStride +
 		int(b.edgeCount)*BufEdgeStride +
+		int(b.layoutLinkCount)*BufLayoutLinkStride +
 		b.portCount*BufPortStride +
 		BufCameraStride +
 		BufOverlayStride +
@@ -1010,7 +1047,7 @@ func (s *SnapshotState) newSnapshotBuild() *snapshotBuild {
 // writeHeader writes the fixed 36-byte header and increments s.tick. Returns the offset after
 // the header.
 func (s *SnapshotState) writeHeader(buf []byte, b *snapshotBuild) int {
-	// Header: [tick][beadCount][nodeCount][edgeCount][portCount][labelBytesCount][eventCount][portNameBytesCount][edgeLabelBytesCount]
+	// Header: [tick][beadCount][nodeCount][edgeCount][portCount][labelBytesCount][eventCount][portNameBytesCount][edgeLabelBytesCount][layoutLinkCount]
 	off := 0
 	binary.LittleEndian.PutUint32(buf[off:], s.tick)
 	off += 4
@@ -1029,6 +1066,8 @@ func (s *SnapshotState) writeHeader(buf []byte, b *snapshotBuild) int {
 	binary.LittleEndian.PutUint32(buf[off:], uint32(b.portNameBytesCount))
 	off += 4
 	binary.LittleEndian.PutUint32(buf[off:], uint32(b.edgeLabelBytesCount))
+	off += 4
+	binary.LittleEndian.PutUint32(buf[off:], b.layoutLinkCount)
 	off += 4
 	s.tick++
 	return off
@@ -1098,6 +1137,16 @@ func (s *SnapshotState) writeEdgeBlock(buf []byte, off int, b *snapshotBuild) in
 	return off + int(b.edgeCount)*BufEdgeStride
 }
 
+// writeLayoutLinkBlock writes the LayoutLink block: stable row order (insertion order of the
+// first-seen pair). Sourced from the LAYOUT model (LocalPolars), independent of the Edge block.
+func (s *SnapshotState) writeLayoutLinkBlock(buf []byte, off int, b *snapshotBuild) int {
+	llBuf := buf[off : off+int(b.layoutLinkCount)*BufLayoutLinkStride]
+	for i, ll := range s.layoutLinks {
+		SetLayoutLinkRow(llBuf, i, int32(s.nodeRowIndex(ll.srcNode)), int32(s.nodeRowIndex(ll.dstNode)))
+	}
+	return off + int(b.layoutLinkCount)*BufLayoutLinkStride
+}
+
 // writePortBlock writes the Port block: flattened over nodes in stable node-row order — for
 // each node in its buffer row order, that node's ports in node-geometry Ports order. NodeRow
 // is the owning node's row index; DX/DY/DZ is the port surface direction; IsInput marks input
@@ -1136,7 +1185,7 @@ func (s *SnapshotState) writeOverlayBlock(buf []byte, off int) int {
 		ov.sceneTori, ov.scenePoles, ov.nodePoles,
 		ov.selSpherePoles, ov.handholds,
 		ov.labelsGlobal, ov.badgesGlobal,
-		ov.overlaysVis, ov.selMode)
+		ov.overlaysVis, ov.doubleLinks, ov.selMode)
 	return off + BufOverlayStride
 }
 
@@ -1194,6 +1243,7 @@ func (s *SnapshotState) buildSnapshot() []byte {
 	off = s.writeNodeBlock(buf, off, b)
 	off = s.writeInteriorBlock(buf, off, b)
 	off = s.writeEdgeBlock(buf, off, b)
+	off = s.writeLayoutLinkBlock(buf, off, b)
 	off = s.writePortBlock(buf, off, b)
 	off = s.writeCameraBlock(buf, off)
 	off = s.writeOverlayBlock(buf, off)

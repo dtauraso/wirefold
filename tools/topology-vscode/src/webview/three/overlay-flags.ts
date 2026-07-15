@@ -21,6 +21,7 @@ import {
   readOverlayLabelsGlobal,
   readOverlayBadgesGlobal,
   readOverlayOverlaysVis,
+  readOverlayDoubleLinks,
 } from "../../schema/buffer-layout";
 
 // Keyed by OverlayFlag. Polarity is MIXED — a historical wart worth stating plainly, since
@@ -55,7 +56,8 @@ export function readOverlayFlags(): OverlayFlagVals | null {
     (readOverlayHandholds(v) ? 1 << 4 : 0) |
     (readOverlayLabelsGlobal(v) ? 1 << 5 : 0) |
     (readOverlayBadgesGlobal(v) ? 1 << 6 : 0) |
-    (readOverlayOverlaysVis(v) ? 1 << 7 : 0);
+    (readOverlayOverlaysVis(v) ? 1 << 7 : 0) |
+    (readOverlayDoubleLinks(v) ? 1 << 8 : 0);
   if (bits === cachedBits && cachedVals) return cachedVals;
   cachedBits = bits;
   cachedVals = {
@@ -68,6 +70,7 @@ export function readOverlayFlags(): OverlayFlagVals | null {
     labelsGlobal: !(bits & (1 << 5)),
     badgesGlobal: !(bits & (1 << 6)),
     overlays: !!(bits & (1 << 7)),
+    doubleLinks: !!(bits & (1 << 8)),
   };
   return cachedVals;
 }

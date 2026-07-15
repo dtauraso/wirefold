@@ -36,6 +36,8 @@ func (s *SnapshotState) recordEvent(ev T.Event) {
 		r.portIsInput = false
 	case T.KindGeometry:
 		r.edge = ev.Edge
+	case T.KindLayoutLink:
+		r.target = ev.Target
 	case T.KindNodeBead:
 		r.slot = ev.Row*2 + ev.Col
 	case T.KindCamera:
@@ -44,7 +46,7 @@ func (s *SnapshotState) recordEvent(ev T.Event) {
 		// All fields read from the Scene block at decode time (same pattern as Camera).
 	case T.KindSceneTori, T.KindScenePoles, T.KindNodePoles,
 		T.KindSelSpherePoles, T.KindHandholds, T.KindLabelsGlobal, T.KindBadgesGlobal,
-		T.KindOverlaysVis:
+		T.KindOverlaysVis, T.KindDoubleLinks:
 		r.flag = ev.Visible
 	case T.KindSelect:
 		r.edge = ev.Edge // edge!="" → edge select; else node select (value=mode)

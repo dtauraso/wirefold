@@ -22,6 +22,7 @@ type overlayState struct {
 	labelsGlobalVisible   bool
 	badgesGlobalVisible   bool
 	overlaysVisible       bool
+	doubleLinksVisible    bool
 }
 
 // setFlag flips *field and emits the new value via emit. Shared body of the uniform
@@ -115,6 +116,16 @@ func (o *overlayState) EmitOverlaysVis(tr *T.Trace) {
 	tr.OverlaysVis(o.overlaysVisible)
 }
 
+// ToggleDoubleLinks flips doubleLinksVisible and emits a double-links event.
+func (o *overlayState) ToggleDoubleLinks(tr *T.Trace) {
+	o.setFlag(&o.doubleLinksVisible, tr.DoubleLinks)
+}
+
+// EmitDoubleLinks emits the current doubleLinksVisible without toggling it.
+func (o *overlayState) EmitDoubleLinks(tr *T.Trace) {
+	tr.DoubleLinks(o.doubleLinksVisible)
+}
+
 // SetGuideVisibility installs an explicit-visibility snapshot wholesale (the TS
 // startup push so settings survive a Go respawn) and emits each so the renderer
 // reflects them.
@@ -128,6 +139,7 @@ func (o *overlayState) SetGuideVisibility(ov overlayState, tr *T.Trace) {
 	o.EmitLabelsGlobal(tr)
 	o.EmitBadgesGlobal(tr)
 	o.EmitOverlaysVis(tr)
+	o.EmitDoubleLinks(tr)
 }
 
 // defaultOverlayState is the startup overlay snapshot used by newMoveDispatch.
@@ -162,6 +174,8 @@ func (md *MoveDispatch) ToggleBadgesGlobal(tr *T.Trace)   { md.ov.ToggleBadgesGl
 func (md *MoveDispatch) EmitBadgesGlobal(tr *T.Trace)     { md.ov.EmitBadgesGlobal(tr) }
 func (md *MoveDispatch) ToggleOverlaysVis(tr *T.Trace)    { md.ov.ToggleOverlaysVis(tr) }
 func (md *MoveDispatch) EmitOverlaysVis(tr *T.Trace)      { md.ov.EmitOverlaysVis(tr) }
+func (md *MoveDispatch) ToggleDoubleLinks(tr *T.Trace)    { md.ov.ToggleDoubleLinks(tr) }
+func (md *MoveDispatch) EmitDoubleLinks(tr *T.Trace)      { md.ov.EmitDoubleLinks(tr) }
 
 // SetGuideVisibility delegates the wholesale explicit-visibility push.
 func (md *MoveDispatch) SetGuideVisibility(ov overlayState, tr *T.Trace) {
@@ -181,6 +195,7 @@ var overlayToggles = map[string]func(*MoveDispatch, *T.Trace){
 	"labelsGlobal":   (*MoveDispatch).ToggleLabelsGlobal,
 	"badgesGlobal":   (*MoveDispatch).ToggleBadgesGlobal,
 	"overlays":       (*MoveDispatch).ToggleOverlaysVis,
+	"doubleLinks":    (*MoveDispatch).ToggleDoubleLinks,
 }
 
 // OVERLAY_TOGGLES_END

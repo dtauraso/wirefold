@@ -65,10 +65,12 @@ func TestMarshalEventMatchesFixture(t *testing.T) {
 		{Step: 17, Kind: KindLabelsGlobal, Visible: true},
 		{Step: 18, Kind: KindBadgesGlobal, Visible: false},
 		{Step: 19, Kind: KindOverlaysVis, Visible: true},
+		{Step: 20, Kind: KindDoubleLinks, Visible: false},
 		{Step: 21, Kind: KindSelect, Node: "A"},
 		{Step: 22, Kind: KindFade, FadedNodes: []string{"A"}, FadedEdges: []string{"e1"}},
 		{Step: 23, Kind: KindHover, Node: "A"},
 		{Step: 24, Kind: KindSceneSphere, PX: 1.0, PY: 2.0, PZ: 3.0, R: 100.0},
+		{Step: 25, Kind: KindLayoutLink, Node: "A", Target: "B"},
 	}
 
 	fixture := fixtureLines(t)

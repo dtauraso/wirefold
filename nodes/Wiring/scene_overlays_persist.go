@@ -62,6 +62,12 @@ func writeSceneOverlays(scenePath string, ov overlayState) error {
 		setVisible("overlaysActive", ov.overlaysVisible)
 		setHidden("labelsGlobalHidden", ov.labelsGlobalVisible)
 		setHidden("badgesHidden", ov.badgesGlobalVisible)
+		// doubleLinksVisible is visible-sense with a FALSE default — write `true` only when on.
+		if ov.doubleLinksVisible {
+			obj["doubleLinksVisible"] = json.RawMessage("true")
+		} else {
+			delete(obj, "doubleLinksVisible")
+		}
 	})
 }
 
@@ -108,6 +114,7 @@ type sceneOverlaysFile struct {
 	OverlaysActive        *bool `json:"overlaysActive"`
 	LabelsGlobalHidden    *bool `json:"labelsGlobalHidden"`
 	BadgesHidden          *bool `json:"badgesHidden"`
+	DoubleLinksVisible    *bool `json:"doubleLinksVisible"`
 }
 
 // loadSceneOverlays reads the persisted overlay-visibility snapshot from scenePath (the
@@ -158,6 +165,10 @@ func loadSceneOverlays(scenePath string) (overlayState, bool) {
 	}
 	if sf.BadgesHidden != nil {
 		ov.badgesGlobalVisible = !*sf.BadgesHidden
+		found = true
+	}
+	if sf.DoubleLinksVisible != nil {
+		ov.doubleLinksVisible = *sf.DoubleLinksVisible
 		found = true
 	}
 	return ov, found

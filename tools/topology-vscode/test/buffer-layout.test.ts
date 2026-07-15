@@ -47,10 +47,12 @@ import {
   OVERLAY_COL_SCENE_TORI, OVERLAY_COL_SCENE_POLES, OVERLAY_COL_NODE_POLES,
   OVERLAY_COL_SEL_SPHERE_POLES, OVERLAY_COL_HANDHOLDS,
   OVERLAY_COL_LABELS_GLOBAL, OVERLAY_COL_BADGES_GLOBAL, OVERLAY_COL_OVERLAYS_VIS,
+  OVERLAY_COL_DOUBLE_LINKS,
   OVERLAY_COL_SEL_MODE, OVERLAY_STRIDE,
   readOverlaySceneTori, readOverlayScenePoles, readOverlayNodePoles,
   readOverlaySelSpherePoles, readOverlayHandholds,
   readOverlayLabelsGlobal, readOverlayBadgesGlobal, readOverlayOverlaysVis,
+  readOverlayDoubleLinks,
   readOverlaySelMode,
   // Port block
   PORT_COL_NODE_ROW, PORT_COL_IS_INPUT, PORT_COL_HOVERED, PORT_STRIDE,
@@ -292,11 +294,11 @@ describe("buffer-layout — Camera block", () => {
 
 describe("buffer-layout — Overlay block", () => {
   it("stride equals packed field sizes", () => {
-    // 9×u8 = 9 (8 overlay flags + SelMode)
-    expect(OVERLAY_STRIDE).toBe(9);
+    // 10×u8 = 10 (9 overlay flags + SelMode)
+    expect(OVERLAY_STRIDE).toBe(10);
   });
 
-  it("column offsets are 0..8", () => {
+  it("column offsets are 0..9", () => {
     expect(OVERLAY_COL_SCENE_TORI).toBe(0);
     expect(OVERLAY_COL_SCENE_POLES).toBe(1);
     expect(OVERLAY_COL_NODE_POLES).toBe(2);
@@ -305,14 +307,15 @@ describe("buffer-layout — Overlay block", () => {
     expect(OVERLAY_COL_LABELS_GLOBAL).toBe(5);
     expect(OVERLAY_COL_BADGES_GLOBAL).toBe(6);
     expect(OVERLAY_COL_OVERLAYS_VIS).toBe(7);
-    expect(OVERLAY_COL_SEL_MODE).toBe(8);
+    expect(OVERLAY_COL_DOUBLE_LINKS).toBe(8);
+    expect(OVERLAY_COL_SEL_MODE).toBe(9);
   });
 
   it("read helpers decode known bytes (alternating pattern)", () => {
     const buf = new ArrayBuffer(OVERLAY_STRIDE);
     const bytes = new Uint8Array(buf);
-    // Alternating 1/0: sceneTori=1, scenePoles=0, nodePoles=1, ..., overlaysVis=0, selMode=1.
-    ([1, 0, 1, 0, 1, 0, 1, 0, 1] as const).forEach((v, i) => { bytes[i] = v; });
+    // Alternating 1/0: sceneTori=1, scenePoles=0, nodePoles=1, ..., doubleLinks=0, selMode=1.
+    ([1, 0, 1, 0, 1, 0, 1, 0, 1, 0] as const).forEach((v, i) => { bytes[i] = v; });
 
     const dv = new DataView(buf);
     expect(readOverlaySceneTori(dv)).toBe(1);
@@ -323,7 +326,8 @@ describe("buffer-layout — Overlay block", () => {
     expect(readOverlayLabelsGlobal(dv)).toBe(0);
     expect(readOverlayBadgesGlobal(dv)).toBe(1);
     expect(readOverlayOverlaysVis(dv)).toBe(0);
-    expect(readOverlaySelMode(dv)).toBe(1);
+    expect(readOverlayDoubleLinks(dv)).toBe(1);
+    expect(readOverlaySelMode(dv)).toBe(0);
   });
 });
 
@@ -342,11 +346,11 @@ describe("buffer-layout — event enum", () => {
 // ─ Meta ───────────────────────────────────────────────────────────────────────
 
 describe("buffer-layout — meta", () => {
-  it("schema version is 23", () => {
-    expect(BUF_LAYOUT_VERSION).toBe(23);
+  it("schema version is 24", () => {
+    expect(BUF_LAYOUT_VERSION).toBe(24);
   });
 
-  it("header size is 36 bytes (9×u32)", () => {
-    expect(BUF_HEADER_SIZE).toBe(36);
+  it("header size is 40 bytes (10×u32)", () => {
+    expect(BUF_HEADER_SIZE).toBe(40);
   });
 });

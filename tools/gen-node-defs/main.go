@@ -1526,10 +1526,11 @@ type overlayOverride struct {
 }
 
 var overlayOverrides = map[string]overlayOverride{
-	"tori":       {field: "sceneToriVisible", method: "SceneTori"},
-	"scenePoles": {breadcrumb: "scene"},
-	"nodePoles":  {breadcrumb: "nodes"},
-	"overlays":   {method: "OverlaysVis"},
+	"tori":        {field: "sceneToriVisible", method: "SceneTori"},
+	"scenePoles":  {breadcrumb: "scene"},
+	"nodePoles":   {breadcrumb: "nodes"},
+	"overlays":    {method: "OverlaysVis"},
+	"doubleLinks": {defaultOff: true},
 }
 
 // parseOverlayFlags reads the OVERLAY_FLAG_NAMES const in messages.ts (bounded by the
@@ -2042,8 +2043,8 @@ func writeBufferLayoutGo(outPath string, schema bufLayoutSchema) error {
 	fmt.Fprintf(w, "const BufInteriorSlotsPerNodeGenerated = %d\n", schema.interiorSlotsPerNode)
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, `// BufHeaderSize is the byte width of the snapshot header:`)
-	fmt.Fprintln(w, `// [tick:u32][beadCount:u32][nodeCount:u32][edgeCount:u32][portCount:u32][labelBytesCount:u32][eventCount:u32][portNameBytesCount:u32][edgeLabelBytesCount:u32]`)
-	fmt.Fprintln(w, `const BufHeaderSize = 36`)
+	fmt.Fprintln(w, `// [tick:u32][beadCount:u32][nodeCount:u32][edgeCount:u32][portCount:u32][labelBytesCount:u32][eventCount:u32][portNameBytesCount:u32][edgeLabelBytesCount:u32][layoutLinkCount:u32]`)
+	fmt.Fprintln(w, `const BufHeaderSize = 40`)
 
 	for _, blk := range schema.blocks {
 		fmt.Fprintln(w)
@@ -2133,8 +2134,8 @@ func writeBufferLayoutTS(outPath string, schema bufLayoutSchema) error {
 	fmt.Fprintf(w, " * Generated (part of BUF_LAYOUT_FINGERPRINT): a mismatch fails check-buffer-layout-parity.sh. */\n")
 	fmt.Fprintf(w, "export const INTERIOR_SLOTS_PER_NODE = %d;\n", schema.interiorSlotsPerNode)
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, `/** Snapshot header: [tick:u32][beadCount:u32][nodeCount:u32][edgeCount:u32][portCount:u32][labelBytesCount:u32][eventCount:u32][portNameBytesCount:u32][edgeLabelBytesCount:u32] */`)
-	fmt.Fprintln(w, `export const BUF_HEADER_SIZE = 36;`)
+	fmt.Fprintln(w, `/** Snapshot header: [tick:u32][beadCount:u32][nodeCount:u32][edgeCount:u32][portCount:u32][labelBytesCount:u32][eventCount:u32][portNameBytesCount:u32][edgeLabelBytesCount:u32][layoutLinkCount:u32] */`)
+	fmt.Fprintln(w, `export const BUF_HEADER_SIZE = 40;`)
 
 	for _, blk := range schema.blocks {
 		fmt.Fprintln(w)

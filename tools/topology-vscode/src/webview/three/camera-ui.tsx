@@ -16,8 +16,11 @@ import { sendRawInput, buildHomeRaw } from "./raw-input";
 
 type ToggleCfg = {
   flag: OverlayFlag;
-  /** Initial value shown before the first buffer snapshot lands (store polarity). */
-  default: boolean;
+  /** Initial value shown before the first buffer snapshot lands (store polarity).
+   *  OMIT this for a flag whose Go-owned default is not something TS should assert —
+   *  useToggleVal then falls back to `false` (render null-until-first-snapshot, same as
+   *  NavGuides.tsx's `bufFlags?.x ?? false`) instead of TS authoring a stand-in value. */
+  default?: boolean;
   /** Compute active (highlight) from the raw value. */
   active: (val: boolean) => boolean;
   /** Label string or function of raw value. */
@@ -39,9 +42,11 @@ function fireToggle(cfg: ToggleCfg, val: boolean) {
 function useToggleVal(cfg: ToggleCfg): boolean {
   const bufFlags = useOverlayFlags();
   // ?? cfg.default only guards the (impossible) missing-key case under noUncheckedIndexedAccess;
-  // every OverlayFlag is always present in the record, so `false` is preserved.
-  if (bufFlags) return bufFlags[cfg.flag] ?? cfg.default;
-  return cfg.default;
+  // every OverlayFlag is always present in the record, so `false` is preserved. When cfg omits
+  // `default` (a flag whose Go default TS should not assert), this falls back to `false` until
+  // the first snapshot lands — the same "null-until-first-snapshot" shape as NavGuides.tsx.
+  if (bufFlags) return bufFlags[cfg.flag] ?? cfg.default ?? false;
+  return cfg.default ?? false;
 }
 
 // ---------------------------------------------------------------------------
@@ -120,6 +125,16 @@ const badgesCfg: ToggleCfg = {
   payload: (v) => ({ flag: "badgesGlobal", wasHidden: v }),
 };
 
+// doubleLinksCfg has no `default` — its Go-owned default (off) is not asserted here; see
+// useToggleVal's fallback and ToggleCfg.default's doc above.
+const doubleLinksCfg: ToggleCfg = {
+  flag: "doubleLinks",
+  active: (v) => v,
+  label: "⇄ double links",
+  title: (a) => (a ? "Hide double-link overlay" : "Show double-link overlay"),
+  payload: (v) => ({ flag: "doubleLinks", was: v }),
+};
+
 // ---------------------------------------------------------------------------
 // Grouped overlay rows for the popover
 // ---------------------------------------------------------------------------
@@ -130,6 +145,7 @@ const OVERLAY_GROUPS: OverlayGroup[] = [
   { heading: "GUIDES", cfgs: [ringsCfg, handholdsCfg] },
   { heading: "POLES",  cfgs: [scenePolesCfg, nodePolesCfg, selSpherePolesCfg] },
   { heading: "LABELS", cfgs: [globalLabelsCfg, badgesCfg] },
+  { heading: "EDGES",  cfgs: [doubleLinksCfg] },
 ];
 
 /** A single row inside the popover: square checkbox + label, fires the row's op on click.

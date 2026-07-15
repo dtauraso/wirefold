@@ -109,6 +109,18 @@ const (
 	// the master toggle is triggered (op="overlays-vis"), so the renderer shows or hides
 	// all 8 overlays at once without mutating individual overlay bools.
 	KindOverlaysVis = "overlays-vis"
+	// KindDoubleLinks carries the double-link (layout-link) overlay visibility state. Go
+	// emits it when the toggle is triggered (op="double-links"), so the renderer draws the
+	// cyan bidirectional overlay reading the LayoutLink block and dims the edge tubes.
+	// Default OFF (unlike the other overlay flags).
+	KindDoubleLinks = "double-links"
+	// KindLayoutLink carries one double-linked node PAIR from the LAYOUT model
+	// (nodes/Wiring/layout_holder.go LocalPolars) — NOT the bead-edge graph. Go emits one per
+	// pair once at load (nodes/Wiring/loader.go emitLayoutLinks, deduplicated so each
+	// unordered pair streams exactly once), keyed by Node (one endpoint) and Target (the
+	// other). The buffer's LayoutLink block resolves both to node rows so the renderer draws
+	// the layout-link overlay from Go-streamed data, never inferred from Edge adjacency.
+	KindLayoutLink = "layout-link"
 	// KindSelect carries the CURRENTLY-SELECTED node id (click-select). Selection is
 	// Go-owned state: the gesture state machine (gesture.go) sets it on a click and emits
 	// this event so the buffer snapshot marks the node's Selected column. Node="" clears
@@ -144,7 +156,7 @@ const (
 // buffer EVENT block for the .probe log. There is no tsc exhaustiveness
 // check derived from it — adding a kind here does not force a TS branch
 // anywhere; it only extends the lookup table.
-var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone, KindPosition, KindGeometry, KindPulseCancelled, KindNodeGeometry, KindArrive, KindNodeBead, KindCamera, KindSceneTori, KindScenePoles, KindNodePoles, KindSelSpherePoles, KindHandholds, KindLabelsGlobal, KindBadgesGlobal, KindOverlaysVis, KindSelect, KindFade, KindHover, KindSceneSphere}
+var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone, KindPosition, KindGeometry, KindPulseCancelled, KindNodeGeometry, KindArrive, KindNodeBead, KindCamera, KindSceneTori, KindScenePoles, KindNodePoles, KindSelSpherePoles, KindHandholds, KindLabelsGlobal, KindBadgesGlobal, KindOverlaysVis, KindDoubleLinks, KindLayoutLink, KindSelect, KindFade, KindHover, KindSceneSphere}
 
 // PortGeom is one port's authoritative world geometry on a node-geometry event:
 // its name, whether it is an input, its sphere-surface world position (PX/PY/PZ),
@@ -492,6 +504,19 @@ func (t *Trace) BadgesGlobal(visible bool) {
 // shows/hides all 8 overlays at once without mutating individual overlay bools.
 func (t *Trace) OverlaysVis(visible bool) {
 	t.emit(Event{Kind: KindOverlaysVis, Visible: visible})
+}
+
+// DoubleLinks emits the layout-link overlay visibility state. visible=true = overlay shown;
+// visible=false = overlay hidden. Go emits this on op="double-links".
+func (t *Trace) DoubleLinks(visible bool) {
+	t.emit(Event{Kind: KindDoubleLinks, Visible: visible})
+}
+
+// LayoutLink emits one double-linked node PAIR (src, dst) from the LAYOUT model
+// (LocalPolars) — NOT the bead-edge graph. Streamed once per unordered pair at load
+// (nodes/Wiring/loader.go emitLayoutLinks dedupes by the alphabetically-first id).
+func (t *Trace) LayoutLink(src, dst string) {
+	t.emit(Event{Kind: KindLayoutLink, Node: src, Target: dst})
 }
 
 // Select emits the currently-selected node id (KindSelect). node="" clears the selection.
@@ -910,7 +935,7 @@ func eventValue(e Event) (any, error) {
 			Radius float64 `json:"radius"`
 		}
 		return sceneSphere{Step: e.Step, Kind: e.Kind, CX: e.PX, CY: e.PY, CZ: e.PZ, Radius: e.R}, nil
-	case KindSceneTori, KindScenePoles, KindNodePoles, KindSelSpherePoles, KindHandholds, KindLabelsGlobal, KindBadgesGlobal, KindOverlaysVis:
+	case KindSceneTori, KindScenePoles, KindNodePoles, KindSelSpherePoles, KindHandholds, KindLabelsGlobal, KindBadgesGlobal, KindOverlaysVis, KindDoubleLinks:
 		// Visibility toggles: all carry just the Visible flag.
 		type visToggle struct {
 			Step    int    `json:"step"`
@@ -918,6 +943,14 @@ func eventValue(e Event) (any, error) {
 			Visible bool   `json:"visible"`
 		}
 		return visToggle{Step: e.Step, Kind: e.Kind, Visible: e.Visible}, nil
+	case KindLayoutLink:
+		type layoutLink struct {
+			Step   int    `json:"step"`
+			Kind   string `json:"kind"`
+			Node   string `json:"node"`
+			Target string `json:"target"`
+		}
+		return layoutLink{Step: e.Step, Kind: e.Kind, Node: e.Node, Target: e.Target}, nil
 	case KindFade:
 		type fade struct {
 			Step       int      `json:"step"`
