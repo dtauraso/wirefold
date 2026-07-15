@@ -57,7 +57,7 @@ window.addEventListener("message", (e) => {
     postLog("lifecycle", { phase: `msg:${msg.type}` });
   }
   if (msg.type === "run-status") {
-    const RUN_STATES = ["running", "paused", "ok", "cancelled"] as const;
+    const RUN_STATES = ["active", "ok", "cancelled"] as const;
     type NonErrorState = typeof RUN_STATES[number];
     setRunStatusImperative(msg.state === "error"
       ? { state: "error", message: msg.message ?? "" }

@@ -214,8 +214,11 @@ export class BuildAndRunRunner {
     this.channel.appendLine("$ " + binPath + " " + topArgs.join(" "));
     this.cancelled = false;
     this.looping = true;
-    // Do NOT post "running" here — Go starts HALTED. The clock state drives status:
-    // idle-on-spawn → running-on-play() → paused-on-pause().
+    // Post "active" here — this is genuine, instant, ext-host-owned truth (cp.spawn below
+    // returns synchronously), NOT a prediction of clock state. Go itself starts HALTED
+    // (main.go); the running-vs-paused distinction is Go-owned and streamed separately in
+    // the binary buffer's Clock block (read via useClockHalted, clock-state.ts) — this
+    // status message no longer predicts it (see play()/pause() below).
     // detached: true makes the child the leader of a new process group; the
     // prebuilt binary is the sole group member, so kill(-pid) reaches it
     // directly. Without this, SIGTERM could leave it orphaned on macOS.
@@ -231,6 +234,7 @@ export class BuildAndRunRunner {
         WIREFOLD_BUF_OUT_FD: "3",
       },
     });
+    this.post({ state: "active" });
     // Flush any framed binary records buffered before this spawn (writeStdin queued them).
     if (this.pendingStdin.length > 0) {
       for (const rec of this.pendingStdin) this.proc.stdin?.write(rec);
@@ -360,21 +364,22 @@ export class BuildAndRunRunner {
     }
   }
 
-  /** Send play to Go's stdin — resumes the clock gate. Fire-and-forget. Called for both
-   *  the ext-host "run" (first start) and "resume" (after pause) message kinds — Go's
-   *  gate has one Resume(), so there is nothing for a separate resume-vs-play distinction
-   *  to do on this seam. */
+  /** Send play to Go's stdin — resumes the clock gate. Fire-and-forget: no status post here.
+   *  Called for both the ext-host "run" (first start) and "resume" (after pause) message
+   *  kinds — Go's gate has one Resume(), so there is nothing for a separate resume-vs-play
+   *  distinction to do on this seam. The running-vs-paused OUTCOME is Go's truth, not this
+   *  write's — it streams back in the binary buffer's Clock block (KindHalted) and the
+   *  webview reflects it via useClockHalted (clock-state.ts), not a local prediction. */
   play(): void {
     if (!this.proc) return;
     this.writeStdin(encodePlay());
-    this.post({ state: "running" });
   }
 
-  /** Send pause to Go's stdin — halts the clock gate. Fire-and-forget. */
+  /** Send pause to Go's stdin — halts the clock gate. Fire-and-forget: no status post here
+   *  (see play() above — the outcome streams back from Go's Clock block). */
   pause(): void {
     if (!this.proc) return;
     this.writeStdin(encodePause());
-    this.post({ state: "paused" });
   }
 
   isRunning(): boolean {

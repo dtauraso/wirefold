@@ -1,15 +1,26 @@
 import { createPortal } from "react-dom";
 import { vscode } from "../vscode-api";
 import { useRunStatusCtx } from "../state/run-status";
+import { useClockHalted } from "./clock-state";
 
 export function RunButton() {
   const status = useRunStatusCtx();
+  const clockHalted = useClockHalted();
   const mount = document.getElementById("run-mount");
   if (!mount) return null;
 
-  const isRunning = status.state === "running";
-  const isPaused = status.state === "paused";
-  const isActive = isRunning || isPaused; // process is alive
+  // isActive ("a Go process is spawned") is the ext-host's genuine, instant status fact —
+  // see messages.ts RunStatus. Running-vs-paused is Go's own truth, streamed in the binary
+  // buffer's Clock block and reflected here via useClockHalted — NOT predicted from the
+  // stdin play/pause write. When no process is alive there is no buffer and no clock, so
+  // clockHalted (possibly stale from a PRIOR run's cached snapshot — the ext host never
+  // clears lastSnapshot on stop) must be ignored unless isActive is also true.
+  const isActive = status.state === "active"; // process is alive
+  const isRunning = isActive && clockHalted === false;
+  const isPaused = isActive && clockHalted !== false; // includes clockHalted===true and
+  // the brief instant right after spawn before the first snapshot has arrived (null) —
+  // Go starts halted (main.go), so treating "not yet known" as paused matches the true
+  // initial state and avoids a false "running" flash.
 
   const onPlayPause = () => {
     if (isPaused) {
@@ -50,24 +61,28 @@ export function RunButton() {
       >
         ■ stop
       </button>
-      <span className={statusClass(status)}>{statusText(status)}</span>
+      <span className={statusClass(status, isRunning, isPaused)}>
+        {statusText(status, isRunning, isPaused)}
+      </span>
     </>,
     mount,
   );
 }
 
-function statusClass(s: ReturnType<typeof useRunStatusCtx>): string {
-  if (s.state === "running") return "run-running";
-  if (s.state === "paused") return "run-running";
+// running/paused are now Go's own truth (clockHalted, via isRunning/isPaused above), not a
+// field on the ext-host RunStatus — so these take them as explicit params rather than
+// reading a "running"/"paused" state off `s` (that state no longer exists on the wire).
+function statusClass(s: ReturnType<typeof useRunStatusCtx>, isRunning: boolean, isPaused: boolean): string {
+  if (isRunning || isPaused) return "run-running";
   if (s.state === "ok") return "run-ok";
   if (s.state === "cancelled") return "run-idle";
   if (s.state === "error") return "run-error";
   return "run-idle";
 }
 
-function statusText(s: ReturnType<typeof useRunStatusCtx>): string {
-  if (s.state === "running") return "running…";
-  if (s.state === "paused") return "paused";
+function statusText(s: ReturnType<typeof useRunStatusCtx>, isRunning: boolean, isPaused: boolean): string {
+  if (isRunning) return "running…";
+  if (isPaused) return "paused";
   if (s.state === "ok") return "ok";
   if (s.state === "cancelled") return "cancelled";
   if (s.state === "error") return s.message;

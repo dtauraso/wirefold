@@ -2,9 +2,14 @@
 // Both sides import from here so unknown / malformed messages are caught
 // at type-narrow time rather than silently writing `[object Object]` to disk.
 
+// "active" means "a Go process is spawned" — a genuine, instant, ext-host-owned fact
+// (cp.spawn returns synchronously), NOT a prediction of clock state. The running-vs-
+// paused distinction is no longer carried on this wire message at all: it is Go-owned
+// truth streamed in the binary buffer's Clock block and read via useClockHalted()
+// (clock-state.ts) — see CLAUDE.md's bridge-surface doctrine. RunButton derives
+// isRunning/isPaused from (isActive && clockHalted), not from RunStatus.
 export type RunStatus =
-  | { state: "running" }
-  | { state: "paused" }
+  | { state: "active" }
   | { state: "ok" }
   | { state: "error"; message: string }
   | { state: "cancelled" };
@@ -206,7 +211,7 @@ export function parseWebviewToHost(raw: unknown): WebviewToHostMsg | undefined {
 // Documented run-status states (RunStatus["state"] union), used to validate the
 // run-status payload without duplicating the union literals.
 const RUN_STATUS_STATES: ReadonlySet<string> = new Set([
-  "running", "paused", "ok", "error", "cancelled",
+  "active", "ok", "error", "cancelled",
 ]);
 
 // parseHostToWebview validates a host→webview message by its type AND its payload,
