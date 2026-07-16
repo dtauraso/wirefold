@@ -101,9 +101,6 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
     case "pause":
       runner.pause();
       return;
-    case "resume":
-      runner.play();
-      return;
     case "stop":
       runner.stop();
       return;
@@ -129,7 +126,9 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
     // encoded into a binary record and sent as "go-record" (see schema/input-layout.ts),
     // never posted directly; "play" is declared only so this union tracks Go's binary-record
     // "play" kind — the ext-host builds that record itself (BuildAndRunRunner.play(), invoked
-    // by the "run" and "resume" cases above), so no webview code ever posts a bare {type:"play"}.
+    // by the "run" case above for both first start and resume-after-pause — Go's clock has
+    // one Resume(), so there is no separate resume-vs-play distinction on this seam), so no
+    // webview code ever posts a bare {type:"play"}.
     // If one somehow arrives, this is a bug upstream — log it rather than silently drop it.
     //
     // The ONLY legitimate reason for a kind to sit here is Go-parity: it must be one of the

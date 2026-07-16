@@ -38,6 +38,7 @@ import {
   readEventEdgeRow, readEventSlot, readEventValue, readEventBead,
   readEventArcLength, readEventSimLatencyMs, readEventX, readEventY, readEventZ, readEventF,
   readSceneCX, readSceneCY, readSceneCZ, readSceneRadius,
+  readClockHalted,
   UNKNOWN_KIND_ID,
 } from "./schema/buffer-layout";
 
@@ -69,6 +70,10 @@ export type DecodedEventLine =
   | { step: number; kind: "badges-global"; visible: boolean }
   | { step: number; kind: "overlays-vis"; visible: boolean }
   | { step: number; kind: "double-links"; visible: boolean }
+  // The clock's running-vs-paused truth (RealClock's Halt()/Resume() transition guards —
+  // see Trace.Halted, KindHalted). visible=true means HALTED (paused), reusing the same
+  // Visible field the overlay toggles use.
+  | { step: number; kind: "halted"; visible: boolean }
   // Layout-link pair, from LocalPolars — NOT the Edge block (see Buffer/layout.go LayoutLink).
   | { step: number; kind: "layout-link"; node: string; target: string }
   // Go-owned click-selection: the currently-selected node id (node="" clears it).
@@ -217,6 +222,8 @@ function decodeEventLine(d: DecodedSnapshot, i: number): Line | null {
       }
       return { kind, fadedNodes: nodes, fadedEdges: edges };
     }
+    case "halted":
+      return { kind, visible: readClockHalted(d.clockView, 0) === 1 };
     default:
       if (OVERLAY_KINDS.has(kind)) return { kind, visible: overlayFlag(d, kind) === 1 };
       return { kind, node, port, value };

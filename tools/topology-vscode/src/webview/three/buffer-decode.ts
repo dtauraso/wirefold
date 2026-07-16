@@ -15,6 +15,7 @@
 //   Camera   CAMERA_STRIDE bytes   (always 1 row)
 //   Overlay  OVERLAY_STRIDE bytes  (always 1 row)
 //   Scene    SCENE_STRIDE bytes    (always 1 row; persisted scene-sphere center+radius)
+//   Clock    CLOCK_STRIDE bytes    (always 1 row; clock halted/running truth)
 //   Label    labelBytesCount bytes (node labels' UTF-8 bytes, node-row order)
 //   Event    eventCount × EVENT_STRIDE bytes (per-tick causal trace events; .probe log only)
 //   PortName portNameBytesCount bytes (port names' UTF-8 bytes, flattened port-row order)
@@ -32,6 +33,7 @@ import {
   CAMERA_STRIDE,
   OVERLAY_STRIDE,
   SCENE_STRIDE,
+  CLOCK_STRIDE,
   EVENT_STRIDE,
   readNodeLabelOff,
   readNodeLabelLen,
@@ -79,6 +81,9 @@ export interface DecodedSnapshot {
   /** DataView over the single scene-sphere row (persisted center + radius; established once
    *  at load and never moved — see readSceneCX/readSceneRadius, KindSceneSphere). */
   sceneView: DataView;
+  /** DataView over the single clock row (the Go-owned running-vs-paused truth — see
+   *  clock-state.ts readClockHalted / useClockHalted). */
+  clockView: DataView;
   /** Total bytes in the trailing label section (self-sizing via the header labelBytesCount). */
   labelBytesCount: number;
   /** Uint8 view over the label-bytes section: every node's label UTF-8 bytes concatenated in
@@ -151,6 +156,7 @@ function decodeSnapshotUncached(buf: ArrayBuffer): DecodedSnapshot | null {
   const eventBytes      = eventCount * EVENT_STRIDE;
   const expectedLen = BUF_HEADER_SIZE + beadBytes + nodeBytes + interiorBytes + edgeBytes +
                       layoutLinkBytes + portBytes + CAMERA_STRIDE + OVERLAY_STRIDE + SCENE_STRIDE +
+                      CLOCK_STRIDE +
                       labelBytesCount + eventBytes + portNameBytesCount + edgeLabelBytesCount;
 
   if (buf.byteLength < expectedLen) return null;
@@ -184,6 +190,9 @@ function decodeSnapshotUncached(buf: ArrayBuffer): DecodedSnapshot | null {
   const sceneView = new DataView(buf, off, SCENE_STRIDE);
   off += SCENE_STRIDE;
 
+  const clockView = new DataView(buf, off, CLOCK_STRIDE);
+  off += CLOCK_STRIDE;
+
   const labelBytes = new Uint8Array(buf, off, labelBytesCount);
   off += labelBytesCount;
 
@@ -198,7 +207,8 @@ function decodeSnapshotUncached(buf: ArrayBuffer): DecodedSnapshot | null {
   return {
     tick, beadCount, nodeCount, edgeCount, portCount, beadView, nodeView, interiorCount,
     interiorView, edgeView, layoutLinkCount, layoutLinkView, portView, cameraView, overlayView,
-    sceneView, labelBytesCount, labelBytes, eventCount, eventView, portNameBytes, edgeLabelBytes,
+    sceneView, clockView, labelBytesCount, labelBytes, eventCount, eventView, portNameBytes,
+    edgeLabelBytes,
   };
 }
 

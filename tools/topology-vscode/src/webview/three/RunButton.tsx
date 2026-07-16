@@ -1,28 +1,26 @@
 import { createPortal } from "react-dom";
 import { vscode } from "../vscode-api";
 import { useRunStatusCtx } from "../state/run-status";
+import { useClockHalted, useClockHasRunOnce } from "./clock-state";
+import { deriveRunButtonState } from "./run-button-state";
 
 export function RunButton() {
   const status = useRunStatusCtx();
+  const clockHalted = useClockHalted();
+  const hasRunOnce = useClockHasRunOnce();
   const mount = document.getElementById("run-mount");
   if (!mount) return null;
 
-  const isRunning = status.state === "running";
-  const isPaused = status.state === "paused";
-  const isActive = isRunning || isPaused; // process is alive
+  const isActive = status.state === "active";
+  const btn = deriveRunButtonState(isActive, clockHalted, hasRunOnce);
 
   const onPlayPause = () => {
-    if (isPaused) {
-      // Resume the clock — handle-message.ts's "resume" case calls runner.play() directly.
-      vscode.postMessage({ type: "resume" });
-      return;
-    }
-    if (isRunning) {
+    // Literal `postMessage({ type: "..." })` calls, not a dynamic `type: btn.action` —
+    // check-message-kind-parity.sh statically greps for literal senders per kind.
+    if (btn.action === "pause") {
       vscode.postMessage({ type: "pause" });
       return;
     }
-    // idle: Go is spawned but clock is halted, or process was stopped and needs
-    // a restart. handle-message calls runner.run() (idempotent spawn) then runner.play().
     vscode.postMessage({ type: "run" });
   };
 
@@ -35,39 +33,42 @@ export function RunButton() {
       <button
         type="button"
         className="run-btn"
-        title={isPaused ? "resume" : isRunning ? "pause" : "go run . in repo root"}
+        title={btn.isRunning ? "pause" : "go run . in repo root"}
         onClick={onPlayPause}
         disabled={false}
       >
-        {isPaused ? "▶ resume" : isRunning ? "⏸ pause" : "▶ run"}
+        {btn.label}
       </button>
       <button
         type="button"
         className="run-btn run-stop-btn"
         title="stop the running process"
         onClick={onStop}
-        disabled={!isActive}
+        disabled={status.state !== "active"}
       >
         ■ stop
       </button>
-      <span className={statusClass(status)}>{statusText(status)}</span>
+      <span className={statusClass(status, btn.isRunning)}>{statusText(status, btn.isRunning)}</span>
     </>,
     mount,
   );
 }
 
-function statusClass(s: ReturnType<typeof useRunStatusCtx>): string {
-  if (s.state === "running") return "run-running";
-  if (s.state === "paused") return "run-running";
+// running is now Go's own truth (clockHalted, via isRunning above), not a field on the
+// ext-host RunStatus — so it's taken as an explicit param rather than read off a
+// "running"/"paused" state on `s` (that state no longer exists on the wire).
+function statusClass(s: ReturnType<typeof useRunStatusCtx>, isRunning: boolean): string {
+  if (isRunning) return "run-running";
+  if (s.state === "active") return "run-running"; // spawned but clock halted: still "in progress"
   if (s.state === "ok") return "run-ok";
   if (s.state === "cancelled") return "run-idle";
   if (s.state === "error") return "run-error";
   return "run-idle";
 }
 
-function statusText(s: ReturnType<typeof useRunStatusCtx>): string {
-  if (s.state === "running") return "running…";
-  if (s.state === "paused") return "paused";
+function statusText(s: ReturnType<typeof useRunStatusCtx>, isRunning: boolean): string {
+  if (isRunning) return "running…";
+  if (s.state === "active") return "paused"; // spawned but clock halted — accurate either way
   if (s.state === "ok") return "ok";
   if (s.state === "cancelled") return "cancelled";
   if (s.state === "error") return s.message;

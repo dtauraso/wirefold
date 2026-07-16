@@ -14,7 +14,7 @@ describe("parseHostToWebview", () => {
   });
 
   it("accepts run-status with a documented state", () => {
-    const msg = { type: "run-status", state: "running" };
+    const msg = { type: "run-status", state: "active" };
     expect(parseHostToWebview(msg)).toEqual(msg);
   });
 

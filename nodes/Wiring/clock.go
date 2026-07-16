@@ -78,6 +78,31 @@ type RealClock struct {
 	haltedAt time.Time
 	// haltedTotal is the accumulated paused duration across all prior halts.
 	haltedTotal time.Duration
+	// hasRun is true once the clock has left halted at least once (i.e. Resume has made a
+	// real halted->running transition). It never goes back to false for this process's
+	// lifetime — it distinguishes "never started" (fresh load) from "started, now paused"
+	// for the RunButton's run-vs-resume label. The clock owns this bit itself, exactly like
+	// halted: it is set inside Resume()'s transition guard, never derived by snapshot.go,
+	// main.go, or TS (see MODEL.md's bridge-surface rule).
+	hasRun bool
+	// haltedHook, when non-nil, is called with the new halted state and the current hasRun
+	// bit from inside the Halt()/Resume() transition guards below — exactly once per real
+	// state change. This is the sole trace-emit point for KindHalted (see Trace.Halted): the
+	// 4 Halt/Resume call sites (main.go, stdin_reader.go) never emit directly, so the truth
+	// can't drift across them. Optional/nil-safe: headless tests construct a RealClock
+	// without wiring a hook.
+	haltedHook func(halted bool, hasRun bool)
+}
+
+// SetHaltedHook installs the clock's halted-state trace hook: after this call, every REAL
+// transition made by Halt()/Resume() calls hook(halted, hasRun) exactly once. Call once at
+// startup (after both the clock and Trace exist) before the first Halt()/Resume(). Pass nil
+// to leave it unset (the default) — Halt/Resume then emit nothing, which is safe for
+// headless tests.
+func (c *RealClock) SetHaltedHook(hook func(halted bool, hasRun bool)) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.haltedHook = hook
 }
 
 // NewRealClock returns a started RealClock anchored at the current monotonic instant.
@@ -113,21 +138,39 @@ func (c *RealClock) Tick() int64 {
 // Halt pauses the clock.
 func (c *RealClock) Halt() {
 	c.mu.Lock()
+	changed := false
 	if !c.halted {
 		c.halted = true
 		c.haltedAt = time.Now()
+		changed = true
 	}
+	hook := c.haltedHook
+	hasRun := c.hasRun
 	c.mu.Unlock()
+	// Emit outside the lock — the hook may block on a channel send (Trace.emit), and Tick()
+	// must not wait on that.
+	if changed && hook != nil {
+		hook(true, hasRun)
+	}
 }
 
-// Resume un-pauses the clock.
+// Resume un-pauses the clock. The first real halted->running transition sets hasRun true
+// for the rest of this process's lifetime (see the hasRun field doc).
 func (c *RealClock) Resume() {
 	c.mu.Lock()
+	changed := false
 	if c.halted {
 		c.halted = false
 		c.haltedTotal += time.Since(c.haltedAt)
+		c.hasRun = true
+		changed = true
 	}
+	hook := c.haltedHook
+	hasRun := c.hasRun
 	c.mu.Unlock()
+	if changed && hook != nil {
+		hook(false, hasRun)
+	}
 }
 
 // SleepCycle blocks for one tickPeriod, or until ctx is done.

@@ -13,7 +13,7 @@ import {
   decodeNavNodes, sceneSphereFromSnapshot,
 } from "../src/webview/three/buffer-nav";
 import {
-  BUF_HEADER_SIZE, NODE_STRIDE, INTERIOR_STRIDE, CAMERA_STRIDE, OVERLAY_STRIDE, SCENE_STRIDE,
+  BUF_HEADER_SIZE, NODE_STRIDE, INTERIOR_STRIDE, CAMERA_STRIDE, OVERLAY_STRIDE, SCENE_STRIDE, CLOCK_STRIDE,
   NODE_COL_CX, NODE_COL_CY, NODE_COL_CZ, NODE_COL_RADIUS,
   NODE_COL_SPHERE_R, NODE_COL_SELECTED, NODE_COL_LABEL_OFF, NODE_COL_LABEL_LEN,
   SCENE_COL_CX, SCENE_COL_CY, SCENE_COL_CZ, SCENE_COL_RADIUS,
@@ -38,7 +38,7 @@ function makeNodeSnapshot(nodeCount: number, fields: NodeFields[], scene?: Scene
   const enc = new TextEncoder();
   const labelChunks = fields.map((f) => enc.encode(f.label ?? ""));
   const labelBytesCount = labelChunks.reduce((n, c) => n + c.length, 0);
-  const total = BUF_HEADER_SIZE + nodeBytes + interiorBytes + CAMERA_STRIDE + OVERLAY_STRIDE + SCENE_STRIDE + labelBytesCount;
+  const total = BUF_HEADER_SIZE + nodeBytes + interiorBytes + CAMERA_STRIDE + OVERLAY_STRIDE + SCENE_STRIDE + CLOCK_STRIDE + labelBytesCount;
   const buf = new ArrayBuffer(total);
   const dv = new DataView(buf);
   dv.setUint32(8, nodeCount, true);       // nodeCount header field
@@ -51,7 +51,7 @@ function makeNodeSnapshot(nodeCount: number, fields: NodeFields[], scene?: Scene
     dv.setFloat32(sceneOff + SCENE_COL_CZ, scene.cz ?? 0, true);
     dv.setFloat32(sceneOff + SCENE_COL_RADIUS, scene.radius ?? 0, true);
   }
-  const labelSecOff = sceneOff + SCENE_STRIDE;
+  const labelSecOff = sceneOff + SCENE_STRIDE + CLOCK_STRIDE;
   const labelView = new Uint8Array(buf, labelSecOff, labelBytesCount);
   let labelCursor = 0;
   fields.forEach((f, row) => {

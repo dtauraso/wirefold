@@ -54,3 +54,92 @@ func TestRealClockHaltFreezesResumeContinues(t *testing.T) {
 		t.Fatalf("Resume appears to have caught up on paused wall time: frozen=%d afterResume=%d", frozen, afterResume)
 	}
 }
+
+// TestRealClockHaltedHookExactlyOncePerTransition pins the haltedHook contract documented on
+// RealClock.haltedHook: Halt() fires the hook with true, Resume() fires with false, and a
+// REPEAT call on an already-halted/already-running clock does NOT re-fire — the emit lives
+// inside the `if !c.halted` / `if c.halted` guards specifically to get this exactly-once
+// property (this is the sole trace-emit point for KindHalted; see Trace.Halted).
+func TestRealClockHaltedHookExactlyOncePerTransition(t *testing.T) {
+	c := NewRealClock()
+	var calls []bool
+	c.SetHaltedHook(func(halted bool, hasRun bool) {
+		calls = append(calls, halted)
+	})
+
+	c.Halt()
+	c.Halt() // repeat: already halted, must not re-fire
+	c.Halt() // repeat again
+	if got := calls; len(got) != 1 || got[0] != true {
+		t.Fatalf("after 3x Halt(): hook calls = %v, want [true]", got)
+	}
+
+	c.Resume()
+	c.Resume() // repeat: already running, must not re-fire
+	if got := calls; len(got) != 2 || got[0] != true || got[1] != false {
+		t.Fatalf("after Resume() x2: hook calls = %v, want [true false]", got)
+	}
+
+	c.Halt()
+	if got := calls; len(got) != 3 || got[2] != true {
+		t.Fatalf("after second real Halt(): hook calls = %v, want [true false true]", got)
+	}
+}
+
+// TestRealClockNilHookNoPanic verifies that a RealClock with no hook installed (the default —
+// headless tests construct clocks without wiring a hook/Trace) does not panic on Halt/Resume.
+func TestRealClockNilHookNoPanic(t *testing.T) {
+	c := NewRealClock()
+	c.Halt()
+	c.Halt()
+	c.Resume()
+	c.Resume()
+}
+
+// TestRealClockHasRunTransition pins the hasRun bit: false before the first real Resume(),
+// true starting with the first Resume(), and NEVER reverts to false — not on a later Halt(),
+// and not on a repeated no-op Resume() while already running. This is what the RunButton's
+// "run" vs "resume" label sources (see clock.go's hasRun field doc); a header-tick-derived
+// substitute is what produced the live "resume on first load" bug this test guards against.
+func TestRealClockHasRunTransition(t *testing.T) {
+	c := NewRealClock()
+	var haltedCalls, hasRunCalls []bool
+	c.SetHaltedHook(func(halted bool, hasRun bool) {
+		haltedCalls = append(haltedCalls, halted)
+		hasRunCalls = append(hasRunCalls, hasRun)
+	})
+
+	// Fresh clock: hasRun is false internally (no hook fired yet, nothing to observe via the
+	// hook until a transition happens — the field itself is unexported, so we drive Halt/Resume
+	// and read the hook's hasRun argument, exactly as the production wiring does).
+	c.Halt() // starts running -> halted: this is main.go's startup Halt(); hasRun stays false
+	if len(hasRunCalls) != 1 || hasRunCalls[0] != false {
+		t.Fatalf("after startup Halt(): hasRunCalls = %v, want [false]", hasRunCalls)
+	}
+
+	c.Resume() // first real halted->running transition: hasRun becomes true from here on
+	if len(hasRunCalls) != 2 || hasRunCalls[1] != true {
+		t.Fatalf("after first Resume(): hasRunCalls = %v, want [.. true]", hasRunCalls)
+	}
+
+	c.Halt() // pause again: hasRun must NOT revert
+	if len(hasRunCalls) != 3 || hasRunCalls[2] != true {
+		t.Fatalf("after second Halt(): hasRunCalls = %v, want [.. .. true] (hasRun must not clear on pause)", hasRunCalls)
+	}
+
+	c.Resume() // resume again: still true
+	if len(hasRunCalls) != 4 || hasRunCalls[3] != true {
+		t.Fatalf("after second Resume(): hasRunCalls = %v, want [.. .. .. true]", hasRunCalls)
+	}
+}
+
+// TestRealClockNilHookHasRunNoPanic verifies a RealClock with no hook installed does not
+// panic on Halt/Resume even as the internal hasRun bit transitions (nil-hook safety must hold
+// for the widened two-arg hook, not just the original halted-only one).
+func TestRealClockNilHookHasRunNoPanic(t *testing.T) {
+	c := NewRealClock()
+	c.Halt()
+	c.Resume()
+	c.Halt()
+	c.Resume()
+}

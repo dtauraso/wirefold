@@ -14,7 +14,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { readOverlayFlags } from "../src/webview/three/overlay-flags";
 import { setLatestSnapshot } from "../src/webview/snapshot-buffer";
 import {
-  BUF_HEADER_SIZE, NODE_STRIDE, INTERIOR_STRIDE, CAMERA_STRIDE, OVERLAY_STRIDE, SCENE_STRIDE,
+  BUF_HEADER_SIZE, NODE_STRIDE, INTERIOR_STRIDE, CAMERA_STRIDE, OVERLAY_STRIDE, SCENE_STRIDE, CLOCK_STRIDE,
   OVERLAY_COL_SCENE_TORI, OVERLAY_COL_SCENE_POLES, OVERLAY_COL_NODE_POLES,
   OVERLAY_COL_SEL_SPHERE_POLES, OVERLAY_COL_HANDHOLDS,
   OVERLAY_COL_LABELS_GLOBAL, OVERLAY_COL_BADGES_GLOBAL, OVERLAY_COL_OVERLAYS_VIS,
@@ -25,7 +25,7 @@ import {
 function makeOverlaySnapshot(cols: Partial<Record<number, number>>): ArrayBuffer {
   // 0 nodes → 0 node bytes, 0 interior bytes, 0 edge bytes, 0 bead bytes.
   void NODE_STRIDE; void INTERIOR_STRIDE;
-  const total = BUF_HEADER_SIZE + CAMERA_STRIDE + OVERLAY_STRIDE + SCENE_STRIDE;
+  const total = BUF_HEADER_SIZE + CAMERA_STRIDE + OVERLAY_STRIDE + SCENE_STRIDE + CLOCK_STRIDE;
   const buf = new ArrayBuffer(total);
   const dv = new DataView(buf);
   // header counts all zero (0 beads/nodes/edges) — default.

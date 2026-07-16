@@ -148,6 +148,11 @@ const (
 	// different, non-authoritative sphere). Reuses the PX/PY/PZ/R fields (center/radius);
 	// no new Event fields.
 	KindSceneSphere = "scene-sphere"
+	// KindHalted carries the clock's running-vs-paused state. RealClock emits this from
+	// inside its Halt()/Resume() transition guards (nodes/Wiring/clock.go) — exactly once
+	// per real state change, never from the play/pause call sites — so the buffer's Clock
+	// block streams the one true halted bit and the webview never predicts it locally.
+	KindHalted = "halted"
 )
 
 // TraceEventKinds is the single source of truth for the closed kind
@@ -156,7 +161,7 @@ const (
 // buffer EVENT block for the .probe log. There is no tsc exhaustiveness
 // check derived from it — adding a kind here does not force a TS branch
 // anywhere; it only extends the lookup table.
-var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone, KindPosition, KindGeometry, KindPulseCancelled, KindNodeGeometry, KindArrive, KindNodeBead, KindCamera, KindSceneTori, KindScenePoles, KindNodePoles, KindSelSpherePoles, KindHandholds, KindLabelsGlobal, KindBadgesGlobal, KindOverlaysVis, KindDoubleLinks, KindLayoutLink, KindSelect, KindFade, KindHover, KindSceneSphere}
+var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone, KindPosition, KindGeometry, KindPulseCancelled, KindNodeGeometry, KindArrive, KindNodeBead, KindCamera, KindSceneTori, KindScenePoles, KindNodePoles, KindSelSpherePoles, KindHandholds, KindLabelsGlobal, KindBadgesGlobal, KindOverlaysVis, KindDoubleLinks, KindLayoutLink, KindSelect, KindFade, KindHover, KindSceneSphere, KindHalted}
 
 // PortGeom is one port's authoritative world geometry on a node-geometry event:
 // its name, whether it is an input, its sphere-surface world position (PX/PY/PZ),
@@ -570,6 +575,22 @@ func (t *Trace) PulseCancelled(node, port string, value int, bead uint64) {
 	t.emit(Event{Kind: KindPulseCancelled, Node: node, Port: port, Value: value, Bead: bead})
 }
 
+// Halted emits the clock's running-vs-paused state AND the "has ever run" state (KindHalted).
+// halted=true = the clock is paused (tick not advancing); halted=false = running. hasRun=true
+// once the clock has left halted at least once this process (RealClock's hasRun field) and
+// never reverts to false. Called ONLY from RealClock's Halt()/Resume() transition guards
+// (nodes/Wiring/clock.go) — exactly once per real state change — never from the play/pause
+// call sites, so this can't be duplicated across the 4 Halt/Resume call sites in
+// main.go/stdin_reader.go. Reuses the Visible field for halted (visToggle shape) and the
+// Value field for hasRun (0/1); no new Event field needed.
+func (t *Trace) Halted(halted bool, hasRun bool) {
+	value := 0
+	if hasRun {
+		value = 1
+	}
+	t.emit(Event{Kind: KindHalted, Visible: halted, Value: value})
+}
+
 // Breadcrumb writes a free-form diagnostic line directly to the sink
 // (if any) in real time. It is logging-only: breadcrumbs are NOT added
 // to the buffered event slice, do NOT receive a Step ordinal, and are
@@ -935,7 +956,7 @@ func eventValue(e Event) (any, error) {
 			Radius float64 `json:"radius"`
 		}
 		return sceneSphere{Step: e.Step, Kind: e.Kind, CX: e.PX, CY: e.PY, CZ: e.PZ, Radius: e.R}, nil
-	case KindSceneTori, KindScenePoles, KindNodePoles, KindSelSpherePoles, KindHandholds, KindLabelsGlobal, KindBadgesGlobal, KindOverlaysVis, KindDoubleLinks:
+	case KindSceneTori, KindScenePoles, KindNodePoles, KindSelSpherePoles, KindHandholds, KindLabelsGlobal, KindBadgesGlobal, KindOverlaysVis, KindDoubleLinks, KindHalted:
 		// Visibility toggles: all carry just the Visible flag.
 		type visToggle struct {
 			Step    int    `json:"step"`

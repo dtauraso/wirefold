@@ -63,7 +63,7 @@ func TestEventBlockPopulate(t *testing.T) {
 		nodeCount*BufInteriorSlotsPerNode*BufInteriorStride +
 		edgeCount*BufEdgeStride +
 		portCount*BufPortStride +
-		BufCameraStride + BufOverlayStride + BufSceneStride + labelBytesCount
+		BufCameraStride + BufOverlayStride + BufSceneStride + BufClockStride + labelBytesCount
 
 	// Find the send row (kind == index of "send" in TraceEventKinds).
 	sendKind := -1
@@ -202,6 +202,7 @@ func TestSnapshotRoundTrip(t *testing.T) {
 		BufCameraStride +
 		BufOverlayStride +
 		BufSceneStride +
+		BufClockStride +
 		int(eventCount)*BufEventStride +
 		int(portNameBytesCount) +
 		int(edgeLabelBytesCount)
@@ -488,6 +489,81 @@ func TestSelectMode(t *testing.T) {
 	}
 }
 
+// TestClockBlockHalted verifies that KindHalted events (Trace.Halted, emitted from
+// RealClock's Halt()/Resume() transition guards) land in the Clock block's Halted and
+// HasRun columns: Halted true/false -> 1/0 (Visible field), HasRun value!=0/==0 -> 1/0
+// (Value field). Also pins that HasRun does NOT clear when Halted flips back to true — the
+// exact bug class this column exists to prevent (a header-tick-derived substitute read >0
+// on the very first frame, before anything had run). Closes the trace-event -> buffer-column
+// gap for the clock's running-vs-paused and has-ever-run bits (see clockSnapState /
+// writeClockBlock).
+func TestClockBlockHalted(t *testing.T) {
+	s := NewSnapshotState(nil)
+	s.Update(T.Event{Kind: T.KindNodeGeometry, Node: "n0", Radius: 1})
+
+	clockOffset := func() int {
+		snap := s.BuildSnapshot()
+		beadCount := int(readU32(snap, 4))
+		nodeCount := int(readU32(snap, 8))
+		edgeCount := int(readU32(snap, 12))
+		portCount := int(readU32(snap, 16))
+		return BufHeaderSize +
+			beadCount*BufBeadStride +
+			nodeCount*BufNodeStride +
+			nodeCount*BufInteriorSlotsPerNode*BufInteriorStride +
+			edgeCount*BufEdgeStride +
+			portCount*BufPortStride +
+			BufCameraStride +
+			BufOverlayStride +
+			BufSceneStride
+	}
+	clockHalted := func() byte {
+		snap := s.BuildSnapshot()
+		return snap[clockOffset()+BufClockColHalted]
+	}
+	clockHasRun := func() byte {
+		snap := s.BuildSnapshot()
+		return snap[clockOffset()+BufClockColHasRun]
+	}
+
+	// Zero-value before any KindHalted event: running (0), never run (0), per
+	// clockSnapState's doc comment.
+	if got := clockHalted(); got != 0 {
+		t.Errorf("before any KindHalted: Halted got %d, want 0 (running)", got)
+	}
+	if got := clockHasRun(); got != 0 {
+		t.Errorf("before any KindHalted: HasRun got %d, want 0 (never run) — this is the exact"+
+			" case the live bug got wrong (reading >0 on the first frame)", got)
+	}
+
+	// Startup Halt(): halted=1, hasRun still 0 (mirrors main.go's clk.Halt() before load).
+	s.Update(T.Event{Kind: T.KindHalted, Visible: true, Value: 0})
+	if got := clockHalted(); got != 1 {
+		t.Errorf("after startup KindHalted(true): Halted got %d, want 1 (halted)", got)
+	}
+	if got := clockHasRun(); got != 0 {
+		t.Errorf("after startup KindHalted(true): HasRun got %d, want 0 (still never run)", got)
+	}
+
+	// First Resume(): halted=0, hasRun=1.
+	s.Update(T.Event{Kind: T.KindHalted, Visible: false, Value: 1})
+	if got := clockHalted(); got != 0 {
+		t.Errorf("after first KindHalted(false, hasRun=1): Halted got %d, want 0 (running)", got)
+	}
+	if got := clockHasRun(); got != 1 {
+		t.Errorf("after first KindHalted(false, hasRun=1): HasRun got %d, want 1 (has run)", got)
+	}
+
+	// Pause again: halted=1, hasRun MUST stay 1 (never clears).
+	s.Update(T.Event{Kind: T.KindHalted, Visible: true, Value: 1})
+	if got := clockHalted(); got != 1 {
+		t.Errorf("after second KindHalted(true, hasRun=1): Halted got %d, want 1 (halted)", got)
+	}
+	if got := clockHasRun(); got != 1 {
+		t.Errorf("after second KindHalted(true, hasRun=1): HasRun got %d, want 1 (must not clear)", got)
+	}
+}
+
 // TestHoverColumn verifies that KindHover marks the Hovered column on the hovered node OR
 // port (exclusive, cleared on others), and that an empty hover clears all hover flags.
 func TestHoverColumn(t *testing.T) {
@@ -603,7 +679,7 @@ func TestSnapshotFraming(t *testing.T) {
 		int(nodeCount)*BufNodeStride +
 		int(nodeCount)*BufInteriorSlotsPerNode*BufInteriorStride +
 		int(edgeCount)*BufEdgeStride +
-		BufCameraStride + BufOverlayStride + BufSceneStride +
+		BufCameraStride + BufOverlayStride + BufSceneStride + BufClockStride +
 		int(readU32(payload, 24))*BufEventStride + // event block
 		int(readU32(payload, 28)) + // port-name bytes
 		int(readU32(payload, 32)) // edge-label bytes
@@ -926,7 +1002,8 @@ func TestSnapshotNodeLabels(t *testing.T) {
 		portCount*BufPortStride +
 		BufCameraStride +
 		BufOverlayStride +
-		BufSceneStride
+		BufSceneStride +
+		BufClockStride
 	// The label section is followed by the EVENT block + port-name + edge-label sections, so
 	// its end is the start of the event block, not the snapshot end. Verify the full length.
 	eventCount := int(readU32(snap, 24))
