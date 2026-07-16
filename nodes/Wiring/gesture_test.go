@@ -477,7 +477,7 @@ func TestGestureConnectedPortRingMove(t *testing.T) {
 	edges := map[string]EdgeEndpoints{
 		"e1": {Source: "N1", Target: "N2", SourceHandle: "out", TargetHandle: "in"},
 	}
-	md := newMoveDispatch(geoms, edges, nil)
+	md := newMoveDispatch(geoms, edges, nil, nil, nil)
 	md.vp.viewpoint = canonicalViewpoint()
 	md.SetPortRowResolver(stubPortRows{{Node: "N1", Port: "out", IsInput: false}})
 

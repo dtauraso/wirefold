@@ -686,7 +686,18 @@ func (b *buildCtx) allocateWires() {
 // position store have been removed, so node positions live in the movers' held
 // geometry) and installs the aimed-port registry for drag-time aiming.
 func (b *buildCtx) buildMoveDispatch() {
-	md := newMoveDispatch(b.nodeGeoms, b.edgeEndpoints, b.tr)
+	// SPEC order (b.spec.Nodes/Edges — the deterministic directory-sorted order parseSpec
+	// read the topology in), NOT map iteration order, so the buffer's row seed
+	// (md.NodeSeeds/EdgeSeeds) gives every node/edge a deterministic row.
+	nodeOrder := make([]string, len(b.spec.Nodes))
+	for i, n := range b.spec.Nodes {
+		nodeOrder[i] = n.ID
+	}
+	edgeOrder := make([]string, len(b.spec.Edges))
+	for i, e := range b.spec.Edges {
+		edgeOrder[i] = e.Label
+	}
+	md := newMoveDispatch(b.nodeGeoms, b.edgeEndpoints, b.tr, nodeOrder, edgeOrder)
 	md.ApplyCascadeRoles(b.deriveCascadeRoles())
 	if b.hasScene {
 		// Persisted scene sphere: install it now so md.sceneSphere is consistent straight out

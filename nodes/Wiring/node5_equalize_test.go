@@ -67,7 +67,7 @@ func TestNode5DragEqualizesNeighborDistances(t *testing.T) {
 		"5To7": {Source: "5", Target: "7", SourceHandle: "out7", TargetHandle: "in"},
 		"5To8": {Source: "5", Target: "8", SourceHandle: "out8", TargetHandle: "in"},
 	}
-	md := newMoveDispatch(geoms, edges, nil)
+	md := newMoveDispatch(geoms, edges, nil, nil, nil)
 	md.layoutHolders = map[string]*LayoutHolder{
 		"2": {}, "5": {}, "7": {}, "8": {},
 	}
@@ -122,7 +122,7 @@ func TestNode5DragCascadesToNode2Follower6AndStopsBeforeNode1(t *testing.T) {
 		"5To7": {Source: "5", Target: "7", SourceHandle: "out7", TargetHandle: "in"},
 		"5To8": {Source: "5", Target: "8", SourceHandle: "out8", TargetHandle: "in"},
 	}
-	md := newMoveDispatch(geoms, edges, nil)
+	md := newMoveDispatch(geoms, edges, nil, nil, nil)
 	md.layoutHolders = map[string]*LayoutHolder{
 		"1": {}, "2": {}, "3": {}, "5": {}, "6": {}, "7": {}, "8": {},
 	}
@@ -206,7 +206,7 @@ func newNode5ChainDispatch() *MoveDispatch {
 		"5To7": {Source: "5", Target: "7", SourceHandle: "out7", TargetHandle: "in"},
 		"5To8": {Source: "5", Target: "8", SourceHandle: "out8", TargetHandle: "in"},
 	}
-	md := newMoveDispatch(geoms, edges, nil)
+	md := newMoveDispatch(geoms, edges, nil, nil, nil)
 	md.layoutHolders = map[string]*LayoutHolder{
 		"1": {}, "2": {}, "3": {}, "5": {}, "6": {}, "7": {}, "8": {},
 	}
@@ -403,7 +403,7 @@ func newFullChainDispatch() *MoveDispatch {
 		"10To6": {Source: "10", Target: "6", SourceHandle: "out6", TargetHandle: "in10"},
 		"10To8": {Source: "10", Target: "8", SourceHandle: "out8", TargetHandle: "in10"},
 	}
-	md := newMoveDispatch(geoms, edges, nil)
+	md := newMoveDispatch(geoms, edges, nil, nil, nil)
 	md.layoutHolders = map[string]*LayoutHolder{
 		"1": {}, "2": {}, "3": {}, "5": {}, "6": {}, "7": {}, "8": {}, "9": {}, "10": {},
 	}
