@@ -144,11 +144,6 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 	// that gives it actual work (drag-time local-polar recomputation); see
 	// memory/project_two_goroutine_node_split.md.
 
-	// Bounded poll (not a fixed sleep) on the atomically-published node-row table —
-	// concurrency-safe (NodeRowCount), gives up after 500ms so a load never hangs.
-	for i := 0; i < 500 && snapState.NodeRowCount() < len(nodes); i++ {
-		time.Sleep(time.Millisecond)
-	}
 	md.LoadSceneSphere(topologyPath)
 
 	// Wait for all nodes to exit, but never block forever: in a timed/cancelled

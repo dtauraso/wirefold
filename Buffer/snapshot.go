@@ -588,18 +588,6 @@ func (s *SnapshotState) LookupNodeRow(row int) (nodeID string, ok bool) {
 	return (*tbl)[row], true
 }
 
-// NodeRowCount is the concurrency-safe count of node rows registered so far (reads the
-// same atomically-published node-row table as LookupNodeRow — safe to call from any
-// goroutine, e.g. main.go polling for startup geometry completion before an early-load
-// emit that needs to resolve node ids to rows).
-func (s *SnapshotState) NodeRowCount() int {
-	tbl := s.nodeTable.Load()
-	if tbl == nil {
-		return 0
-	}
-	return len(*tbl)
-}
-
 // --- internal helpers --------------------------------------------------------
 
 func (s *SnapshotState) onNodeGeometry(ev T.Event) {
