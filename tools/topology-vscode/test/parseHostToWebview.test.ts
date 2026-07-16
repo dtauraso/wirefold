@@ -13,13 +13,8 @@ describe("parseHostToWebview", () => {
     expect(parseHostToWebview({ type: "load", text: "{}", sceneText: "{}" })).toBeUndefined();
   });
 
-  it("accepts run-status with a documented state", () => {
-    const msg = { type: "run-status", state: "active" };
-    expect(parseHostToWebview(msg)).toEqual(msg);
-  });
-
-  it("rejects run-status with an unknown state", () => {
-    expect(parseHostToWebview({ type: "run-status", state: "bogus" })).toBeUndefined();
+  it("rejects the removed run-status type (the play/pause + run/stop feature was deleted; build status goes to the output channel)", () => {
+    expect(parseHostToWebview({ type: "run-status", state: "active" })).toBeUndefined();
   });
 
   it("rejects the removed save-error type (nothing posts it; Go persists its own scene state)", () => {

@@ -5,27 +5,15 @@ import { postLog } from "./log/post";
 postLog("lifecycle", { phase: "bundle-eval" });
 
 import { createRoot } from "react-dom/client";
-import { useEffect, useState } from "react";
 import "./webview.css";
 import { ThreeView } from "./three/ThreeView";
 import { parseHostToWebview } from "../messages";
-import { setRunStatusImperative, registerRunStatusSetter, RunStatusCtx } from "./state/run-status";
-import type { RunStatusUI } from "./state/run-status";
 import { ErrorBoundary } from "./log/ErrorBoundary";
 import { CrashListeners } from "./log/CrashListeners";
-import { RunButton } from "./three/RunButton";
 import { setLatestSnapshot } from "./snapshot-buffer";
 
 function Root() {
-  const [runStatus, setRunStatus] = useState<RunStatusUI>({ state: "idle" });
-  useEffect(() => { registerRunStatusSetter(setRunStatus); }, []);
-  return (
-    <RunStatusCtx.Provider value={runStatus}>
-      {/* RunButton is mounted once here for all views. */}
-      <RunButton />
-      <ThreeView />
-    </RunStatusCtx.Provider>
-  );
+  return <ThreeView />;
 }
 
 postLog("lifecycle", { phase: "before-render" });
@@ -53,18 +41,9 @@ window.addEventListener("message", (e) => {
   // each triggered a host-side file append. That starved orbit input (camera lagged while
   // beads, computed in Go and delivered outbound, stayed smooth). Snapshots are NOT dropped
   // — every one is still applied below; only the hot-path logging is suppressed/coalesced.
-  if (msg.type !== "buffer-snapshot") {
-    postLog("lifecycle", { phase: `msg:${msg.type}` });
-  }
-  if (msg.type === "run-status") {
-    const RUN_STATES = ["active", "ok", "cancelled"] as const;
-    type NonErrorState = typeof RUN_STATES[number];
-    setRunStatusImperative(msg.state === "error"
-      ? { state: "error", message: msg.message ?? "" }
-      : { state: (RUN_STATES as readonly string[]).includes(msg.state)
-            ? msg.state
-            : "idle" });
-  } else if (msg.type === "buffer-snapshot") {
+  // buffer-snapshot is the only host→webview message; it is the hot-path firehose and is
+  // deliberately never per-message-logged (see the note above).
+  if (msg.type === "buffer-snapshot") {
     // Store the latest snapshot for buffer-scene rendering. EVERY snapshot is applied —
     // nothing dropped. The observability log is COALESCED to at most ~1/sec (with a running
     // count) so it does not re-flood the webview->host bridge and re-starve raw-input.

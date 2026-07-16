@@ -23,7 +23,7 @@ import (
 //
 // clk is the single monotonic clock every wire reads to time its own delivery
 // (MODEL.md). Both callers (Run, RunTest) pass a real clock; it is always non-nil.
-// The global play/pause gate is this clock's Halt/Resume.
+// The clock is free-running (no play/pause gate).
 func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath string, topologyPath string, clk W.Clock) {
 	// Open the binary snapshot output channel (default fd 3; set WIREFOLD_BUF_OUT_FD=0
 	// to disable). Writes are fire-and-forget: if fd 3 is not connected nothing reads
@@ -60,20 +60,11 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 	// not a per-tick firehose) and fire-and-forget.
 	tr.SetDebugSink(os.Stdout)
 
-	// Wire the clock's halted-state trace hook so Halt()/Resume() (the only emit point —
-	// see clock.go/Trace.Halted) streams the running-vs-paused truth into the buffer's Clock
-	// block. RealClock is the only production Clock implementation; a test/fake Clock (none
-	// exist today) simply has no hook and streams nothing, which is safe.
-	if rc, ok := clk.(*W.RealClock); ok {
-		rc.SetHaltedHook(tr.Halted)
-	}
-
-	// starts halted; first `play` stdin signal resumes. Startup geometry is NOT emitted
-	// here — each node's own goroutine emits its geometry once at startup (below, after
-	// this function's node-goroutine launch loop); see the row-seeding comment there for
-	// why the buffer's row tables do not depend on that emit order.
-	clk.Halt()
-
+	// The clock is free-running (no play/pause gate): it starts ticking at construction
+	// and never halts. Startup geometry is NOT emitted here — each node's own goroutine
+	// emits its geometry once at startup (below, after this function's node-goroutine
+	// launch loop); see the row-seeding comment there for why the buffer's row tables do
+	// not depend on that emit order.
 	nodes, slotReg, md, err := W.LoadTopology(ctx, topologyPath, tr, clk)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "load topology: %v\n", err)
@@ -167,7 +158,7 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 	// Read the editor→Go bridge: "edit" JSON lines (op = create/update/delete)
 	// from stdin. When stdin reaches EOF (extension host disconnect), cancel the context.
 	go func() {
-		W.RunStdinReader(ctx, os.Stdin, slotReg, md, tr, clk)
+		W.RunStdinReader(ctx, os.Stdin, slotReg, md, tr)
 		cancel()
 	}()
 
@@ -190,19 +181,18 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 	md.LoadSceneSphere(topologyPath)
 
 	// Wait for all nodes to exit, but never block forever: in a timed/cancelled
-	// run (e.g. -duration, or SIGINT) some nodes may be parked on paced-wire
-	// delivery gated by a halted clock and so never observe ctx cancellation.
-	// On cancellation, Resume the clock so any ctx-aware paced waits proceed and
-	// nodes can return, then wait a brief grace and exit regardless. The buffer's row
-	// tables are already seeded from the diagram (above, before the node-goroutine
-	// launch loop) regardless of pacing, so flushing the trace here still captures a
-	// correct scene even if a node's own startup geometry emit never got scheduled.
+	// run (e.g. -duration, or SIGINT) a node could still be mid-cycle when ctx is
+	// cancelled. Pacing loops are all ctx-aware (SleepCycle selects on ctx.Done),
+	// so they observe cancellation on their own; we wait a brief grace and exit
+	// regardless. The buffer's row tables are already seeded from the diagram
+	// (above, before the node-goroutine launch loop), so flushing the trace here
+	// still captures a correct scene even if a node's own startup geometry emit
+	// never got scheduled.
 	done := make(chan struct{})
 	go func() { wg.Wait(); close(done) }()
 	select {
 	case <-done:
 	case <-ctx.Done():
-		clk.Resume()
 		select {
 		case <-done:
 		case <-time.After(250 * time.Millisecond):
@@ -229,7 +219,7 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 
 // Run wires the topology and blocks until SIGTERM/SIGINT or stdin EOF.
 // This is the live-run path used by the extension host. It uses a production
-// RealClock; that clock's Halt/Resume is the global play/pause gate.
+// free-running RealClock (no play/pause gate).
 func Run(tracePath string, topologyPath string) {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()

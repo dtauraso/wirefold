@@ -28,10 +28,10 @@ Communication is `panel.webview.postMessage` ↔ `vscode.postMessage`, wired in
 `WebviewToHostMsg` includes `ready` and the binary bridge envelope (a fully
 encoded editor→Go record built via `src/schema/input-layout.ts` and written
 FRAMED to Go's stdin by `runCommand.ts`); `HostToWebviewMsg` carries the
-decoded content-buffer snapshot plus run-status. Extension-side dispatch is
+decoded content-buffer snapshot. Extension-side dispatch is
 `src/extension/handle-message.ts`. Per CLAUDE.md, Go → TS is the binary
 content buffer and nothing else; TS → Go is framed binary records
-(addressed `edit` ops, or bare commands like `play`/`pause`) — see CLAUDE.md
+(addressed `edit` ops, or the bare `save` command) — see CLAUDE.md
 for the full bridge-surface model, not duplicated here.
 
 ## Extension side — what lives where
@@ -61,7 +61,6 @@ generically from the decoded content buffer, keyed off `NODE_DEFS`
 | `src/webview/three/ThreeView.tsx` | R3F `<Canvas>` root: camera, pointer/gesture state machine |
 | `src/webview/three/raw-input.ts` | Raw pointer/wheel + raycast hit → binary `raw-input` record to Go |
 | `src/webview/three/overlay-flags.ts` | Read-only reflection of Go-owned overlay-toggle state (`useSyncExternalStore`; no store) |
-| `src/webview/state/run-status.ts` | Run-status reflection (running/paused/ok/error) |
 | `webview/log/*` | Crash listeners, error boundary, log posting to the extension host |
 
 There is no JSON-trace render path, no `pump.ts`, and no zustand/Redux-style

@@ -1,12 +1,12 @@
 ---
 name: Never run the sim in the foreground; bound or background it
-description: The sim and anything parked on a halted clock / paced wire can fail to exit; a foreground run-and-grep blocks until the harness limit. Background it or wrap in tools/run-bounded.sh, and keep these checks in the main session.
+description: The sim and anything parked on a paced wire can fail to exit; a foreground run-and-grep blocks until the harness limit. Background it or wrap in tools/run-bounded.sh, and keep these checks in the main session.
 type: feedback
 ---
 
 A subagent once hung for 13 minutes on a verification step that ran the
 sim binary in the foreground (`./wirefold … -duration 1s`). The sim — and
-anything parked on a halted clock or paced-wire delivery — does not
+anything parked on paced-wire delivery — does not
 reliably exit on its own, and macOS has no `timeout`, so the `Bash` call
 blocked until the harness limit.
 

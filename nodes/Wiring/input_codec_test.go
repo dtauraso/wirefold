@@ -20,8 +20,6 @@ func TestDecodeControlRecords(t *testing.T) {
 		kind byte
 		want string
 	}{
-		{inKindResume, "play"},
-		{inKindPause, "pause"},
 		{inKindSave, "save"},
 	}
 	for _, c := range cases {
@@ -135,7 +133,7 @@ func TestFramedPartialReads(t *testing.T) {
 	// A real (empty) dispatch so the `save` command has an overlay snapshot to persist.
 	md := newMoveDispatch(map[string]nodeGeom{}, map[string]EdgeEndpoints{}, nil, nil, nil)
 	md.EnableEditPersist(root) // arms overlaysPersist so `save` can write scene.json
-	go RunStdinReader(ctx, pr, SlotRegistry{}, md, nil, nil)
+	go RunStdinReader(ctx, pr, SlotRegistry{}, md, nil)
 
 	frame := frameRecord(encodeControl(inKindSave))
 	go func() {
@@ -160,7 +158,7 @@ func TestFramedPartialReads(t *testing.T) {
 
 // TestFrameLenPrefix documents the transport frame is [len:u32-LE][record].
 func TestFrameLenPrefix(t *testing.T) {
-	rec := encodeControl(inKindResume)
+	rec := encodeControl(inKindSave)
 	frame := frameRecord(rec)
 	if got := binary.LittleEndian.Uint32(frame[:4]); int(got) != len(rec) {
 		t.Fatalf("frame length prefix = %d, want %d", got, len(rec))

@@ -3,17 +3,6 @@
 // at type-narrow time rather than silently writing `[object Object]` to disk.
 
 // "active" means "a Go process is spawned" — a genuine, instant, ext-host-owned fact
-// (cp.spawn returns synchronously), NOT a prediction of clock state. The running-vs-
-// paused distinction is no longer carried on this wire message at all: it is Go-owned
-// truth streamed in the binary buffer's Clock block and read via useClockHalted()
-// (clock-state.ts) — see CLAUDE.md's bridge-surface doctrine. RunButton derives
-// isRunning/isPaused from (isActive && clockHalted), not from RunStatus.
-export type RunStatus =
-  | { state: "active" }
-  | { state: "ok" }
-  | { state: "error"; message: string }
-  | { state: "cancelled" };
-
 // Geometry-CRUD edit sent webview → host → Go. ONE message kind ("edit") with
 // EXACTLY THREE ops: create / update / delete (mirroring nodes/Wiring/stdin_reader.go
 // applyEdit). Go owns the clock; this seam carries no delivery signal.
@@ -138,15 +127,11 @@ export type WebviewToHostMsg =
   // webview builds the binary record via schema/input-layout.ts and posts it here; the
   // host writes it FRAMED to Go's stdin. This is the TS→Go binary buffer (symmetric with
   // the fd-3 content buffer). The logical Go-bound kinds ("raw-input", "edit") are no
-  // longer posted as JSON objects — they are encoded into this record (and the host builds
-  // play/pause records directly) — but stay declared below (and EditMsg is kept in
-  // this union) as the shared vocabulary the message-kind + edit-op parity guards check.
+  // longer posted as JSON objects — they are encoded into this record — but stay declared
+  // below (and EditMsg is kept in this union) as the shared vocabulary the message-kind +
+  // edit-op parity guards check.
   | { type: "go-record"; record: ArrayBuffer }
   | { type: "raw-input"; event: RawInputEvent }
-  | { type: "run" }
-  | { type: "play" }
-  | { type: "pause" }
-  | { type: "stop" }
   // The bare SAVE command (encoded as a single kind byte in schema/input-layout.ts and
   // sent via go-record). Go persists its OWN authoritative scene state — no payload. Kept
   // in this union + WEBVIEW_TO_HOST_TYPES so message-kind-parity tracks stdin_reader.go's
@@ -156,7 +141,6 @@ export type WebviewToHostMsg =
   | EditMsg;
 
 export type HostToWebviewMsg =
-  | { type: "run-status"; state: RunStatus["state"]; message?: string }
   // Phase 3: binary snapshot from Go's fd3 side channel.
   // The ArrayBuffer is transferred zero-copy (postMessage transferable).
   // Phase 5 will render from it; for now the webview stubs the handler.
@@ -166,11 +150,11 @@ export type HostToWebviewMsg =
   | { type: "buffer-snapshot"; buffer: ArrayBuffer };
 
 export const WEBVIEW_TO_HOST_TYPES: ReadonlySet<WebviewToHostMsg["type"]> = new Set([
-  "ready", "run", "play", "pause", "stop", "webview-log", "edit", "save", "raw-input", "go-record",
+  "ready", "webview-log", "edit", "save", "raw-input", "go-record",
 ]);
 
 const HOST_TO_WEBVIEW_TYPES: ReadonlySet<HostToWebviewMsg["type"]> = new Set([
-  "run-status", "buffer-snapshot",
+  "buffer-snapshot",
 ]);
 
 // The editor→Go payload validators (parseEdit / parseUpdate / parseRawInput) were removed
@@ -202,12 +186,6 @@ export function parseWebviewToHost(raw: unknown): WebviewToHostMsg | undefined {
   }
 }
 
-// Documented run-status states (RunStatus["state"] union), used to validate the
-// run-status payload without duplicating the union literals.
-const RUN_STATUS_STATES: ReadonlySet<string> = new Set([
-  "active", "ok", "error", "cancelled",
-]);
-
 // parseHostToWebview validates a host→webview message by its type AND its payload,
 // mirroring parseWebviewToHost's per-op shape checks. A malformed message is dropped
 // (undefined) rather than forwarded — the webview message listener drops undefined, so a
@@ -221,11 +199,6 @@ export function parseHostToWebview(raw: unknown): HostToWebviewMsg | undefined {
     return undefined;
   }
   switch (t) {
-    case "run-status":
-      // state must be a documented RunStatus state; message (if present) a string.
-      if (typeof m.state !== "string" || !RUN_STATUS_STATES.has(m.state)) return undefined;
-      if (m.message !== undefined && typeof m.message !== "string") return undefined;
-      return m as unknown as HostToWebviewMsg;
     case "buffer-snapshot":
       // buffer must be an ArrayBuffer (transferred zero-copy from the host).
       return m.buffer instanceof ArrayBuffer ? (m as unknown as HostToWebviewMsg) : undefined;

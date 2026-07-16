@@ -22,7 +22,6 @@
 //	Camera   BufCameraStride bytes             (always 1 row)
 //	Overlay  BufOverlayStride bytes            (always 1 row)
 //	Scene    BufSceneStride bytes              (always 1 row; persisted scene-sphere center+radius)
-//	Clock    BufClockStride bytes              (always 1 row; clock halted/running truth)
 //	Label    labelBytesCount bytes             (node labels' UTF-8 bytes, node-row order)
 //	Event    eventCount × BufEventStride bytes (per-tick causal trace events; .probe log only)
 //	PortName portNameBytesCount bytes          (port names' UTF-8 bytes, flattened port-row order)
@@ -83,11 +82,10 @@ type SnapshotState struct {
 	// to the correct destination node.
 	srcToDest map[srcPortKey]string
 
-	// Camera, overlay, scene-sphere, and clock singletons (always one row each in the snapshot).
+	// Camera, overlay, and scene-sphere singletons (always one row each in the snapshot).
 	camera  cameraSnapState
 	overlay overlaySnapState
 	scene   sceneSnapState
-	clock   clockSnapState
 
 	// tick is the monotonic snapshot sequence counter.
 	tick uint32
@@ -298,16 +296,6 @@ type sceneSnapState struct {
 	radius     float64
 }
 
-// clockSnapState mirrors the clock block (single row): the running-vs-paused bit and the
-// "has ever run" bit, both mirrored from KindHalted events emitted by RealClock's
-// Halt()/Resume() transition guards (see nodes/Wiring/clock.go). Zero-value (halted=0,
-// hasRun=0) until the first KindHalted arrives; production always halts before load
-// (main.go), so the real first value is halted=1,hasRun=0.
-type clockSnapState struct {
-	halted uint8
-	hasRun uint8
-}
-
 // overlaySnapState mirrors the overlay block (single row).
 type overlaySnapState struct {
 	sceneTori      uint8
@@ -387,14 +375,6 @@ func (s *SnapshotState) Update(ev T.Event) {
 		// this a single time at startup, so a plain assign (not a merge) is correct.
 		s.scene = sceneSnapState{cx: ev.PX, cy: ev.PY, cz: ev.PZ, radius: ev.R}
 		s.emitSnapshot()
-
-	case T.KindHalted:
-		// The running-vs-paused bit and the "has ever run" bit, streamed from RealClock's
-		// Halt()/Resume() transition guards (see Trace.Halted). Reuses the Visible field for
-		// halted and the Value field for hasRun.
-		s.clock.halted = boolU8(ev.Visible)
-		s.clock.hasRun = boolU8(ev.Value != 0)
-		s.emitSnapshot() // state-change point: emit on play/pause
 
 	case T.KindSceneTori, T.KindScenePoles, T.KindNodePoles,
 		T.KindSelSpherePoles, T.KindHandholds, T.KindLabelsGlobal,
@@ -976,7 +956,6 @@ func (s *SnapshotState) newSnapshotBuild() *snapshotBuild {
 		BufCameraStride +
 		BufOverlayStride +
 		BufSceneStride +
-		BufClockStride +
 		b.labelBytesCount +
 		b.eventCount*BufEventStride +
 		b.portNameBytesCount +
@@ -1153,13 +1132,6 @@ func (s *SnapshotState) writeSceneBlock(buf []byte, off int) int {
 	return off + BufSceneStride
 }
 
-// writeClockBlock writes the Clock block (always 1 row): the running-vs-paused bit and the
-// "has ever run" bit.
-func (s *SnapshotState) writeClockBlock(buf []byte, off int) int {
-	SetClockRow(buf[off:], 0, s.clock.halted, s.clock.hasRun)
-	return off + BufClockStride
-}
-
 // writeLabelBytesSection writes the Label bytes section (self-sizing via header
 // labelBytesCount): every node's label UTF-8 bytes concatenated in node-row order. Each
 // node's LabelOff/LabelLen columns slice into this section; the numeric node row carries its
@@ -1211,7 +1183,6 @@ func (s *SnapshotState) buildSnapshot() []byte {
 	off = s.writeCameraBlock(buf, off)
 	off = s.writeOverlayBlock(buf, off)
 	off = s.writeSceneBlock(buf, off)
-	off = s.writeClockBlock(buf, off)
 	off = s.writeLabelBytesSection(buf, off, b)
 	off = s.writeEventBlockSection(buf, off, b)
 	off = s.writePortNameBytesSection(buf, off, b)

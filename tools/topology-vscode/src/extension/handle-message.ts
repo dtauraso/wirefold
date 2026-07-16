@@ -90,20 +90,6 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
       }
       return;
     }
-    case "run":
-      // Primary path: Go is already spawned on open (case "ready") and the user is
-      // starting the clock for the first time, or resuming after a stop+restart.
-      // runner.run() is idempotent (no-op if already running), so it is safe to call
-      // unconditionally before play().
-      runner.run();
-      runner.play();
-      return;
-    case "pause":
-      runner.pause();
-      return;
-    case "stop":
-      runner.stop();
-      return;
     case "webview-log":
       await appendWebviewLog(msg.entry, logUri);
       return;
@@ -124,11 +110,7 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
     // message-kind-parity tracks stdin_reader.go's msg.Type switch, but no live webview code
     // path posts them as a bare JS object: "raw-input"/"edit"/"save" are always
     // encoded into a binary record and sent as "go-record" (see schema/input-layout.ts),
-    // never posted directly; "play" is declared only so this union tracks Go's binary-record
-    // "play" kind — the ext-host builds that record itself (BuildAndRunRunner.play(), invoked
-    // by the "run" case above for both first start and resume-after-pause — Go's clock has
-    // one Resume(), so there is no separate resume-vs-play distinction on this seam), so no
-    // webview code ever posts a bare {type:"play"}.
+    // never posted directly.
     // If one somehow arrives, this is a bug upstream — log it rather than silently drop it.
     //
     // The ONLY legitimate reason for a kind to sit here is Go-parity: it must be one of the
@@ -138,7 +120,6 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
     // DECLARED_NOT_SENT_START
     case "raw-input":
     case "save":
-    case "play":
     case "edit":
       console.warn(`topology editor: unexpected direct "${msg.type}" message (expected via go-record)`, msg);
       return;

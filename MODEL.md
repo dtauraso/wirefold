@@ -32,7 +32,7 @@ the network itself is the nodes-and-wires Go runtime.
   fires. There is no slot — node-local held state replaces it.
 - **Channel.** A Go channel connecting a source to a wire, or a wire to a
   destination node. One input port is one channel.
-- **Clock (the human-speed clock).** There is exactly one clock: the system monotonic clock, read through a **scale** so it advances in integer **ticks** at human-watchable speed (`tick = ⌊(now − start − haltedTotal) / tickPeriod⌋`; the scale is the human-speed / playback-speed knob, `MsPerTick = 16` ⇒ ≈62.5 ticks/sec). All timing is **tick counts**, not wall-clock durations. The model is **sleep-only**: a pacing loop calls `SleepCycle` to wait exactly ONE cycle and re-reads `Tick()`, rather than blocking on a target tick — there is no wait-until-tick-k primitive. The play/pause gate (`Halt` / `Resume`) freezes the tick advance by subtracting halted time; it stops incrementing the tick, not the underlying system clock, and touches no goroutine. **Everything that animates runs in these ticks:** bead traveling, all in-node animations, and all node/gate processing windows. Per-update tick counts come from formulas, not literals — a bead crossing an edge takes `ticksToCross = arcLength / pulseSpeed` (pulseSpeed in world-units-per-tick, uniform across wires); node processing windows are tick counts. There is no separate render cadence — the tick IS the animation clock.
+- **Clock (the human-speed clock).** There is exactly one clock: the system monotonic clock, read through a **scale** so it advances in integer **ticks** at human-watchable speed (`tick = ⌊(now − start) / tickPeriod⌋`; the scale is the human-speed / playback-speed knob, `MsPerTick = 16` ⇒ ≈62.5 ticks/sec). All timing is **tick counts**, not wall-clock durations. The model is **sleep-only**: a pacing loop calls `SleepCycle` to wait exactly ONE cycle and re-reads `Tick()`, rather than blocking on a target tick — there is no wait-until-tick-k primitive. The clock is **free-running**: it advances monotonically with wall time and never pauses (there is no play/pause gate). **Everything that animates runs in these ticks:** bead traveling, all in-node animations, and all node/gate processing windows. Per-update tick counts come from formulas, not literals — a bead crossing an edge takes `ticksToCross = arcLength / pulseSpeed` (pulseSpeed in world-units-per-tick, uniform across wires); node processing windows are tick counts. There is no separate render cadence — the tick IS the animation clock.
 
 ## Wire lifecycle
 
@@ -92,9 +92,9 @@ resolving instantaneously.
 - Durations are tick counts: bead traversal (`ticksToCross`) and node processing windows.
 ## Driver
 
-**Self-scheduling goroutines + one global play/pause gate.** Each node
-and wire is a goroutine; they coordinate through channels. A single
-global gate halts or resumes wire animation. There is no central walker.
+**Self-scheduling goroutines.** Each node and wire is a goroutine; they
+coordinate through channels. There is no central walker, and no play/pause
+gate — the clock is free-running and the animation never halts.
 
 Each wire times its OWN delivery on the human-speed clock: when its
 `ticksToCross` have elapsed (observed by the owning node's loop driving
@@ -149,10 +149,6 @@ when a bead has arrived. Go owns the clock.
   (`tools/topology-vscode/src/webview/three/SelectionHighlight.tsx`), and the camera (`tools/topology-vscode/src/webview/three/BufferCamera.tsx` maps the buffer
   Camera row onto the three.js camera). Nothing in this tree owns traversal
   timing, positions, or geometry.
-- **Global gate** is a play/pause signal sent to the Go process (freezes
-  the human-speed clock's tick advance). While halted the tick does not
-  advance, so beads, in-node animations, and node windows all freeze; the
-  editor reflects the last known state.
 - **Bridge surface — binary BOTH ways.** **Go → TS:** the binary content
   buffer ALONE (`buffer-snapshot` on fd 3) — stated in full under "Go → TS is
   the binary content buffer" above; not restated here, so the two copies cannot
@@ -162,8 +158,7 @@ when a bead has arrived. Go owns the clock.
   geometry-CRUD `edit` (`op` = create / update / delete — exactly three ops;
   `update` sets a numeric attribute on a typed entity, e.g. overlays toggle/set
   as a flag-id / bitfield), a bare `save` command (Go persists its OWN current
-  state — camera + overlays — the editor sends no scene payload), and the
-  play/pause control signal. There is NO JSON on
+  state — camera + overlays — the editor sends no scene payload). There is NO JSON on
   either wire. The TS → Go send is fire-and-forget: the editor places a record
   and never blocks on Go, never asks when a bead arrived, and there is no
   delivery signal — Go times its own delivery. Nothing about node-local state
@@ -243,7 +238,6 @@ and none is a source of truth.
 - arc length, pulse speed (world-units per tick), ticks-to-cross,
   tick-count processing window
 - tick, human-speed clock (the one system monotonic clock scaled to ticks
-  at human speed), scale, `SleepCycle`, `Tick`, `Halt` / `Resume`
+  at human speed), scale, `SleepCycle`, `Tick`
 - node receives, node holds, node fires, wire advances, wire delivers,
   wire emits position
-- halt, resume, global gate

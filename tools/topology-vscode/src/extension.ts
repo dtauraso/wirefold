@@ -72,7 +72,6 @@ function openTopologyEditor(context: vscode.ExtensionContext, folderUri?: vscode
     void panel.webview.postMessage(msg);
   };
   const runner = new BuildAndRunRunner(
-    (status) => post({ type: "run-status", ...status }),
     // fd3 buffer-snapshot frames: forward each to the webview verbatim. Without this
     // wiring the runner reads fd3 (handleFd3) but drops every frame, so the new-system
     // BufferScene (which polls getLatestSnapshot each frame) never receives node/edge/
@@ -174,7 +173,7 @@ function openTopologyEditor(context: vscode.ExtensionContext, folderUri?: vscode
     });
   });
 
-  // Spawn Go immediately (halted); the render path is buffer-only (buffer-snapshot on
+  // Spawn Go immediately; the render path is buffer-only (buffer-snapshot on
   // fd3) so there is nothing else to send on "ready".
   runner.run(topologyPath);
 }

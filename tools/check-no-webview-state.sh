@@ -19,7 +19,6 @@ set -euo pipefail
 #   - snapshot-buffer.ts   (holds the latest binary snapshot + subscribe)
 #   - overlay-flags.ts     (decodes the buffer Overlay columns via useSyncExternalStore)
 #   - buffer-nav.ts        (row-keyed id/label table decoded from the buffer)
-#   - clock-state.ts       (decodes the buffer Clock column via useSyncExternalStore)
 #
 # Exit 0 when clean.
 
@@ -61,7 +60,7 @@ while IFS= read -r line; do
   f="${line%%:*}"
   base="$(basename "$f")"
   case "$base" in
-    snapshot-buffer.ts|overlay-flags.ts|buffer-nav.ts|clock-state.ts) continue ;;
+    snapshot-buffer.ts|overlay-flags.ts|buffer-nav.ts) continue ;;
   esac
   report "domain-hook: $line  (useSyncExternalStore outside the allowed buffer-reflect resources)"
 done < <(grep -arnE '\buseSyncExternalStore\b' \

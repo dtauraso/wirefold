@@ -3,7 +3,7 @@
 // The editor→Go bridge is a purely BINARY buffer (symmetric with the Go→TS content
 // buffer on fd 3): each message is a binary RECORD written FRAMED as [len:u32-LE][record]
 // to stdin. input_codec.go decodes a record into the stdinMsg below; the dispatch switch
-// and every handler (applyEdit / HandleRawInput / play-pause) are UNCHANGED —
+// and every handler (applyEdit / HandleRawInput) are UNCHANGED —
 // only the wire decode moved from newline-JSON to framed binary.
 //
 // The editor→Go bridge carries these top-level message kinds (all fully binary; no JSON
@@ -23,18 +23,14 @@
 //     Camera / node-move / port-anchor are NOT edits: the gesture FSM produces them
 //     in-process from raw-input, so they never cross this seam as an edit op.
 //
-//  2. "play" / "pause" — control. Routes directly to the clock's global gate (Halt/Resume).
-//     The process starts halted; the first play message resumes bead delivery; pause
-//     re-halts.
-//
-//  3. "save" — Go persists its OWN authoritative scene state (overlay visibility →
+//  2. "save" — Go persists its OWN authoritative scene state (overlay visibility →
 //     scene.json, preserving the Go-owned cameraPolar). Bare command, no payload; the
 //     editor holds no authoritative scene document.
 //
-//  4. "raw-input" — a raw pointer/wheel event + stateless raycast hit, handed to the
+//  3. "raw-input" — a raw pointer/wheel event + stateless raycast hit, handed to the
 //     gesture FSM.
 //
-// A remounted webview that has nothing new to render (Go paused/idle) is served from the
+// A remounted webview that has nothing new to render (Go idle) is served from the
 // EXT HOST's cached last fd3 snapshot instead of asking Go to manufacture one — see
 // runCommand.ts's BuildAndRunRunner.lastSnapshot/getLastSnapshot. Go has no "resend"
 // concept: it emits a frame only when something changes, and that stays true here.
@@ -79,7 +75,7 @@ type stdinCRUDPayload struct {
 // three values (create/update/delete). create/delete name a destination slot (Target/
 // TargetHandle). op=="update" sets an attribute on a typed entity — the sole live entity is
 // overlays: Attr=="toggle" (Flag names one overlay). The other top-level types are
-// raw-input (Event) and the bare commands (play/pause/save).
+// raw-input (Event) and the bare command (save).
 //
 // These structs carry NO json tags: this seam is framed binary end to end and nothing
 // unmarshals them (input_codec.go decodes the record). The wire field order is the
@@ -155,7 +151,7 @@ type rawHit struct {
 type SlotRegistry map[string]*PacedWire
 
 // RunStdinReader reads FRAMED BINARY records from r, dispatching geometry-CRUD "edit"
-// messages and play/pause clock-gate control messages. RunStdinReader itself returns
+// messages and the bare save command. RunStdinReader itself returns
 // when ctx is done or r reaches EOF. CAVEAT: its background frame-reader goroutine
 // (which blocks in io.ReadFull) has NO ctx-cancel exit path — on ctx-done it keeps
 // parked in the read until r reaches EOF or is closed. Benign in production (process
@@ -166,13 +162,12 @@ type SlotRegistry map[string]*PacedWire
 // destination port's wire. md may be nil; if non-nil, update (node-move)
 // ops mail-sort each entry to the owning node/edge goroutine's inbox.
 // tr emits control breadcrumbs for the edit ops.
-// clk may be nil; if non-nil, "play" calls clk.Resume() and "pause" calls clk.Halt().
 // maxFrameBytes bounds a single framed-binary record: the reader buffer size and the
 // upper limit a decoded [len:u32] is allowed to request, so a corrupt/hostile length can't
 // drive an unbounded allocation. Matches the 1 MB headroom of the pre-frame line buffer.
 const maxFrameBytes = 1 << 20
 
-func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace, clk Clock) {
+func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace) {
 	// Framed-binary reader: each record is [len:u32-LE][record bytes]. A background
 	// goroutine reads whole frames (io.ReadFull handles partial reads — a frame split
 	// across TCP/pipe chunks is reassembled before the record is decoded) and hands the
@@ -233,10 +228,6 @@ func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *
 			switch msg.Type {
 			case "edit":
 				applyEdit(msg, slotReg, md, tr)
-			case "play":
-				handlePlayMsg(clk)
-			case "pause":
-				handlePauseMsg(clk)
 			case "raw-input":
 				handleRawInputMsg(msg, slotReg, md, tr)
 			case "save":
@@ -244,20 +235,6 @@ func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *
 			}
 			// MSG_TYPES_END
 		}
-	}
-}
-
-// handlePlayMsg resumes the clock's global gate (bead delivery starts). clk may be nil.
-func handlePlayMsg(clk Clock) {
-	if clk != nil {
-		clk.Resume()
-	}
-}
-
-// handlePauseMsg halts the clock's global gate (bead delivery freezes). clk may be nil.
-func handlePauseMsg(clk Clock) {
-	if clk != nil {
-		clk.Halt()
 	}
 }
 

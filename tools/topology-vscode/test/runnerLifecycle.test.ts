@@ -82,7 +82,7 @@ afterEach(() => {
 });
 
 function newRunner() {
-  return new BuildAndRunRunner(() => {});
+  return new BuildAndRunRunner();
 }
 
 describe("pendingStdin drain", () => {
@@ -110,15 +110,6 @@ describe("pendingStdin drain", () => {
     const proc = spawned[0];
     expect(proc.stdin.write).not.toHaveBeenCalled();
   });
-
-  it("stop() clears pendingStdin — not replayed onto the next spawned Go", () => {
-    const r = newRunner();
-    r.writeStdin(rec1);
-    r.stop();
-    r.run();
-    const proc = spawned[0];
-    expect(proc.stdin.write).not.toHaveBeenCalled();
-  });
 });
 
 describe("lastSnapshot cache (getLastSnapshot) — resend replacement", () => {
@@ -142,7 +133,6 @@ describe("lastSnapshot cache (getLastSnapshot) — resend replacement", () => {
   it("cached buffer survives the posted buffer being TRANSFER-detached", () => {
     const posted: ArrayBuffer[] = [];
     const r = new BuildAndRunRunner(
-      () => {},
       (snap) => {
         posted.push(snap.buffer);
         // Simulate exactly what a real postMessage transfer does to its source buffer.
@@ -183,7 +173,7 @@ describe("lastSnapshot cache (getLastSnapshot) — resend replacement", () => {
   });
 
   it("cache is overwritten by each new frame; getLastSnapshot reflects the LATEST one", () => {
-    const r = new BuildAndRunRunner(() => {}); // no onSnapshot — cache still populates
+    const r = new BuildAndRunRunner(); // no onSnapshot — cache still populates
     r.run();
     const proc = spawned[0];
     const fd3 = proc.stdio[3] as { on: ReturnType<typeof vi.fn> };
@@ -196,26 +186,6 @@ describe("lastSnapshot cache (getLastSnapshot) — resend replacement", () => {
 
     onFd3Data(Buffer.from(framed([1, 2, 3, 4]).buffer));
     expect(new Uint8Array(r.getLastSnapshot()!)).toEqual(new Uint8Array([1, 2, 3, 4]));
-  });
-});
-
-describe("run() re-announces liveness on an already-spawned proc", () => {
-  // Pins the fix: run() used to silently `return` when this.proc was already set, so a
-  // webview that remounted (reopened file, hot reload) after Go was already running never
-  // received {state:"active"} and its run/stop buttons went inert while Go kept streaming
-  // fd3 frames. run() must now re-post "active" on that path too — post() is idempotent for
-  // an unchanged state, so this is safe to call every time.
-  it("second run() call, with proc already spawned, posts {state:\"active\"} again", () => {
-    const statuses: { state: string }[] = [];
-    const r = new BuildAndRunRunner((s) => statuses.push(s));
-    r.run();
-    expect(spawnMock).toHaveBeenCalledTimes(1);
-    expect(statuses.some((s) => s.state === "active")).toBe(true);
-
-    statuses.length = 0; // clear the first spawn's posts; isolate the second call
-    r.run(); // proc already set — must NOT spawn again, but MUST re-post active
-    expect(spawnMock).toHaveBeenCalledTimes(1); // idempotent spawn: still only one proc
-    expect(statuses).toEqual([{ state: "active" }]);
   });
 });
 
@@ -239,14 +209,4 @@ describe("respawn / looping", () => {
     expect(spawnMock).toHaveBeenCalledTimes(1);
   });
 
-  it("stop() clears looping then cancels — terminates the loop", () => {
-    const r = newRunner();
-    r.run();
-    expect(spawnMock).toHaveBeenCalledTimes(1);
-    r.stop();
-    spawned[0].emit("close", null);
-    expect(spawnMock).toHaveBeenCalledTimes(1);
-    // And a subsequent natural-looking close does not resurrect the loop either.
-    expect(r.isRunning()).toBe(false);
-  });
 });

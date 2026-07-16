@@ -25,9 +25,6 @@ function fakeRunner(running: boolean, lastSnapshot?: ArrayBuffer) {
     calls,
     isRunning: () => running,
     run: rec("run"),
-    play: rec("play"),
-    pause: rec("pause"),
-    stop: rec("stop"),
     getLastSnapshot: () => {
       calls.push({ method: "getLastSnapshot", args: [] });
       return lastSnapshot;
@@ -44,31 +41,7 @@ function ctxFor(runner: ReturnType<typeof fakeRunner>, post: MessageCtx["post"] 
 
 const names = (r: ReturnType<typeof fakeRunner>) => r.calls.map((c) => c.method);
 
-describe("handleMessage dispatch — control signals", () => {
-  it("play is declared for Go's binary-record kind only — no live webview sender posts it, so dispatch just warns", async () => {
-    const r = fakeRunner(true);
-    await handleMessage({ type: "play" }, ctxFor(r));
-    expect(names(r)).toEqual([]);
-  });
-
-  it("pause → runner.pause()", async () => {
-    const r = fakeRunner(true);
-    await handleMessage({ type: "pause" }, ctxFor(r));
-    expect(names(r)).toEqual(["pause"]);
-  });
-
-  it("stop → runner.stop()", async () => {
-    const r = fakeRunner(true);
-    await handleMessage({ type: "stop" }, ctxFor(r));
-    expect(names(r)).toEqual(["stop"]);
-  });
-
-  it("run → runner.run() then runner.play()", async () => {
-    const r = fakeRunner(true);
-    await handleMessage({ type: "run" }, ctxFor(r));
-    expect(names(r)).toEqual(["run", "play"]);
-  });
-
+describe("handleMessage dispatch — ready / auto-launch", () => {
   it("ready spawns; posts the cached last snapshot only when Go was ALREADY running", async () => {
     const cached = new Uint8Array([1, 2, 3]).buffer;
     const posted: unknown[] = [];

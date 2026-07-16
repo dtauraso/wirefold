@@ -2,13 +2,12 @@ import * as vscode from "vscode";
 import * as cp from "child_process";
 import * as fs from "fs";
 import * as path from "path";
-import type { RunStatus, HostToWebviewMsg } from "./messages";
+import type { HostToWebviewMsg } from "./messages";
 import { buildBinary, maxGoMtime, killOrphanedSims } from "./goBuild";
-import { encodePlay, encodePause, frameRecord } from "./schema/input-layout";
+import { frameRecord } from "./schema/input-layout";
 import { PROBE_DIR, PROBE_FILES } from "./probe-files";
 import { decodeBufferLog } from "./buffer-log";
 
-export type { RunStatus };
 
 /** Format a Go-side error as a probe JSONL line (src="go", kind="error"). */
 function goErrorLine(message: string): string {
@@ -134,8 +133,9 @@ export class BuildAndRunRunner {
   // against natural exits, since a process that happened to die from SIGTERM
   // on its own would be misreported as "cancelled".
   private cancelled = false;
-  // looping: when true, respawn automatically on natural exit. Set by run();
-  // cleared by stop().
+  // looping: when true, respawn automatically on natural exit. Set by run(). A
+  // deliberate teardown (cancel(), from dispose) does not clear this — it sets
+  // `cancelled`, and the close handler's cancelled branch suppresses the respawn.
   private looping = false;
   private channel: vscode.OutputChannel | undefined;
   // Partial line buffer for stdout — trace lines are newline-delimited.
@@ -161,7 +161,6 @@ export class BuildAndRunRunner {
   private topologyPath: string | undefined;
 
   constructor(
-    private readonly post: (s: RunStatus) => void,
     private readonly onSnapshot?: (msg: HostToWebviewMsg & { type: "buffer-snapshot" }) => void,
   ) {}
 
@@ -173,7 +172,6 @@ export class BuildAndRunRunner {
       // process exists, leaving its run/stop buttons inert while Go streams frames at it.
       // The "ready" case replays the cached snapshot for the same reason; this is its
       // status half. post() is idempotent for an unchanged state.
-      this.post({ state: "active" });
       return;
     }
     if (topologyPath) this.topologyPath = topologyPath;
@@ -203,7 +201,6 @@ export class BuildAndRunRunner {
         } catch { /* swallow */ }
       }
       this.looping = false;
-      this.post({ state: "error", message: built.error });
       return;
     }
     // Reap orphaned sims left by prior/crashed editor sessions before spawning a
@@ -223,11 +220,6 @@ export class BuildAndRunRunner {
     this.channel.appendLine("$ " + binPath + " " + topArgs.join(" "));
     this.cancelled = false;
     this.looping = true;
-    // Post "active" here — this is genuine, instant, ext-host-owned truth (cp.spawn below
-    // returns synchronously), NOT a prediction of clock state. Go itself starts HALTED
-    // (main.go); the running-vs-paused distinction is Go-owned and streamed separately in
-    // the binary buffer's Clock block (read via useClockHalted, clock-state.ts) — this
-    // status message no longer predicts it (see play()/pause() below).
     // detached: true makes the child the leader of a new process group; the
     // prebuilt binary is the sole group member, so kill(-pid) reaches it
     // directly. Without this, SIGTERM could leave it orphaned on macOS.
@@ -243,7 +235,6 @@ export class BuildAndRunRunner {
         WIREFOLD_BUF_OUT_FD: "3",
       },
     });
-    this.post({ state: "active" });
     // Flush any framed binary records buffered before this spawn (writeStdin queued them).
     if (this.pendingStdin.length > 0) {
       for (const rec of this.pendingStdin) this.proc.stdin?.write(rec);
@@ -272,14 +263,12 @@ export class BuildAndRunRunner {
       this.cancelled = false;
       if (cancelled) {
         this.channel!.appendLine("\n[cancelled]");
-        this.post({ state: "cancelled" });
       } else if (looping) {
         // Natural exit while looping — respawn immediately.
         this.channel!.appendLine(code === 0 ? "\n[ok — restarting]" : `\n[exit ${code} — restarting]`);
         this.run();
       } else if (code === 0) {
         this.channel!.appendLine("\n[ok]");
-        this.post({ state: "ok" });
       } else {
         const message = `exit code ${code}`;
         this.channel!.appendLine(`\n[${message}]`);
@@ -288,7 +277,6 @@ export class BuildAndRunRunner {
             fs.appendFileSync(this.goErrorsFile, goErrorLine(message), "utf8");
           } catch { /* swallow */ }
         }
-        this.post({ state: "error", message });
       }
     });
     this.proc.on("error", (err) => {
@@ -300,7 +288,6 @@ export class BuildAndRunRunner {
           fs.appendFileSync(this.goErrorsFile, goErrorLine(err.message), "utf8");
         } catch { /* swallow */ }
       }
-      this.post({ state: "error", message: err.message });
     });
   }
 
@@ -373,25 +360,6 @@ export class BuildAndRunRunner {
     }
   }
 
-  /** Send play to Go's stdin — resumes the clock gate. Fire-and-forget: no status post here.
-   *  Called from the ext-host "run" case for BOTH first start and resume-after-pause — Go's
-   *  gate has one Resume(), so there is nothing for a separate resume-vs-play distinction to
-   *  do on this seam (there is no "resume" webview→host message kind for the same reason).
-   *  The running-vs-paused OUTCOME is Go's truth, not this write's — it streams back in the
-   *  binary buffer's Clock block (KindHalted) and the webview reflects it via useClockHalted
-   *  (clock-state.ts), not a local prediction. */
-  play(): void {
-    if (!this.proc) return;
-    this.writeStdin(encodePlay());
-  }
-
-  /** Send pause to Go's stdin — halts the clock gate. Fire-and-forget: no status post here
-   *  (see play() above — the outcome streams back from Go's Clock block). */
-  pause(): void {
-    if (!this.proc) return;
-    this.writeStdin(encodePause());
-  }
-
   isRunning(): boolean {
     return this.proc !== undefined;
   }
@@ -407,12 +375,6 @@ export class BuildAndRunRunner {
    *  second remount would be served a zero-length buffer. The copy is one per remount. */
   getLastSnapshot(): ArrayBuffer | undefined {
     return this.lastSnapshot?.slice(0);
-  }
-
-  stop() {
-    this.looping = false;
-    this.pendingStdin = [];
-    this.cancel();
   }
 
   /** Framed binary records written before Go's stdin exists, flushed on spawn (see writeStdin/run). */

@@ -265,21 +265,6 @@ type bufLayoutScene struct {
 	Radius float32 `buf:"f32"` // scene-sphere radius
 }
 
-// bufLayoutClock defines the clock-state block (always 1 row).
-// Matched from KindHalted trace events. The clock (nodes/Wiring/clock.go RealClock) is the
-// single source of truth for running-vs-paused; this block streams that truth so the webview
-// never predicts play/pause locally (see runCommand.ts play()/pause()).
-type bufLayoutClock struct {
-	Halted uint8 `buf:"u8"` // 1 = clock is halted (paused)
-	// HasRun is 1 once the clock has left halted at least once this process (RealClock's
-	// hasRun field, set inside Resume()'s transition guard); it never reverts to 0. Backs the
-	// RunButton's run-vs-resume label: a fresh load has Halted=1,HasRun=0 ("run"), after the
-	// first play it stays HasRun=1 across subsequent pauses ("resume"). Do NOT derive this
-	// from the snapshot header's tick counter — that is a frame-emit counter, not the clock's
-	// tick, and is already >0 on the first frame because startup geometry emits while halted.
-	HasRun uint8 `buf:"u8"` // 1 = clock has advanced (run) at least once
-}
-
 // bufLayoutEvent defines one row of the per-tick EVENT column block.
 // The block is self-sizing via an eventCount field in the snapshot header; it carries
 // the causal trace events that occurred since the previous snapshot (recv/fire/send/done/
@@ -320,6 +305,5 @@ var _ = [...]any{
 	bufLayoutCamera{},
 	bufLayoutOverlay{},
 	bufLayoutScene{},
-	bufLayoutClock{},
 	bufLayoutEvent{},
 }

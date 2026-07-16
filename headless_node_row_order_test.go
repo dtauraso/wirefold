@@ -20,6 +20,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/binary"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -70,8 +71,7 @@ func nodeRowIDs(snap []byte) []string {
 		portCount*B.BufPortStride +
 		B.BufCameraStride +
 		B.BufOverlayStride +
-		B.BufSceneStride +
-		B.BufClockStride
+		B.BufSceneStride
 
 	ids := make([]string, nodeCount)
 	for i := 0; i < nodeCount; i++ {
@@ -120,13 +120,10 @@ func runOnceAndReadFirstFrame(t *testing.T, binPath, repoRoot string, wantNodeCo
 	})
 
 	br := bufio.NewReader(fd3Read)
-	// The very FIRST fd-3 frame is the pre-load Halted trace event (clk.Halt() fires before
-	// LoadTopology even runs, let alone the row pre-emit) and so carries nodeCount==0; the
-	// pre-emit loop itself then emits ONE frame PER node.NodeGeometry call (Update's
+	// The row pre-emit loop emits ONE frame PER node.NodeGeometry call (Update's
 	// KindNodeGeometry case always calls emitSnapshot), so nodeCount climbs 0,1,2,...
 	// across several frames before reaching the full set. Skip forward to the first frame
-	// that carries ALL of them (bounded, same pattern as headless_clock_test.go's
-	// waitForHalted).
+	// that carries ALL of them (bounded).
 	const maxFrames = 200
 	for i := 0; i < maxFrames; i++ {
 		snap, err := readOneSnapshotFrame(br)
@@ -186,4 +183,19 @@ func TestHeadlessNodeRowOrderIsDeterministic(t *testing.T) {
 			}
 		}
 	}
+}
+
+// readOneSnapshotFrame reads one length-prefixed fd3 frame ([len:u32-LE][bytes]) from r.
+// Shared by the headless snapshot tests (was in the deleted headless_clock_test.go).
+func readOneSnapshotFrame(r *bufio.Reader) ([]byte, error) {
+	var lenBuf [4]byte
+	if _, err := io.ReadFull(r, lenBuf[:]); err != nil {
+		return nil, err
+	}
+	n := binary.LittleEndian.Uint32(lenBuf[:])
+	buf := make([]byte, n)
+	if _, err := io.ReadFull(r, buf); err != nil {
+		return nil, err
+	}
+	return buf, nil
 }

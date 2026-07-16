@@ -3,8 +3,6 @@
 // fingerprint is parity-guarded by tools/check-input-layout-parity.sh.
 import { describe, it, expect } from "vitest";
 import {
-  IN_KIND_RESUME,
-  IN_KIND_PAUSE,
   IN_KIND_SAVE,
   IN_KIND_RAW_INPUT,
   IN_KIND_EDIT_CREATE,
@@ -15,8 +13,6 @@ import {
   IN_UPDATE_KINDS,
   IN_UPDATE_ATTRS,
   INPUT_LAYOUT_FINGERPRINT,
-  encodePlay,
-  encodePause,
   encodeOverlaysToggle,
   decodeInputRecord,
   frameRecord,
@@ -47,23 +43,18 @@ function createDeleteBytes(kind: number, target: string, targetHandle: string): 
 }
 
 describe("control records — exact bytes", () => {
-  it("play/pause/save are a single kind byte", () => {
-    expect(new Uint8Array(encodePlay())).toEqual(new Uint8Array([IN_KIND_RESUME]));
-    expect(new Uint8Array(encodePause())).toEqual(new Uint8Array([IN_KIND_PAUSE]));
+  it("save is a single kind byte", () => {
     expect(new Uint8Array(controlBytes(IN_KIND_SAVE))).toEqual(new Uint8Array([IN_KIND_SAVE]));
   });
 
-  it("play is pinned to the literal byte 0x01 (Go's IN_KIND_RESUME)", () => {
-    // This does not re-derive IN_KIND_RESUME — it pins the actual wire byte Go's
-    // stdin_reader.go decoder expects for "resume playback". If IN_KIND_RESUME ever
-    // changes value, this literal must be independently updated to match Go, or this
-    // assertion (not just the constant-derived one above) will catch the drift.
-    expect(new Uint8Array(encodePlay())).toEqual(new Uint8Array([0x01]));
+  it("save is pinned to the literal byte 0x04 (Go's IN_KIND_SAVE)", () => {
+    // Pins the actual wire byte Go's stdin_reader.go decoder expects for "save". If
+    // IN_KIND_SAVE ever changes value, this literal must be independently updated to match
+    // Go, or this assertion catches the drift.
+    expect(new Uint8Array(controlBytes(IN_KIND_SAVE))).toEqual(new Uint8Array([0x04]));
   });
 
   it("decode control", () => {
-    expect(decodeInputRecord(encodePlay())).toEqual({ kind: "play" });
-    expect(decodeInputRecord(encodePause())).toEqual({ kind: "pause" });
     expect(decodeInputRecord(controlBytes(IN_KIND_SAVE))).toEqual({ kind: "save" });
   });
 });
@@ -134,8 +125,7 @@ describe("fingerprint self-consistency", () => {
     // Built from the live constants, not typed in by hand — if any IN_KIND_* value drifts
     // from the fingerprint's hardcoded numbers, this fails instead of silently passing.
     const expected =
-      `kinds=resume:${IN_KIND_RESUME},pause:${IN_KIND_PAUSE},` +
-      `save:${IN_KIND_SAVE},raw-input:${IN_KIND_RAW_INPUT},` +
+      `kinds=save:${IN_KIND_SAVE},raw-input:${IN_KIND_RAW_INPUT},` +
       `edit-create:${IN_KIND_EDIT_CREATE},edit-delete:${IN_KIND_EDIT_DELETE},edit-update:${IN_KIND_EDIT_UPDATE}`;
     expect(INPUT_LAYOUT_FINGERPRINT).toContain(expected);
   });

@@ -13,7 +13,6 @@ import * as os from "os";
 import { TRACE_EVENT_KINDS } from "../src/schema/trace-kinds";
 import { splitFrames } from "../src/runCommand";
 import { decodeBufferLog } from "../src/buffer-log";
-import { encodePlay, frameRecord } from "../src/schema/input-layout";
 
 const KIND_SET = new Set<string>(TRACE_EVENT_KINDS);
 const REPO_ROOT = path.resolve(__dirname, "../../..");
@@ -51,7 +50,7 @@ describe("buffer-decoded .probe log equivalence", () => {
     cp.execFileSync("go", ["build", "-o", bin, "."], { cwd: REPO_ROOT });
 
     // Reference = the -trace JSONL file (Go's Trace.WriteJSONL — the SAME serializer the removed
-    // stdout emitter used). -duration gives a CLEAN self-terminating exit: Go resumes the clock,
+    // stdout emitter used). -duration gives a CLEAN self-terminating exit: Go runs free,
     // drains the Trace (writes the -trace file), and FinalFlush emits the last buffer snapshot —
     // so both the reference file and the buffer stream are complete and deterministic.
     const traceFile = path.join(os.tmpdir(), `wf-equiv-trace-${Date.now()}.jsonl`);
@@ -73,9 +72,9 @@ describe("buffer-decoded .probe log equivalence", () => {
       }
     });
 
-    // Resume the clock so flow events fire, then wait for the clean self-terminating exit so
-    // both streams (stdout drain + final buffer flush) are fully written before comparing.
-    proc.stdin.write(frameRecord(encodePlay()));
+    // The clock is free-running (no play/pause gate), so flow events fire from startup.
+    // Wait for the clean self-terminating -duration exit so both streams (stdout drain +
+    // final buffer flush) are fully written before comparing.
     await new Promise<void>((r) => proc.on("close", () => r()));
     await new Promise((r) => setTimeout(r, 100));
 

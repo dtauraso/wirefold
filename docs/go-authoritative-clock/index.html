@@ -673,7 +673,7 @@ The bridge is: geometry + shading + position data out, editor geometry + animati
           <td>Message receiver</td>
           <td title="tools/topology-vscode/src/webview/main.tsx">main.tsx</td>
           <td>event-driven (window "message")</td>
-          <td><ol><li>parseHostToWebview narrows the incoming message (main.tsx).</li><li><strong>trace-event</strong> &rarr; handleTraceEvent (the pump).</li><li><strong>load</strong> &rarr; store.load(text); <strong>run-status</strong> &rarr; set run state; <strong>flush</strong> &rarr; flush saves.</li><li>On startup, post {type:"ready"} back to the host.</li></ol></td>
+          <td><ol><li>parseHostToWebview narrows the incoming message (main.tsx).</li><li><strong>buffer-snapshot</strong> &rarr; setLatestSnapshot (the only host&rarr;webview message; BufferScene polls it).</li><li>On startup, post {type:"ready"} back to the host.</li></ol></td>
         </tr>
         <tr>
           <td class="enum">5</td>

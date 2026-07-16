@@ -16,9 +16,8 @@
 // without per-kind boilerplate.
 //
 // UpdateLayout parks on ctx.Done() the same way every node's Update loop exits
-// on cancellation, but is NOT gated by the play/pause clock: it does not wait
-// on WaitTick/SleepCycle, so it keeps running while beads are paused (MODEL.md:
-// the play/pause gate freezes tick advance, not goroutines). For this slice it
+// on cancellation. It does not pace on SleepCycle — it owns LocalPolars and idles
+// until cancellation. For this slice it
 // does no runtime mutation — it owns LocalPolars and idles; drag-time
 // recomputation is a later slice.
 package Wiring
@@ -95,10 +94,9 @@ type LayoutHolder struct {
 	localPolars []LocalPolar
 }
 
-// UpdateLayout runs this node's layout-update loop until ctx is cancelled. It is
-// NOT gated by the play/pause clock — it parks on ctx.Done() only (the same
-// cancellation wait every node's Update loop uses to exit), so it stays live
-// while the bead clock is halted.
+// UpdateLayout runs this node's layout-update loop until ctx is cancelled. It
+// parks on ctx.Done() only (the same cancellation wait every node's Update loop
+// uses to exit).
 func (lh *LayoutHolder) UpdateLayout(ctx context.Context) {
 	<-ctx.Done()
 }

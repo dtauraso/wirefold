@@ -23,13 +23,13 @@
 // BuildAndRunRunner.lastSnapshot / getLastSnapshot in runCommand.ts). Left as an
 // intentional GAP rather than renumbered, so no other kind's wire value moves.
 
-// INPUT_LAYOUT_FINGERPRINT: v15 kinds=resume:1,pause:2,save:4,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays updateAttrs=toggle overlayFlags=tori,scenePoles,nodePoles,selSpherePoles,handholds,labelsGlobal,overlays,doubleLinks
+// INPUT_LAYOUT_FINGERPRINT: v16 kinds=save:4,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays updateAttrs=toggle overlayFlags=tori,scenePoles,nodePoles,selSpherePoles,handholds,labelsGlobal,overlays,doubleLinks
 export const INPUT_LAYOUT_FINGERPRINT =
-  "v15 kinds=resume:1,pause:2,save:4,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays updateAttrs=toggle overlayFlags=tori,scenePoles,nodePoles,selSpherePoles,handholds,labelsGlobal,overlays,doubleLinks";
+  "v16 kinds=save:4,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays updateAttrs=toggle overlayFlags=tori,scenePoles,nodePoles,selSpherePoles,handholds,labelsGlobal,overlays,doubleLinks";
 
 // Record kind bytes (first byte of every record). Must match input_codec.go.
-export const IN_KIND_RESUME = 1;
-export const IN_KIND_PAUSE = 2;
+// Kinds 1 (resume) and 2 (pause) removed — the play/pause clock gate was deleted
+// end-to-end. Intentional gaps (never renumber a live wire value).
 // Kind 3 (IN_KIND_RESEND) removed — intentional gap, see comment above.
 export const IN_KIND_SAVE = 4;
 // Kind 5 (IN_KIND_FADE_TOGGLE) removed — the fade feature was deleted end-to-end.
@@ -127,8 +127,6 @@ export function encodeControl(kind: number): ArrayBuffer {
   return w.toArrayBuffer();
 }
 
-export const encodePlay = () => encodeControl(IN_KIND_RESUME);
-export const encodePause = () => encodeControl(IN_KIND_PAUSE);
 
 // Update attr indices (must match IN_UPDATE_ATTRS ordering).
 const IN_OVERLAY_ATTR_TOGGLE = 0;
@@ -234,7 +232,7 @@ class ByteReader {
 }
 
 export type DecodedInput =
-  | { kind: "play" | "pause" | "save" }
+  | { kind: "save" }
   | { kind: "raw-input"; event: RawInputEvent }
   | { kind: "edit-create" | "edit-delete"; target: string; targetHandle: string }
   | { kind: "edit-update"; entity: "overlays"; attr: "toggle"; flag: OverlayFlag };
@@ -245,10 +243,6 @@ export function decodeInputRecord(record: ArrayBuffer): DecodedInput | undefined
   if (bytes.length === 0) return undefined;
   const r = new ByteReader(bytes);
   switch (bytes[0]) {
-    case IN_KIND_RESUME:
-      return { kind: "play" };
-    case IN_KIND_PAUSE:
-      return { kind: "pause" };
     case IN_KIND_SAVE:
       return { kind: "save" };
     case IN_KIND_RAW_INPUT: {

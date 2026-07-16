@@ -76,12 +76,16 @@ removed sidecar message is rejected; do not reintroduce one.)
   remove an edge; **`update` sets an ATTRIBUTE on a typed entity** (`kind` = node / edge /
   camera / overlays / scene) — there is no per-feature op. New *addressed* capability is a
   new entity kind or attribute, NOT a new op.
-- **Bare commands** — `play` / `pause` have live TS senders today.
-  `save` is defined end-to-end (kind byte, Go decode + persist) but currently has **no live
-  TS sender** — no UI affordance posts it yet; it stays in the vocabulary because Go's decode
-  and the `INPUT_LAYOUT_FINGERPRINT` both carry it. All of these carry **no entity id on
-  purpose**: they act on state **Go already owns** (the clock; the current selection), so
-  there is nothing for TS to address. There is no `resend`
+- **Bare commands** — `save` is the only bare command. It is defined end-to-end (kind byte,
+  Go decode + persist) but currently has **no live TS sender** — no UI affordance posts it
+  yet; it stays in the vocabulary because Go's decode and the `INPUT_LAYOUT_FINGERPRINT` both
+  carry it. It carries **no entity id on purpose**: it acts on state **Go already owns** (the
+  current selection / scene), so there is nothing for TS to address. There was a `play` /
+  `pause` clock-gate pair and a `run` / `stop` process control; both were **removed
+  end-to-end** — the clock is free-running (no pause) and Go auto-runs on the webview's
+  `ready` (respawning on exit), so the editor has no run/pause/stop affordance. The removed
+  kind bytes (`resume:1`, `pause:2`) are left as GAPS in `input_codec.go`, never renumbered.
+  There is no `resend`
   command: the ext host caches the last fd3 buffer-snapshot frame and replays it to a
   remounted webview on `ready` instead (`BuildAndRunRunner.lastSnapshot`/`getLastSnapshot`
   in `tools/topology-vscode/src/runCommand.ts`) — Go only ever emits a frame when

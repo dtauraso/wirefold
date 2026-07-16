@@ -5,7 +5,7 @@
 // extension host writes each record FRAMED as [len:u32-LE][record] to Go's stdin.
 // This file decodes one record (kind byte + fixed numeric fields + length-prefixed
 // UTF-8 sections) back into the SAME stdinMsg the old newline-JSON path produced,
-// so applyEdit / HandleRawInput / play-pause dispatch is UNCHANGED — only the wire
+// so applyEdit / HandleRawInput dispatch is UNCHANGED — only the wire
 // decode differs.
 //
 // The record layout is defined ONCE here and mirrored in
@@ -15,9 +15,9 @@
 // Numbers are little-endian (matching the fd-3 content buffer). Enum discriminators
 // (event kind, hit kind, update entity kind, update attr, overlay flag) are u8 indices
 // into the shared orderings. There is NO JSON on the wire: every record is fully numeric.
-// The live editor→Go traffic is raw-input, overlays toggle (numeric flag-id),
-// the bare `save` COMMAND (Go persists its OWN authoritative scene state), and the
-// play/pause control bytes. create/delete/edit-update record kinds stay defined (the
+// The live editor→Go traffic is raw-input, overlays toggle (numeric flag-id), and
+// the bare `save` COMMAND (Go persists its OWN authoritative scene state).
+// create/delete/edit-update record kinds stay defined (the
 // 3-op create/update/delete concept), though the gesture FSM now produces edge create/delete
 // in-process from raw-input.
 //
@@ -39,13 +39,13 @@ import (
 // to INPUT_LAYOUT_FINGERPRINT in input-layout.ts (guarded by check-input-layout-parity.sh).
 // Bump on both sides whenever any record kind, field, or enum ordering changes.
 //
-// INPUT_LAYOUT_FINGERPRINT: v15 kinds=resume:1,pause:2,save:4,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays updateAttrs=toggle overlayFlags=tori,scenePoles,nodePoles,selSpherePoles,handholds,labelsGlobal,overlays,doubleLinks
-const InputLayoutFingerprint = "v15 kinds=resume:1,pause:2,save:4,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays updateAttrs=toggle overlayFlags=tori,scenePoles,nodePoles,selSpherePoles,handholds,labelsGlobal,overlays,doubleLinks"
+// INPUT_LAYOUT_FINGERPRINT: v16 kinds=save:4,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays updateAttrs=toggle overlayFlags=tori,scenePoles,nodePoles,selSpherePoles,handholds,labelsGlobal,overlays,doubleLinks
+const InputLayoutFingerprint = "v16 kinds=save:4,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays updateAttrs=toggle overlayFlags=tori,scenePoles,nodePoles,selSpherePoles,handholds,labelsGlobal,overlays,doubleLinks"
 
 // Record kind bytes (first byte of every record).
 const (
-	inKindResume = 1 // play  — resume the clock gate
-	inKindPause  = 2 // pause — halt the clock gate
+	// Kinds 1 (resume) and 2 (pause) removed — the play/pause clock gate was deleted
+	// end-to-end. Intentional gaps, per house style (never renumber a live wire value).
 	// Kind 3 (inKindResend) removed — intentional gap, see comment above.
 	inKindSave = 4 // save  — Go persists its OWN scene state (bare command)
 	// Kind 5 (inKindFadeToggle) removed — the fade feature was deleted end-to-end.
@@ -195,10 +195,6 @@ func decodeInputRecord(rec []byte) (stdinMsg, bool) {
 	}
 	r := &recReader{b: rec, pos: 1}
 	switch rec[0] {
-	case inKindResume:
-		return stdinMsg{Type: "play"}, true
-	case inKindPause:
-		return stdinMsg{Type: "pause"}, true
 	case inKindSave:
 		return stdinMsg{Type: "save"}, true
 	case inKindRawInput:
@@ -342,7 +338,7 @@ func enumIndex(list []string, s string) byte {
 	return 0
 }
 
-// encodeControl builds a payload-less control record (play/pause).
+// encodeControl builds a payload-less control record (save).
 func encodeControl(kind byte) []byte { return []byte{kind} }
 
 // encodeEditCreateDelete builds an edit create/delete record.

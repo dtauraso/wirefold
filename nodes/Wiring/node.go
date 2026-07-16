@@ -9,9 +9,9 @@ package Wiring
 import "context"
 
 // Node is the Go node interface. Update runs the node's pausable bead event
-// loop until ctx is cancelled. UpdateLayout runs the node's pause-INDEPENDENT
+// loop until ctx is cancelled. UpdateLayout runs the node's
 // layout-update loop (owns LocalPolars, layout_holder.go) until ctx is
-// cancelled; it is not gated by the play/pause clock. Every kind gets
+// cancelled. Every kind gets
 // UpdateLayout for free by embedding Wiring.LayoutHolder.
 type Node interface {
 	Update(ctx context.Context)
