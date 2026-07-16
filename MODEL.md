@@ -86,8 +86,9 @@ resolving instantaneously.
 - Go owns the bead's PROGRESS (the fraction `t`, timed in ticks on the human-speed clock)
   AND the bead's absolute world position — it computes the position from its own
   live node/port endpoints (moved by the same drag) and packs the result into the
-  content buffer. The editor decodes and draws it (`readBeadX/Y/Z` in
-  `buffer-scene.tsx`'s `BeadInstances`); it does not interpolate or own positions.
+  content buffer. The editor decodes and draws it (`readBeadX/Y/Z` from
+  `schema/buffer-layout.ts`, consumed by `three/BeadInstances.tsx`); it does not
+  interpolate or own positions.
 - Durations are tick counts: bead traversal (`ticksToCross`) and node processing windows.
 ## Driver
 
@@ -138,11 +139,16 @@ when a bead has arrived. Go owns the clock.
   parse. Stdout carries only the DEBUG BREADCRUMB channel's sparse
   `{"kind":"breadcrumb",...}` control-event lines.
 - **`BufferScene`** (`tools/topology-vscode/src/webview/three/buffer-scene.tsx`)
-  draws ALL geometry from the buffer: node bodies (sphere mesh + ring,
-  keyed off `node.data.fill`/`node.data.stroke` from `NODE_DEFS`), ports,
-  edge tubes, transit + interior beads, selection highlight, and the
-  camera (`BufferCamera` maps the buffer Camera row onto the three.js
-  camera). It owns no traversal timing, no positions, no geometry.
+  is the composition root of the render tree — it decodes the buffer and
+  assembles the per-concern components that draw ALL geometry from it. It is a
+  small file; the drawing lives in its siblings under `three/`. Grep the symbol,
+  not this filename. The tree covers: node bodies (`NodeInstances.tsx` — sphere
+  mesh + ring, keyed off `node.data.fill`/`node.data.stroke` from `NODE_DEFS`),
+  ports (`PortInstances.tsx`), edge tubes (`EdgeTube.tsx`), transit and interior
+  beads (`BeadInstances.tsx`, `InteriorBeadInstances.tsx`), selection highlight
+  (`SelectionHighlight.tsx`), and the camera (`BufferCamera.tsx` maps the buffer
+  Camera row onto the three.js camera). Nothing in this tree owns traversal
+  timing, positions, or geometry.
 - **Global gate** is a play/pause signal sent to the Go process (freezes
   the human-speed clock's tick advance). While halted the tick does not
   advance, so beads, in-node animations, and node windows all freeze; the

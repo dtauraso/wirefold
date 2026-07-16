@@ -40,9 +40,10 @@ That is a load-bearing lesson with a known failure signature, not style.
 `rebuildPortTable`, `nodeRowIndex`, …). Positions are computed by the goroutine
 that owns them — MODEL.md is explicit that Go computes a bead's absolute world
 position from its own live node/port endpoints, and the editor only decodes:
-`readBeadX/Y/Z` are defined in `schema/buffer-layout.ts` and consumed by
-`three/BeadInstances.tsx`. (MODEL.md:90 places both inside `buffer-scene.tsx`;
-that is stale — see the caveat below.)
+`readBeadX/Y/Z` are defined in `tools/topology-vscode/src/schema/buffer-layout.ts`
+and consumed by `tools/topology-vscode/src/webview/three/BeadInstances.tsx`.
+(MODEL.md:90 places both inside `buffer-scene.tsx`; that is stale — see the
+caveat below.)
 
 **Caveat — the docs' file pointers are one hop stale.** `buffer-scene.tsx` is no
 longer the monolith MODEL.md and CLAUDE.md describe. It is now a ~4KB
@@ -55,9 +56,9 @@ the split-drift that [[feedback_guards_hardcoding_single_file_break_on_split]]
 predicts, landing in the doctrine docs rather than in a guard.
 
 **One historical exception, now gone.** A central iterate-to-fixpoint solver over
-all nodes/edges did once live inside the emitter (`Buffer/fade.go`, ported from
-the retired TS render-mask fixpoint). It was removed with the fade feature
-(58557356). `grep "for changed := true" Buffer/` is now empty.
+all nodes/edges did once live inside the emitter — `Buffer/fade.go`, now deleted
+(it was ported from the retired TS render-mask fixpoint). It went with the fade
+feature (58557356). `grep "for changed := true" Buffer/` is now empty.
 
 **Why this matters for [[feedback_per_goroutine_bridge]].** That memory worried
 that a "central emitter" deviated from David's invariant — "each goroutine sends
