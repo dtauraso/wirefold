@@ -68,7 +68,10 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 		rc.SetHaltedHook(tr.Halted)
 	}
 
-	// starts halted; geometry still emits in LoadTopology; first `play` stdin signal resumes.
+	// starts halted; first `play` stdin signal resumes. Startup geometry is NOT emitted
+	// here — each node's own goroutine emits its geometry once at startup (below, after
+	// this function's node-goroutine launch loop); see the row-seeding comment there for
+	// why the buffer's row tables do not depend on that emit order.
 	clk.Halt()
 
 	nodes, slotReg, md, err := W.LoadTopology(ctx, topologyPath, tr, clk)
@@ -79,6 +82,45 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 	// One example startup breadcrumb — proves the debug channel end-to-end and is genuinely
 	// useful (which topology loaded, how many nodes). Sparse: once per run.
 	tr.Breadcrumb("topology-loaded", topologyPath, "", fmt.Sprintf("nodes=%d", len(nodes)))
+
+	// Seed the buffer's node/edge row tables from the diagram itself — SPEC ORDER,
+	// prefilled with the diagram's own load-time geometry — BEFORE any node goroutine
+	// starts (the launch loop below). This makes row order a deterministic projection of
+	// the diagram instead of a discovery log built by racing node goroutines to their
+	// first geometry emit (CLAUDE.md/MODEL.md); each node's own later EmitGeometry then
+	// just overwrites its own pre-assigned row, exactly as node_move.go's newNodeMover
+	// already seeds its own atomic snap from this same load-time geometry.
+	//
+	// This goes through the SAME tr.NodeGeometry/tr.Geometry event pipeline every node's
+	// own later startup emit uses — NOT a direct SnapshotState mutation. SnapshotState's
+	// own doc comment (Buffer/snapshot.go) requires every method call to come from the
+	// single Trace-drain goroutine; a first attempt at this feature called a bypass
+	// SnapshotState.SeedNodes/SeedEdges method directly from this (main) goroutine and hit
+	// a genuine data race with the drain goroutine — go test panicked inside
+	// writeEdgeBlock/SetEdgeRow with a corrupted slice. Routing through tr.NodeGeometry/
+	// tr.Geometry instead queues these onto Trace's channel, so the drain goroutine
+	// processes them in FIFO order exactly like any other event — single-writer
+	// preserved, and ordering (spec order, before any node goroutine can race in) still
+	// comes from THIS loop running synchronously before the node-goroutine launch loop
+	// below. Ports are omitted (nil) here: the aimed port geometry needs each port's
+	// partner center, which isn't resolved until the node's own goroutine runs — the row
+	// still exists as soon as this loop returns, and the node's real startup emit fills in
+	// ports moments later into this SAME pre-assigned row (onNodeGeometry's exists-check).
+	for _, sd := range md.NodeSeeds() {
+		tr.NodeGeometry(sd.ID, sd.Label, sd.Kind, sd.CX, sd.CY, sd.CZ, sd.Radius, sd.SphereR, nil,
+			sd.VRX, sd.VRY, sd.VRZ, sd.FRX, sd.FRY, sd.FRZ)
+	}
+	for _, sd := range md.EdgeSeeds() {
+		tr.Geometry(sd.Label, sd.SrcNode, sd.DstNode, 0, 0, 0, 0, 0, 0)
+	}
+	// Sparse, one-time startup sanity check (CLAUDE.md DEBUG BREADCRUMB channel): every
+	// node LoadTopology returned should have gotten a row-seed entry above. A mismatch
+	// means md.NodeSeeds() (spec order) and LoadTopology's node list diverged — a real
+	// topology bug — and must be visible, not silently reconciled by a later node
+	// goroutine's own emit landing on whatever row it happens to get.
+	if len(md.NodeSeeds()) != len(nodes) {
+		tr.Breadcrumb("row-seed-count-mismatch", "", "", fmt.Sprintf("NodeSeeds=%d nodes=%d", len(md.NodeSeeds()), len(nodes)))
+	}
 
 	// Initial camera viewpoint = FILE DATA. Go reads the saved camera from
 	// <topologyPath>/view/scene.json itself and installs it into the gesture-FSM viewpoint,
@@ -150,9 +192,10 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 	// run (e.g. -duration, or SIGINT) some nodes may be parked on paced-wire
 	// delivery gated by a halted clock and so never observe ctx cancellation.
 	// On cancellation, Resume the clock so any ctx-aware paced waits proceed and
-	// nodes can return, then wait a brief grace and exit regardless. The startup
-	// geometry is already emitted (in LoadTopology) before any pacing, so
-	// flushing the trace here still captures it.
+	// nodes can return, then wait a brief grace and exit regardless. The buffer's row
+	// tables are already seeded from the diagram (above, before the node-goroutine
+	// launch loop) regardless of pacing, so flushing the trace here still captures a
+	// correct scene even if a node's own startup geometry emit never got scheduled.
 	done := make(chan struct{})
 	go func() { wg.Wait(); close(done) }()
 	select {
