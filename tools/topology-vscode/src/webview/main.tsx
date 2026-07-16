@@ -7,13 +7,19 @@ postLog("lifecycle", { phase: "bundle-eval" });
 import { createRoot } from "react-dom/client";
 import "./webview.css";
 import { ThreeView } from "./three/ThreeView";
+import { SpeedSlider } from "./three/SpeedSlider";
 import { parseHostToWebview } from "../messages";
 import { ErrorBoundary } from "./log/ErrorBoundary";
 import { CrashListeners } from "./log/CrashListeners";
 import { setLatestSnapshot } from "./snapshot-buffer";
 
 function Root() {
-  return <ThreeView />;
+  return (
+    <>
+      <ThreeView />
+      <SpeedSlider />
+    </>
+  );
 }
 
 postLog("lifecycle", { phase: "before-render" });

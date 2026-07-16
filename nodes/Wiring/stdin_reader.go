@@ -86,6 +86,9 @@ type stdinMsg struct {
 	Kind string
 	Attr string
 	Flag string
+	// Num is the numeric payload for an op=="update" that carries a value rather than a
+	// flag name — currently only clock/speed (the playback multiplier). Zero otherwise.
+	Num int
 	// Event is the payload for the top-level type=="raw-input" message; nil otherwise.
 	Event *rawInputMsg
 	stdinCRUDPayload
@@ -167,7 +170,7 @@ type SlotRegistry map[string]*PacedWire
 // drive an unbounded allocation. Matches the 1 MB headroom of the pre-frame line buffer.
 const maxFrameBytes = 1 << 20
 
-func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace) {
+func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace, clk Clock) {
 	// Framed-binary reader: each record is [len:u32-LE][record bytes]. A background
 	// goroutine reads whole frames (io.ReadFull handles partial reads — a frame split
 	// across TCP/pipe chunks is reassembled before the record is decoded) and hands the
@@ -227,7 +230,7 @@ func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *
 			// MSG_TYPES_START
 			switch msg.Type {
 			case "edit":
-				applyEdit(msg, slotReg, md, tr)
+				applyEdit(msg, slotReg, md, tr, clk)
 			case "raw-input":
 				handleRawInputMsg(msg, slotReg, md, tr)
 			case "save":
@@ -310,7 +313,7 @@ func createEdgeInSlot(slotReg SlotRegistry, dstNode, dstPort string, tr *T.Trace
 	return true
 }
 
-func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace) {
+func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace, clk Clock) {
 	// EDIT_OPS_START
 	switch msg.Op {
 	case "create":
@@ -332,17 +335,28 @@ func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace
 		tr.Breadcrumb("delete", pw.Target, pw.TargetHandle, destKey)
 		pw.Delete()
 	case "update":
-		applyUpdate(msg, md, tr)
+		applyUpdate(msg, md, tr, clk)
 	}
 	// EDIT_OPS_END
 }
 
 // applyUpdate routes an op=="update" edit to the entity named by msg.Kind, setting the
-// requested attribute. The sole live entity is overlays (toggle one flag).
+// requested attribute. Live entities: overlays (toggle one flag) and clock (set the
+// playback-speed multiplier — Go-owned state, the slider just signals the value).
 // Unknown kinds/attrs are ignored (forward-compat).
-func applyUpdate(msg stdinMsg, md *MoveDispatch, tr *T.Trace) {
+func applyUpdate(msg stdinMsg, md *MoveDispatch, tr *T.Trace, clk Clock) {
 	// EDIT_UPDATE_KINDS_START
 	switch msg.Kind {
+	case "clock":
+		if clk == nil {
+			return
+		}
+		switch msg.Attr {
+		case "speed":
+			// The playback multiplier (0/1/2 from the slider). Go owns the clock; this
+			// just sets its speed. Every tick-timed thing scales together (see Clock.SetSpeed).
+			clk.SetSpeed(float64(msg.Num))
+		}
 	case "overlays":
 		if md == nil {
 			return

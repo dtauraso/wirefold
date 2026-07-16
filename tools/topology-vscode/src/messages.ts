@@ -48,15 +48,17 @@ export const OVERLAY_FLAG_ORDER = OVERLAY_FLAG_NAMES;
 // The geometry-CRUD edit surface. THREE ops (create / update / delete). create/delete
 // name an edge by its destination slot (kept as the 3-op concept though the gesture FSM
 // now creates/deletes edges in-process from raw-input, so TS sends no create/delete). The
-// sole live update entity is overlays (toggle one flag); node/edge/camera edits became
-// gesture-FSM-in-process (raw-input) and scene became the bare `save` command — none cross
-// this seam any more. The former attr="set" full-visibility install was dead (its only
-// caller, the load-time main.tsx push, was removed); only attr="toggle" is live.
+// live update entities are overlays (toggle one flag) and clock (set the playback-speed
+// multiplier); node/edge/camera edits became gesture-FSM-in-process (raw-input) and scene
+// became the bare `save` command — none cross this seam any more. The former attr="set"
+// full-visibility install was dead (its only caller, the load-time main.tsx push, was
+// removed); only attr="toggle" is live for overlays.
 type EditMsg =
   | { type: "edit"; op: "create"; target: string; targetHandle: string }
   | { type: "edit"; op: "delete"; target: string; targetHandle: string }
   // op="update" — set an attribute on a typed entity (kind discriminator).
-  | { type: "edit"; op: "update"; kind: "overlays"; attr: "toggle"; flag: OverlayFlag };
+  | { type: "edit"; op: "update"; kind: "overlays"; attr: "toggle"; flag: OverlayFlag }
+  | { type: "edit"; op: "update"; kind: "clock"; attr: "speed"; value: number };
 // EDIT_MSG_END
 
 // RAW INPUT (Phase 6, OFF by default behind USE_RAW_INPUT). A single raw pointer/wheel

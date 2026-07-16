@@ -36,12 +36,20 @@ import (
 //
 // Stops when ctx is cancelled or a placement fails (wire torn down).
 //
-// Paced-wire mode (out.Paced()) sleeps on the shared clock's
-// SleepCycle so it freezes on pause, and paces placement on the per-edge K
-// above. Chan mode (!out.Paced(), unit tests) has no shared clock and
-// no wire geometry, so it keeps the OLD unconditional per-cycle placement
-// (falls back to a wall-clock sleep of the same duration) — that mode never
-// exhibited the density bug since it has no wire to visualize.
+// Paced-wire mode (out.Paced()) sleeps one WALL cycle per iteration but PACES
+// PLACEMENT on the clock's TICK delta: a new bead is placed once the tick has
+// advanced by the per-edge K (one edge-crossing latency in ticks) since the last
+// placement. Because Tick() is playback-speed-scaled, placement scales WITH speed
+// for free — at 2× the tick advances twice as fast so beads are placed twice as
+// often, and at 0 the tick holds so no new bead is placed (and the in-flight ones
+// don't move either, since StepOnce reads the same frozen tick). Pacing on tick
+// delta rather than a wall-cycle COUNT is what makes that true: a wall-cycle
+// counter would keep placing at 0 (piling beads at the source) and would not
+// speed up at 2×.
+//
+// Chan mode (!out.Paced(), unit tests) has no shared clock and no wire geometry,
+// so it keeps the OLD unconditional per-cycle placement (wall-clock sleep) — that
+// mode has no tick to read and no wire to visualize.
 func DriveHeld(ctx context.Context, out *Wiring.Out, held *atomic.Int64, transform func(int64) int) {
 	go func() {
 		paced := out.Paced()
@@ -58,15 +66,19 @@ func DriveHeld(ctx context.Context, out *Wiring.Out, held *atomic.Int64, transfo
 			sleep = clk.SleepCycle
 		}
 
-		var cyclesSincePlace int64 = 0
+		// lastPlaceTick anchors placement pacing in SCALED-tick space (paced mode).
+		// Seeded to now so the first bead lands one K after start, as before.
+		var lastPlaceTick int64
+		if paced {
+			lastPlaceTick = clk.Tick()
+		}
 		for {
 			if ctx.Err() != nil {
 				return
 			}
 
-			// Chan mode (!paced, unit tests): no wire geometry, no shared
-			// clock — place every cycle exactly as before (immediate send,
-			// synchronous chan semantics).
+			// Chan mode (!paced): place every cycle exactly as before (immediate
+			// send, synchronous chan semantics).
 			place := !paced
 			if paced {
 				if latMs := out.Geom().SimLatencyMs; latMs > 0 {
@@ -74,7 +86,7 @@ func DriveHeld(ctx context.Context, out *Wiring.Out, held *atomic.Int64, transfo
 					if k < 1 {
 						k = 1
 					}
-					place = cyclesSincePlace >= k
+					place = clk.Tick()-lastPlaceTick >= k
 				}
 				// else: geometry not yet known — don't place this cycle.
 			}
@@ -82,14 +94,15 @@ func DriveHeld(ctx context.Context, out *Wiring.Out, held *atomic.Int64, transfo
 				if !out.PlaceDriven(transform(held.Load())).Live() {
 					return
 				}
-				cyclesSincePlace = 0
+				if paced {
+					lastPlaceTick = clk.Tick()
+				}
 			}
 
 			if err := sleep(ctx); err != nil {
 				return
 			}
 			out.StepOnce(ctx)
-			cyclesSincePlace++
 		}
 	}()
 }

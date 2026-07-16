@@ -32,6 +32,7 @@ package Wiring
 
 import (
 	"context"
+	"sync"
 	"time"
 )
 
@@ -45,44 +46,90 @@ const MsPerTick = 16
 const tickPeriod = MsPerTick * time.Millisecond
 
 // Clock is the one human-speed clock the network reads. Tick() returns the
-// current integer tick. The clock is free-running (no pause gate).
+// current integer tick, advancing at the current playback speed.
 type Clock interface {
-	// Tick returns the current tick since the clock started. The clock is
-	// free-running wall-clock time floored to ticks; there is no pause, so ticks
-	// accrue monotonically from start for the life of the process.
+	// Tick returns the current tick since the clock started. Ticks accrue as
+	// SCALED wall time — wall elapsed integrated against the playback speed (see
+	// SetSpeed) — so at speed 1 it is plain wall time, at 2 it advances twice as
+	// fast, and at 0 it holds. It is monotonic non-decreasing for the process life.
 	Tick() int64
-	// SleepCycle blocks for exactly one clock cycle (or until ctx is done).
+	// SleepCycle blocks for exactly one WALL clock cycle (or until ctx is done).
 	// It is the primitive for one-cycle pacing loops; it does not read Tick()
 	// itself, so it is immune to a tick advancing between the call and the wait.
+	// It sleeps WALL time regardless of playback speed — the loop re-reads Tick()
+	// to see how many scaled ticks actually elapsed, so speed scaling lives in
+	// Tick(), not in the sleep cadence.
 	SleepCycle(ctx context.Context) error
+	// SetSpeed sets the global playback-speed multiplier applied to tick advance
+	// (0 = frozen, 1 = normal, 2 = double). Everything timed in ticks — bead
+	// travel, in-node animation, node/gate windows — scales together because they
+	// all read Tick(). Continuity is automatic: Tick() is a continuous function of
+	// wall time (piecewise-linear across speed changes), so a bead's fractional
+	// progress t=(now−placement)/crossTicks never jumps when the speed changes.
+	SetSpeed(speed float64)
 }
 
-// RealClock is the production Clock: wall-clock elapsed since start, floored to a
-// tick via MsPerTick. It is free-running — there is no halt/pause gate (the
-// play/pause feature was removed end-to-end), so Tick() is a plain monotonic
-// function of real time. Nothing waits on this clock via a condition variable —
-// pacing loops call SleepCycle (time.After-based) and re-check Tick() themselves.
+// RealClock is the production Clock: SCALED wall-clock elapsed since start, floored
+// to a tick via MsPerTick. "Scaled" = wall time integrated against the playback
+// speed — at speed s the tick advances s× as fast as wall time. Speed changes
+// accumulate the scaled elapsed up to the change instant, then continue from the
+// new slope, so Tick() stays continuous and monotonic across changes (the same
+// accumulate-on-transition shape the removed halt gate used, generalized from
+// {0,1} to an arbitrary non-negative multiplier). Nothing waits on this clock via
+// a condition variable — pacing loops call SleepCycle (wall time.After) and
+// re-check Tick() themselves.
 type RealClock struct {
-	// start is the wall-clock instant the clock began (monotonic). Immutable after
-	// construction, so Tick() needs no lock.
-	start time.Time
+	mu sync.Mutex
+	// speed is the current playback multiplier (>= 0). Default 1.
+	speed float64
+	// accScaled is scaled elapsed accumulated across all PRIOR speed segments, up
+	// to lastChange. The live segment (lastChange → now) is added at read time.
+	accScaled time.Duration
+	// lastChange is the wall instant the current speed segment began (construction
+	// or the last SetSpeed).
+	lastChange time.Time
 }
 
-// NewRealClock returns a started RealClock anchored at the current monotonic instant.
+// NewRealClock returns a started RealClock at speed 1, anchored at the current
+// monotonic instant.
 func NewRealClock() *RealClock {
-	return &RealClock{start: time.Now()}
+	return &RealClock{speed: 1, lastChange: time.Now()}
 }
 
-// Tick returns the current tick: wall-clock elapsed since start, floored to ticks.
-func (c *RealClock) Tick() int64 {
-	elapsed := time.Since(c.start)
-	if elapsed < 0 {
-		elapsed = 0
+// scaledElapsedLocked returns total scaled elapsed = accumulated prior segments +
+// the live segment (wall time since lastChange × current speed). Caller holds mu.
+func (c *RealClock) scaledElapsedLocked() time.Duration {
+	live := time.Duration(float64(time.Since(c.lastChange)) * c.speed)
+	total := c.accScaled + live
+	if total < 0 {
+		total = 0
 	}
-	return int64(elapsed / tickPeriod)
+	return total
 }
 
-// SleepCycle blocks for one tickPeriod, or until ctx is done.
+// Tick returns the current tick: scaled elapsed floored to ticks.
+func (c *RealClock) Tick() int64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return int64(c.scaledElapsedLocked() / tickPeriod)
+}
+
+// SetSpeed sets the playback-speed multiplier. It banks the scaled elapsed of the
+// segment that just ended, then starts a new segment at the new speed — so Tick()
+// is continuous across the change (no jump). A negative value is clamped to 0.
+func (c *RealClock) SetSpeed(speed float64) {
+	if speed < 0 {
+		speed = 0
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	now := time.Now()
+	c.accScaled += time.Duration(float64(now.Sub(c.lastChange)) * c.speed)
+	c.lastChange = now
+	c.speed = speed
+}
+
+// SleepCycle blocks for one WALL tickPeriod, or until ctx is done.
 func (c *RealClock) SleepCycle(ctx context.Context) error {
 	select {
 	case <-time.After(tickPeriod):
@@ -116,6 +163,7 @@ func (inertClock) SleepCycle(ctx context.Context) error {
 	<-ctx.Done()
 	return ctx.Err()
 }
+func (inertClock) SetSpeed(float64) {}
 
 // Compile-time assertion that inertClock satisfies Clock.
 var _ Clock = inertClock{}

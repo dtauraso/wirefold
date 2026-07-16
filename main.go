@@ -158,7 +158,7 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 	// Read the editor→Go bridge: "edit" JSON lines (op = create/update/delete)
 	// from stdin. When stdin reaches EOF (extension host disconnect), cancel the context.
 	go func() {
-		W.RunStdinReader(ctx, os.Stdin, slotReg, md, tr)
+		W.RunStdinReader(ctx, os.Stdin, slotReg, md, tr, clk)
 		cancel()
 	}()
 

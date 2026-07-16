@@ -23,9 +23,9 @@
 // BuildAndRunRunner.lastSnapshot / getLastSnapshot in runCommand.ts). Left as an
 // intentional GAP rather than renumbered, so no other kind's wire value moves.
 
-// INPUT_LAYOUT_FINGERPRINT: v16 kinds=save:4,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays updateAttrs=toggle overlayFlags=tori,scenePoles,nodePoles,selSpherePoles,handholds,labelsGlobal,overlays,doubleLinks
+// INPUT_LAYOUT_FINGERPRINT: v17 kinds=save:4,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays,clock updateAttrs=toggle,speed overlayFlags=tori,scenePoles,nodePoles,selSpherePoles,handholds,labelsGlobal,overlays,doubleLinks
 export const INPUT_LAYOUT_FINGERPRINT =
-  "v16 kinds=save:4,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays updateAttrs=toggle overlayFlags=tori,scenePoles,nodePoles,selSpherePoles,handholds,labelsGlobal,overlays,doubleLinks";
+  "v17 kinds=save:4,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays,clock updateAttrs=toggle,speed overlayFlags=tori,scenePoles,nodePoles,selSpherePoles,handholds,labelsGlobal,overlays,doubleLinks";
 
 // Record kind bytes (first byte of every record). Must match input_codec.go.
 // Kinds 1 (resume) and 2 (pause) removed — the play/pause clock gate was deleted
@@ -47,13 +47,13 @@ export const IN_HIT_KINDS = ["port", "handhold", "node", "edge", "torus", "empty
 // the sole live edit-update entity; camera/node/edge left the wire when their edits became
 // gesture-FSM-in-process (raw-input), and scene became the bare save COMMAND.
 // EDIT_UPDATE_KINDS_START
-export const IN_UPDATE_KINDS = ["overlays"] as const;
+export const IN_UPDATE_KINDS = ["overlays", "clock"] as const;
 // EDIT_UPDATE_KINDS_END
 // IN_UPDATE_ATTRS is the shared update sub-attribute vocabulary, u8 index on the wire.
 // "toggle" is overlays' single-flag toggle. The former "set" full-visibility-snapshot attr
 // was removed (its only caller, the load-time main.tsx push, was deleted; no live TS sender
-// remained).
-export const IN_UPDATE_ATTRS = ["toggle"] as const;
+// remained). "speed" is clock's playback-speed multiplier (0/1/2 from the slider).
+export const IN_UPDATE_ATTRS = ["toggle", "speed"] as const;
 
 import type { RawInputEvent, OverlayFlag } from "../messages";
 import { OVERLAY_FLAG_ORDER } from "../messages";
@@ -130,6 +130,7 @@ export function encodeControl(kind: number): ArrayBuffer {
 
 // Update attr indices (must match IN_UPDATE_ATTRS ordering).
 const IN_OVERLAY_ATTR_TOGGLE = 0;
+const IN_CLOCK_ATTR_SPEED = 1;
 
 // NOTE: there is no encodeSave/encodeEditCreate/encodeEditDelete here. IN_KIND_SAVE and
 // IN_KIND_EDIT_CREATE/IN_KIND_EDIT_DELETE stay defined (Go reads them and they are in the
@@ -146,6 +147,17 @@ export function encodeOverlaysToggle(flag: OverlayFlag): ArrayBuffer {
   w.u8(enumIndex(IN_UPDATE_KINDS, "overlays"));
   w.u8(IN_OVERLAY_ATTR_TOGGLE);
   w.u8(enumIndex(OVERLAY_FLAG_ORDER, flag));
+  return w.toArrayBuffer();
+}
+
+/** Build a clock SPEED record: [22][entityKind=clock][attr=speed][u8 speed].
+ *  speed is 0, 1, or 2 — Go owns the clock; this just signals the multiplier. */
+export function encodeClockSpeed(speed: number): ArrayBuffer {
+  const w = new ByteWriter();
+  w.u8(IN_KIND_EDIT_UPDATE);
+  w.u8(enumIndex(IN_UPDATE_KINDS, "clock"));
+  w.u8(IN_CLOCK_ATTR_SPEED);
+  w.u8(speed);
   return w.toArrayBuffer();
 }
 
@@ -235,7 +247,8 @@ export type DecodedInput =
   | { kind: "save" }
   | { kind: "raw-input"; event: RawInputEvent }
   | { kind: "edit-create" | "edit-delete"; target: string; targetHandle: string }
-  | { kind: "edit-update"; entity: "overlays"; attr: "toggle"; flag: OverlayFlag };
+  | { kind: "edit-update"; entity: "overlays"; attr: "toggle"; flag: OverlayFlag }
+  | { kind: "edit-update"; entity: "clock"; attr: "speed"; value: number };
 
 /** Decode one record body (with kind byte, without the [len] frame). */
 export function decodeInputRecord(record: ArrayBuffer): DecodedInput | undefined {
@@ -284,15 +297,24 @@ export function decodeInputRecord(record: ArrayBuffer): DecodedInput | undefined
         targetHandle: r.str(),
       };
     case IN_KIND_EDIT_UPDATE: {
-      // entityKind byte selects the entity; attr byte + numeric payload follow. overlays is
-      // the sole live entity.
+      // entityKind byte selects the entity; attr byte + numeric payload follow.
       const entityKind = IN_UPDATE_KINDS[r.u8()];
-      if (entityKind !== "overlays") return undefined;
-      const attr = r.u8();
-      if (attr === IN_OVERLAY_ATTR_TOGGLE) {
-        const flag = OVERLAY_FLAG_ORDER[r.u8()];
-        if (!flag) return undefined;
-        return { kind: "edit-update", entity: "overlays", attr: "toggle", flag };
+      if (entityKind === "overlays") {
+        const attr = r.u8();
+        if (attr === IN_OVERLAY_ATTR_TOGGLE) {
+          const flag = OVERLAY_FLAG_ORDER[r.u8()];
+          if (!flag) return undefined;
+          return { kind: "edit-update", entity: "overlays", attr: "toggle", flag };
+        }
+        return undefined;
+      }
+      if (entityKind === "clock") {
+        const attr = r.u8();
+        if (attr === IN_CLOCK_ATTR_SPEED) {
+          const value = r.u8();
+          return { kind: "edit-update", entity: "clock", attr: "speed", value };
+        }
+        return undefined;
       }
       return undefined;
     }

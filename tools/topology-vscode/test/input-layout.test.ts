@@ -14,6 +14,7 @@ import {
   IN_UPDATE_ATTRS,
   INPUT_LAYOUT_FINGERPRINT,
   encodeOverlaysToggle,
+  encodeClockSpeed,
   decodeInputRecord,
   frameRecord,
 } from "../src/schema/input-layout";
@@ -97,6 +98,15 @@ describe("overlays edit-update — fully numeric (no JSON)", () => {
     expect(new Uint8Array(encodeOverlaysToggle("overlays"))[3]).toBe(6);
   });
 
+});
+
+describe("clock edit-update — fully numeric (no JSON)", () => {
+  it("speed: [22][entityKind=clock][attr=speed=1][value] + round-trip", () => {
+    const rec = encodeClockSpeed(2);
+    const b = new Uint8Array(rec);
+    expect(b).toEqual(new Uint8Array([22, IN_UPDATE_KINDS.indexOf("clock"), 1, 2]));
+    expect(decodeInputRecord(rec)).toEqual({ kind: "edit-update", entity: "clock", attr: "speed", value: 2 });
+  });
 });
 
 describe("fingerprint self-consistency", () => {

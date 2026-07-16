@@ -39,8 +39,8 @@ import (
 // to INPUT_LAYOUT_FINGERPRINT in input-layout.ts (guarded by check-input-layout-parity.sh).
 // Bump on both sides whenever any record kind, field, or enum ordering changes.
 //
-// INPUT_LAYOUT_FINGERPRINT: v16 kinds=save:4,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays updateAttrs=toggle overlayFlags=tori,scenePoles,nodePoles,selSpherePoles,handholds,labelsGlobal,overlays,doubleLinks
-const InputLayoutFingerprint = "v16 kinds=save:4,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays updateAttrs=toggle overlayFlags=tori,scenePoles,nodePoles,selSpherePoles,handholds,labelsGlobal,overlays,doubleLinks"
+// INPUT_LAYOUT_FINGERPRINT: v17 kinds=save:4,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays,clock updateAttrs=toggle,speed overlayFlags=tori,scenePoles,nodePoles,selSpherePoles,handholds,labelsGlobal,overlays,doubleLinks
+const InputLayoutFingerprint = "v17 kinds=save:4,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays,clock updateAttrs=toggle,speed overlayFlags=tori,scenePoles,nodePoles,selSpherePoles,handholds,labelsGlobal,overlays,doubleLinks"
 
 // Record kind bytes (first byte of every record).
 const (
@@ -55,9 +55,11 @@ const (
 	inKindEditUpdate = 22 // edit op=update (entity byte + attr byte + numeric payload)
 )
 
-// Update attr indices (must match IN_UPDATE_ATTRS ordering in input-layout.ts).
+// Update attr indices (positional in IN_UPDATE_ATTRS; the order is pinned across both
+// languages by the updateAttrs= token in the fingerprint).
 const (
-	inOverlayAttrToggle = 0
+	inOverlayAttrToggle = 0 // overlays: flip one flag
+	inClockAttrSpeed    = 1 // clock: set the playback-speed multiplier
 )
 
 // Enum orderings (u8 index → string), shared with input-layout.ts. Every one is DERIVED
@@ -225,23 +227,30 @@ func decodeInputRecord(rec []byte) (stdinMsg, bool) {
 			return stdinMsg{}, false
 		}
 		entity := enumAt(inUpdateKinds, kindByte)
-		if entity != "overlays" {
-			return stdinMsg{}, false
-		}
 		attr, err2 := r.u8()
 		if err2 != nil {
 			return stdinMsg{}, false
 		}
-		msg := stdinMsg{Type: "edit", Op: "update", Kind: "overlays"}
-		switch attr {
-		case inOverlayAttrToggle:
+		switch entity {
+		case "overlays":
+			if attr != inOverlayAttrToggle {
+				return stdinMsg{}, false
+			}
 			flagID, err := r.u8()
 			if err != nil || int(flagID) >= len(inOverlayFlags) {
 				return stdinMsg{}, false
 			}
-			msg.Attr = "toggle"
-			msg.Flag = inOverlayFlags[flagID]
-			return msg, true
+			return stdinMsg{Type: "edit", Op: "update", Kind: "overlays", Attr: "toggle", Flag: inOverlayFlags[flagID]}, true
+		case "clock":
+			if attr != inClockAttrSpeed {
+				return stdinMsg{}, false
+			}
+			// [u8 speed] — the playback multiplier (0/1/2 from the slider).
+			speed, err := r.u8()
+			if err != nil {
+				return stdinMsg{}, false
+			}
+			return stdinMsg{Type: "edit", Op: "update", Kind: "clock", Attr: "speed", Num: int(speed)}, true
 		}
 		return stdinMsg{}, false
 	}
