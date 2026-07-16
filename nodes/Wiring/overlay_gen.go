@@ -20,7 +20,6 @@ type overlayState struct {
 	selSpherePolesVisible bool
 	handholdsVisible      bool
 	labelsGlobalVisible   bool
-	badgesGlobalVisible   bool
 	overlaysVisible       bool
 	doubleLinksVisible    bool
 }
@@ -96,16 +95,6 @@ func (o *overlayState) EmitLabelsGlobal(tr *T.Trace) {
 	tr.LabelsGlobal(o.labelsGlobalVisible)
 }
 
-// ToggleBadgesGlobal flips badgesGlobalVisible and emits a badges-global event.
-func (o *overlayState) ToggleBadgesGlobal(tr *T.Trace) {
-	o.setFlag(&o.badgesGlobalVisible, tr.BadgesGlobal)
-}
-
-// EmitBadgesGlobal emits the current badgesGlobalVisible without toggling it.
-func (o *overlayState) EmitBadgesGlobal(tr *T.Trace) {
-	tr.BadgesGlobal(o.badgesGlobalVisible)
-}
-
 // ToggleOverlaysVis flips overlaysVisible and emits a overlays-vis event.
 func (o *overlayState) ToggleOverlaysVis(tr *T.Trace) {
 	o.setFlag(&o.overlaysVisible, tr.OverlaysVis)
@@ -137,7 +126,6 @@ func (o *overlayState) SetGuideVisibility(ov overlayState, tr *T.Trace) {
 	o.EmitSelSpherePoles(tr)
 	o.EmitHandholds(tr)
 	o.EmitLabelsGlobal(tr)
-	o.EmitBadgesGlobal(tr)
 	o.EmitOverlaysVis(tr)
 	o.EmitDoubleLinks(tr)
 }
@@ -151,7 +139,6 @@ func defaultOverlayState() overlayState {
 		selSpherePolesVisible: true,
 		handholdsVisible:      true,
 		labelsGlobalVisible:   true,
-		badgesGlobalVisible:   true,
 		overlaysVisible:       true,
 	}
 }
@@ -170,8 +157,6 @@ func (md *MoveDispatch) ToggleHandholds(tr *T.Trace)      { md.ov.ToggleHandhold
 func (md *MoveDispatch) EmitHandholds(tr *T.Trace)        { md.ov.EmitHandholds(tr) }
 func (md *MoveDispatch) ToggleLabelsGlobal(tr *T.Trace)   { md.ov.ToggleLabelsGlobal(tr) }
 func (md *MoveDispatch) EmitLabelsGlobal(tr *T.Trace)     { md.ov.EmitLabelsGlobal(tr) }
-func (md *MoveDispatch) ToggleBadgesGlobal(tr *T.Trace)   { md.ov.ToggleBadgesGlobal(tr) }
-func (md *MoveDispatch) EmitBadgesGlobal(tr *T.Trace)     { md.ov.EmitBadgesGlobal(tr) }
 func (md *MoveDispatch) ToggleOverlaysVis(tr *T.Trace)    { md.ov.ToggleOverlaysVis(tr) }
 func (md *MoveDispatch) EmitOverlaysVis(tr *T.Trace)      { md.ov.EmitOverlaysVis(tr) }
 func (md *MoveDispatch) ToggleDoubleLinks(tr *T.Trace)    { md.ov.ToggleDoubleLinks(tr) }
@@ -193,7 +178,6 @@ var overlayToggles = map[string]func(*MoveDispatch, *T.Trace){
 	"selSpherePoles": (*MoveDispatch).ToggleSelSpherePoles,
 	"handholds":      (*MoveDispatch).ToggleHandholds,
 	"labelsGlobal":   (*MoveDispatch).ToggleLabelsGlobal,
-	"badgesGlobal":   (*MoveDispatch).ToggleBadgesGlobal,
 	"overlays":       (*MoveDispatch).ToggleOverlaysVis,
 	"doubleLinks":    (*MoveDispatch).ToggleDoubleLinks,
 }

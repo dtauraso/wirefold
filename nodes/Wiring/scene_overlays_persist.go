@@ -16,7 +16,10 @@
 // + default-omission mirror TS's serializeSceneState (webview/state/viewer/types.ts): most
 // flags are visible-sense written only when hidden (false); labelsGlobalHidden/badgesHidden
 // are hidden-sense written only when hidden (true); a key at its default is deleted so the
-// on-disk shape matches what the editor would have written.
+// on-disk shape matches what the editor would have written. An old scene.json that still
+// carries a "badgesHidden" key (from before the occlusion-badge feature was removed) is
+// tolerated: json.Unmarshal into sceneOverlaysFile silently ignores unknown keys, so it is
+// dropped on the next save without needing an explicit migration.
 //
 // The debounce/coalesce timer and the JSON read-modify-write/atomic-write plumbing are
 // shared machinery from scene_persist.go (debouncedPersister, sceneReadModifyWrite,
@@ -61,7 +64,6 @@ func writeSceneOverlays(scenePath string, ov overlayState) error {
 		setVisible("handholdsVisible", ov.handholdsVisible)
 		setVisible("overlaysActive", ov.overlaysVisible)
 		setHidden("labelsGlobalHidden", ov.labelsGlobalVisible)
-		setHidden("badgesHidden", ov.badgesGlobalVisible)
 		// doubleLinksVisible is visible-sense with a FALSE default — write `true` only when on.
 		if ov.doubleLinksVisible {
 			obj["doubleLinksVisible"] = json.RawMessage("true")
@@ -113,7 +115,6 @@ type sceneOverlaysFile struct {
 	HandholdsVisible      *bool `json:"handholdsVisible"`
 	OverlaysActive        *bool `json:"overlaysActive"`
 	LabelsGlobalHidden    *bool `json:"labelsGlobalHidden"`
-	BadgesHidden          *bool `json:"badgesHidden"`
 	DoubleLinksVisible    *bool `json:"doubleLinksVisible"`
 }
 
@@ -161,10 +162,6 @@ func loadSceneOverlays(scenePath string) (overlayState, bool) {
 	}
 	if sf.LabelsGlobalHidden != nil {
 		ov.labelsGlobalVisible = !*sf.LabelsGlobalHidden
-		found = true
-	}
-	if sf.BadgesHidden != nil {
-		ov.badgesGlobalVisible = !*sf.BadgesHidden
 		found = true
 	}
 	if sf.DoubleLinksVisible != nil {

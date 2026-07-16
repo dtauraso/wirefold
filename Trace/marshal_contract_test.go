@@ -63,7 +63,6 @@ func TestMarshalEventMatchesFixture(t *testing.T) {
 		{Step: 15, Kind: KindSelSpherePoles, Visible: true},
 		{Step: 16, Kind: KindHandholds, Visible: false},
 		{Step: 17, Kind: KindLabelsGlobal, Visible: true},
-		{Step: 18, Kind: KindBadgesGlobal, Visible: false},
 		{Step: 19, Kind: KindOverlaysVis, Visible: true},
 		{Step: 20, Kind: KindDoubleLinks, Visible: false},
 		{Step: 21, Kind: KindSelect, Node: "A"},

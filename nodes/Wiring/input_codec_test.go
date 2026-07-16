@@ -63,7 +63,7 @@ func TestDecodeEditUpdateOverlaysToggle(t *testing.T) {
 // TestOverlayFlagOrderMatchesFingerprint guards that the derived flag order equals the
 // fingerprint's overlayFlags list (self-check on parseOverlayFlags).
 func TestOverlayFlagOrderMatchesFingerprint(t *testing.T) {
-	want := []string{"tori", "scenePoles", "nodePoles", "selSpherePoles", "handholds", "labelsGlobal", "badgesGlobal", "overlays", "doubleLinks"}
+	want := []string{"tori", "scenePoles", "nodePoles", "selSpherePoles", "handholds", "labelsGlobal", "overlays", "doubleLinks"}
 	if !reflect.DeepEqual(inOverlayFlags, want) {
 		t.Fatalf("inOverlayFlags = %v, want %v", inOverlayFlags, want)
 	}
