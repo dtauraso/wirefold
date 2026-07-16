@@ -12,8 +12,8 @@ and then mirror it. One source of truth, no drift.
 
 **Why:** the mirror step doubles work and lets the two indexes
 desync. The repo-only location also keeps memory portable across
-AI systems per the post-v0 no-lock-in rule (see
-`feedback_workflow_post_v0.md`).
+AI systems — it travels with the code, not with one vendor's
+tooling.
 
 **How to apply:** any new feedback/project/reference memory for
 this project goes straight to `memory/<name>.md` with an entry

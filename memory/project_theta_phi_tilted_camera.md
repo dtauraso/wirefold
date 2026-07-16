@@ -21,4 +21,4 @@ snaps φ to 0 on the axis, and the θ-lock keeps each node's φ, so near the pol
 and positions get unstable. The CAMERA math (`spherical.go`) already avoids this via the
 epsilon-free great-circle bearing form (`atan2` of two unnormalized terms — no `/sinθ`).
 If the θ-lock/layout needs a pole fix, mirror that bearing-form approach. Relates to
-[[feedback-make-bug-class-unrepresentable]] (pick the formulation with no pole special-case).
+[[feedback_make_bug_class_unrepresentable]] (pick the formulation with no pole special-case).

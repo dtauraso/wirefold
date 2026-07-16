@@ -12,10 +12,10 @@ Delegated edit/implementation work must go to the project **`implementer`** suba
 delegated agent can recursively spawn its own subagents — observed 2026-06-27 as a
 `general-purpose → general-purpose → general-purpose` nested tree (~20 agent files for
 ~5 explicit spawns). `implementer`'s toolset omits `Agent`, so recursion is structurally
-impossible (the bug class is unrepresentable, cf. [[feedback-make-bug-class-unrepresentable]]),
+impossible (the bug class is unrepresentable, cf. [[feedback_make_bug_class_unrepresentable]]),
 rather than relying on a prompt plea.
 
 **How to apply:** for write/refactor/fix tasks use `subagent_type: "implementer"`. For
 read-only research use `Explore` (already excludes `Agent`). Reserve `general-purpose`
 only when a task genuinely needs to fan out to further subagents (rare; decide consciously).
-Still spot-check delegated commits ([[feedback-verify-subagent-commits]]).
+Still spot-check delegated commits ([[feedback_verify_subagent_commits]]).

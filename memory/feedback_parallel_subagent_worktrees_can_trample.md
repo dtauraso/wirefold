@@ -49,7 +49,9 @@ groups, then commit. **Lessons:** (1) the file-disjoint split is NOT sufficient 
 ANY git tree/index mutation by a subagent (`stash`, `checkout`, `reset`, `add`) is
 global and tramples siblings; the delegation prompt must forbid all mutating git,
 not just worktrees. (2) A refactor's blast radius can exceed its named file set
-(splitting a struct broke `fadePersister` call sites in `node_move.go` + test files
-outside the agent's scope) — scope the agent to the call sites too, or serialize.
+(splitting a struct broke call sites in `node_move.go` + test files outside the
+agent's scope — the specific symbol, `fadePersister`, has since been removed with
+the fade feature; the blast-radius lesson is what matters) — scope the agent to
+the call sites too, or serialize.
 (3) When trampling is likely (shared tree, overlapping-ish concerns), prefer
 SEQUENTIAL implementers or worktree isolation over disjoint-file parallelism.
