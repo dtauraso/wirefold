@@ -114,7 +114,7 @@ func (md *MoveDispatch) LoadSceneSphere(topologyPath string) {
 }
 
 // sceneSpherePersister coalesces rapid pans into a debounced read-modify-write of
-// scene.json's "sceneSphere" key, mirroring overlaysPersister/fadePersister. path == "" ⇒
+// scene.json's "sceneSphere" key, mirroring overlaysPersister. path == "" ⇒
 // no-op (tests that never arm persistence).
 type sceneSpherePersister struct {
 	path     string

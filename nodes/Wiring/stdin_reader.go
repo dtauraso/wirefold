@@ -20,9 +20,8 @@
 //       create (record 20): un-silence the destination slot's wire.
 //       delete (record 21): silence it + cancel any in-flight bead.
 //       update overlays attr=toggle: flip one named overlay flag.
-//     Camera / node-move / port-anchor / edge-fade are NOT edits: the gesture FSM produces
-//     them in-process from raw-input, so they never cross this seam as an edit op. (Fade
-//     still crosses — as the bare fade-toggle command in 6, not as an edit.)
+//     Camera / node-move / port-anchor are NOT edits: the gesture FSM produces them
+//     in-process from raw-input, so they never cross this seam as an edit op.
 //
 //  2. "play" / "pause" — control. Routes directly to the clock's global gate (Halt/Resume).
 //     The process starts halted; the first play message resumes bead delivery; pause
@@ -34,10 +33,6 @@
 //
 //  4. "raw-input" — a raw pointer/wheel event + stateless raycast hit, handed to the
 //     gesture FSM.
-//
-//  5. "fade-toggle" — flips fade on the CURRENT SELECTION. A bare command carrying no
-//     entity id BY DESIGN: Go owns the selection, so there is nothing for TS to address.
-//     That is why fade is not an edit op=update on an entity.
 //
 // A remounted webview that has nothing new to render (Go paused/idle) is served from the
 // EXT HOST's cached last fd3 snapshot instead of asking Go to manufacture one — see
@@ -84,7 +79,7 @@ type stdinCRUDPayload struct {
 // three values (create/update/delete). create/delete name a destination slot (Target/
 // TargetHandle). op=="update" sets an attribute on a typed entity — the sole live entity is
 // overlays: Attr=="toggle" (Flag names one overlay). The other top-level types are
-// raw-input (Event) and the bare commands (play/pause/save/fade-toggle).
+// raw-input (Event) and the bare commands (play/pause/save).
 //
 // These structs carry NO json tags: this seam is framed binary end to end and nothing
 // unmarshals them (input_codec.go decodes the record). The wire field order is the
@@ -168,8 +163,8 @@ type SlotRegistry map[string]*PacedWire
 // must close r. Call in a goroutine alongside the node run loop.
 //
 // slotReg is keyed by "target.targetHandle" and resolves create/delete ops to the
-// destination port's wire. md may be nil; if non-nil, update (node-move) and
-// fade ops mail-sort each entry to the owning node/edge goroutine's inbox.
+// destination port's wire. md may be nil; if non-nil, update (node-move)
+// ops mail-sort each entry to the owning node/edge goroutine's inbox.
 // tr emits control breadcrumbs for the edit ops.
 // clk may be nil; if non-nil, "play" calls clk.Resume() and "pause" calls clk.Halt().
 // maxFrameBytes bounds a single framed-binary record: the reader buffer size and the
@@ -246,8 +241,6 @@ func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *
 				handleRawInputMsg(msg, slotReg, md, tr)
 			case "save":
 				handleSaveMsg(md)
-			case "fade-toggle":
-				handleFadeToggleMsg(md, tr)
 			}
 			// MSG_TYPES_END
 		}
@@ -291,15 +284,6 @@ func handleSaveMsg(md *MoveDispatch) {
 	md.spherePersist.flushNow(md.sceneSphere)
 }
 
-// handleFadeToggleMsg toggles fade on the Go-owned current selection. Go owns selection
-// + topology, so TS sends no id — MoveDispatch resolves the selected node/edge, flips
-// its fade seed, and emits the new faded sets. Fire-and-forget.
-func handleFadeToggleMsg(md *MoveDispatch, tr *T.Trace) {
-	if md != nil {
-		md.ToggleFadeSelection(tr)
-	}
-}
-
 // overlayToggles (the FLAG name → MoveDispatch flip-method table) is GENERATED into
 // overlay_gen.go from OVERLAY_FLAG_NAMES. Parity guarded by check-edit-op-parity.sh via
 // the OVERLAY_TOGGLES sentinels in overlay_gen.go.
@@ -314,7 +298,7 @@ func handleFadeToggleMsg(md *MoveDispatch, tr *T.Trace) {
 //   - update: set an ATTRIBUTE on a typed entity (msg.Kind). The sole live entity is
 //     overlays:
 //       overlays + attr "toggle": flip the named flag via overlayToggles.
-//     (Camera / node-move / port-anchor / edge-fade edits are now produced in-process by
+//     (Camera / node-move / port-anchor edits are now produced in-process by
 //     the gesture FSM from raw-input, so they no longer cross this seam.
 //     The former attr="set" full-visibility install was removed: its only caller, the
 //     load-time main.tsx push, was deleted; no live TS sender remains.)
@@ -393,7 +377,7 @@ func applyUpdate(msg stdinMsg, md *MoveDispatch, tr *T.Trace) {
 				fn(md, tr)
 			}
 		}
-		// Persist ON CHANGE (mirrors fade/camera): schedule a debounced write of the new
+		// Persist ON CHANGE (mirrors camera): schedule a debounced write of the new
 		// overlay snapshot so toggles survive a reload without an explicit save. No-op until
 		// EnableEditPersist arms the writer (nil-receiver / empty-treeRoot guard in schedule).
 		md.overlaysPersist.schedule(md.ov)

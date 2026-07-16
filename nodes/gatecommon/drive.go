@@ -34,7 +34,7 @@ import (
 // does not place until it is; it still steps the wire every cycle, so
 // nothing else stalls waiting on it.
 //
-// Stops when ctx is cancelled or a placement fails (wire faded/torn down).
+// Stops when ctx is cancelled or a placement fails (wire torn down).
 //
 // Paced-wire mode (out.Clock() != nil) sleeps on the shared clock's
 // SleepCycle so it freezes on pause, and paces placement on the per-edge K

@@ -564,55 +564,6 @@ func (md *MoveDispatch) applySelect(ev rawInputMsg, tr *T.Trace) {
 	tr.Select(node)
 }
 
-// ToggleFadeSelection flips the fade state of the CURRENTLY-SELECTED entity (the pre-branch
-// "f" key press). Selection is Go-owned (md.selected / md.selectedEdge), so the TS "f" press
-// is a BARE command — Go resolves which node/edge is selected here. A selected edge toggles
-// its edge-seed; otherwise a selected node toggles its node-seed. Nothing selected = no-op.
-// After flipping, it emits the FULL directly-faded seed sets so the buffer snapshot mirrors
-// them and recomputes the fade fixpoint.
-func (md *MoveDispatch) ToggleFadeSelection(tr *T.Trace) {
-	if md.directlyFadedNodes == nil {
-		md.directlyFadedNodes = map[string]bool{}
-	}
-	if md.directlyFadedEdges == nil {
-		md.directlyFadedEdges = map[string]bool{}
-	}
-	switch {
-	case md.selectedEdge != "":
-		toggleSet(md.directlyFadedEdges, md.selectedEdge)
-	case md.selected != "":
-		toggleSet(md.directlyFadedNodes, md.selected)
-	default:
-		return // nothing selected
-	}
-	if tr != nil {
-		tr.Fade(setToSlice(md.directlyFadedNodes), setToSlice(md.directlyFadedEdges))
-	}
-	// Persist the updated fade seeds to scene.json (debounced, fire-and-forget).
-	if md.fadePersist != nil {
-		md.fadePersist.schedule(setToSlice(md.directlyFadedNodes), setToSlice(md.directlyFadedEdges))
-	}
-}
-
-// toggleSet flips key's membership in set (add if absent, delete if present).
-func toggleSet(set map[string]bool, key string) {
-	if set[key] {
-		delete(set, key)
-	} else {
-		set[key] = true
-	}
-}
-
-// setToSlice returns the set's members as a fresh slice (safe to hand across the Trace
-// bridge; the caller keeps mutating its map).
-func setToSlice(set map[string]bool) []string {
-	out := make([]string, 0, len(set))
-	for k := range set {
-		out = append(out, k)
-	}
-	return out
-}
-
 // nodeFromHit resolves a node hit to its node id. A node hit carries only a numeric buffer
 // NODE-ROW index (the node InstancedMesh instanceId == its buffer node row); Go maps it back
 // through its own node-row table (nodeRows), since Go owns the topology and wrote the Node

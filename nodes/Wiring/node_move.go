@@ -44,7 +44,6 @@ const (
 	// The node-move kind ("move", the zero value "") carries no payload and is a
 	// no-op in every mover switch, so it has no constant — the switches simply
 	// fall through. The remaining kinds each select a distinct payload.
-	moveMsgKindFade    = "fade"
 	moveMsgKindAnchor  = "anchor"  // per-port anchor update (drag along the ring)
 	moveMsgKindCenter  = "center"  // polar-layout re-propagated world center for one node
 	moveMsgKindCenters = "centers" // batched centers for an edge: update both endpoints, recompute ONCE
@@ -95,7 +94,6 @@ type centerSnap struct {
 
 // moveMsg is one entry routed to a mover's inbox. kind selects the payload:
 //   - "" or "move": node-move — currently a no-op (polar-layout positions all nodes via "center" messages).
-//   - "fade":       per-wire fade — Faded applied by edgeMover only (nodeMover ignores).
 //
 // Every PRODUCTION send is fire-and-forget: the sender drops the message in an inbox
 // and returns. No production path observes the receiver finishing — a node does its own
@@ -111,7 +109,6 @@ type centerSnap struct {
 type moveMsg struct {
 	Kind   string
 	NodeID string
-	Faded  bool
 	// Anchor payload (Kind == "anchor"): identify the port whose anchor changed.
 	// Port/IsInput name the port on NodeID; AnchorId is the snapped ring-anchor index
 	// (Go snaps from the incoming world-space direction; TS never computes the index).
@@ -607,19 +604,11 @@ func newEdgeMover(ep EdgeEndpoints, edgeID string, srcGeom, dstGeom nodeGeom, tr
 	}
 }
 
-// handle applies one inbox message to this edge. For a "fade" message it sets its
-// OWN wire's faded flag (the wire owns its flag — no central fan-out). For a move
-// message it updates the matching endpoint geom, recomputes the edge's segment + arc,
-// writes them onto the source Out, revises any in-flight bead, emits the new edge
-// geometry, and updates the dest port's latency aggregate. A move that touches
-// neither endpoint is ignored.
+// handle applies one inbox message to this edge. For a move message it updates the
+// matching endpoint geom, recomputes the edge's segment + arc, writes them onto the
+// source Out, revises any in-flight bead, emits the new edge geometry, and updates
+// the dest port's latency aggregate. A move that touches neither endpoint is ignored.
 func (m *edgeMover) handle(msg moveMsg) {
-	if msg.Kind == moveMsgKindFade {
-		if m.dest != nil {
-			m.dest.SetFaded(msg.Faded)
-		}
-		return
-	}
 	if msg.Kind == moveMsgKindAnchor {
 		// A port-anchor change recomputes this edge's segment/arc only if the changed
 		// port is one of THIS edge's endpoints (matching node id, port name, direction).
@@ -766,12 +755,11 @@ type MoveDispatch struct {
 	// vpPersist is the debounced camera-viewpoint persister (scene_camera_persist.go), armed
 	// by EnableViewpointPersist after the startup seed. nil until armed (old path / tests).
 	vpPersist *viewpointPersister
-	// posPersist / anchorPersist / fadePersist are the debounced disk persisters for the
-	// three FSM-applied edits (node-drag position, ring-move anchor, fade). Armed by
-	// EnableEditPersist after the startup seed; nil until armed (tests that never arm).
+	// posPersist / anchorPersist are the debounced disk persisters for the two FSM-applied
+	// edits (node-drag position, ring-move anchor). Armed by EnableEditPersist after the
+	// startup seed; nil until armed (tests that never arm).
 	posPersist      *nodePosPersister
 	anchorPersist   *anchorPersister
-	fadePersist     *fadePersister
 	overlaysPersist *overlaysPersister
 	// quantOffsetPersist is the debounced disk persister for a node's scalar triple
 	// (iTheta,iPhi,iR) about the scene center (quant_offset_persist.go) — the sole
@@ -793,14 +781,6 @@ type MoveDispatch struct {
 	// KindSelect (Edge field) so the buffer snapshot marks the edge's Selected column.
 	// Exclusive with `selected`: selecting an edge clears the node selection and vice versa.
 	selectedEdge string
-	// directlyFadedNodes / directlyFadedEdges are the Go-owned fade SEED sets: the node ids
-	// and edge labels the user has DIRECTLY toggled faded (pressing "f" on a selection). Go
-	// owns fade because it owns topology + selection. ToggleFadeSelection flips the currently-
-	// selected entity's membership and emits the full seeds via KindFade; the buffer snapshot
-	// mirrors them and recomputes the fade fixpoint (computeFade) each build. Fade STATE is
-	// in-memory only — persistence to disk is a separate (pending) batch.
-	directlyFadedNodes map[string]bool
-	directlyFadedEdges map[string]bool
 	// portRows resolves a numeric buffer PORT-ROW index (carried on a new-system raw hit)
 	// back to its (node, port, isInput) identity. Wired to the buffer SnapshotState's
 	// port-row table in main.go (new-system only); nil on the old path and in unit tests, in
@@ -951,15 +931,13 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 		sort.Strings(edgeOrder)
 	}
 	md := &MoveDispatch{
-		dispatch:           map[string]chan moveMsg{},
-		nodeMovers:         map[string]*nodeMover{},
-		edgeMovers:         map[string]*edgeMover{},
-		edgeOut:            map[string]*Out{},
-		tr:                 tr,
-		ov:                 defaultOverlayState(),
-		directlyFadedNodes: map[string]bool{},
-		directlyFadedEdges: map[string]bool{},
-		layoutHolders:      map[string]*LayoutHolder{},
+		dispatch:      map[string]chan moveMsg{},
+		nodeMovers:    map[string]*nodeMover{},
+		edgeMovers:    map[string]*edgeMover{},
+		edgeOut:       map[string]*Out{},
+		tr:            tr,
+		ov:            defaultOverlayState(),
+		layoutHolders: map[string]*LayoutHolder{},
 	}
 	// Static partner-center lookup for the seed pass: every node's center is already known
 	// off the load-time geoms map (no goroutine/atomic-snap needed), so this is the SAME
@@ -1799,16 +1777,15 @@ func (md *MoveDispatch) EnableViewpointPersist(topologyPath string) {
 	md.vp.persist = p.schedule
 }
 
-// EnableEditPersist arms disk persistence for the three FSM-applied topology edits:
+// EnableEditPersist arms disk persistence for the FSM-applied topology edits:
 //   - node-drag (RootMove) → the moved node's x/y/z in <root>/nodes/<id>/meta.json
 //   - ring-move (applyRingAnchor) → the port's anchorId in the port json file
-//   - fade (ToggleFadeSelection) → fadedNodes/fadedEdges in view/scene.json
 //   - overlays (applyUpdate toggle/set) → overlay-visibility keys in view/scene.json
 //
 // Node-position + anchor persistence needs the per-node/per-port files of the directory-tree
 // form; for a monolithic topology.json (no per-node files) their root is "" and those two
-// persisters no-op. Fade rides scene.json, which exists for both forms. Call AFTER
-// SeedInitialViewpoint + SeedFade so the seed emits do not write the loaded state back.
+// persisters no-op. Call AFTER SeedInitialViewpoint so the seed emits do not write the
+// loaded state back.
 func (md *MoveDispatch) EnableEditPersist(topologyPath string) {
 	// sceneTreeRoot handles both the directory form and the file-inside-tree form (and
 	// returns "" for a true monolithic topology with no tree), making the two-form bug
@@ -1816,7 +1793,6 @@ func (md *MoveDispatch) EnableEditPersist(topologyPath string) {
 	root := sceneTreeRoot(topologyPath)
 	md.posPersist = &nodePosPersister{root: root, debounce: viewpointPersistDebounce}
 	md.anchorPersist = &anchorPersister{root: root, debounce: viewpointPersistDebounce}
-	md.fadePersist = &fadePersister{path: sceneCameraPath(topologyPath), debounce: viewpointPersistDebounce}
 	md.overlaysPersist = &overlaysPersister{path: sceneCameraPath(topologyPath), debounce: viewpointPersistDebounce}
 	md.spherePersist = &sceneSpherePersister{path: sceneCameraPath(topologyPath), debounce: viewpointPersistDebounce}
 	md.quantOffsetPersist = &quantOffsetPersister{root: root, debounce: viewpointPersistDebounce}

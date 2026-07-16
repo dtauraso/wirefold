@@ -122,7 +122,6 @@ type PacedWire struct {
 	// teardownGen: a bead whose gen is < teardownGen is invalidated wholesale
 	// (Reset/Delete). Beads placed after a teardown get gen >= teardownGen.
 	teardownGen uint64
-	faded       bool // when true, placeBeadNoWalker places nothing
 	deleted     bool // when true, the edge was deleted; source places no beads
 	// clock is the one monotonic clock this wire reads to time its own delivery.
 	clock      Clock
@@ -187,17 +186,10 @@ func (pw *PacedWire) SetClock(c Clock) {
 	pw.mu.Unlock()
 }
 
-// SetFaded sets the faded flag. When faded is true, Send/TryPlace place no bead.
-func (pw *PacedWire) SetFaded(v bool) {
-	pw.mu.Lock()
-	pw.faded = v
-	pw.mu.Unlock()
-}
-
 // PlaceDeliverOnly places a delivery-only bead (no position stream) WITHOUT
 // spawning a walker goroutine. Delivery is driven by the caller's subsequent
 // per-cycle StepOnce/StepOnceAt calls. Returns false if the wire is
-// faded/deleted (nothing placed). Cross-package tests that only exercise
+// deleted (nothing placed). Cross-package tests that only exercise
 // delivery timing use this (see gatetesthelper.Send).
 func (pw *PacedWire) PlaceDeliverOnly(value int, inFlightMs float64) bool {
 	_, ok := pw.placeBeadNoWalker(value, beadPlacement{InFlightMs: inFlightMs})
@@ -212,7 +204,7 @@ const msToArcWu = PulseSpeedWuPerMs
 
 // placeBeadNoWalker appends a bead WITHOUT launching a walker goroutine,
 // returning the bead's gen so the caller can drive delivery synchronously.
-// Returns (0, false) when faded/deleted (nothing placed).
+// Returns (0, false) when deleted (nothing placed).
 func (pw *PacedWire) placeBeadNoWalker(value int, bp beadPlacement) (gen uint64, ok bool) {
 	return pw.placeBeadNoWalkerAt(value, bp, pw.clock.Tick())
 }
@@ -227,7 +219,7 @@ func (pw *PacedWire) placeBeadNoWalker(value int, bp beadPlacement) (gen uint64,
 // equal latency.
 func (pw *PacedWire) placeBeadNoWalkerAt(value int, bp beadPlacement, tick int64) (gen uint64, ok bool) {
 	pw.mu.Lock()
-	if pw.faded || pw.deleted {
+	if pw.deleted {
 		pw.mu.Unlock()
 		return 0, false
 	}

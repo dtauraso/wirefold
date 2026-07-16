@@ -309,7 +309,7 @@ type DriveItem struct {
 
 // Live reports whether this DriveItem carries a bead actually placed on a
 // paced wire (i.e. PlaceDriven succeeded in paced-wire mode). False for a nil
-// Out, chan mode, or a failed placement (faded/torn-down wire) — callers that
+// Out, chan mode, or a failed placement (torn-down wire) — callers that
 // need to detect placement failure check this.
 func (di DriveItem) Live() bool {
 	return di.live
@@ -321,7 +321,7 @@ func (di DriveItem) Live() bool {
 // on this Out (or the underlying wire) each subsequent cycle. In chan mode
 // (tests) it sends immediately on the raw channel and returns an inert item,
 // so unit tests keep their synchronous chan semantics. A nil Out, or a failed
-// placement (faded/deleted), returns an inert item.
+// placement (deleted), returns an inert item.
 func (o *Out) PlaceDriven(v int) DriveItem {
 	if o == nil {
 		return DriveItem{}

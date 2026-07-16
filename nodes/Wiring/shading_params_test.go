@@ -29,8 +29,6 @@ func TestShadingParamsFloat(t *testing.T) {
 		{"NodeClearcoatRoughness", ShadingParamNodeClearcoatRoughness, 0.1},
 		{"NodeEnvMapIntensity", ShadingParamNodeEnvMapIntensity, 1.0},
 		{"NodeOpacity", ShadingParamNodeOpacity, 0.92},
-		{"NodeFadeOpacity", ShadingParamNodeFadeOpacity, 0.25},
-		{"NodeFadeBodyMul", ShadingParamNodeFadeBodyMul, 0.6},
 		// Procedural env map.
 		{"EnvSkyTopR", ShadingParamEnvSkyTopR, 0.78},
 		{"EnvSkyTopG", ShadingParamEnvSkyTopG, 0.77},

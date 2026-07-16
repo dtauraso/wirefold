@@ -2,8 +2,8 @@ package Wiring
 
 // scene_paths.go — ONE shared source of truth for topology-path resolution.
 //
-// Five persisters (camera, fade, overlays, node-pos, anchor) and three loaders
-// (loadSceneViewpoint, loadSceneFade, loadSceneOverlays) all need to resolve a
+// Four persisters (camera, overlays, node-pos, anchor) and two loaders
+// (loadSceneViewpoint, loadSceneOverlays) all need to resolve a
 // topologyPath — which may be EITHER the directory form (a tree root containing
 // nodes/ and view/) OR the file form (a topology.json FILE inside that tree) — to
 // one of two derived locations:
