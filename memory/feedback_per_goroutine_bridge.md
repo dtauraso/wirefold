@@ -21,8 +21,9 @@ decodes and draws it (`readBeadX/Y/Z`) and interpolates nothing. The
 content-buffer work closed this. `NodeMoveRegistry`, cited as the central
 node-move emitter, now survives only in a `loader.go` comment.
 
-Note that the gap did not close by pushing emission out to each goroutine; it
-closed the other way, with Go packing the whole scene into one streamed buffer.
-The invariant above is David's and stands as written — do not reinterpret it
-against the buffer architecture without asking him. See
-[[feedback_dont_invent_doctrine]].
+**The buffer does not deviate from the invariant.** Go packing the whole scene
+into one streamed buffer looks central, but the emitter is a fan-in channel
+consumer: goroutines send via `tr.*`, Trace's channel carries it, one drain
+goroutine packs. Goroutines still send. See
+[[project_emitter_packs_from_a_fan_in_channel]] for the wiring, the single-writer
+contract, and the data race that enforces it.
