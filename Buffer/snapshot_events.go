@@ -52,9 +52,6 @@ func (s *SnapshotState) recordEvent(ev T.Event) {
 		r.edge = ev.Edge // edge!="" → edge select; else node select (value=mode)
 	case T.KindHover:
 		r.portIsInput = ev.Value == 1
-	case T.KindFade:
-		r.fadedNodes = append([]string(nil), ev.FadedNodes...)
-		r.fadedEdges = append([]string(nil), ev.FadedEdges...)
 	}
 	s.pendingEvents = append(s.pendingEvents, r)
 }

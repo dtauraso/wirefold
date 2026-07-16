@@ -82,7 +82,6 @@ func TestSetNodeRow(t *testing.T) {
 		1,    // selected
 		3,    // kindID (Input = index 3 in NODE_DEFS_ARRAY)
 		7, 4, // labelOff, labelLen
-		1, // faded
 		1, // hovered
 		1, // latchedSel
 	)
@@ -107,15 +106,14 @@ func TestSetNodeRow(t *testing.T) {
 	assertU8At(t, buf, BufNodeColKindId, 3, "KindId")
 	assertU32At(t, buf, BufNodeColLabelOff, 7, "LabelOff")
 	assertU32At(t, buf, BufNodeColLabelLen, 4, "LabelLen")
-	assertU8At(t, buf, BufNodeColFaded, 1, "Faded")
 	assertU8At(t, buf, BufNodeColHovered, 1, "Hovered")
 	assertU8At(t, buf, BufNodeColLatchedSel, 1, "LatchedSel")
 }
 
 func TestSetEdgeRow(t *testing.T) {
 	buf := make([]byte, BufEdgeStride*2)
-	SetEdgeRow(buf, 0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 1, 1, 11, 22)
-	SetEdgeRow(buf, 1, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 0, 0, 0, 0)
+	SetEdgeRow(buf, 0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 1, 11, 22)
+	SetEdgeRow(buf, 1, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 0, 0, 0)
 
 	assertF32At(t, buf, BufEdgeColSX, 1.0, "row0.SX")
 	assertF32At(t, buf, BufEdgeColSY, 2.0, "row0.SY")
@@ -124,12 +122,10 @@ func TestSetEdgeRow(t *testing.T) {
 	assertF32At(t, buf, BufEdgeColEY, 5.0, "row0.EY")
 	assertF32At(t, buf, BufEdgeColEZ, 6.0, "row0.EZ")
 	assertU8At(t, buf, BufEdgeColSelected, 1, "row0.Selected")
-	assertU8At(t, buf, BufEdgeColFaded, 1, "row0.Faded")
 	assertU32At(t, buf, BufEdgeColEdgeLabelOff, 11, "row0.EdgeLabelOff")
 	assertU32At(t, buf, BufEdgeColEdgeLabelLen, 22, "row0.EdgeLabelLen")
 
 	base := BufEdgeStride
-	assertU8At(t, buf, base+BufEdgeColFaded, 0, "row1.Faded")
 	assertF32At(t, buf, base+BufEdgeColSX, 7.0, "row1.SX")
 	assertF32At(t, buf, base+BufEdgeColEZ, 12.0, "row1.EZ")
 }
@@ -171,17 +167,17 @@ func TestBeadStrideIsPackedSize(t *testing.T) {
 }
 
 func TestNodeStrideIsPackedSize(t *testing.T) {
-	// Node block: 5×f32 + 6×f32 (vr/fr normals) + 5×u8 (events) + 1×u8 (selected) + 1×u8 (kindID) + 2×u32 (label off/len) + 1×u8 (faded) + 1×u8 (hovered) + 1×u8 (latchedSel)
-	//           = (5+6)×4 + 5 + 1 + 1 + 8 + 1 + 1 + 1 = 62
-	want := 5*4 + 6*4 + 5*1 + 1*1 + 1*1 + 2*4 + 1*1 + 1*1 + 1*1
+	// Node block: 5×f32 + 6×f32 (vr/fr normals) + 5×u8 (events) + 1×u8 (selected) + 1×u8 (kindID) + 2×u32 (label off/len) + 1×u8 (hovered) + 1×u8 (latchedSel)
+	//           = (5+6)×4 + 5 + 1 + 1 + 8 + 1 + 1 = 61
+	want := 5*4 + 6*4 + 5*1 + 1*1 + 1*1 + 2*4 + 1*1 + 1*1
 	if BufNodeStride != want {
 		t.Errorf("BufNodeStride = %d, want %d (packed size)", BufNodeStride, want)
 	}
 }
 
 func TestEdgeStrideIsPackedSize(t *testing.T) {
-	// Edge block: 6×f32 + 2×u8 (selected + faded) + 2×u32 (edge-label off/len) = 34
-	want := 6*4 + 2 + 2*4
+	// Edge block: 6×f32 + 1×u8 (selected) + 2×u32 (edge-label off/len) = 33
+	want := 6*4 + 1 + 2*4
 	if BufEdgeStride != want {
 		t.Errorf("BufEdgeStride = %d, want %d (packed size)", BufEdgeStride, want)
 	}

@@ -24,7 +24,7 @@
 package Buffer
 
 // BufLayoutVersion is the schema version. Bump when any column changes.
-const BufLayoutVersion = 29
+const BufLayoutVersion = 30
 
 // BufInteriorSlotsPerNode is the fixed number of interior grid slots reserved per
 // node in the Interior block (a 2x2 held/interior-bead grid: slot = row*2 + col).
@@ -101,10 +101,6 @@ type bufLayoutNode struct {
 	// label (fall back to nothing / row index on the render side).
 	LabelOff uint32 `buf:"u32"` // byte offset into the label-bytes section
 	LabelLen uint32 `buf:"u32"` // label UTF-8 byte length
-	// Faded is the fixpoint fade mask for this node (1 = dimmed). Go owns the directly-
-	// faded seeds and recomputes the fixpoint (computeFade) each snapshot; the renderer
-	// dims a faded node's body/ring opacity. Persistent (not a transient event flag).
-	Faded uint8 `buf:"u8"` // 1 = node is faded (dimmed)
 	// Hovered is the Go-owned pointer-hover flag: 1 marks the node currently under the
 	// pointer (the gesture FSM tracks it from the raycast hit on each pointer-move and
 	// emits KindHover). The renderer thickens+recolors this node's border ring (pre-branch
@@ -145,14 +141,10 @@ type bufLayoutEdge struct {
 	EY       float32 `buf:"f32"` // end world y
 	EZ       float32 `buf:"f32"` // end world z
 	Selected uint8   `buf:"u8"`  // persistent: 1 = this edge is the click-selected edge
-	// Faded is the fixpoint fade mask for this edge (1 = dimmed). Set by Go's fade fixpoint
-	// (computeFade) each snapshot; the renderer dims a faded edge's tube. A faded edge's
-	// transit bead is suppressed Go-side (its bead rows are written Live=0).
-	Faded uint8 `buf:"u8"` // 1 = edge is faded (dimmed)
 	// EdgeLabelOff/EdgeLabelLen are this edge's slice into the snapshot's trailing EDGE-LABEL
 	// BYTES section (the label-section analogue for edges): EdgeLabelOff is the byte offset,
 	// EdgeLabelLen the UTF-8 byte length. Edge labels are carried ONLY for the .probe buffer-
-	// decoded log (geometry `edge`, select-edge, fade `fadedEdges`) — the render/bridge path
+	// decoded log (geometry `edge`, select-edge) — the render/bridge path
 	// still resolves an edge hit by row index (LookupEdgeRow), never by this string.
 	// Concatenated in the same stable edge-row order as the Edge block.
 	EdgeLabelOff uint32 `buf:"u32"` // byte offset into the edge-label-bytes section
