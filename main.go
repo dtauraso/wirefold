@@ -102,16 +102,20 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 	// processes them in FIFO order exactly like any other event — single-writer
 	// preserved, and ordering (spec order, before any node goroutine can race in) still
 	// comes from THIS loop running synchronously before the node-goroutine launch loop
-	// below. Ports are omitted (nil) here: the aimed port geometry needs each port's
-	// partner center, which isn't resolved until the node's own goroutine runs — the row
-	// still exists as soon as this loop returns, and the node's real startup emit fills in
-	// ports moments later into this SAME pre-assigned row (onNodeGeometry's exists-check).
+	// below. Ports and edge endpoints are REAL, not placeholder: every node's center is
+	// already known at load (b.nodeGeoms), so md.NodeSeeds()/md.EdgeSeeds() compute the
+	// same aimed-port and edge-segment geometry the node/edge's own live emit would
+	// produce (node_move.go's newMoveDispatch, reusing builders.go's
+	// aimedPortPosDir/buildPortGeoms and port_geometry.go's edgeSegment) — the row is
+	// fully valid, not degenerate, the instant this loop returns. The node's real startup
+	// emit then just re-writes its own pre-assigned row with the identical values
+	// (onNodeGeometry's exists-check), which is a no-op in practice.
 	for _, sd := range md.NodeSeeds() {
-		tr.NodeGeometry(sd.ID, sd.Label, sd.Kind, sd.CX, sd.CY, sd.CZ, sd.Radius, sd.SphereR, nil,
+		tr.NodeGeometry(sd.ID, sd.Label, sd.Kind, sd.CX, sd.CY, sd.CZ, sd.Radius, sd.SphereR, sd.Ports,
 			sd.VRX, sd.VRY, sd.VRZ, sd.FRX, sd.FRY, sd.FRZ)
 	}
 	for _, sd := range md.EdgeSeeds() {
-		tr.Geometry(sd.Label, sd.SrcNode, sd.DstNode, 0, 0, 0, 0, 0, 0)
+		tr.Geometry(sd.Label, sd.SrcNode, sd.DstNode, sd.SX, sd.SY, sd.SZ, sd.EX, sd.EY, sd.EZ)
 	}
 	// Sparse, one-time startup sanity check (CLAUDE.md DEBUG BREADCRUMB channel): every
 	// node LoadTopology returned should have gotten a row-seed entry above. A mismatch
