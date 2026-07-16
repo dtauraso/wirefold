@@ -9,29 +9,27 @@ export function RunButton() {
   const mount = document.getElementById("run-mount");
   if (!mount) return null;
 
-  // Two facts, each owned by the only side that can know it. isActive ("a Go process is
+  // ONE fact drives the button: is Go's clock actually ticking. isActive ("a Go process is
   // spawned") is the ext host's: a dead process cannot report that it is dead. clockHalted
   // is Go's, streamed in the buffer's Clock block — NOT predicted from the stdin play/pause
   // write. The buffer describes a live process, so it means nothing without isActive.
-  const isActive = status.state === "active"; // process is alive
-  const isRunning = isActive && clockHalted === false;
-  const isPaused = isActive && clockHalted !== false; // includes clockHalted===true and
-  // the brief instant right after spawn before the first snapshot has arrived (null) —
-  // Go starts halted (main.go), so treating "not yet known" as paused matches the true
-  // initial state and avoids a false "running" flash.
+  //
+  // Go's clock has ONE gate and ONE Resume() (see stdin_reader.go handlePlayMsg) — it
+  // cannot distinguish "never started" from "user paused", and should not have to. So there
+  // are only TWO button states, not three: running (clock ticking) vs. not (halted, whether
+  // that's pre-start, post-pause, or post-stop). There is no separate "resume" label/action;
+  // the halted case always posts {type:"run"}, which handle-message.ts's "run" case
+  // resolves correctly for both first start and resume-after-pause (idempotent runner.run()
+  // then runner.play()).
+  const isRunning = isActiveAndTicking(status, clockHalted);
 
   const onPlayPause = () => {
-    if (isPaused) {
-      // Resume the clock — handle-message.ts's "resume" case calls runner.play() directly.
-      vscode.postMessage({ type: "resume" });
-      return;
-    }
     if (isRunning) {
       vscode.postMessage({ type: "pause" });
       return;
     }
-    // idle: Go is spawned but clock is halted, or process was stopped and needs
-    // a restart. handle-message calls runner.run() (idempotent spawn) then runner.play().
+    // Not running: process never started, is paused, or was stopped and needs a restart.
+    // handle-message's "run" case calls runner.run() (idempotent spawn) then runner.play().
     vscode.postMessage({ type: "run" });
   };
 
@@ -44,43 +42,49 @@ export function RunButton() {
       <button
         type="button"
         className="run-btn"
-        title={isPaused ? "resume" : isRunning ? "pause" : "go run . in repo root"}
+        title={isRunning ? "pause" : "go run . in repo root"}
         onClick={onPlayPause}
         disabled={false}
       >
-        {isPaused ? "▶ resume" : isRunning ? "⏸ pause" : "▶ run"}
+        {isRunning ? "⏸ pause" : "▶ run"}
       </button>
       <button
         type="button"
         className="run-btn run-stop-btn"
         title="stop the running process"
         onClick={onStop}
-        disabled={!isActive}
+        disabled={status.state !== "active"}
       >
         ■ stop
       </button>
-      <span className={statusClass(status, isRunning, isPaused)}>
-        {statusText(status, isRunning, isPaused)}
-      </span>
+      <span className={statusClass(status, isRunning)}>{statusText(status, isRunning)}</span>
     </>,
     mount,
   );
 }
 
-// running/paused are now Go's own truth (clockHalted, via isRunning/isPaused above), not a
-// field on the ext-host RunStatus — so these take them as explicit params rather than
-// reading a "running"/"paused" state off `s` (that state no longer exists on the wire).
-function statusClass(s: ReturnType<typeof useRunStatusCtx>, isRunning: boolean, isPaused: boolean): string {
-  if (isRunning || isPaused) return "run-running";
+function isActiveAndTicking(
+  status: ReturnType<typeof useRunStatusCtx>,
+  clockHalted: boolean | null,
+): boolean {
+  return status.state === "active" && clockHalted === false;
+}
+
+// running is now Go's own truth (clockHalted, via isRunning above), not a field on the
+// ext-host RunStatus — so it's taken as an explicit param rather than read off a
+// "running"/"paused" state on `s` (that state no longer exists on the wire).
+function statusClass(s: ReturnType<typeof useRunStatusCtx>, isRunning: boolean): string {
+  if (isRunning) return "run-running";
+  if (s.state === "active") return "run-running"; // spawned but clock halted: still "in progress"
   if (s.state === "ok") return "run-ok";
   if (s.state === "cancelled") return "run-idle";
   if (s.state === "error") return "run-error";
   return "run-idle";
 }
 
-function statusText(s: ReturnType<typeof useRunStatusCtx>, isRunning: boolean, isPaused: boolean): string {
+function statusText(s: ReturnType<typeof useRunStatusCtx>, isRunning: boolean): string {
   if (isRunning) return "running…";
-  if (isPaused) return "paused";
+  if (s.state === "active") return "paused"; // spawned but clock halted — accurate either way
   if (s.state === "ok") return "ok";
   if (s.state === "cancelled") return "cancelled";
   if (s.state === "error") return s.message;

@@ -147,7 +147,6 @@ export type WebviewToHostMsg =
   | { type: "run" }
   | { type: "play" }
   | { type: "pause" }
-  | { type: "resume" }
   | { type: "stop" }
   // The bare SAVE command (encoded as a single kind byte in schema/input-layout.ts and
   // sent via go-record). Go persists its OWN authoritative scene state — no payload. Kept
@@ -172,7 +171,7 @@ export type HostToWebviewMsg =
   | { type: "buffer-snapshot"; buffer: ArrayBuffer };
 
 export const WEBVIEW_TO_HOST_TYPES: ReadonlySet<WebviewToHostMsg["type"]> = new Set([
-  "ready", "run", "play", "pause", "resume", "stop", "webview-log", "edit", "save", "fade-toggle", "raw-input", "go-record",
+  "ready", "run", "play", "pause", "stop", "webview-log", "edit", "save", "fade-toggle", "raw-input", "go-record",
 ]);
 
 const HOST_TO_WEBVIEW_TYPES: ReadonlySet<HostToWebviewMsg["type"]> = new Set([

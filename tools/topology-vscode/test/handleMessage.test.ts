@@ -57,12 +57,6 @@ describe("handleMessage dispatch — control signals", () => {
     expect(names(r)).toEqual(["pause"]);
   });
 
-  it("resume → runner.play() (one clock gate; no separate resume-vs-play distinction)", async () => {
-    const r = fakeRunner(true);
-    await handleMessage({ type: "resume" }, ctxFor(r));
-    expect(names(r)).toEqual(["play"]);
-  });
-
   it("stop → runner.stop()", async () => {
     const r = fakeRunner(true);
     await handleMessage({ type: "stop" }, ctxFor(r));
