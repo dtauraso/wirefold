@@ -1053,9 +1053,27 @@ func parseWirePropsFromFile(filePath string) ([]wireProp, error) {
 					continue
 				}
 				// Parse segments: prop, optional|required, tsType:X
+				//
+				// A malformed prop tag is an ERROR, not a skip. These `continue`s used to be
+				// silent: a field tagged wire:"prop,tsType:string" (no optional|required
+				// segment) was dropped, the generator still printed "wrote wire-defs.ts
+				// (1 entries)" and exited 0, and the prop simply never reached TS. The tag
+				// looked correct in review and nothing anywhere said otherwise. If a field
+				// says it is a wire prop, either emit it or say why not.
+				fieldName := "<anonymous>"
+				if len(field.Names) > 0 {
+					fieldName = field.Names[0].Name
+				}
 				segments := strings.Split(wireVal, ",")
 				if len(segments) < 3 {
-					continue
+					return nil, fmt.Errorf(
+						"specEdge.%s: malformed wire tag %q — want prop,<optional|required>,tsType:<T> (got %d segments, need at least 3)",
+						fieldName, wireVal, len(segments))
+				}
+				if segments[1] != "required" && segments[1] != "optional" {
+					return nil, fmt.Errorf(
+						"specEdge.%s: wire tag %q has second segment %q — want \"required\" or \"optional\"",
+						fieldName, wireVal, segments[1])
 				}
 				required := segments[1] == "required"
 				tsType := ""
@@ -1065,7 +1083,8 @@ func parseWirePropsFromFile(filePath string) ([]wireProp, error) {
 					}
 				}
 				if tsType == "" {
-					continue
+					return nil, fmt.Errorf(
+						"specEdge.%s: wire tag %q has no tsType:<T> segment", fieldName, wireVal)
 				}
 				// Extract json name.
 				jsonName := ""

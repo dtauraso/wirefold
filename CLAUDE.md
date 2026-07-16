@@ -38,11 +38,17 @@ of this file is the only entry point you need.
 2. The generated `node-defs.ts` is the single registry — no separate `registry.ts`
    exists. The schema dir is `tools/topology-vscode/src/schema/`.
 3. The Go node package under `nodes/<Kind>/`.
+4. Run `go run ./tools/gen-kind-imports` to refresh `kinds_generated.go`. That file's blank
+   imports are what make a package's `init()` — and therefore its `Wiring.Register` call —
+   run at all. **Skip this and the kind does not exist in the binary**: it fails at runtime
+   with `unknown type "X"` while its SPEC.md, Go package, and `NODE_DEFS` entry all look
+   correct. Guard: `check-kind-imports.sh`; the parity test
+   `kind_registry_parity_test.go` catches it from the registry side.
 
 If a new kind needs a **new column in the content buffer**, add it to the buffer layout
 (`Buffer/` + `tools/topology-vscode/src/schema/buffer-layout.ts`) and its reader in the
 same commit — `check-buffer-layout-parity.sh` fails otherwise. This is the one
-grep-discoverable edit the three items above don't cover.
+grep-discoverable edit the four items above don't cover.
 
 **Wire props:** Wire props (`WireProps` from `tools/topology-vscode/src/schema/wire-defs.ts`,
 generated from `wire:"prop,..."` tags on `specEdge` in `nodes/Wiring/loader.go`) are
