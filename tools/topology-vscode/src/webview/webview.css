@@ -29,10 +29,10 @@ html, body { margin: 0; padding: 0; height: 100%; background: #fafafa; font-fami
   position: fixed; top: 44px; left: 8px;
   padding: 6px 10px; background: #fff; border: 1px solid #ddd; border-radius: 6px;
   font-size: 12px; display: flex; flex-direction: column; gap: 4px;
-  /* Above the buffer-projected node-name label pills (ThreeView.tsx inline zIndex:10) and
-     +N occlusion badges (zIndex:15) — those are DOM overlays painted from #app, which
-     follows #rule-eq-mount in html.ts's markup, so equal/lower z-index let a later-painted
-     label win the stacking tiebreak and visually cover the equation panel. */
+  /* Above the buffer-projected node-name label pills (ThreeView.tsx inline zIndex:10) —
+     those are DOM overlays painted from #app, which follows #rule-eq-mount in html.ts's
+     markup, so equal/lower z-index let a later-painted label win the stacking tiebreak and
+     visually cover the equation panel. */
   z-index: 1000; color: #333;
 }
 .rule-eq-center { color: #666; }

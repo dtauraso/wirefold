@@ -1,8 +1,8 @@
 // scene-content.tsx — 3D scene orchestrator + RaycasterHelper.
 //
 // Render is Go-owned: BufferScene (buffer-scene.tsx) draws all geometry from the binary
-// content buffer. This file provides the scene lighting/env, the camera-settle detector,
-// and the buffer-backed hit-testing (RaycasterHelper) that forwards picks to Go.
+// content buffer. This file provides the scene lighting/env and the buffer-backed
+// hit-testing (RaycasterHelper) that forwards picks to Go.
 
 import React, { useEffect, useRef } from "react";
 import { useThree } from "@react-three/fiber";
@@ -13,7 +13,6 @@ import {
   SHADING_PARAM_SCENE_DIR_INTENSITY,
 } from "../../schema/shading-params";
 import { ProceduralEnvProvider } from "./scene-env";
-import { CameraSettleDetector } from "./scene-camera";
 import { BUFFER_NODE_TAG, BUFFER_PORT_TAG, BUFFER_EDGE_TAG, BUFFER_RING_TAG } from "./buffer-scene";
 import { HANDHOLD_TERM_TAG } from "./NavGuides";
 
@@ -152,17 +151,14 @@ function RaycasterHelper({
 
 export function Scene({
   onPickRequest,
-  onCameraSettle,
 }: {
   onPickRequest: React.MutableRefObject<
     ((ndcX: number, ndcY: number, opts?: PickOptions) => string | null) | null
   >;
-  onCameraSettle: () => void;
 }) {
   return (
     <ProceduralEnvProvider>
       <RaycasterHelper onPickRequest={onPickRequest} />
-      <CameraSettleDetector onSettle={onCameraSettle} />
       <ambientLight intensity={SHADING_PARAM_SCENE_AMBIENT_INTENSITY} />
       <directionalLight position={[0, 0, 10]} intensity={SHADING_PARAM_SCENE_DIR_INTENSITY} />
     </ProceduralEnvProvider>

@@ -23,9 +23,9 @@
 // BuildAndRunRunner.lastSnapshot / getLastSnapshot in runCommand.ts). Left as an
 // intentional GAP rather than renumbered, so no other kind's wire value moves.
 
-// INPUT_LAYOUT_FINGERPRINT: v13 kinds=resume:1,pause:2,save:4,fadeToggle:5,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays updateAttrs=toggle overlayFlags=tori,scenePoles,nodePoles,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays,doubleLinks
+// INPUT_LAYOUT_FINGERPRINT: v14 kinds=resume:1,pause:2,save:4,fadeToggle:5,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays updateAttrs=toggle overlayFlags=tori,scenePoles,nodePoles,selSpherePoles,handholds,labelsGlobal,overlays,doubleLinks
 export const INPUT_LAYOUT_FINGERPRINT =
-  "v13 kinds=resume:1,pause:2,save:4,fadeToggle:5,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays updateAttrs=toggle overlayFlags=tori,scenePoles,nodePoles,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays,doubleLinks";
+  "v14 kinds=resume:1,pause:2,save:4,fadeToggle:5,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays updateAttrs=toggle overlayFlags=tori,scenePoles,nodePoles,selSpherePoles,handholds,labelsGlobal,overlays,doubleLinks";
 
 // Record kind bytes (first byte of every record). Must match input_codec.go.
 export const IN_KIND_RESUME = 1;

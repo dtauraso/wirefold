@@ -74,13 +74,6 @@ var overlayCases = []overlayCase{
 		kind:   T.KindLabelsGlobal,
 	},
 	{
-		name:   "badgesGlobal",
-		get:    func(o *overlayState) bool { return o.badgesGlobalVisible },
-		toggle: (*overlayState).ToggleBadgesGlobal,
-		emit:   (*overlayState).EmitBadgesGlobal,
-		kind:   T.KindBadgesGlobal,
-	},
-	{
 		name:   "overlays",
 		get:    func(o *overlayState) bool { return o.overlaysVisible },
 		toggle: (*overlayState).ToggleOverlaysVis,
@@ -188,8 +181,6 @@ func setOverlayField(o *overlayState, name string, v bool) {
 		o.handholdsVisible = v
 	case "labelsGlobal":
 		o.labelsGlobalVisible = v
-	case "badgesGlobal":
-		o.badgesGlobalVisible = v
 	case "overlays":
 		o.overlaysVisible = v
 	default:
@@ -203,7 +194,7 @@ func TestDefaultOverlayState(t *testing.T) {
 	on := []bool{
 		d.sceneToriVisible, d.scenePolesVisible, d.nodePolesVisible,
 		d.selSpherePolesVisible, d.handholdsVisible,
-		d.labelsGlobalVisible, d.badgesGlobalVisible, d.overlaysVisible,
+		d.labelsGlobalVisible, d.overlaysVisible,
 	}
 	for i, v := range on {
 		if !v {

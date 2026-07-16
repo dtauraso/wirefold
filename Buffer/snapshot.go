@@ -326,7 +326,6 @@ type overlaySnapState struct {
 	selSpherePoles uint8
 	handholds      uint8
 	labelsGlobal   uint8
-	badgesGlobal   uint8
 	overlaysVis    uint8
 	doubleLinks    uint8
 	// selMode is the current select mode (1 = own, 0 = surface), set by KindSelect.
@@ -357,7 +356,6 @@ func NewSnapshotState(out io.Writer) *SnapshotState {
 		T.KindSelSpherePoles: &s.overlay.selSpherePoles,
 		T.KindHandholds:      &s.overlay.handholds,
 		T.KindLabelsGlobal:   &s.overlay.labelsGlobal,
-		T.KindBadgesGlobal:   &s.overlay.badgesGlobal,
 		T.KindOverlaysVis:    &s.overlay.overlaysVis,
 		T.KindDoubleLinks:    &s.overlay.doubleLinks,
 	}
@@ -414,7 +412,7 @@ func (s *SnapshotState) Update(ev T.Event) {
 		s.emitSnapshot() // state-change point: emit on play/pause
 
 	case T.KindSceneTori, T.KindScenePoles, T.KindNodePoles,
-		T.KindSelSpherePoles, T.KindHandholds, T.KindLabelsGlobal, T.KindBadgesGlobal,
+		T.KindSelSpherePoles, T.KindHandholds, T.KindLabelsGlobal,
 		T.KindOverlaysVis, T.KindDoubleLinks:
 		if field, ok := s.overlayFlagFields[ev.Kind]; ok {
 			*field = boolU8(ev.Visible)
@@ -1226,7 +1224,7 @@ func (s *SnapshotState) writeOverlayBlock(buf []byte, off int) int {
 	SetOverlayRow(buf[off:],
 		ov.sceneTori, ov.scenePoles, ov.nodePoles,
 		ov.selSpherePoles, ov.handholds,
-		ov.labelsGlobal, ov.badgesGlobal,
+		ov.labelsGlobal,
 		ov.overlaysVis, ov.doubleLinks, ov.selMode)
 	return off + BufOverlayStride
 }

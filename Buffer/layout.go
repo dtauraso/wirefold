@@ -24,7 +24,7 @@
 package Buffer
 
 // BufLayoutVersion is the schema version. Bump when any column changes.
-const BufLayoutVersion = 27
+const BufLayoutVersion = 28
 
 // BufInteriorSlotsPerNode is the fixed number of interior grid slots reserved per
 // node in the Interior block (a 2x2 held/interior-bead grid: slot = row*2 + col).
@@ -260,7 +260,6 @@ type bufLayoutOverlay struct {
 	SelSpherePoles uint8 `buf:"u8"` // 1 = selection-sphere pole axes visible
 	Handholds      uint8 `buf:"u8"` // 1 = rotation grab-sphere handholds visible
 	LabelsGlobal   uint8 `buf:"u8"` // 1 = all node labels visible
-	BadgesGlobal   uint8 `buf:"u8"` // 1 = all occlusion +N badges visible
 	OverlaysVis    uint8 `buf:"u8"` // 1 = master overlays toggle on
 	// DoubleLinks mirrors the LAYOUT-link overlay's own visibility (default OFF, unlike the
 	// other flags which default on) — the cyan second-tube overlay reads the LayoutLink block

@@ -116,15 +116,6 @@ const globalLabelsCfg: ToggleCfg = {
   payload: (v) => ({ flag: "labelsGlobal", wasHidden: v }),
 };
 
-const badgesCfg: ToggleCfg = {
-  flag: "badgesGlobal",
-  default: false,
-  active: (v) => !v,
-  label: (v) => `${v ? "▴" : "▾"} +N badges`,
-  title: (a) => (a ? "Hide +N badges" : "Show +N badges"),
-  payload: (v) => ({ flag: "badgesGlobal", wasHidden: v }),
-};
-
 // doubleLinksCfg has no `default` — its Go-owned default (off) is not asserted here; see
 // useToggleVal's fallback and ToggleCfg.default's doc above.
 const doubleLinksCfg: ToggleCfg = {
@@ -144,7 +135,7 @@ type OverlayGroup = { heading: string; cfgs: ToggleCfg[] };
 const OVERLAY_GROUPS: OverlayGroup[] = [
   { heading: "GUIDES", cfgs: [ringsCfg, handholdsCfg] },
   { heading: "POLES",  cfgs: [scenePolesCfg, nodePolesCfg, selSpherePolesCfg] },
-  { heading: "LABELS", cfgs: [globalLabelsCfg, badgesCfg] },
+  { heading: "LABELS", cfgs: [globalLabelsCfg] },
   { heading: "EDGES",  cfgs: [doubleLinksCfg] },
 ];
 

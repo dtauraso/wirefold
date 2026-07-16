@@ -32,7 +32,7 @@ import {
   readCameraPosTheta, readCameraPosPhi, readCameraUpTheta, readCameraUpPhi,
   readOverlaySceneTori, readOverlayScenePoles, readOverlayNodePoles,
   readOverlaySelSpherePoles, readOverlayHandholds, readOverlayLabelsGlobal,
-  readOverlayBadgesGlobal, readOverlayOverlaysVis, readOverlayDoubleLinks,
+  readOverlayOverlaysVis, readOverlayDoubleLinks,
   readPortPX, readPortPY, readPortPZ,
   readEventKind, readEventNodeRow, readEventPortRow, readEventTargetRow, readEventTargetPortRow,
   readEventEdgeRow, readEventSlot, readEventValue, readEventBead,
@@ -67,7 +67,6 @@ export type DecodedEventLine =
   | { step: number; kind: "sel-sphere-poles"; visible: boolean }
   | { step: number; kind: "handholds"; visible: boolean }
   | { step: number; kind: "labels-global"; visible: boolean }
-  | { step: number; kind: "badges-global"; visible: boolean }
   | { step: number; kind: "overlays-vis"; visible: boolean }
   | { step: number; kind: "double-links"; visible: boolean }
   // The clock's running-vs-paused truth (RealClock's Halt()/Resume() transition guards —
@@ -108,7 +107,6 @@ function overlayFlag(d: DecodedSnapshot, kind: string): number {
     case "sel-sphere-poles": return readOverlaySelSpherePoles(v);
     case "handholds": return readOverlayHandholds(v);
     case "labels-global": return readOverlayLabelsGlobal(v);
-    case "badges-global": return readOverlayBadgesGlobal(v);
     case "overlays-vis": return readOverlayOverlaysVis(v);
     case "double-links": return readOverlayDoubleLinks(v);
     default: return 0;
@@ -117,7 +115,7 @@ function overlayFlag(d: DecodedSnapshot, kind: string): number {
 
 const OVERLAY_KINDS = new Set([
   "scene-tori", "scene-poles", "node-poles", "sel-sphere-poles",
-  "handholds", "labels-global", "badges-global", "overlays-vis", "double-links",
+  "handholds", "labels-global", "overlays-vis", "double-links",
 ]);
 
 function decodeEventLine(d: DecodedSnapshot, i: number): Line | null {

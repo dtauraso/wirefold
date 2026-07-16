@@ -101,10 +101,6 @@ const (
 	// the visibility is toggled (op="labels-vis"), so the renderer shows or hides
 	// all node labels in ThreeView without computing any geometry.
 	KindLabelsGlobal = "labels-global"
-	// KindBadgesGlobal carries the global occlusion-badge visibility state. Go emits it when
-	// the visibility is toggled (op="badges-vis"), so the renderer shows or hides
-	// all occlusion +N badges in ThreeView without computing any geometry.
-	KindBadgesGlobal = "badges-global"
 	// KindOverlaysVis carries the master overlays visibility state. Go emits it when
 	// the master toggle is triggered (op="overlays-vis"), so the renderer shows or hides
 	// all 8 overlays at once without mutating individual overlay bools.
@@ -161,7 +157,7 @@ const (
 // buffer EVENT block for the .probe log. There is no tsc exhaustiveness
 // check derived from it — adding a kind here does not force a TS branch
 // anywhere; it only extends the lookup table.
-var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone, KindPosition, KindGeometry, KindPulseCancelled, KindNodeGeometry, KindArrive, KindNodeBead, KindCamera, KindSceneTori, KindScenePoles, KindNodePoles, KindSelSpherePoles, KindHandholds, KindLabelsGlobal, KindBadgesGlobal, KindOverlaysVis, KindDoubleLinks, KindLayoutLink, KindSelect, KindFade, KindHover, KindSceneSphere, KindHalted}
+var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone, KindPosition, KindGeometry, KindPulseCancelled, KindNodeGeometry, KindArrive, KindNodeBead, KindCamera, KindSceneTori, KindScenePoles, KindNodePoles, KindSelSpherePoles, KindHandholds, KindLabelsGlobal, KindOverlaysVis, KindDoubleLinks, KindLayoutLink, KindSelect, KindFade, KindHover, KindSceneSphere, KindHalted}
 
 // PortGeom is one port's authoritative world geometry on a node-geometry event:
 // its name, whether it is an input, its sphere-surface world position (PX/PY/PZ),
@@ -495,13 +491,6 @@ func (t *Trace) Handholds(visible bool) {
 // shows/hides all node labels in ThreeView without computing any geometry.
 func (t *Trace) LabelsGlobal(visible bool) {
 	t.emit(Event{Kind: KindLabelsGlobal, Visible: visible})
-}
-
-// BadgesGlobal emits the global occlusion-badge visibility state. visible=true = badges shown;
-// visible=false = badges hidden. Go emits this on op="badges-vis" so the renderer
-// shows/hides all +N badges in ThreeView without computing any geometry.
-func (t *Trace) BadgesGlobal(visible bool) {
-	t.emit(Event{Kind: KindBadgesGlobal, Visible: visible})
 }
 
 // OverlaysVis emits the master overlays visibility state. visible=true = all overlays shown;
@@ -956,7 +945,7 @@ func eventValue(e Event) (any, error) {
 			Radius float64 `json:"radius"`
 		}
 		return sceneSphere{Step: e.Step, Kind: e.Kind, CX: e.PX, CY: e.PY, CZ: e.PZ, Radius: e.R}, nil
-	case KindSceneTori, KindScenePoles, KindNodePoles, KindSelSpherePoles, KindHandholds, KindLabelsGlobal, KindBadgesGlobal, KindOverlaysVis, KindDoubleLinks, KindHalted:
+	case KindSceneTori, KindScenePoles, KindNodePoles, KindSelSpherePoles, KindHandholds, KindLabelsGlobal, KindOverlaysVis, KindDoubleLinks, KindHalted:
 		// Visibility toggles: all carry just the Visible flag.
 		type visToggle struct {
 			Step    int    `json:"step"`

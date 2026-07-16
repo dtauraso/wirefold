@@ -39,8 +39,8 @@ import (
 // to INPUT_LAYOUT_FINGERPRINT in input-layout.ts (guarded by check-input-layout-parity.sh).
 // Bump on both sides whenever any record kind, field, or enum ordering changes.
 //
-// INPUT_LAYOUT_FINGERPRINT: v13 kinds=resume:1,pause:2,save:4,fadeToggle:5,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays updateAttrs=toggle overlayFlags=tori,scenePoles,nodePoles,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays,doubleLinks
-const InputLayoutFingerprint = "v13 kinds=resume:1,pause:2,save:4,fadeToggle:5,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays updateAttrs=toggle overlayFlags=tori,scenePoles,nodePoles,selSpherePoles,handholds,labelsGlobal,badgesGlobal,overlays,doubleLinks"
+// INPUT_LAYOUT_FINGERPRINT: v14 kinds=resume:1,pause:2,save:4,fadeToggle:5,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays updateAttrs=toggle overlayFlags=tori,scenePoles,nodePoles,selSpherePoles,handholds,labelsGlobal,overlays,doubleLinks
+const InputLayoutFingerprint = "v14 kinds=resume:1,pause:2,save:4,fadeToggle:5,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays updateAttrs=toggle overlayFlags=tori,scenePoles,nodePoles,selSpherePoles,handholds,labelsGlobal,overlays,doubleLinks"
 
 // Record kind bytes (first byte of every record).
 const (

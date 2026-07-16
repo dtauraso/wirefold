@@ -5,8 +5,8 @@
 // nodeLabel). Identity in this system is the buffer NODE-ROW INDEX: Go resolves a row back to
 // its node id (Buffer.SnapshotState.LookupNodeRow) for any topology edit, so the webview needs
 // no node-id strings at all. This module is the pure decode that turns the numeric node rows
-// (paired with their decoded labels) into NavNode records so NavGuides / label-pills /
-// occlusion badges can run entirely off the buffer, keyed by row.
+// (paired with their decoded labels) into NavNode records so NavGuides / label-pills
+// can run entirely off the buffer, keyed by row.
 //
 // ── Ordering guarantee (row i ↔ buffer node row i) ─────────────────────────────
 // Go's Buffer.SnapshotState assigns each node its row on the FIRST KindNodeGeometry event it
