@@ -11,12 +11,13 @@
 //     cannot report itself dead).
 //   - clockHalted: Go's Clock-block truth, streamed in the buffer — NOT predicted from
 //     the stdin play/pause write.
-//   - hasRunOnce: Go's header tick > 0 at some point this process — Go's clock only
-//     advances tick while unhalted (RealClock.activeElapsedLocked), so tick > 0 means
-//     the clock has run before. This is what distinguishes "▶ run" (never started, or
-//     process not spawned) from "▶ resume" (paused after having run) — WITHOUT a new
-//     buffer column or any TS-authored "hasEverRun" flag: it's read from the buffer
-//     every time via useClockHasRunOnce (clock-state.ts).
+//   - hasRunOnce: the Clock block's HasRun column (Go-owned: RealClock's own hasRun field,
+//     set inside Resume()'s transition guard — see nodes/Wiring/clock.go), NOT the snapshot
+//     header's tick (that is a frame-emit counter, already >0 on the first frame because
+//     startup geometry emits while halted — reading it as "has run" produced a live
+//     "resume on first load" bug). This is what distinguishes "▶ run" (never started, or
+//     process not spawned) from "▶ resume" (paused after having run) — read from the
+//     buffer every time via useClockHasRunOnce (clock-state.ts).
 //
 // The click ACTION is identical for "run" and "resume": both post {type:"run"}. Go's
 // gate has ONE Resume() (see stdin_reader.go handlePlayMsg); there is no separate

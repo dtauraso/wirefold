@@ -26,6 +26,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	B "github.com/dtauraso/wirefold/Buffer"
 )
 
 // inKindResume/inKindPause mirror nodes/Wiring/input_codec.go's record-kind bytes for the
@@ -63,43 +65,40 @@ func readOneSnapshotFrame(r *bufio.Reader) ([]byte, error) {
 	return buf, nil
 }
 
-// clockHaltedByte decodes the Clock block's Halted column out of one raw snapshot buffer,
-// mirroring Buffer/snapshot.go's block order (header, bead, node, interior, edge, layout
-// link, port, camera, overlay, scene, clock) and Buffer/buffer_layout_gen.go's strides.
-// Duplicated here (rather than importing Buffer) to keep this headless test decoding the
-// bytes independently of the package that produced them — an import-and-trust decode
-// would not catch a Buffer/TS layout-mirroring bug the way raw byte math does.
-func clockHaltedByte(snap []byte) byte {
-	const (
-		headerSize    = 40 // Buffer/buffer_layout_gen.go BufHeaderSize
-		beadStride    = 17 // BufBeadStride
-		nodeStride    = 62 // BufNodeStride
-		interior      = 17 // BufInteriorStride
-		interiorSlot  = 4  // BufInteriorSlotsPerNode
-		edgeStride    = 42 // BufEdgeStride
-		linkStride    = 12 // BufLayoutLinkStride
-		portStride    = 38 // BufPortStride
-		cameraStride  = 32 // BufCameraStride
-		overlayStride = 10 // BufOverlayStride
-		sceneStride   = 16 // BufSceneStride
-	)
+// clockBlockOffset computes the byte offset of the Clock block within one raw snapshot
+// buffer, mirroring Buffer/snapshot.go's block order (header, bead, node, interior, edge,
+// layout link, port, camera, overlay, scene, clock). It imports the generated stride
+// constants (Buffer/buffer_layout_gen.go, itself independently pinned by
+// buffer_layout_gen_test.go / check-buffer-layout-parity.sh) instead of hardcoding them, so
+// adding a Clock-block column can't silently make this test read the wrong byte — its job is
+// to pin the chain clock -> trace -> snapshot -> fd3, not to re-derive the layout by hand.
+func clockBlockOffset(snap []byte) int {
 	readU32 := func(off int) uint32 { return binary.LittleEndian.Uint32(snap[off:]) }
 	beadCount := readU32(4)
 	nodeCount := readU32(8)
 	edgeCount := readU32(12)
 	portCount := readU32(16)
 	layoutLinkCount := readU32(36)
-	off := headerSize +
-		int(beadCount)*beadStride +
-		int(nodeCount)*nodeStride +
-		int(nodeCount)*interiorSlot*interior +
-		int(edgeCount)*edgeStride +
-		int(layoutLinkCount)*linkStride +
-		int(portCount)*portStride +
-		cameraStride +
-		overlayStride +
-		sceneStride
-	return snap[off]
+	return B.BufHeaderSize +
+		int(beadCount)*B.BufBeadStride +
+		int(nodeCount)*B.BufNodeStride +
+		int(nodeCount)*B.BufInteriorSlotsPerNode*B.BufInteriorStride +
+		int(edgeCount)*B.BufEdgeStride +
+		int(layoutLinkCount)*B.BufLayoutLinkStride +
+		int(portCount)*B.BufPortStride +
+		B.BufCameraStride +
+		B.BufOverlayStride +
+		B.BufSceneStride
+}
+
+// clockHaltedByte decodes the Clock block's Halted column out of one raw snapshot buffer.
+func clockHaltedByte(snap []byte) byte {
+	return snap[clockBlockOffset(snap)+B.BufClockColHalted]
+}
+
+// clockHasRunByte decodes the Clock block's HasRun column out of one raw snapshot buffer.
+func clockHasRunByte(snap []byte) byte {
+	return snap[clockBlockOffset(snap)+B.BufClockColHasRun]
 }
 
 // TestHeadlessClockHaltedFlipsOnPlayPause spawns the real ./wirefold binary against the
@@ -159,56 +158,65 @@ func TestHeadlessClockHaltedFlipsOnPlayPause(t *testing.T) {
 
 	br := bufio.NewReader(fd3Read)
 
-	readHalted := func(label string) byte {
-		snap, err := readOneSnapshotFrame(br)
-		if err != nil {
-			t.Fatalf("%s: readOneSnapshotFrame: %v", label, err)
-		}
-		return clockHaltedByte(snap)
-	}
-
 	// main.go halts the clock BEFORE load, so the very first emitted frame (from
-	// LoadTopology's geometry emits) must already show Halted=1.
-	if got := readHalted("first frame"); got != 1 {
+	// LoadTopology's geometry emits) must already show Halted=1, HasRun=0 — this is the
+	// exact assertion that would have caught the live "resume on first load" bug: a
+	// header-tick-derived substitute read >0 on this very first frame because the frame
+	// counter (not the clock) had already advanced from startup-geometry emits.
+	firstSnap, err := readOneSnapshotFrame(br)
+	if err != nil {
+		t.Fatalf("first frame: readOneSnapshotFrame: %v", err)
+	}
+	if got := clockHaltedByte(firstSnap); got != 1 {
 		t.Fatalf("first frame: Halted = %d, want 1 (main.go halts before load)", got)
 	}
+	if got := clockHasRunByte(firstSnap); got != 0 {
+		t.Fatalf("first frame: HasRun = %d, want 0 (nothing has run yet)", got)
+	}
 
-	// play → Halted must flip to 0. Keep sending frames forward until we observe the
-	// flip or the context deadline stops us (Update only emits on state-change points,
-	// so intervening frames unrelated to the clock are possible before the KindHalted
-	// frame arrives).
+	// play → Halted must flip to 0, HasRun to 1. Keep sending frames forward until we
+	// observe the flip or the context deadline stops us (Update only emits on
+	// state-change points, so intervening frames unrelated to the clock are possible
+	// before the KindHalted frame arrives).
 	if err := writeFramedRecord(stdin, hcInKindResume); err != nil {
 		t.Fatalf("write play record: %v", err)
 	}
-	haltedAfterPlay := waitForHalted(t, br, 0)
-	if haltedAfterPlay != 0 {
-		t.Fatalf("after play: Halted = %d, want 0 (running)", haltedAfterPlay)
+	afterPlay := waitForHalted(t, br, 0)
+	if got := clockHaltedByte(afterPlay); got != 0 {
+		t.Fatalf("after play: Halted = %d, want 0 (running)", got)
+	}
+	if got := clockHasRunByte(afterPlay); got != 1 {
+		t.Fatalf("after play: HasRun = %d, want 1 (clock has now run)", got)
 	}
 
-	// pause → Halted must flip back to 1.
+	// pause → Halted must flip back to 1, but HasRun must NOT reset.
 	if err := writeFramedRecord(stdin, hcInKindPause); err != nil {
 		t.Fatalf("write pause record: %v", err)
 	}
-	haltedAfterPause := waitForHalted(t, br, 1)
-	if haltedAfterPause != 1 {
-		t.Fatalf("after pause: Halted = %d, want 1 (halted)", haltedAfterPause)
+	afterPause := waitForHalted(t, br, 1)
+	if got := clockHaltedByte(afterPause); got != 1 {
+		t.Fatalf("after pause: Halted = %d, want 1 (halted)", got)
+	}
+	if got := clockHasRunByte(afterPause); got != 1 {
+		t.Fatalf("after pause: HasRun = %d, want 1 (must not reset on pause)", got)
 	}
 }
 
 // waitForHalted reads snapshot frames until one shows Halted == want (proving the
 // production hook actually delivered the transition), or fails the test if none arrives
-// within a bounded number of frames.
-func waitForHalted(t *testing.T, br *bufio.Reader, want byte) byte {
+// within a bounded number of frames. Returns the full snapshot buffer so callers can also
+// inspect HasRun in the same frame.
+func waitForHalted(t *testing.T, br *bufio.Reader, want byte) []byte {
 	t.Helper()
 	const maxFrames = 500
-	var last byte
+	var last []byte
 	for i := 0; i < maxFrames; i++ {
 		snap, err := readOneSnapshotFrame(br)
 		if err != nil {
 			t.Fatalf("waitForHalted: readOneSnapshotFrame: %v", err)
 		}
-		last = clockHaltedByte(snap)
-		if last == want {
+		last = snap
+		if clockHaltedByte(snap) == want {
 			return last
 		}
 	}
