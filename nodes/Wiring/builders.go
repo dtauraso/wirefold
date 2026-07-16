@@ -500,7 +500,17 @@ func buildPartnerCenterFn(nodeID string, edgeEndpoints map[string]EdgeEndpoints,
 // an aimed port's placement. partnerCenter may be nil (no edges known / test callers), in which
 // case every port takes the ring-placement fallback.
 func emitNodeGeometryLocked(tr *T.Trace, nodeName string, g nodeGeom, partnerCenter partnerCenterFn) {
-	emitNodeGeometryWith(tr, nodeName, g, func(name string, isInput bool) (vec3, vec3) {
+	emitNodeGeometryWith(tr, nodeName, g, aimedPortPosDir(g, partnerCenter))
+}
+
+// aimedPortPosDir returns the port-position/direction closure used by BOTH the node's own
+// live geometry emit (emitNodeGeometryLocked, above) and the load-time row seed
+// (newMoveDispatch's md.nodeSeeds, node_move.go) — the ONE place aimed-vs-static port
+// placement is computed, so seed and live emit can never drift apart. partnerCenter may
+// be nil (no edges known / test callers), in which case every port takes the ring-placement
+// fallback.
+func aimedPortPosDir(g nodeGeom, partnerCenter partnerCenterFn) func(name string, isInput bool) (vec3, vec3) {
+	return func(name string, isInput bool) (vec3, vec3) {
 		var pc vec3
 		hasPartner := false
 		if partnerCenter != nil {
@@ -514,7 +524,30 @@ func emitNodeGeometryLocked(tr *T.Trace, nodeName string, g nodeGeom, partnerCen
 		}
 		dir, _ := portDir(g, name, isInput)
 		return pos, dir
-	})
+	}
+}
+
+// buildPortGeoms derives the full port-geometry slice (input ports then output ports, same
+// order emitNodeGeometryWith streams) from g and a port-position/direction function. Shared
+// by emitNodeGeometryWith (live emit) and the load-time row seed so both agree on port order
+// and values.
+func buildPortGeoms(g nodeGeom, portPosDir func(name string, isInput bool) (pos, dir vec3)) []T.PortGeom {
+	ports := make([]T.PortGeom, 0, len(g.Inputs)+len(g.Outputs))
+	appendPort := func(name string, isInput bool) {
+		pos, dir := portPosDir(name, isInput)
+		ports = append(ports, T.PortGeom{
+			Name: name, IsInput: isInput,
+			PX: pos.X, PY: pos.Y, PZ: pos.Z,
+			DX: dir.X, DY: dir.Y, DZ: dir.Z,
+		})
+	}
+	for _, p := range g.Inputs {
+		appendPort(p.Name, true)
+	}
+	for _, p := range g.Outputs {
+		appendPort(p.Name, false)
+	}
+	return ports
 }
 
 // effectiveRadius returns the node's REACH radius (max distance to a surface child),
@@ -534,21 +567,7 @@ func effectiveRadius(g nodeGeom) float64 {
 // fallback, and the ring normals all live here regardless of that logic.
 func emitNodeGeometryWith(tr *T.Trace, nodeName string, g nodeGeom, portPosDir func(name string, isInput bool) (pos, dir vec3)) {
 	center := nodeWorldPos(g)
-	ports := make([]T.PortGeom, 0, len(g.Inputs)+len(g.Outputs))
-	appendPort := func(name string, isInput bool) {
-		pos, dir := portPosDir(name, isInput)
-		ports = append(ports, T.PortGeom{
-			Name: name, IsInput: isInput,
-			PX: pos.X, PY: pos.Y, PZ: pos.Z,
-			DX: dir.X, DY: dir.Y, DZ: dir.Z,
-		})
-	}
-	for _, p := range g.Inputs {
-		appendPort(p.Name, true)
-	}
-	for _, p := range g.Outputs {
-		appendPort(p.Name, false)
-	}
+	ports := buildPortGeoms(g, portPosDir)
 	// sphereR streams the REACH radius (max distance to a surface child) so the TS
 	// SphereRing sizes correctly without recomputing geometry. Childless nodes
 	// (ReachR == 0) fall back to nodeR so the value stays sane.

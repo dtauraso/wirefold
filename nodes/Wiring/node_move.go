@@ -736,6 +736,14 @@ type MoveDispatch struct {
 	edgeMovers map[string]*edgeMover
 	// edgeOut: edgeId → source *Out, for read-only access by tests/verifiers.
 	edgeOut map[string]*Out
+	// nodeSeeds/edgeSeeds are every node/edge's load-time seed geometry, captured ONCE at
+	// construction (newMoveDispatch) in spec order — the deterministic directory-sorted
+	// order LoadTopology read the topology in, NOT map iteration order. Exposed via
+	// NodeSeeds/EdgeSeeds so main.go can seed the buffer's row tables from the diagram
+	// itself before any node goroutine starts (CLAUDE.md: rows are a projection of the
+	// diagram, not a discovery log built by racing goroutines to their first emit).
+	nodeSeeds []NodeGeomSeed
+	edgeSeeds []EdgeGeomSeed
 	// sceneSphere is the first-class scene reference every node's SCENE polar is measured
 	// about (polar-model.md, sphere_layout.go). Loaded from scene.json (or defaulted from
 	// the content-fit) at startup; its Center is the one cartesian anchor. Phase 1 stores
@@ -886,11 +894,62 @@ type PortRowResolver interface {
 // startup after LoadTopology.
 func (md *MoveDispatch) SetPortRowResolver(r PortRowResolver) { md.portRows = r }
 
+// NodeGeomSeed is one node's load-time seed geometry, exported in spec order and consumed
+// by main.go's pre-launch tr.NodeGeometry loop (see the row-seeding comment in main.go).
+// Ports are the SAME aimed-vs-static port geometry (buildPortGeoms/aimedPortPosDir,
+// builders.go) the node's own live emit later produces — computed here from the same
+// load-time geoms map, since every node's center is already known at load (buildPartnerCenterFn
+// resolves partner centers straight off geoms, no goroutine needed). main.go copies these
+// fields into the tr.NodeGeometry call (which additionally resolves the numeric KindID,
+// since that table lives in Buffer).
+type NodeGeomSeed struct {
+	ID, Label, Kind              string
+	CX, CY, CZ, Radius, SphereR  float64
+	Ports                        []T.PortGeom
+	VRX, VRY, VRZ, FRX, FRY, FRZ float64
+}
+
+// EdgeGeomSeed is one edge's load-time topology AND its real segment endpoints — the same
+// edgeSegment(srcGeom, dstGeom, srcH, dstH) computation the edge's own live recomputeGeometry
+// (node_move.go) uses, evaluated here against the load-time geoms so the seed row is never a
+// degenerate 0,0,0→0,0,0 segment.
+type EdgeGeomSeed struct {
+	Label, SrcNode, DstNode string
+	SX, SY, SZ, EX, EY, EZ  float64
+}
+
+// NodeSeeds returns every node's load-time seed geometry in SPEC ORDER (see
+// MoveDispatch.nodeSeeds). Call after LoadTopology returns, before launching any node
+// goroutine, and stream each entry via tr.NodeGeometry (main.go).
+func (md *MoveDispatch) NodeSeeds() []NodeGeomSeed { return md.nodeSeeds }
+
+// EdgeSeeds returns every edge's load-time seed topology (with real endpoint geometry) in
+// SPEC ORDER. Call alongside NodeSeeds; stream each entry via tr.Geometry (main.go).
+func (md *MoveDispatch) EdgeSeeds() []EdgeGeomSeed { return md.edgeSeeds }
+
 // newMoveDispatch builds the registry from per-node geometry and per-edge endpoints.
 // It creates one nodeMover per node and one edgeMover per edge, registering each in
 // the dispatch map under its key (node id / edge id). Outs and dest wires are bound
-// later by Bind once node construction has populated them.
-func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEndpoints, tr *T.Trace) *MoveDispatch {
+// later by Bind once node construction has populated them. nodeOrder/edgeOrder are the
+// SPEC order (deterministic directory-sorted order, not map iteration order) used to
+// build md.nodeSeeds/edgeSeeds for buffer row seeding.
+func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEndpoints, tr *T.Trace, nodeOrder, edgeOrder []string) *MoveDispatch {
+	// nil order (test call sites that don't care about seed order) falls back to sorted
+	// map keys — still deterministic, just not necessarily spec order.
+	if nodeOrder == nil {
+		nodeOrder = make([]string, 0, len(geoms))
+		for id := range geoms {
+			nodeOrder = append(nodeOrder, id)
+		}
+		sort.Strings(nodeOrder)
+	}
+	if edgeOrder == nil {
+		edgeOrder = make([]string, 0, len(edgeEndpoints))
+		for label := range edgeEndpoints {
+			edgeOrder = append(edgeOrder, label)
+		}
+		sort.Strings(edgeOrder)
+	}
 	md := &MoveDispatch{
 		dispatch:           map[string]chan moveMsg{},
 		nodeMovers:         map[string]*nodeMover{},
@@ -901,6 +960,66 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 		directlyFadedNodes: map[string]bool{},
 		directlyFadedEdges: map[string]bool{},
 		layoutHolders:      map[string]*LayoutHolder{},
+	}
+	// Static partner-center lookup for the seed pass: every node's center is already known
+	// off the load-time geoms map (no goroutine/atomic-snap needed), so this is the SAME
+	// buildPartnerCenterFn the dynamic movers use below, just closed over geoms directly
+	// instead of md.nodeMovers' atomic snaps. Kept per-node (not shared) to match
+	// buildPartnerCenterFn's (nodeID, edgeEndpoints, centerOf) shape.
+	seedPartnerCenter := func(nodeID string) partnerCenterFn {
+		return buildPartnerCenterFn(nodeID, edgeEndpoints, func(otherID string) vec3 {
+			if g, ok := geoms[otherID]; ok {
+				return nodeWorldPos(g)
+			}
+			return vec3{}
+		})
+	}
+	md.nodeSeeds = make([]NodeGeomSeed, 0, len(nodeOrder))
+	for _, id := range nodeOrder {
+		g, ok := geoms[id]
+		if !ok {
+			continue
+		}
+		label := g.Label
+		if label == "" {
+			label = id
+		}
+		var cx, cy, cz float64
+		if g.HasPos {
+			c := nodeWorldPos(g)
+			cx, cy, cz = c.X, c.Y, c.Z
+		}
+		ports := buildPortGeoms(g, aimedPortPosDir(g, seedPartnerCenter(id)))
+		md.nodeSeeds = append(md.nodeSeeds, NodeGeomSeed{
+			ID: id, Label: label, Kind: g.Kind,
+			CX: cx, CY: cy, CZ: cz,
+			Radius: nodeRadius(g.Kind), SphereR: effectiveRadius(g),
+			Ports: ports,
+			VRX:   verticalRingNormalX, VRY: verticalRingNormalY, VRZ: verticalRingNormalZ,
+			FRX: flatRingNormalX, FRY: flatRingNormalY, FRZ: flatRingNormalZ,
+		})
+	}
+	md.edgeSeeds = make([]EdgeGeomSeed, 0, len(edgeOrder))
+	for _, label := range edgeOrder {
+		ep, ok := edgeEndpoints[label]
+		if !ok {
+			continue
+		}
+		// Real endpoint geometry: the same edgeSegment computation recomputeGeometry
+		// (below) uses on every live move, evaluated once here against the load-time
+		// geoms so the seed row is never a degenerate 0,0,0->0,0,0 segment.
+		var sx, sy, sz, ex, ey, ez float64
+		if srcG, ok := geoms[ep.Source]; ok {
+			if dstG, ok := geoms[ep.Target]; ok {
+				seg := edgeSegment(srcG, dstG, ep.SourceHandle, ep.TargetHandle)
+				sx, sy, sz = seg.Start.X, seg.Start.Y, seg.Start.Z
+				ex, ey, ez = seg.End.X, seg.End.Y, seg.End.Z
+			}
+		}
+		md.edgeSeeds = append(md.edgeSeeds, EdgeGeomSeed{
+			Label: label, SrcNode: ep.Source, DstNode: ep.Target,
+			SX: sx, SY: sy, SZ: sz, EX: ex, EY: ey, EZ: ez,
+		})
 	}
 	for id, g := range geoms {
 		nm := newNodeMover(id, g, tr)

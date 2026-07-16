@@ -523,7 +523,7 @@ func TestRootMoveNode2CascadesToSource(t *testing.T) {
 		"5To7": {Source: "5", Target: "7", SourceHandle: "out7", TargetHandle: "in"},
 		"5To8": {Source: "5", Target: "8", SourceHandle: "out8", TargetHandle: "in"},
 	}
-	md := newMoveDispatch(geoms, edges, nil)
+	md := newMoveDispatch(geoms, edges, nil, nil, nil)
 	md.layoutHolders = map[string]*LayoutHolder{
 		"2": {}, "5": {}, "7": {}, "8": {},
 	}
@@ -637,7 +637,7 @@ func TestRootMoveNode5DragCascadesToNode6(t *testing.T) {
 		"2To5": {Source: "2", Target: "5", SourceHandle: "outT", TargetHandle: "inT"},
 		"2To6": {Source: "2", Target: "6", SourceHandle: "out6", TargetHandle: "in"},
 	}
-	md := newMoveDispatch(geoms, edges, nil)
+	md := newMoveDispatch(geoms, edges, nil, nil, nil)
 	md.layoutHolders = map[string]*LayoutHolder{
 		"5": {}, "2": {}, "7": {}, "8": {}, "6": {},
 	}
@@ -726,7 +726,7 @@ func TestRootMoveNode2CascadeKeepsNode1EdgesEqual(t *testing.T) {
 		"1To3": {Source: "1", Target: "3", SourceHandle: "out3", TargetHandle: "in"},
 		"2To5": {Source: "2", Target: "5", SourceHandle: "out5", TargetHandle: "in"},
 	}
-	md := newMoveDispatch(geoms, edges, nil)
+	md := newMoveDispatch(geoms, edges, nil, nil, nil)
 	md.layoutHolders = map[string]*LayoutHolder{
 		"1": {}, "2": {}, "3": {}, "5": {},
 	}
@@ -818,7 +818,7 @@ func TestRootMoveNode9DragKeepsRadiiEqual(t *testing.T) {
 		"9To3": {Source: "9", Target: "3", SourceHandle: "out3", TargetHandle: "in"},
 		"9To6": {Source: "9", Target: "6", SourceHandle: "out6", TargetHandle: "in"},
 	}
-	md := newMoveDispatch(geoms, edges, nil)
+	md := newMoveDispatch(geoms, edges, nil, nil, nil)
 	md.layoutHolders = map[string]*LayoutHolder{
 		"9": {}, "3": {}, "6": {},
 	}
@@ -961,7 +961,7 @@ func TestRootMoveNode10DragKeepsRadiiEqual(t *testing.T) {
 		"10To6": {Source: "10", Target: "6", SourceHandle: "out6", TargetHandle: "in"},
 		"10To8": {Source: "10", Target: "8", SourceHandle: "out8", TargetHandle: "in"},
 	}
-	md := newMoveDispatch(geoms, edges, nil)
+	md := newMoveDispatch(geoms, edges, nil, nil, nil)
 	md.layoutHolders = map[string]*LayoutHolder{
 		"10": {}, "6": {}, "8": {},
 	}
@@ -1113,7 +1113,7 @@ func TestRootMoveNode6MakesFourEdgesEqual(t *testing.T) {
 		"10To6": {Source: "10", Target: "6", SourceHandle: "out6", TargetHandle: "in2"},
 		"10To8": {Source: "10", Target: "8", SourceHandle: "out8", TargetHandle: "in"},
 	}
-	md := newMoveDispatch(geoms, edges, nil)
+	md := newMoveDispatch(geoms, edges, nil, nil, nil)
 	md.layoutHolders = map[string]*LayoutHolder{
 		"6": {}, "9": {}, "3": {}, "10": {}, "8": {},
 	}
@@ -1364,7 +1364,7 @@ func TestRootMoveNode6TriggersNode2MovesNode5(t *testing.T) {
 		"5To7":  {Source: "5", Target: "7", SourceHandle: "out7", TargetHandle: "in5"},
 		"5To8":  {Source: "5", Target: "8", SourceHandle: "out8", TargetHandle: "in5"},
 	}
-	md := newMoveDispatch(geoms, edges, nil)
+	md := newMoveDispatch(geoms, edges, nil, nil, nil)
 	md.layoutHolders = map[string]*LayoutHolder{
 		"6": {}, "9": {}, "3": {}, "10": {}, "8": {},
 		"2": {}, "1": {}, "5": {}, "7": {},
@@ -1513,7 +1513,7 @@ func TestNode6DragNoDataRace(t *testing.T) {
 		"10To6": {Source: "10", Target: "6", SourceHandle: "out6", TargetHandle: "in2"},
 		"10To8": {Source: "10", Target: "8", SourceHandle: "out8", TargetHandle: "in"},
 	}
-	md := newMoveDispatch(geoms, edges, nil)
+	md := newMoveDispatch(geoms, edges, nil, nil, nil)
 	md.layoutHolders = map[string]*LayoutHolder{
 		"6": {}, "9": {}, "3": {}, "10": {}, "8": {},
 	}
