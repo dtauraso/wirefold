@@ -19,7 +19,6 @@ import {
   readOverlaySelSpherePoles,
   readOverlayHandholds,
   readOverlayLabelsGlobal,
-  readOverlayBadgesGlobal,
   readOverlayOverlaysVis,
   readOverlayDoubleLinks,
 } from "../../schema/buffer-layout";
@@ -28,9 +27,8 @@ import {
 // the ViewerState key names it mirrored are gone (that state island was deleted once Go
 // owned scene persistence):
 //   • most flags are visible-sense (true = shown) — <x>Visible
-//   • labelsGlobal / badgesGlobal are HIDDEN-sense (true = hidden) —
-//     labelsGlobalHidden / badgesHidden. The buffer stores visible-sense, so we
-//     invert those two here.
+//   • labelsGlobal is HIDDEN-sense (true = hidden) — labelsGlobalHidden. The buffer
+//     stores visible-sense, so we invert that one here.
 export type OverlayFlagVals = Record<OverlayFlag, boolean>;
 
 // Cache so getSnapshot returns a STABLE object identity while the flags are unchanged
@@ -55,9 +53,8 @@ export function readOverlayFlags(): OverlayFlagVals | null {
     (readOverlaySelSpherePoles(v) ? 1 << 3 : 0) |
     (readOverlayHandholds(v) ? 1 << 4 : 0) |
     (readOverlayLabelsGlobal(v) ? 1 << 5 : 0) |
-    (readOverlayBadgesGlobal(v) ? 1 << 6 : 0) |
-    (readOverlayOverlaysVis(v) ? 1 << 7 : 0) |
-    (readOverlayDoubleLinks(v) ? 1 << 8 : 0);
+    (readOverlayOverlaysVis(v) ? 1 << 6 : 0) |
+    (readOverlayDoubleLinks(v) ? 1 << 7 : 0);
   if (bits === cachedBits && cachedVals) return cachedVals;
   cachedBits = bits;
   cachedVals = {
@@ -68,9 +65,8 @@ export function readOverlayFlags(): OverlayFlagVals | null {
     handholds: !!(bits & (1 << 4)),
     // hidden-sense: buffer stores VISIBLE, store field is *Hidden → invert.
     labelsGlobal: !(bits & (1 << 5)),
-    badgesGlobal: !(bits & (1 << 6)),
-    overlays: !!(bits & (1 << 7)),
-    doubleLinks: !!(bits & (1 << 8)),
+    overlays: !!(bits & (1 << 6)),
+    doubleLinks: !!(bits & (1 << 7)),
   };
   return cachedVals;
 }

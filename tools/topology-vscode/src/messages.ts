@@ -43,7 +43,6 @@ const OVERLAY_FLAG_NAMES = [
   "selSpherePoles",
   "handholds",
   "labelsGlobal",
-  "badgesGlobal",
   "overlays",
   "doubleLinks",
 ] as const;

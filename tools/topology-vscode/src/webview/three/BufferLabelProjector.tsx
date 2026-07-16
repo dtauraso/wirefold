@@ -3,7 +3,7 @@
 // and reports {row,label,px,py,cx,cy} — the row is the node's buffer node-row index
 // (identity) and the label is decoded straight from the buffer's label section (nodeLabel).
 // Split out of buffer-scene.tsx. Mirrors the old JSON-path LabelProjector but sourced
-// entirely from the buffer, no id table. The DOM pills/badges (ThreeView) render from these
+// entirely from the buffer, no id table. The DOM label pills (ThreeView) render from these
 // positions. Pure projection — no store writes.
 
 import { useRef } from "react";

@@ -2,7 +2,7 @@
 // buffer (BufferScene) with raw-input forwarding to Go's gesture FSM for all interaction.
 //   - PerspectiveCamera driven by Go's Camera buffer row (BufferCamera)
 //   - Pointer/wheel events forwarded raw to Go (useInteractionControls → raw-input)
-//   - Node labels / +N occlusion badges projected from the buffer node block
+//   - Node labels projected from the buffer node block
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { Canvas } from "@react-three/fiber";
@@ -14,11 +14,9 @@ import { Scene } from "./scene-content";
 import { BufferScene, BufferLabelProjector } from "./buffer-scene";
 import { ProceduralEnvProvider } from "./scene-env";
 import type { BufferLabelPos } from "./buffer-scene";
-import { computeOcclusionCountsNav } from "./scene-occlusion";
 import { getLatestSnapshot } from "../snapshot-buffer";
 import { decodeSnapshot } from "./buffer-decode";
-import { decodeNavNodes } from "./buffer-nav";
-import { readOverlayLabelsGlobal, readOverlayBadgesGlobal } from "../../schema/buffer-layout";
+import { readOverlayLabelsGlobal } from "../../schema/buffer-layout";
 import { NavGuides } from "./NavGuides";
 import { postGoRecord } from "../vscode-api";
 import { encodeFadeToggle } from "../../schema/input-layout";
@@ -112,31 +110,16 @@ export function ThreeView() {
     return () => el.removeEventListener("wheel", onWheelNative);
   }, [onWheelNative]);
 
-  // Occlusion counts: recomputed only when the camera settles (not per-frame). Computed from
-  // the buffer's node block (Go-owned centers/radii).
-  const [bufferOcclusionCounts, setBufferOcclusionCounts] = useState<Map<number, number>>(new Map());
-
-  const onCameraSettle = useCallback(() => {
-    const cam = cameraRef.current;
-    if (!cam) return;
-    const snap = getLatestSnapshot();
-    const decoded = snap ? decodeSnapshot(snap) : null;
-    const nav = decoded ? decodeNavNodes(decoded) : [];
-    setBufferOcclusionCounts(computeOcclusionCountsNav(nav, cam, canvasSize));
-  }, [cameraRef, canvasSize]);
-
-  // Label/badge global visibility come from the buffer overlay columns (Go-owned). Read at
+  // Label global visibility comes from the buffer overlay column (Go-owned). Read at
   // render time: ThreeView re-renders every frame (bufferLabelPositions updates each rAF), so
   // a toggle change — which Go reflects into the buffer overlay row — is picked up within a
-  // frame. Buffer sense: LabelsGlobal/BadgesGlobal == 1 means VISIBLE, so hidden = (col === 0).
+  // frame. Buffer sense: LabelsGlobal == 1 means VISIBLE, so hidden = (col === 0).
   let bufLabelsHidden = false;
-  let bufBadgesHidden = false;
   {
     const snap = getLatestSnapshot();
     const decoded = snap ? decodeSnapshot(snap) : null;
     if (decoded) {
       bufLabelsHidden = readOverlayLabelsGlobal(decoded.overlayView) === 0;
-      bufBadgesHidden = readOverlayBadgesGlobal(decoded.overlayView) === 0;
     }
   }
 
@@ -159,7 +142,6 @@ export function ThreeView() {
         >
           <Scene
             onPickRequest={pickRequest}
-            onCameraSettle={onCameraSettle}
           />
           {/* NavGuides (polar tori / pole frames / θ-φ angle arcs / handholds), derived from
               the binary buffer (Go-owned node centers/radii/sphereR + selection column). */}
@@ -196,38 +178,6 @@ export function ThreeView() {
           <div style={{ whiteSpace: "nowrap" }}>{pos.label || String(pos.row)}</div>
         </div>
       ))}
-
-      {/* Occlusion "+N" badges — count hidden nodes directly behind a front node, computed from
-          the buffer's node block (computeOcclusionCountsNav) at the buffer projection. Only
-          shown when N >= 1. Recomputed on camera settle. */}
-      {!bufBadgesHidden && bufferLabelPositions.map((pos) => {
-        const count = bufferOcclusionCounts.get(pos.row);
-        if (!count || count < 1) return null;
-        return (
-          <div
-            key={`badge-${pos.row}`}
-            style={{
-              position: "absolute",
-              left: pos.px + 10,
-              top: pos.py - 18,
-              background: "rgba(30,30,50,0.88)",
-              color: "#7df",
-              fontSize: 9,
-              fontFamily: "monospace",
-              fontWeight: "bold",
-              padding: "1px 5px",
-              borderRadius: 8,
-              border: "1px solid rgba(100,180,255,0.5)",
-              pointerEvents: "none",
-              whiteSpace: "nowrap",
-              zIndex: 15,
-              lineHeight: "14px",
-            }}
-          >
-            +{count}
-          </div>
-        );
-      })}
 
       {/* Widgets — fixed corner, pointerEvents auto */}
       <HomeButton cameraRef={cameraRef} aspect={canvasSize.w / canvasSize.h} />

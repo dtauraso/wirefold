@@ -15,7 +15,6 @@
 {"step":15,"kind":"sel-sphere-poles","visible":true}
 {"step":16,"kind":"handholds","visible":false}
 {"step":17,"kind":"labels-global","visible":true}
-{"step":18,"kind":"badges-global","visible":false}
 {"step":19,"kind":"overlays-vis","visible":true}
 {"step":20,"kind":"double-links","visible":false}
 {"step":21,"kind":"select","node":"A","port":"","value":0}
