@@ -253,13 +253,13 @@ func RunGate(ctx context.Context, g *GateNode, invertLeft bool) {
 		now = defaultTick()
 	}
 
-	// clk selects paced vs chan mode: paced mode sleeps one cycle on the shared
+	// paced selects paced vs chan mode: paced mode sleeps one cycle on the shared
 	// clock and StepOnces the output below (never parking across the output
 	// traversal); chan mode falls back to a wall-clock sleep.
-	clk := g.ToPassed.Clock()
+	paced := g.ToPassed.Paced()
 	sleep := defaultSleep()
-	if clk != nil {
-		sleep = clk.SleepCycle
+	if paced {
+		sleep = g.ToPassed.Clock().SleepCycle
 	}
 
 	var w gateWindow
@@ -303,7 +303,7 @@ func RunGate(ctx context.Context, g *GateNode, invertLeft bool) {
 			emitInputs(g)
 		}
 
-		if clk != nil {
+		if paced {
 			// Paced mode: advance any in-flight ToPassed output bead exactly one
 			// position-step per cycle. The gate goroutine is never parked across
 			// the output traversal — StepOnce runs every cycle regardless of

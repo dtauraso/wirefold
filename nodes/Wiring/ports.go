@@ -246,19 +246,32 @@ func (o *Out) placementFrom(g outGeom) beadPlacement {
 	}
 }
 
-// Clock returns the wire's shared human-speed Clock, or nil in chan mode / for a
-// nil Out (no wire, no clock).
+// Paced reports whether this Out drives a paced wire on a shared clock. It is the
+// paced-vs-chan MODE predicate: paced mode sleeps on the shared clock and StepOnces the
+// wire; chan mode (unit tests) has no wire to advance and falls back to a wall-clock
+// sleep.
 //
-// DOES NOT mirror In.Clock, which never returns nil. Here nil is load-bearing: it is the
-// paced-vs-chan MODE SELECTOR. gatecommon.RunGate and DriveHeld both branch on
-// `clk := out.Clock(); if clk != nil` to choose sleeping on the shared clock plus
-// StepOnce (paced) over a wall-clock sleep (chan mode, unit tests). Do not "fix" this nil
-// to match In's: an Out's nil means "no wire, take the other branch", whereas an In's nil
-// meant only "the next SleepCycle panics" — which is why it was removed there and kept
-// here.
+// This says out loud what `out.Clock() != nil` used to say sideways. Mode was encoded in
+// a nil, so the ONLY thing stopping someone from "fixing" Clock() to never return nil —
+// and silently collapsing both modes into one — was a comment asking them not to. Asking
+// is not a mechanism (CLAUDE.md: enforce in code before adding prose). With the mode in a
+// named predicate, Clock() is free to be non-nil like In.Clock, and nil carries no
+// meaning on either port.
+//
+// The condition is exactly what the nil encoded — pw AND a clock on it — not merely
+// Wired(): a paced wire whose clock was never set took the chan-mode branch before, and
+// still does.
+func (o *Out) Paced() bool {
+	return o != nil && o.pw != nil && o.pw.clock != nil
+}
+
+// Clock returns the shared human-speed Clock this port paces on. NEVER RETURNS NIL —
+// mirrors In.Clock; see its doc for why a nil Clock is a panic waiting to happen.
+// Callers choosing paced vs chan behavior must branch on Paced(), not on this being nil.
+// In chan mode this is the inert placeholder, which Paced() callers never reach.
 func (o *Out) Clock() Clock {
-	if o == nil || o.pw == nil {
-		return nil
+	if !o.Paced() {
+		return inertClock{}
 	}
 	return o.pw.clock
 }
