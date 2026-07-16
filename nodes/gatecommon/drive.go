@@ -36,14 +36,15 @@ import (
 //
 // Stops when ctx is cancelled or a placement fails (wire torn down).
 //
-// Paced-wire mode (out.Clock() != nil) sleeps on the shared clock's
+// Paced-wire mode (out.Paced()) sleeps on the shared clock's
 // SleepCycle so it freezes on pause, and paces placement on the per-edge K
-// above. Chan mode (out.Clock() == nil, unit tests) has no shared clock and
+// above. Chan mode (!out.Paced(), unit tests) has no shared clock and
 // no wire geometry, so it keeps the OLD unconditional per-cycle placement
 // (falls back to a wall-clock sleep of the same duration) — that mode never
 // exhibited the density bug since it has no wire to visualize.
 func DriveHeld(ctx context.Context, out *Wiring.Out, held *atomic.Int64, transform func(int64) int) {
 	go func() {
+		paced := out.Paced()
 		clk := out.Clock()
 		sleep := func(ctx context.Context) error {
 			select {
@@ -53,7 +54,7 @@ func DriveHeld(ctx context.Context, out *Wiring.Out, held *atomic.Int64, transfo
 				return nil
 			}
 		}
-		if clk != nil {
+		if paced {
 			sleep = clk.SleepCycle
 		}
 
@@ -63,11 +64,11 @@ func DriveHeld(ctx context.Context, out *Wiring.Out, held *atomic.Int64, transfo
 				return
 			}
 
-			// Chan mode (clk == nil, unit tests): no wire geometry, no shared
+			// Chan mode (!paced, unit tests): no wire geometry, no shared
 			// clock — place every cycle exactly as before (immediate send,
 			// synchronous chan semantics).
-			place := clk == nil
-			if clk != nil {
+			place := !paced
+			if paced {
 				if latMs := out.Geom().SimLatencyMs; latMs > 0 {
 					k := int64(latMs/Wiring.MsPerTick + 0.999999)
 					if k < 1 {

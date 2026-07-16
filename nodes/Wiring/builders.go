@@ -353,13 +353,29 @@ func wirePorts(ctx context.Context, v reflect.Value, nodePtr any, name string, p
 
 // wireInPort resolves a single PortIn field: a paced binding (NewInPaced) when
 // pb has one for this port name, otherwise a dead-end chan wrapper.
+//
+// The dead-end In gets the shared clock as well as the placeholder channel: node pacing
+// loops call In.Clock().SleepCycle unguarded, so an unwired In holding no clock is a
+// panic (see In.Clock). With the real clock it paces exactly like a wired node and stays
+// inert by polling a port that never delivers — the precondition-gating validate.go
+// promises.
 func wireInPort(f reflect.Value, portName string, ctx context.Context, name string, pb PortBindings, tr *T.Trace) {
 	if b := pb.singlePaced[portName]; b.pw != nil {
 		f.Set(reflect.ValueOf(NewInPaced(b.pw, ctx, name, portName, tr)))
 	} else {
 		ch := pb.deadEndIn(portName)
-		f.Set(reflect.ValueOf(&In{ch: ch, node: name, port: portName, trace: tr}))
+		f.Set(reflect.ValueOf(&In{ch: ch, node: name, port: portName, trace: tr, clock: pb.inClock()}))
 	}
+}
+
+// inClock is the Clock an unwired In should hold: the loader's shared clock when there is
+// one (always, in production — loader.go sets pb.clock), else the inert placeholder for a
+// test build with no loader. Never nil.
+func (pb *PortBindings) inClock() Clock {
+	if pb.clock != nil {
+		return pb.clock
+	}
+	return inertClock{}
 }
 
 // wireOutPort resolves a single PortOut field: a paced binding

@@ -115,7 +115,13 @@ func validateSpec(spec *topoSpec) error {
 		}
 	}
 
-	// (No required-inbound-edge check: a node with an unfed required port loads and stays inert by precondition-gating — the editor flags it visually instead.)
+	// (No required-inbound-edge check: a node with an unfed required port loads and stays
+	// inert by precondition-gating — it paces on the shared clock and polls a port that
+	// never delivers, so it simply never fires. Nothing flags it: the editor's red-node
+	// diagnostic for a missing required input was removed, so an unfed port is silent by
+	// design, not merely unenforced here. What makes "loads and stays inert" TRUE rather
+	// than aspirational is that an unwired In holds a real clock and a placeholder channel
+	// — see In.Clock / wireInPort. It used to panic instead.)
 
 	// Check 4: sendRules values must be recognised SendRule constants.
 	for _, n := range spec.Nodes {
