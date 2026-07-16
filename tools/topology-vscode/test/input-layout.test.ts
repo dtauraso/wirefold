@@ -6,7 +6,6 @@ import {
   IN_KIND_RESUME,
   IN_KIND_PAUSE,
   IN_KIND_SAVE,
-  IN_KIND_FADE_TOGGLE,
   IN_KIND_RAW_INPUT,
   IN_KIND_EDIT_CREATE,
   IN_KIND_EDIT_DELETE,
@@ -14,7 +13,6 @@ import {
   INPUT_LAYOUT_FINGERPRINT,
   encodePlay,
   encodePause,
-  encodeFadeToggle,
   encodeOverlaysToggle,
   decodeInputRecord,
   frameRecord,
@@ -49,7 +47,6 @@ describe("control records — exact bytes", () => {
     expect(new Uint8Array(encodePlay())).toEqual(new Uint8Array([IN_KIND_RESUME]));
     expect(new Uint8Array(encodePause())).toEqual(new Uint8Array([IN_KIND_PAUSE]));
     expect(new Uint8Array(controlBytes(IN_KIND_SAVE))).toEqual(new Uint8Array([IN_KIND_SAVE]));
-    expect(new Uint8Array(encodeFadeToggle())).toEqual(new Uint8Array([IN_KIND_FADE_TOGGLE]));
   });
 
   it("play is pinned to the literal byte 0x01 (Go's IN_KIND_RESUME)", () => {
@@ -64,7 +61,6 @@ describe("control records — exact bytes", () => {
     expect(decodeInputRecord(encodePlay())).toEqual({ kind: "play" });
     expect(decodeInputRecord(encodePause())).toEqual({ kind: "pause" });
     expect(decodeInputRecord(controlBytes(IN_KIND_SAVE))).toEqual({ kind: "save" });
-    expect(decodeInputRecord(encodeFadeToggle())).toEqual({ kind: "fade-toggle" });
   });
 });
 
@@ -118,7 +114,7 @@ describe("fingerprint self-consistency", () => {
     // from the fingerprint's hardcoded numbers, this fails instead of silently passing.
     const expected =
       `kinds=resume:${IN_KIND_RESUME},pause:${IN_KIND_PAUSE},` +
-      `save:${IN_KIND_SAVE},fadeToggle:${IN_KIND_FADE_TOGGLE},raw-input:${IN_KIND_RAW_INPUT},` +
+      `save:${IN_KIND_SAVE},raw-input:${IN_KIND_RAW_INPUT},` +
       `edit-create:${IN_KIND_EDIT_CREATE},edit-delete:${IN_KIND_EDIT_DELETE},edit-update:${IN_KIND_EDIT_UPDATE}`;
     expect(INPUT_LAYOUT_FINGERPRINT).toContain(expected);
   });

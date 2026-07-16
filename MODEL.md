@@ -156,9 +156,8 @@ when a bead has arrived. Go owns the clock.
   geometry-CRUD `edit` (`op` = create / update / delete — exactly three ops;
   `update` sets a numeric attribute on a typed entity, e.g. overlays toggle/set
   as a flag-id / bitfield), a bare `save` command (Go persists its OWN current
-  state — camera + overlays — the editor sends no scene payload), a bare
-  fade-toggle command (`f` on the selected element; Go owns the selection and
-  the fade fixpoint), and the play/pause control signal. There is NO JSON on
+  state — camera + overlays — the editor sends no scene payload), and the
+  play/pause control signal. There is NO JSON on
   either wire. The TS → Go send is fire-and-forget: the editor places a record
   and never blocks on Go, never asks when a bead arrived, and there is no
   delivery signal — Go times its own delivery. Nothing about node-local state

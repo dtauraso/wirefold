@@ -152,10 +152,6 @@ export type WebviewToHostMsg =
   // in this union + WEBVIEW_TO_HOST_TYPES so message-kind-parity tracks stdin_reader.go's
   // "save" msg.Type.
   | { type: "save" }
-  // The bare FADE-TOGGLE command (single kind byte in schema/input-layout.ts, sent via
-  // go-record). Toggles fade on Go's OWN current selection — no payload. Kept in this union
-  // + WEBVIEW_TO_HOST_TYPES so message-kind-parity tracks stdin_reader.go's "fade-toggle".
-  | { type: "fade-toggle" }
   | { type: "webview-log"; entry: string }
   | EditMsg;
 
@@ -170,7 +166,7 @@ export type HostToWebviewMsg =
   | { type: "buffer-snapshot"; buffer: ArrayBuffer };
 
 export const WEBVIEW_TO_HOST_TYPES: ReadonlySet<WebviewToHostMsg["type"]> = new Set([
-  "ready", "run", "play", "pause", "stop", "webview-log", "edit", "save", "fade-toggle", "raw-input", "go-record",
+  "ready", "run", "play", "pause", "stop", "webview-log", "edit", "save", "raw-input", "go-record",
 ]);
 
 const HOST_TO_WEBVIEW_TYPES: ReadonlySet<HostToWebviewMsg["type"]> = new Set([

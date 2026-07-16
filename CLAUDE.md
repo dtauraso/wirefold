@@ -47,7 +47,7 @@ grep-discoverable edit the three items above don't cover.
 generated from `wire:"prop,..."` tags on `specEdge` in `nodes/Wiring/loader.go`) are
 Go-owned edge metadata from the spec JSON. Today the only prop is `label`, and it does
 NOT feed the render path: `EdgeTube` (`buffer-scene.tsx`'s edge renderer) reads only
-SX..EZ/Selected/Faded from the Edge block; `label` rides the Edge block's
+SX..EZ/Selected from the Edge block; `label` rides the Edge block's
 EdgeLabelOff/EdgeLabelLen columns solely for the `.probe` buffer-decoded log, never for
 drawing. If a NEW wire prop needs to affect rendering, it must be packed into the Edge
 block (`Buffer/` + `buffer-layout.ts`) and read by `EdgeTube` in the same commit — a
@@ -69,19 +69,19 @@ removed sidecar message is rejected; do not reintroduce one.)
   remove an edge; **`update` sets an ATTRIBUTE on a typed entity** (`kind` = node / edge /
   camera / overlays / scene) — there is no per-feature op. New *addressed* capability is a
   new entity kind or attribute, NOT a new op.
-- **Bare commands** — `play` / `pause`, `fade-toggle` have live TS senders today.
+- **Bare commands** — `play` / `pause` have live TS senders today.
   `save` is defined end-to-end (kind byte, Go decode + persist) but currently has **no live
   TS sender** — no UI affordance posts it yet; it stays in the vocabulary because Go's decode
   and the `INPUT_LAYOUT_FINGERPRINT` both carry it. All of these carry **no entity id on
   purpose**: they act on state **Go already owns** (the clock; the current selection), so
-  there is nothing for TS to address. `fade-toggle` flips fade on the Go-owned selection —
-  TS cannot name the target, therefore it cannot be an `update`. There is no `resend`
+  there is nothing for TS to address. There is no `resend`
   command: the ext host caches the last fd3 buffer-snapshot frame and replays it to a
   remounted webview on `ready` instead (`BuildAndRunRunner.lastSnapshot`/`getLastSnapshot`
   in `tools/topology-vscode/src/runCommand.ts`) — Go only ever emits a frame when
-  something changes, and that stays true.
+  something changes, and that stays true. There is no `fade-toggle` command: the fade/dimming
+  feature was deleted end-to-end (nodes/edges/beads always render at full opacity).
 - **`raw-input`** — raw pointer/wheel + stateless raycast hit → Go's gesture FSM. Camera
-  orbit, node moves, port-anchor moves and edge fade are produced **in-process** by the FSM
+  orbit, node moves, and port-anchor moves are produced **in-process** by the FSM
   from raw-input; they do not cross this seam as edits.
 
 Keep all of it in parity across `messages.ts`, `stdin_reader.go`, and `handle-message.ts`

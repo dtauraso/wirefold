@@ -19,47 +19,21 @@ import {
   SHADING_PARAM_NODE_CLEARCOAT_ROUGHNESS,
   SHADING_PARAM_NODE_ENV_MAP_INTENSITY,
   SHADING_PARAM_NODE_OPACITY,
-  SHADING_PARAM_NODE_FADE_OPACITY,
-  SHADING_PARAM_NODE_FADE_BODY_MUL,
 } from "../../schema/shading-params";
 import {
   readNodeCX, readNodeCY, readNodeCZ, readNodeRadius,
-  readNodeFaded, readOverlaySelSpherePoles,
+  readOverlaySelSpherePoles,
 } from "../../schema/buffer-layout";
 import {
   BUFFER_NODE_TAG, BUFFER_RING_TAG, NODE_SPHERE_RADIUS,
   NODE_RING_TUBE_RATIO, RING_PICK_TUBE_RATIO, nodeRowColors,
 } from "./buffer-scene-shared";
 
-// Per-instance FADE: an `aFaded` instanced attribute (0|1) drives a per-node alpha multiply
-// injected into the shared material (onBeforeCompile). A single InstancedMesh keeps
-// instanceId == node row (so a faded node is still pickable to un-fade it) while faded rows
-// render dimmed. The multipliers are the pre-branch faded/solid opacity RATIOS: body target
-// = FADE_OPACITY*BODY_MUL vs solid NODE_OPACITY; ring target = FADE_OPACITY vs solid 1.
-const NODE_BODY_FADE_MUL = (SHADING_PARAM_NODE_FADE_OPACITY * SHADING_PARAM_NODE_FADE_BODY_MUL) / SHADING_PARAM_NODE_OPACITY;
-const NODE_RING_FADE_MUL = SHADING_PARAM_NODE_FADE_OPACITY;
-const glslFloat = (n: number): string => (Number.isInteger(n) ? n.toFixed(1) : String(n));
-function makeFadeAlphaPatch(mul: number) {
-  return (shader: { vertexShader: string; fragmentShader: string }) => {
-    shader.vertexShader = "attribute float aFaded;\nvarying float vFaded;\n" +
-      shader.vertexShader.replace("void main() {", "void main() {\n  vFaded = aFaded;");
-    shader.fragmentShader = "varying float vFaded;\n" +
-      shader.fragmentShader.replace(
-        "#include <dithering_fragment>",
-        `  if ( vFaded > 0.5 ) gl_FragColor.a *= ${glslFloat(mul)};\n#include <dithering_fragment>`,
-      );
-  };
-}
-const patchBodyFade = makeFadeAlphaPatch(NODE_BODY_FADE_MUL);
-const patchRingFade = makeFadeAlphaPatch(NODE_RING_FADE_MUL);
-
 export function NodeInstances({ capacity }: { capacity: number }) {
   const envTex = useContext(EnvTexContext);
   const bodyRef = useRef<THREE.InstancedMesh>(null);
   const ringRef = useRef<THREE.InstancedMesh>(null);
   const ringPickRef = useRef<THREE.InstancedMesh>(null);
-  const bodyFadedRef = useRef<THREE.InstancedBufferAttribute>(null);
-  const ringFadedRef = useRef<THREE.InstancedBufferAttribute>(null);
   const matRef  = useRef(new THREE.Matrix4());
   const posRef  = useRef(new THREE.Vector3());
   const quatRef = useRef(new THREE.Quaternion());
@@ -108,13 +82,6 @@ export function NodeInstances({ capacity }: { capacity: number }) {
       const { fill, stroke } = nodeRowColors(nodeView, i);
       body.setColorAt(i, colRef.current.set(fill));
       ring.setColorAt(i, colRef.current.set(stroke));
-
-      // Per-instance fade flag → aFaded attribute (drives the shader alpha multiply).
-      const faded = readNodeFaded(nodeView, i) ? 1 : 0;
-      const bf = bodyFadedRef.current;
-      const rf = ringFadedRef.current;
-      if (bf) (bf.array as Float32Array)[i] = faded;
-      if (rf) (rf.array as Float32Array)[i] = faded;
     }
     body.count = n;
     ring.count = n;
@@ -124,8 +91,6 @@ export function NodeInstances({ capacity }: { capacity: number }) {
     ringPick.instanceMatrix.needsUpdate = true;
     if (body.instanceColor) body.instanceColor.needsUpdate = true;
     if (ring.instanceColor) ring.instanceColor.needsUpdate = true;
-    if (bodyFadedRef.current) bodyFadedRef.current.needsUpdate = true;
-    if (ringFadedRef.current) ringFadedRef.current.needsUpdate = true;
     // Refresh the InstancedMesh bounding sphere so raycast picking stays accurate as
     // nodes move (three.js early-outs a ray against a cached union sphere; a dragged
     // node outside the stale sphere would otherwise be un-pickable). Cheap for the
@@ -137,9 +102,7 @@ export function NodeInstances({ capacity }: { capacity: number }) {
   return (
     <>
       <instancedMesh ref={bodyRef} args={[undefined, undefined, capacity]} userData={{ [BUFFER_NODE_TAG]: true }} frustumCulled={false}>
-        <sphereGeometry args={[1, 16, 16]}>
-          <instancedBufferAttribute ref={bodyFadedRef} attach="attributes-aFaded" args={[new Float32Array(capacity), 1]} />
-        </sphereGeometry>
+        <sphereGeometry args={[1, 16, 16]} />
         {/* Match GraphNode's glassy translucent body EXACTLY (scene-graph.tsx): a
             meshPhysicalMaterial with transmission + depthWrite=false + opacity 0.92 so
             the node interior (held/interior beads) shows through. Per-node fill is the
@@ -159,16 +122,11 @@ export function NodeInstances({ capacity }: { capacity: number }) {
           transparent
           opacity={SHADING_PARAM_NODE_OPACITY}
           depthWrite={false}
-          onBeforeCompile={patchBodyFade}
         />
       </instancedMesh>
       <instancedMesh ref={ringRef} args={[undefined, undefined, capacity]} userData={{ [BUFFER_RING_TAG]: true }} frustumCulled={false}>
-        <torusGeometry args={[1, NODE_RING_TUBE_RATIO, 8, 32]}>
-          <instancedBufferAttribute ref={ringFadedRef} attach="attributes-aFaded" args={[new Float32Array(capacity), 1]} />
-        </torusGeometry>
-        {/* transparent so faded rings (aFaded=1) blend at reduced alpha; solid rings keep
-            alpha 1 → visually opaque. */}
-        <meshStandardMaterial roughness={0.6} metalness={0} transparent depthWrite={false} onBeforeCompile={patchRingFade} />
+        <torusGeometry args={[1, NODE_RING_TUBE_RATIO, 8, 32]} />
+        <meshStandardMaterial roughness={0.6} metalness={0} depthWrite={false} />
       </instancedMesh>
       {/* Invisible pick-proxy torus: same per-instance transform as the visible ring above,
           but a much thicker tube (RING_PICK_TUBE_RATIO) so the ring band is a generous
