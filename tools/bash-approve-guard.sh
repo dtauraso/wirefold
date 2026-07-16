@@ -55,6 +55,15 @@ DESTRUCTIVE_PATTERNS=(
   'git[[:space:]]+branch[[:space:]].*-[Dd]([[:space:]]|$)'
   'git[[:space:]]+tag[[:space:]].*-d([[:space:]]|$)'
   '[-][-]force(-with-lease)?([[:space:]]|=|$)'
+  # git merge: CLAUDE.md's Workflow section names "merging a task branch into main"
+  # FIRST in its list of actions that still require sign-off. Until this line, that rule
+  # was prose the code contradicted: merge matched no tier, fell through to
+  # `otherwise -> allow`, and was SILENTLY AUTO-APPROVED — the guard actively answered
+  # the question the doc says to ask. --force and branch -D were gated; the one action
+  # named first was not.
+  # Trailing ([[:space:]]|$) is load-bearing: it keeps read-only `git merge-base` out
+  # (after "merge" comes "-", not a space), while still catching `git merge --no-ff x`.
+  'git[[:space:]]+merge([[:space:]]|$)'
 )
 
 NETWORK_PATTERNS=(
