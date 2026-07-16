@@ -24,7 +24,7 @@
 package Buffer
 
 // BufLayoutVersion is the schema version. Bump when any column changes.
-const BufLayoutVersion = 26
+const BufLayoutVersion = 27
 
 // BufInteriorSlotsPerNode is the fixed number of interior grid slots reserved per
 // node in the Interior block (a 2x2 held/interior-bead grid: slot = row*2 + col).
@@ -294,6 +294,13 @@ type bufLayoutScene struct {
 // never predicts play/pause locally (see runCommand.ts play()/pause()).
 type bufLayoutClock struct {
 	Halted uint8 `buf:"u8"` // 1 = clock is halted (paused)
+	// HasRun is 1 once the clock has left halted at least once this process (RealClock's
+	// hasRun field, set inside Resume()'s transition guard); it never reverts to 0. Backs the
+	// RunButton's run-vs-resume label: a fresh load has Halted=1,HasRun=0 ("run"), after the
+	// first play it stays HasRun=1 across subsequent pauses ("resume"). Do NOT derive this
+	// from the snapshot header's tick counter — that is a frame-emit counter, not the clock's
+	// tick, and is already >0 on the first frame because startup geometry emits while halted.
+	HasRun uint8 `buf:"u8"` // 1 = clock has advanced (run) at least once
 }
 
 // bufLayoutEvent defines one row of the per-tick EVENT column block.

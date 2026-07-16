@@ -308,12 +308,14 @@ type sceneSnapState struct {
 	radius     float64
 }
 
-// clockSnapState mirrors the clock block (single row): the one true running-vs-paused bit,
-// mirrored from KindHalted events emitted by RealClock's Halt()/Resume() transition guards
-// (see nodes/Wiring/clock.go). Zero-value (halted=0, i.e. running) until the first KindHalted
-// arrives; production always halts before load (main.go), so the real first value is 1.
+// clockSnapState mirrors the clock block (single row): the running-vs-paused bit and the
+// "has ever run" bit, both mirrored from KindHalted events emitted by RealClock's
+// Halt()/Resume() transition guards (see nodes/Wiring/clock.go). Zero-value (halted=0,
+// hasRun=0) until the first KindHalted arrives; production always halts before load
+// (main.go), so the real first value is halted=1,hasRun=0.
 type clockSnapState struct {
 	halted uint8
+	hasRun uint8
 }
 
 // overlaySnapState mirrors the overlay block (single row).
@@ -404,9 +406,11 @@ func (s *SnapshotState) Update(ev T.Event) {
 		s.emitSnapshot()
 
 	case T.KindHalted:
-		// The one true running-vs-paused bit, streamed from RealClock's Halt()/Resume()
-		// transition guards (see Trace.Halted). Reuses the Visible field.
+		// The running-vs-paused bit and the "has ever run" bit, streamed from RealClock's
+		// Halt()/Resume() transition guards (see Trace.Halted). Reuses the Visible field for
+		// halted and the Value field for hasRun.
 		s.clock.halted = boolU8(ev.Visible)
+		s.clock.hasRun = boolU8(ev.Value != 0)
 		s.emitSnapshot() // state-change point: emit on play/pause
 
 	case T.KindSceneTori, T.KindScenePoles, T.KindNodePoles,
@@ -1235,9 +1239,10 @@ func (s *SnapshotState) writeSceneBlock(buf []byte, off int) int {
 	return off + BufSceneStride
 }
 
-// writeClockBlock writes the Clock block (always 1 row): the one true running-vs-paused bit.
+// writeClockBlock writes the Clock block (always 1 row): the running-vs-paused bit and the
+// "has ever run" bit.
 func (s *SnapshotState) writeClockBlock(buf []byte, off int) int {
-	SetClockRow(buf[off:], 0, s.clock.halted)
+	SetClockRow(buf[off:], 0, s.clock.halted, s.clock.hasRun)
 	return off + BufClockStride
 }
 

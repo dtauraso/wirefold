@@ -346,8 +346,8 @@ describe("buffer-layout — event enum", () => {
 // ─ Meta ───────────────────────────────────────────────────────────────────────
 
 describe("buffer-layout — meta", () => {
-  it("schema version is 26", () => {
-    expect(BUF_LAYOUT_VERSION).toBe(26);
+  it("schema version is 27", () => {
+    expect(BUF_LAYOUT_VERSION).toBe(27);
   });
 
   it("header size is 40 bytes (10×u32)", () => {
