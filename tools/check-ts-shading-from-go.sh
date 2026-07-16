@@ -50,7 +50,7 @@ FORBIDDEN=(
   'ior=\{1\.5\}'
   'clearcoatRoughness=\{0\.1\}'
   'envMapIntensity=\{1'
-  'opacity=\{faded \? fadeOpacity \* 0\.6 : 0\.92\}'
+  'opacity=\{0\.92\}'
   # Procedural env map: sky radius, vertex-tint literals, light colors/intensities, PMREM blur.
   'SphereGeometry\(50,'
   '0\.78 \+ \(1\.0 - 0\.78\)'

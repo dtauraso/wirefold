@@ -3,7 +3,7 @@ set -euo pipefail
 
 # check-scene-path-resolution.sh — guard: path resolution must live in scene_paths.go.
 #
-# All five scene persisters (camera, fade, overlays, node-pos, anchor) and their loaders
+# All four scene persisters (camera, overlays, node-pos, anchor) and their loaders
 # must resolve topologyPath via sceneTreeRoot / sceneJSONPath (scene_paths.go). A persister
 # that hand-rolls os.Stat+IsDir will diverge between the directory-form and the file-form
 # topologyPath — the exact bug that recurred three times in one session.

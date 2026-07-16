@@ -68,15 +68,15 @@ func TestSceneJSONPathBothForms(t *testing.T) {
 	}
 }
 
-// TestAllFivePersistersConsistentBothForms arms all five persisters via the public
+// TestAllPersistersConsistentBothForms arms all persisters via the public
 // API (EnableEditPersist + EnableViewpointPersist) for BOTH the directory form and
 // the file form of topologyPath, and asserts each persister's stored root/path is
 // non-empty and resolves to the same concrete location in both cases.
 //
 // This is the test that would have caught the original bug: the file-form
 // topologyPath left node-pos / anchor persister root == "" (no-op) while camera
-// + fade + overlays worked correctly.
-func TestAllFivePersistersConsistentBothForms(t *testing.T) {
+// + overlays worked correctly.
+func TestAllPersistersConsistentBothForms(t *testing.T) {
 	wantSceneJSON := func(root string) string {
 		return filepath.Join(root, "view", "scene.json")
 	}
@@ -84,10 +84,8 @@ func TestAllFivePersistersConsistentBothForms(t *testing.T) {
 	run := func(t *testing.T, label, topologyPath, expectedRoot string) {
 		t.Helper()
 		md := &MoveDispatch{
-			nodeMovers:         map[string]*nodeMover{},
-			ov:                 defaultOverlayState(),
-			directlyFadedNodes: map[string]bool{},
-			directlyFadedEdges: map[string]bool{},
+			nodeMovers: map[string]*nodeMover{},
+			ov:         defaultOverlayState(),
 		}
 		md.EnableViewpointPersist(topologyPath)
 		md.EnableEditPersist(topologyPath)
@@ -102,15 +100,7 @@ func TestAllFivePersistersConsistentBothForms(t *testing.T) {
 			t.Fatalf("[%s] vpPersist.path=%q want %q", label, md.vpPersist.path, want)
 		}
 
-		// 2. fade persister
-		if md.fadePersist == nil {
-			t.Fatalf("[%s] fadePersist nil", label)
-		}
-		if md.fadePersist.path != want {
-			t.Fatalf("[%s] fadePersist.path=%q want %q", label, md.fadePersist.path, want)
-		}
-
-		// 3. overlays persister
+		// 2. overlays persister
 		if md.overlaysPersist == nil {
 			t.Fatalf("[%s] overlaysPersist nil", label)
 		}
@@ -118,7 +108,7 @@ func TestAllFivePersistersConsistentBothForms(t *testing.T) {
 			t.Fatalf("[%s] overlaysPersist.path=%q want %q", label, md.overlaysPersist.path, want)
 		}
 
-		// 4. node-pos persister (root, not path)
+		// 3. node-pos persister (root, not path)
 		if md.posPersist == nil {
 			t.Fatalf("[%s] posPersist nil", label)
 		}
@@ -126,7 +116,7 @@ func TestAllFivePersistersConsistentBothForms(t *testing.T) {
 			t.Fatalf("[%s] posPersist.root=%q want %q", label, md.posPersist.root, expectedRoot)
 		}
 
-		// 5. anchor persister (root, not path)
+		// 4. anchor persister (root, not path)
 		if md.anchorPersist == nil {
 			t.Fatalf("[%s] anchorPersist nil", label)
 		}
@@ -141,19 +131,16 @@ func TestAllFivePersistersConsistentBothForms(t *testing.T) {
 
 	// Cross-check: the dir-form and file-form must agree on both the root and the scene path.
 	{
-		mdDir := &MoveDispatch{nodeMovers: map[string]*nodeMover{}, ov: defaultOverlayState(), directlyFadedNodes: map[string]bool{}, directlyFadedEdges: map[string]bool{}}
+		mdDir := &MoveDispatch{nodeMovers: map[string]*nodeMover{}, ov: defaultOverlayState()}
 		mdDir.EnableViewpointPersist(root)
 		mdDir.EnableEditPersist(root)
 
-		mdFile := &MoveDispatch{nodeMovers: map[string]*nodeMover{}, ov: defaultOverlayState(), directlyFadedNodes: map[string]bool{}, directlyFadedEdges: map[string]bool{}}
+		mdFile := &MoveDispatch{nodeMovers: map[string]*nodeMover{}, ov: defaultOverlayState()}
 		mdFile.EnableViewpointPersist(topoFile)
 		mdFile.EnableEditPersist(topoFile)
 
 		if mdDir.vpPersist.path != mdFile.vpPersist.path {
 			t.Fatalf("vpPersist.path diverges: dir=%q file=%q", mdDir.vpPersist.path, mdFile.vpPersist.path)
-		}
-		if mdDir.fadePersist.path != mdFile.fadePersist.path {
-			t.Fatalf("fadePersist.path diverges: dir=%q file=%q", mdDir.fadePersist.path, mdFile.fadePersist.path)
 		}
 		if mdDir.overlaysPersist.path != mdFile.overlaysPersist.path {
 			t.Fatalf("overlaysPersist.path diverges: dir=%q file=%q", mdDir.overlaysPersist.path, mdFile.overlaysPersist.path)

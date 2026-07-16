@@ -51,15 +51,8 @@ const ShadingParamNodeClearcoatRoughness = 0.1
 // ShadingParamNodeEnvMapIntensity scales the baked env-map reflection on the node glass.
 const ShadingParamNodeEnvMapIntensity = 1.0
 
-// ShadingParamNodeOpacity is the node-body opacity when not faded.
+// ShadingParamNodeOpacity is the node-body opacity.
 const ShadingParamNodeOpacity = 0.92
-
-// ShadingParamNodeFadeOpacity is the base fade opacity for faded scene elements.
-const ShadingParamNodeFadeOpacity = 0.25
-
-// ShadingParamNodeFadeBodyMul multiplies the fade opacity for the node BODY
-// specifically (faded body opacity = ShadingParamNodeFadeOpacity * this).
-const ShadingParamNodeFadeBodyMul = 0.6
 
 // --- Procedural environment map (ProceduralEnvProvider) -------------------
 // A tiny gradient-sky scene baked into a PMREM env texture. The env-map vertex

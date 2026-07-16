@@ -18,7 +18,6 @@
 {"step":19,"kind":"overlays-vis","visible":true}
 {"step":20,"kind":"double-links","visible":false}
 {"step":21,"kind":"select","node":"A","port":"","value":0}
-{"step":22,"kind":"fade","fadedNodes":["A"],"fadedEdges":["e1"]}
 {"step":23,"kind":"hover","node":"A","port":"","value":0}
 {"step":24,"kind":"scene-sphere","cx":1,"cy":2,"cz":3,"radius":100}
 {"step":25,"kind":"layout-link","node":"A","target":"B"}

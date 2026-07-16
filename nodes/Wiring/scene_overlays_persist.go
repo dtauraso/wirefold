@@ -1,8 +1,8 @@
-// scene_overlays_persist.go — persist + load Go's OWN overlay-visibility state to scene.json,
-// mirroring scene_fade_persist.go (writer + debounced persister + loader + seed).
+// scene_overlays_persist.go — persist + load Go's OWN overlay-visibility state to scene.json
+// (writer + debounced persister + loader + seed, mirroring scene_camera_persist.go).
 //
 // Go owns the overlay flags (overlay_gen.go's overlayState). Persistence has two triggers:
-// the bare `save` command (stdin_reader.go) and — like fade/camera — an ON-CHANGE debounced
+// the bare `save` command (stdin_reader.go) and — like camera — an ON-CHANGE debounced
 // write scheduled whenever an overlays update lands (applyUpdate toggle/set). The camera pose
 // is continuously flushed by scene_camera_persist.go; this file handles the overlay half. No
 // scene document crosses the TS→Go bridge — Go writes ITS OWN current snapshot.
@@ -74,8 +74,8 @@ func writeSceneOverlays(scenePath string, ov overlayState) error {
 }
 
 // overlaysPersister coalesces rapid overlay toggles/sets into a debounced read-modify-write
-// of scene.json's overlay-visibility keys. Owned by MoveDispatch (armed by EnableEditPersist),
-// mirroring fadePersister. path == "" (tests that never arm) → no-op.
+// of scene.json's overlay-visibility keys. Owned by MoveDispatch (armed by EnableEditPersist).
+// path == "" (tests that never arm) → no-op.
 type overlaysPersister struct {
 	path     string // scene.json path (sceneCameraPath(topologyPath))
 	debounce time.Duration

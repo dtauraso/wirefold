@@ -24,9 +24,9 @@ import {
 import {
   readNodeCX, readNodeCY, readNodeCZ, readNodeRadius, readNodeSphereR,
   readNodeVRX, readNodeVRY, readNodeVRZ, readNodeFRX, readNodeFRY, readNodeFRZ,
-  readNodeKindId, readNodeFaded,
+  readNodeKindId,
   readInteriorPresent, readInteriorValue, readInteriorOX, readInteriorOY, readInteriorOZ,
-  readEdgeSX, readEdgeSY, readEdgeSZ, readEdgeEX, readEdgeEY, readEdgeEZ, readEdgeFaded,
+  readEdgeSX, readEdgeSY, readEdgeSZ, readEdgeEX, readEdgeEY, readEdgeEZ,
   readPortNodeRow, readPortDX, readPortDY, readPortDZ, readPortIsInput,
   readCameraPX, readCameraPY, readCameraPZ, readCameraR,
   readCameraPosTheta, readCameraPosPhi, readCameraUpTheta, readCameraUpPhi,
@@ -77,7 +77,6 @@ export type DecodedEventLine =
   | { step: number; kind: "layout-link"; node: string; target: string }
   // Go-owned click-selection: the currently-selected node id (node="" clears it).
   | { step: number; kind: "select"; node: string }
-  | { step: number; kind: "fade"; fadedNodes: string[]; fadedEdges: string[] }
   | { step: number; kind: "hover"; node: string; port?: string; value?: number };
 
 /**
@@ -206,20 +205,6 @@ function decodeEventLine(d: DecodedSnapshot, i: number): Line | null {
       return { kind, node, port: "", value };
     case "hover":
       return { kind, node, port, value };
-    case "fade": {
-      // Fade line lists the DIRECTLY-faded seed sets. The buffer carries the fixpoint Faded
-      // columns (nodes/edges dimmed), which for a single fade toggle equals the seed set here;
-      // reconstruct fadedNodes/fadedEdges from the faded columns.
-      const nodes: string[] = [];
-      for (let r = 0; r < d.nodeCount; r++) {
-        if (readNodeFaded(d.nodeView, r) === 1) nodes.push(nodeLabel(d, r));
-      }
-      const edges: string[] = [];
-      for (let r = 0; r < d.edgeCount; r++) {
-        if (readEdgeFaded(d.edgeView, r) === 1) edges.push(edgeLabel(d, r));
-      }
-      return { kind, fadedNodes: nodes, fadedEdges: edges };
-    }
     case "halted":
       return { kind, visible: readClockHalted(d.clockView, 0) === 1 };
     default:

@@ -122,7 +122,7 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
     // LIVE_CASES_END
     // The following kinds are declared in WebviewToHostMsg (and WEBVIEW_TO_HOST_TYPES) so
     // message-kind-parity tracks stdin_reader.go's msg.Type switch, but no live webview code
-    // path posts them as a bare JS object: "raw-input"/"edit"/"save"/"fade-toggle" are always
+    // path posts them as a bare JS object: "raw-input"/"edit"/"save" are always
     // encoded into a binary record and sent as "go-record" (see schema/input-layout.ts),
     // never posted directly; "play" is declared only so this union tracks Go's binary-record
     // "play" kind — the ext-host builds that record itself (BuildAndRunRunner.play(), invoked
@@ -138,7 +138,6 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
     // DECLARED_NOT_SENT_START
     case "raw-input":
     case "save":
-    case "fade-toggle":
     case "play":
     case "edit":
       console.warn(`topology editor: unexpected direct "${msg.type}" message (expected via go-record)`, msg);

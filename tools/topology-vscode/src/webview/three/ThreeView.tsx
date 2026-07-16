@@ -18,8 +18,6 @@ import { getLatestSnapshot } from "../snapshot-buffer";
 import { decodeSnapshot } from "./buffer-decode";
 import { readOverlayLabelsGlobal } from "../../schema/buffer-layout";
 import { NavGuides } from "./NavGuides";
-import { postGoRecord } from "../vscode-api";
-import { encodeFadeToggle } from "../../schema/input-layout";
 
 // ---------------------------------------------------------------------------
 // ThreeView: Canvas wrapper + interaction + label overlay + widgets
@@ -82,23 +80,6 @@ export function ThreeView() {
     cameraRef,
     pickRequest,
   );
-
-  // "f" toggles fade on Go's CURRENT selection (pre-branch ThreeView "f" handler). The
-  // press is a BARE command — Go owns selection + topology and resolves which node/edge is
-  // selected, flips its fade seed, and re-streams the Faded columns. Fire-and-forget; TS
-  // holds no fade state. Ignored while typing in an input/textarea.
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== "f" && e.key !== "F") return;
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
-      const t = e.target as HTMLElement | null;
-      const tag = t?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || t?.isContentEditable) return;
-      postGoRecord(encodeFadeToggle());
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
 
   // Bind wheel listener as non-passive so e.preventDefault() actually works.
   // React's synthetic onWheel is passive — preventDefault silently no-ops there,

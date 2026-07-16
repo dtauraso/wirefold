@@ -3,8 +3,7 @@
 // LoadTopology reads topology.json, allocates one PacedWire per destination
 // port (fan-in safe), and returns ([]Node, SlotRegistry, *MoveDispatch).
 // An edge-label-keyed WireRegistry is built internally to bind each source Out to
-// its wire, but it is not returned: fade ops route via MoveDispatch.dispatch and no
-// caller consumed the map.
+// its wire, but it is not returned: no caller consumed the map.
 //
 // Key behaviors:
 //   - One *PacedWire per (destNode, destPort); multiple edges sharing a
@@ -204,8 +203,7 @@ type topoSpec struct {
 
 // WireRegistry maps edge label → *PacedWire. Each entry points to the wire owned by
 // the destination port; multiple edges sharing a destination port map to the same *PacedWire.
-// It is an internal build aid (binding source Out → wire); it is not returned, and
-// fade is routed via MoveDispatch (per-wire dispatch), not via this map.
+// It is an internal build aid (binding source Out → wire); it is not returned.
 type WireRegistry map[string]*PacedWire
 
 // LoadTopology reads the JSON file at jsonPath and constructs []Node plus a

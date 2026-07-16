@@ -1,9 +1,9 @@
 package Wiring
 
-// scene_edit_persist_test.go — round-trip tests for the three FSM-applied edit persisters:
-// node-drag position (meta.json x/y/z), ring-move anchor (port json anchorId), and fade
-// (scene.json fadedNodes/fadedEdges). Each pins: an FSM edit → the debounced writer persists
-// it to disk preserving sibling fields → a reload reads it back.
+// scene_edit_persist_test.go — round-trip tests for the two FSM-applied edit persisters:
+// node-drag position (meta.json x/y/z) and ring-move anchor (port json anchorId). Each pins:
+// an FSM edit → the debounced writer persists it to disk preserving sibling fields → a
+// reload reads it back.
 
 import (
 	"context"
@@ -115,57 +115,6 @@ func TestPersistAnchorRoundTrips(t *testing.T) {
 	}
 }
 
-// TestPersistFadeRoundTrips: select a node, toggle fade, flush → scene.json carries the seed;
-// a fresh MoveDispatch.SeedFade reads it back into the directly-faded set.
-func TestPersistFadeRoundTrips(t *testing.T) {
-	root := writeTree(t)
-	md := loadTreeMD(t, root)
-	md.EnableEditPersist(root)
-
-	md.selected = "dst"
-	md.ToggleFadeSelection(nil)
-	md.fadePersist.flush()
-
-	nodes, edges := loadSceneFade(root)
-	if len(edges) != 0 {
-		t.Fatalf("edges=%v want none", edges)
-	}
-	if len(nodes) != 1 || nodes[0] != "dst" {
-		t.Fatalf("fadedNodes=%v want [dst]", nodes)
-	}
-	// Seed a fresh dispatch from disk and confirm the set is restored.
-	fresh := &MoveDispatch{}
-	fresh.SeedFade(root, nil)
-	if !fresh.directlyFadedNodes["dst"] {
-		t.Fatalf("SeedFade did not restore dst")
-	}
-}
-
-// TestFadePersistPreservesCameraPolar: a camera write then a fade write both survive in
-// scene.json (the three scene.json writers coexist via sceneFileMu).
-func TestFadePersistPreservesCameraPolar(t *testing.T) {
-	root := writeTree(t)
-	md := &MoveDispatch{nodeMovers: map[string]*nodeMover{}}
-	md.EnableViewpointPersist(root)
-	md.SetViewpoint(vec3{X: 1, Y: 2, Z: 3}, 200, dir{Theta: 0.5, Phi: 1.5}, dir{Theta: 0.05, Phi: 0.15})
-	md.EmitViewpoint(nil)
-	md.vpPersist.flush()
-
-	md.EnableEditPersist(root)
-	md.fadePersist.schedule([]string{"n1"}, []string{"e0"})
-	md.fadePersist.flush()
-
-	// Camera survives.
-	if _, _, _, _, ok := loadSceneViewpoint(root); !ok {
-		t.Fatalf("cameraPolar clobbered by fade write")
-	}
-	// Fade landed.
-	nodes, edges := loadSceneFade(root)
-	if len(nodes) != 1 || nodes[0] != "n1" || len(edges) != 1 || edges[0] != "e0" {
-		t.Fatalf("fade seeds=%v/%v want [n1]/[e0]", nodes, edges)
-	}
-}
-
 // TestPersistOverlaysRoundTrips: toggle an overlay flag → debounced flush → scene.json carries
 // the (inverted) key; a fresh MoveDispatch.LoadOverlays reads it back into md.ov.
 func TestPersistOverlaysRoundTrips(t *testing.T) {
@@ -205,9 +154,9 @@ func TestPersistOverlaysRoundTrips(t *testing.T) {
 	}
 }
 
-// TestOverlaysPersistPreservesCameraAndFade: camera + fade + overlays all coexist in
-// scene.json — the three scene.json writers must not clobber each other (sceneFileMu).
-func TestOverlaysPersistPreservesCameraAndFade(t *testing.T) {
+// TestOverlaysPersistPreservesCamera: camera + overlays coexist in scene.json — the writers
+// must not clobber each other (sceneFileMu).
+func TestOverlaysPersistPreservesCamera(t *testing.T) {
 	root := writeTree(t)
 	md := loadTreeMD(t, root)
 	md.EnableViewpointPersist(root)
@@ -216,8 +165,6 @@ func TestOverlaysPersistPreservesCameraAndFade(t *testing.T) {
 	md.vpPersist.flush()
 
 	md.EnableEditPersist(root)
-	md.fadePersist.schedule([]string{"src"}, []string{"e0"})
-	md.fadePersist.flush()
 
 	md.ToggleSceneTori(nil)
 	md.overlaysPersist.schedule(md.ov)
@@ -227,15 +174,10 @@ func TestOverlaysPersistPreservesCameraAndFade(t *testing.T) {
 	if _, _, _, _, ok := loadSceneViewpoint(root); !ok {
 		t.Fatalf("cameraPolar clobbered by overlay write")
 	}
-	// Fade survives.
-	nodes, edges := loadSceneFade(root)
-	if len(nodes) != 1 || nodes[0] != "src" || len(edges) != 1 || edges[0] != "e0" {
-		t.Fatalf("fade seeds clobbered: %v/%v", nodes, edges)
-	}
 	// Overlay landed.
 	ov, found := loadSceneOverlays(sceneCameraPath(root))
 	if !found || ov.sceneToriVisible {
-		t.Fatalf("overlay not persisted alongside camera+fade (found=%v ov=%+v)", found, ov)
+		t.Fatalf("overlay not persisted alongside camera (found=%v ov=%+v)", found, ov)
 	}
 }
 
@@ -250,7 +192,7 @@ func TestEnableEditPersistTrueMonolithicNoTree(t *testing.T) {
 	if err := os.WriteFile(topoFile, []byte("{}"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	md := &MoveDispatch{ov: defaultOverlayState(), directlyFadedNodes: map[string]bool{}, directlyFadedEdges: map[string]bool{}}
+	md := &MoveDispatch{ov: defaultOverlayState()}
 	md.EnableEditPersist(topoFile)
 	if md.posPersist.root != "" {
 		t.Fatalf("posPersist.root=%q want empty (no nodes/ subdir → true monolithic)", md.posPersist.root)
@@ -273,7 +215,7 @@ func TestOverlaysPersistMonolithicForm(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	md := &MoveDispatch{ov: defaultOverlayState(), directlyFadedNodes: map[string]bool{}, directlyFadedEdges: map[string]bool{}}
+	md := &MoveDispatch{ov: defaultOverlayState()}
 	md.EnableEditPersist(topoFile) // topologyPath is a FILE, not a dir
 
 	// overlaysPersist.path must be non-empty (the sceneCameraPath sibling).

@@ -146,9 +146,6 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 	// Initial camera viewpoint = FILE DATA: Go reads the saved camera from
 	// <topologyPath>/view/scene.json and installs it into the gesture-FSM viewpoint.
 	W.SeedInitialViewpoint(topologyPath, md, tr)
-	// Restore persisted fade: seed the FSM's directly-faded sets from scene.json and emit
-	// them so the buffer snapshot rebuilds the fade fixpoint from the first frame.
-	md.SeedFade(topologyPath, tr)
 	// Restore persisted overlay visibility: seed md.ov from scene.json and emit each flag so
 	// the buffer streams the saved overlay state from the first frame. Seed BEFORE
 	// EnableEditPersist so the seed's own emit does not write the loaded state back.
@@ -158,8 +155,8 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 	// <topologyPath>/view/scene.json's cameraPolar, so navigate-then-reload round-trips.
 	// Arming after the seed keeps the seed's own emit from persisting the loaded/default pose.
 	md.EnableViewpointPersist(topologyPath)
-	// Arm disk persistence for the three FSM-applied edits (node-drag position, ring-move
-	// anchor, fade) — debounced Go-side read-modify-writes, armed after the seeds so their
+	// Arm disk persistence for the FSM-applied edits (node-drag position, ring-move
+	// anchor) — debounced Go-side read-modify-writes, armed after the seeds so their
 	// own emits do not write loaded state back.
 	md.EnableEditPersist(topologyPath)
 
@@ -167,7 +164,7 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 	// node-move: each node/edge drains its own inbox and recomputes its own geometry).
 	md.Start(ctx)
 
-	// Read the editor→Go bridge: "edit" JSON lines (op = create/update/delete/fade)
+	// Read the editor→Go bridge: "edit" JSON lines (op = create/update/delete)
 	// from stdin. When stdin reaches EOF (extension host disconnect), cancel the context.
 	go func() {
 		W.RunStdinReader(ctx, os.Stdin, slotReg, md, tr, clk)

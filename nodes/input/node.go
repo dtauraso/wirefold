@@ -45,7 +45,7 @@ type Node struct {
 
 // fanOutPlace places v on every wired fan-out output (same cycle — preserves
 // concurrent fan-out) without driving them. Returns false if any wired
-// placement failed (faded/torn-down wire), mirroring EmitOneDriven's
+// placement failed (torn-down wire), mirroring EmitOneDriven's
 // false-return-stops-the-goroutine convention.
 //
 // tick is snapshotted ONCE by the caller (clk.Tick(), read a single time)

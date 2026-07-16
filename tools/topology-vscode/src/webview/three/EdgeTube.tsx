@@ -10,7 +10,6 @@ import * as THREE from "three";
 import { getLatestSnapshot } from "../snapshot-buffer";
 import { decodeSnapshot } from "./buffer-decode";
 import {
-  SHADING_PARAM_NODE_FADE_OPACITY,
   SHADING_PARAM_TUBE_COLOR,
   SHADING_PARAM_TUBE_EMISSIVE,
   SHADING_PARAM_TUBE_EMISSIVE_INTENSITY,
@@ -20,7 +19,7 @@ import {
 } from "../../schema/shading-params";
 import {
   readEdgeSX, readEdgeSY, readEdgeSZ, readEdgeEX, readEdgeEY, readEdgeEZ,
-  readEdgeSelected, readEdgeFaded,
+  readEdgeSelected,
   readLayoutLinkSrcNodeRow, readLayoutLinkDstNodeRow, readLayoutLinkEdgeRow,
   readNodeCX, readNodeCY, readNodeCZ,
   readOverlayOverlaysVis, readOverlayDoubleLinks,
@@ -68,14 +67,11 @@ function buildArrow(apex: THREE.Vector3, dir: THREE.Vector3, height: number): {
 // SingleEdgeTube halo, which doubled as the pick tube). `selected` paints that halo orange
 // (opacity 0.6) when Go marks this edge selected; otherwise the halo stays opacity 0 but
 // remains raycast-hittable. `dimmed` (the layout-link overlay is on) drops opacity to 0.25,
-// same as the pre-removal DoubleEdgeOverlay dim — fade takes precedence over it.
-function EdgeTube({ seg, dimmed, row, selected, faded }: { seg: EdgeSeg; dimmed: boolean; row: number; selected: boolean; faded: boolean }) {
-  // Faded edge: dim the tube (mirror pre-branch SingleEdgeTube `faded ? FADE_OPACITY : …`).
-  // Fade takes precedence over the layout-link dim. The traveling bead is suppressed
-  // Go-side (a faded edge's bead rows stream Live=0), so no bead-hiding is needed here.
-  const tubeTransparent = faded || dimmed;
-  const tubeOpacity = faded ? SHADING_PARAM_NODE_FADE_OPACITY : dimmed ? 0.25 : 1;
-  const matKey = faded ? "faded" : dimmed ? "dimmed" : "solid";
+// same as the pre-removal DoubleEdgeOverlay dim.
+function EdgeTube({ seg, dimmed, row, selected }: { seg: EdgeSeg; dimmed: boolean; row: number; selected: boolean }) {
+  const tubeTransparent = dimmed;
+  const tubeOpacity = dimmed ? 0.25 : 1;
+  const matKey = dimmed ? "dimmed" : "solid";
   const { tubeGeo, haloGeo, arrow } = useMemo(() => {
     const start = new THREE.Vector3(seg.sx, seg.sy, seg.sz);
     const end = new THREE.Vector3(seg.ex, seg.ey, seg.ez);
@@ -218,25 +214,12 @@ function sameSegs(a: EdgeSeg[], b: EdgeSeg[]): boolean {
   return true;
 }
 
-function sameFaded(a: boolean[], b: boolean[]): boolean {
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) {
-    if (a[i] !== b[i]) return false;
-  }
-  return true;
-}
-
 export function EdgeTubes({ capacity }: { capacity: number }) {
   const [segs, setSegs] = useState<EdgeSeg[]>([]);
   // The Go-selected edge's buffer row (-1 = none). Tracked separately from the segment set
   // so a selection change (which does NOT move any endpoint) toggles the halo without
   // rebuilding the tube geometries. Go OWNS the selection (Edge block Selected column).
   const [selRow, setSelRow] = useState(-1);
-  // Faded edge rows (Go-owned fade fixpoint, Edge Faded column). Tracked separately from the
-  // segment set — a fade toggle does NOT move any endpoint, so it dims the tube without
-  // rebuilding geometry (mirrors selRow).
-  const [fadedRows, setFadedRows] = useState<boolean[]>([]);
-  const fadedPrevRef = useRef<boolean[]>([]);
   const prevRef = useRef<{ segs: EdgeSeg[] }>({ segs: [] });
 
   // Layout-link overlay state: whether it's on (Go-owned overlay flag), and the current
@@ -256,7 +239,6 @@ export function EdgeTubes({ capacity }: { capacity: number }) {
 
     const n = Math.min(edgeCount, capacity);
     const next: EdgeSeg[] = new Array<EdgeSeg>(n);
-    const fadedNext: boolean[] = new Array<boolean>(n);
     let sel = -1;
     for (let i = 0; i < n; i++) {
       const s: EdgeSeg = {
@@ -265,8 +247,6 @@ export function EdgeTubes({ capacity }: { capacity: number }) {
       };
       next[i] = s;
       if (sel < 0 && readEdgeSelected(edgeView, i)) sel = i;
-      const f = !!readEdgeFaded(edgeView, i);
-      fadedNext[i] = f;
     }
     // Rebuild the segment set (and thus the tube geometries) only when something moved —
     // not every frame.
@@ -276,11 +256,6 @@ export function EdgeTubes({ capacity }: { capacity: number }) {
     }
     // Selection toggles cheaply (no geometry rebuild) — update only when the row changes.
     if (sel !== selRow) setSelRow(sel);
-    // Fade toggles cheaply too (opacity only, no geometry rebuild).
-    if (!sameFaded(fadedPrevRef.current, fadedNext)) {
-      fadedPrevRef.current = fadedNext;
-      setFadedRows(fadedNext);
-    }
 
     // Layout-link overlay: Go-streamed pairs (LayoutLink block). Each pair's endpoints are the
     // connecting bead edge's own port-anchored SX..EZ (Edge block, row = this pair's EdgeRow) —
@@ -325,7 +300,7 @@ export function EdgeTubes({ capacity }: { capacity: number }) {
     <>
       {segs.map((s, i) => (
         <React.Fragment key={`edge-row-${i}`}>
-          <EdgeTube seg={s} dimmed={showDouble} row={i} selected={i === selRow} faded={!!fadedRows[i]} />
+          <EdgeTube seg={s} dimmed={showDouble} row={i} selected={i === selRow} />
         </React.Fragment>
       ))}
       {showDouble && linkSegs.map((s, i) => (

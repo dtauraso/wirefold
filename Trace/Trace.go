@@ -122,12 +122,6 @@ const (
 	// this event so the buffer snapshot marks the node's Selected column. Node="" clears
 	// the selection (empty-space click). Keyed by node id; the renderer highlights it.
 	KindSelect = "select"
-	// KindFade carries the FULL directly-faded seed sets (node ids + edge labels) after a
-	// fade toggle. Fade is Go-owned state: the gesture FSM flips the currently-selected
-	// entity's membership in MoveDispatch.directlyFaded* and emits this event so the buffer
-	// snapshot mirrors the seeds and recomputes the fade fixpoint (computeFade) each build,
-	// writing the Faded columns. Empty sets clear all fade.
-	KindFade = "fade"
 	// KindHover carries the CURRENTLY-HOVERED entity (pointer hover). Hover is Go-owned
 	// state: the gesture FSM (gesture.go) tracks which node or port is under the pointer from
 	// the raycast hit on each pointer-move and emits this event so the buffer snapshot marks
@@ -157,7 +151,7 @@ const (
 // buffer EVENT block for the .probe log. There is no tsc exhaustiveness
 // check derived from it — adding a kind here does not force a TS branch
 // anywhere; it only extends the lookup table.
-var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone, KindPosition, KindGeometry, KindPulseCancelled, KindNodeGeometry, KindArrive, KindNodeBead, KindCamera, KindSceneTori, KindScenePoles, KindNodePoles, KindSelSpherePoles, KindHandholds, KindLabelsGlobal, KindOverlaysVis, KindDoubleLinks, KindLayoutLink, KindSelect, KindFade, KindHover, KindSceneSphere, KindHalted}
+var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone, KindPosition, KindGeometry, KindPulseCancelled, KindNodeGeometry, KindArrive, KindNodeBead, KindCamera, KindSceneTori, KindScenePoles, KindNodePoles, KindSelSpherePoles, KindHandholds, KindLabelsGlobal, KindOverlaysVis, KindDoubleLinks, KindLayoutLink, KindSelect, KindHover, KindSceneSphere, KindHalted}
 
 // PortGeom is one port's authoritative world geometry on a node-geometry event:
 // its name, whether it is an input, its sphere-surface world position (PX/PY/PZ),
@@ -263,12 +257,6 @@ type Event struct {
 	// Visible carries the tori visibility state on scene-tori events (KindSceneTori).
 	// true = tori shown; false = tori hidden. Set on scene-tori events only.
 	Visible bool `json:"visible"`
-	// FadedNodes/FadedEdges carry the FULL DIRECTLY-FADED seed sets on fade events
-	// (KindFade): the node ids and edge labels the user has directly toggled faded. Go owns
-	// the fade seeds (MoveDispatch.directlyFaded*); the snapshot recomputes the fade fixpoint
-	// (computeFade) from these seeds + its own adjacency each build. Set on fade events only.
-	FadedNodes []string `json:"fadedNodes,omitempty"`
-	FadedEdges []string `json:"fadedEdges,omitempty"`
 }
 
 // Trace is the shared recorder. Construct with New; injected into
@@ -541,13 +529,6 @@ func (t *Trace) Hover(node, port string, isInput bool) {
 		v = 1
 	}
 	t.emit(Event{Kind: KindHover, Node: node, Port: port, Value: v})
-}
-
-// Fade emits the FULL directly-faded seed sets (KindFade). Go owns the fade seeds; the
-// snapshot mirrors them and recomputes the fade fixpoint each build. Fresh slices are
-// passed so the drain goroutine never races the caller's maps.
-func (t *Trace) Fade(nodes, edges []string) {
-	t.emit(Event{Kind: KindFade, FadedNodes: nodes, FadedEdges: edges})
 }
 
 // PulseCancelled tells the renderer to drop an in-flight bead's sprite (Phase 3),
@@ -954,14 +935,6 @@ func eventValue(e Event) (any, error) {
 			Target string `json:"target"`
 		}
 		return layoutLink{Step: e.Step, Kind: e.Kind, Node: e.Node, Target: e.Target}, nil
-	case KindFade:
-		type fade struct {
-			Step       int      `json:"step"`
-			Kind       string   `json:"kind"`
-			FadedNodes []string `json:"fadedNodes"`
-			FadedEdges []string `json:"fadedEdges"`
-		}
-		return fade{Step: e.Step, Kind: e.Kind, FadedNodes: e.FadedNodes, FadedEdges: e.FadedEdges}, nil
 	default:
 		return recvOrSend{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value}, nil
 	}

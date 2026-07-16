@@ -1,15 +1,15 @@
 package Wiring
 
-// scene_persist.go — shared machinery for the five domain persisters in this package
-// (fade, overlays, camera viewpoint, node position, port anchor).
+// scene_persist.go — shared machinery for the four domain persisters in this package
+// (overlays, camera viewpoint, node position, port anchor).
 // Each of those files repeated the same three things: a debounced-coalesce timer, a
 // read-modify-write of a JSON object, and an atomic (tmp+rename) write. This file factors
-// that machinery out once so the five files hold only their domain-specific shape (which
+// that machinery out once so the four files hold only their domain-specific shape (which
 // key(s) they own, how to marshal/unmarshal them) and wire it in.
 //
 // Two read-modify-write flavors exist because the two persisted-file kinds have different
 // failure semantics:
-//   - scene.json (fade/overlays/camera) is read BEST-EFFORT: an absent or malformed
+//   - scene.json (overlays/camera) is read BEST-EFFORT: an absent or malformed
 //     file yields an empty object and the writer proceeds, because the writer only ever
 //     owns a subset of scene.json's keys and scene.json is allowed to not exist yet (fresh
 //     topology). This intentionally REPLACES an unparsable file rather than blocking the
@@ -40,7 +40,7 @@ func safeTreePathComponent(s string) bool {
 }
 
 // sceneFileMu serializes read-modify-write cycles on view/scene.json across all of its
-// writers (camera, overlays, fade, polar locks) so their field updates never race/clobber.
+// writers (camera, overlays, polar locks) so their field updates never race/clobber.
 var sceneFileMu sync.Mutex
 
 // atomicWriteTmpSuffix is the temp-file suffix writeJSONAtomic uses before renaming into
@@ -52,7 +52,7 @@ const atomicWriteTmpSuffix = ".tmp"
 // counter promote through to e.g. `md.vpPersist.writes`. Each domain type keeps its own
 // `path`/`root` and `debounce` fields at its OWN top level (not inside this generic type),
 // because call sites construct persisters with keyed struct literals like
-// `&fadePersister{path: ..., debounce: ...}`, and Go's keyed-literal syntax cannot address a
+// `&overlaysPersister{path: ..., debounce: ...}`, and Go's keyed-literal syntax cannot address a
 // field nested inside an embedded struct.
 type debouncedPersister[T any] struct {
 	mu      sync.Mutex
@@ -121,7 +121,7 @@ func readSceneObjBestEffort(path string) map[string]json.RawMessage {
 // sceneReadModifyWrite locks sceneFileMu, best-effort-reads path's existing object, lets
 // mutate edit it in place (setting only the key(s) the caller owns), then atomically writes
 // it back. This is THE single read-modify-write path for scene.json, shared by the camera,
-// overlays, fade, and polar-lock writers so they never race each other.
+// overlays and polar-lock writers so they never race each other.
 func sceneReadModifyWrite(path string, mutate func(obj map[string]json.RawMessage)) error {
 	sceneFileMu.Lock()
 	defer sceneFileMu.Unlock()
