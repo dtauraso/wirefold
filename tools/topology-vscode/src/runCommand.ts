@@ -166,7 +166,16 @@ export class BuildAndRunRunner {
   ) {}
 
   run(topologyPath?: string) {
-    if (this.proc) return;
+    if (this.proc) {
+      // Already spawned: re-announce liveness rather than returning silently. "active" is
+      // STATE, not a one-shot event — a webview that remounts (reopened file, hot reload)
+      // missed the post from the original spawn below and would otherwise never learn a
+      // process exists, leaving its run/stop buttons inert while Go streams frames at it.
+      // The "ready" case replays the cached snapshot for the same reason; this is its
+      // status half. post() is idempotent for an unchanged state.
+      this.post({ state: "active" });
+      return;
+    }
     if (topologyPath) this.topologyPath = topologyPath;
     const folder = vscode.workspace.workspaceFolders?.[0];
     if (!folder) return;
@@ -365,11 +374,12 @@ export class BuildAndRunRunner {
   }
 
   /** Send play to Go's stdin — resumes the clock gate. Fire-and-forget: no status post here.
-   *  Called for both the ext-host "run" (first start) and "resume" (after pause) message
-   *  kinds — Go's gate has one Resume(), so there is nothing for a separate resume-vs-play
-   *  distinction to do on this seam. The running-vs-paused OUTCOME is Go's truth, not this
-   *  write's — it streams back in the binary buffer's Clock block (KindHalted) and the
-   *  webview reflects it via useClockHalted (clock-state.ts), not a local prediction. */
+   *  Called from the ext-host "run" case for BOTH first start and resume-after-pause — Go's
+   *  gate has one Resume(), so there is nothing for a separate resume-vs-play distinction to
+   *  do on this seam (there is no "resume" webview→host message kind for the same reason).
+   *  The running-vs-paused OUTCOME is Go's truth, not this write's — it streams back in the
+   *  binary buffer's Clock block (KindHalted) and the webview reflects it via useClockHalted
+   *  (clock-state.ts), not a local prediction. */
   play(): void {
     if (!this.proc) return;
     this.writeStdin(encodePlay());

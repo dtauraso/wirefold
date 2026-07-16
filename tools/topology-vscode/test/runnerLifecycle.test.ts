@@ -199,6 +199,26 @@ describe("lastSnapshot cache (getLastSnapshot) — resend replacement", () => {
   });
 });
 
+describe("run() re-announces liveness on an already-spawned proc", () => {
+  // Pins the fix: run() used to silently `return` when this.proc was already set, so a
+  // webview that remounted (reopened file, hot reload) after Go was already running never
+  // received {state:"active"} and its run/stop buttons went inert while Go kept streaming
+  // fd3 frames. run() must now re-post "active" on that path too — post() is idempotent for
+  // an unchanged state, so this is safe to call every time.
+  it("second run() call, with proc already spawned, posts {state:\"active\"} again", () => {
+    const statuses: { state: string }[] = [];
+    const r = new BuildAndRunRunner((s) => statuses.push(s));
+    r.run();
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    expect(statuses.some((s) => s.state === "active")).toBe(true);
+
+    statuses.length = 0; // clear the first spawn's posts; isolate the second call
+    r.run(); // proc already set — must NOT spawn again, but MUST re-post active
+    expect(spawnMock).toHaveBeenCalledTimes(1); // idempotent spawn: still only one proc
+    expect(statuses).toEqual([{ state: "active" }]);
+  });
+});
+
 describe("respawn / looping", () => {
   it("a natural exit while looping respawns", () => {
     const r = newRunner();
