@@ -60,20 +60,52 @@ const (
 	inOverlayAttrToggle = 0
 )
 
-// Enum orderings (u8 index → string), shared with input-layout.ts.
-var inEventKinds = []string{"pointerdown", "pointermove", "pointerup", "wheel", "home"}
-var inHitKinds = []string{"port", "handhold", "node", "edge", "torus", "empty"}
-var inUpdateKinds = []string{"overlays"}
+// Enum orderings (u8 index → string), shared with input-layout.ts. Every one is DERIVED
+// from its token in the fingerprint, so a Go-side ordering CANNOT drift from the pinned
+// layout: there is no second array to reorder. The chain that keeps both languages in
+// lockstep, per enum:
+//
+//	TS array (the source)  →[vitest pins the token to the array]→  TS fingerprint
+//	   →[check-input-layout-parity.sh diffs the two strings]→  Go fingerprint
+//	   →[parseFPList, here]→  Go array
+//
+// Every link is checked, so the loop is closed. These orderings are WIRE INDICES (a u8
+// index is all that crosses the bridge), so an unchecked reorder is a silent
+// mis-dispatch — a raycast hit on a node decoding as an edge — with nothing to fail.
+// overlayFlags derived this way already; the other three were hand-synced literals whose
+// ends of the chain dangled.
+var (
+	inEventKinds   = parseFPList(InputLayoutFingerprint, "eventKinds=")
+	inHitKinds     = parseFPList(InputLayoutFingerprint, "hitKinds=")
+	inUpdateKinds  = parseFPList(InputLayoutFingerprint, "updateKinds=")
+	inOverlayFlags = parseFPList(InputLayoutFingerprint, "overlayFlags=")
+)
 
-// inOverlayFlags is the overlay FLAG order used by the overlays toggle binary records
-// (a flag's index here is its wire id). It is DERIVED from the
-// fingerprint's `overlayFlags=` token so it cannot drift from the pinned layout; the
-// fingerprint is byte-identical to input-layout.ts (guarded), whose encoder keys off
-// OVERLAY_FLAG_ORDER — so all three stay in lockstep.
-var inOverlayFlags = parseOverlayFlags(InputLayoutFingerprint)
+// init fails the process at STARTUP if any enum token is missing from the fingerprint.
+// Without this a typo'd/renamed token yields a nil list, enumAt returns "", and every
+// record carrying that enum is rejected at runtime — a live input bridge that silently
+// does nothing. A malformed layout is a build/boot error, not a quiet degradation
+// (mirrors gen-node-defs: a malformed wire prop tag is an error, not a silent skip).
+func init() {
+	for _, e := range []struct {
+		marker string
+		list   []string
+	}{
+		{"eventKinds=", inEventKinds},
+		{"hitKinds=", inHitKinds},
+		{"updateKinds=", inUpdateKinds},
+		{"overlayFlags=", inOverlayFlags},
+	} {
+		if len(e.list) == 0 {
+			panic("input_codec: INPUT_LAYOUT_FINGERPRINT is missing the " + e.marker + " token — the wire enum orderings derive from it")
+		}
+	}
+}
 
-func parseOverlayFlags(fp string) []string {
-	const marker = "overlayFlags="
+// parseFPList extracts one space-delimited, comma-separated enum token from the
+// fingerprint (e.g. marker "hitKinds=" → ["port","handhold",...]). Returns nil if the
+// marker is absent; init() above turns that into a startup panic.
+func parseFPList(fp, marker string) []string {
 	i := strings.Index(fp, marker)
 	if i < 0 {
 		return nil

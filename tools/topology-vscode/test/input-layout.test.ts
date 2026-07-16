@@ -10,6 +10,10 @@ import {
   IN_KIND_EDIT_CREATE,
   IN_KIND_EDIT_DELETE,
   IN_KIND_EDIT_UPDATE,
+  IN_EVENT_KINDS,
+  IN_HIT_KINDS,
+  IN_UPDATE_KINDS,
+  IN_UPDATE_ATTRS,
   INPUT_LAYOUT_FINGERPRINT,
   encodePlay,
   encodePause,
@@ -107,6 +111,23 @@ describe("overlays edit-update — fully numeric (no JSON)", () => {
 describe("fingerprint self-consistency", () => {
   it("overlayFlags token equals OVERLAY_FLAG_ORDER", () => {
     expect(INPUT_LAYOUT_FINGERPRINT).toContain(`overlayFlags=${OVERLAY_FLAG_ORDER.join(",")}`);
+  });
+
+  // These orderings are WIRE INDICES: only a u8 index crosses the bridge, so a reorder on
+  // either side silently re-points every value (a raycast hit on a node decoding as an
+  // edge) with nothing to fail — no type error, no crash, a valid byte either way.
+  // check-input-layout-parity.sh only diffs the two FINGERPRINT STRINGS, so it catches
+  // half-remembering (array + one fingerprint edited) and is blind to forgetting (array
+  // edited, neither fingerprint touched). These tests pin the TS end of each chain; Go
+  // derives its arrays from its own fingerprint (input_codec.go parseFPList), so the loop
+  // TS array → token → [guard] → Go token → Go array is closed at every link.
+  it.each([
+    ["eventKinds", IN_EVENT_KINDS],
+    ["hitKinds", IN_HIT_KINDS],
+    ["updateKinds", IN_UPDATE_KINDS],
+    ["updateAttrs", IN_UPDATE_ATTRS],
+  ])("%s token equals the live array (not a string literal copy)", (marker, arr) => {
+    expect(INPUT_LAYOUT_FINGERPRINT).toContain(`${marker}=${arr.join(",")}`);
   });
 
   it("kinds= token matches the actual IN_KIND_* constants (not a string literal copy)", () => {
