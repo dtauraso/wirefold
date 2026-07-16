@@ -87,7 +87,7 @@ resolving instantaneously.
   AND the bead's absolute world position — it computes the position from its own
   live node/port endpoints (moved by the same drag) and packs the result into the
   content buffer. The editor decodes and draws it (`readBeadX/Y/Z` from
-  `schema/buffer-layout.ts`, consumed by `three/BeadInstances.tsx`); it does not
+  `tools/topology-vscode/src/schema/buffer-layout.ts`, consumed by `tools/topology-vscode/src/webview/three/BeadInstances.tsx`); it does not
   interpolate or own positions.
 - Durations are tick counts: bead traversal (`ticksToCross`) and node processing windows.
 ## Driver
@@ -142,11 +142,11 @@ when a bead has arrived. Go owns the clock.
   is the composition root of the render tree — it decodes the buffer and
   assembles the per-concern components that draw ALL geometry from it. It is a
   small file; the drawing lives in its siblings under `three/`. Grep the symbol,
-  not this filename. The tree covers: node bodies (`NodeInstances.tsx` — sphere
+  not this filename. The tree covers: node bodies (`tools/topology-vscode/src/webview/three/NodeInstances.tsx` — sphere
   mesh + ring, keyed off `node.data.fill`/`node.data.stroke` from `NODE_DEFS`),
-  ports (`PortInstances.tsx`), edge tubes (`EdgeTube.tsx`), transit and interior
-  beads (`BeadInstances.tsx`, `InteriorBeadInstances.tsx`), selection highlight
-  (`SelectionHighlight.tsx`), and the camera (`BufferCamera.tsx` maps the buffer
+  ports (`tools/topology-vscode/src/webview/three/PortInstances.tsx`), edge tubes (`tools/topology-vscode/src/webview/three/EdgeTube.tsx`), transit and interior
+  beads (`tools/topology-vscode/src/webview/three/BeadInstances.tsx`, `tools/topology-vscode/src/webview/three/InteriorBeadInstances.tsx`), selection highlight
+  (`tools/topology-vscode/src/webview/three/SelectionHighlight.tsx`), and the camera (`tools/topology-vscode/src/webview/three/BufferCamera.tsx` maps the buffer
   Camera row onto the three.js camera). Nothing in this tree owns traversal
   timing, positions, or geometry.
 - **Global gate** is a play/pause signal sent to the Go process (freezes
