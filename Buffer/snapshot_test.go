@@ -285,14 +285,6 @@ func TestSnapshotRoundTrip(t *testing.T) {
 	if readF32(snap, edgeOff+BufEdgeColEZ) != float32(6.6) {
 		t.Errorf("edge.EZ: got %v, want ~6.6", readF32(snap, edgeOff+BufEdgeColEZ))
 	}
-	// Edge-graph adjacency: source node-A → row 0, dest node-B → row 1.
-	if got := readI32(snap, edgeOff+BufEdgeColSrcNodeRow); got != 0 {
-		t.Errorf("edge.SrcNodeRow: got %d, want 0 (node-A)", got)
-	}
-	if got := readI32(snap, edgeOff+BufEdgeColDstNodeRow); got != 1 {
-		t.Errorf("edge.DstNodeRow: got %d, want 1 (node-B)", got)
-	}
-
 	// ── Camera block ─────────────────────────────────────────────────────────
 	camOff := edgeOff + int(edgeCount)*BufEdgeStride
 	if readF32(snap, camOff+BufCameraColPX) != 10.0 {
@@ -449,43 +441,6 @@ func TestLookupPortRow(t *testing.T) {
 	}
 	if _, _, _, ok := s.LookupPortRow(-1); ok {
 		t.Errorf("LookupPortRow(-1): want ok=false")
-	}
-}
-
-// TestSelectMode verifies that KindSelect's Value carries the select mode into the
-// overlay SelMode column (1 = own / secondary, 0 = surface / primary), and that
-// clearing the selection resets SelMode to surface.
-func TestSelectMode(t *testing.T) {
-	s := NewSnapshotState(nil)
-	s.Update(T.Event{Kind: T.KindNodeGeometry, Node: "n0", Radius: 1})
-
-	selModeOf := func() byte {
-		snap := s.BuildSnapshot()
-		nodeCount := readU32(snap, 8)
-		edgeCount := readU32(snap, 12)
-		ovOff := BufHeaderSize +
-			int(readU32(snap, 4))*BufBeadStride +
-			int(nodeCount)*BufNodeStride +
-			int(nodeCount)*BufInteriorSlotsPerNode*BufInteriorStride +
-			int(edgeCount)*BufEdgeStride +
-			BufCameraStride
-		return snap[ovOff+BufOverlayColSelMode]
-	}
-
-	// Primary click → surface (Value 0).
-	s.Update(T.Event{Kind: T.KindSelect, Node: "n0", Value: 0})
-	if got := selModeOf(); got != 0 {
-		t.Errorf("surface select: SelMode got %d, want 0", got)
-	}
-	// Two-finger tap → own (Value 1).
-	s.Update(T.Event{Kind: T.KindSelect, Node: "n0", Value: 1})
-	if got := selModeOf(); got != 1 {
-		t.Errorf("own select: SelMode got %d, want 1", got)
-	}
-	// Clear selection → SelMode resets to surface.
-	s.Update(T.Event{Kind: T.KindSelect, Node: ""})
-	if got := selModeOf(); got != 0 {
-		t.Errorf("cleared select: SelMode got %d, want 0", got)
 	}
 }
 

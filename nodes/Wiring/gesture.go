@@ -481,9 +481,8 @@ func (md *MoveDispatch) gestPointerUp(ev rawInputMsg, slotReg SlotRegistry, tr *
 	case g.phase == gestPending:
 		// Click → Go-owned selection. A node hit selects it; empty space clears the
 		// selection. md.selected is the authoritative selection; Select() emits it so the
-		// buffer snapshot marks the node's Selected column. g.secondary (two-finger tap)
-		// picks the "own" select mode; a primary click picks "surface".
-		md.applySelect(ev, tr, g.secondary)
+		// buffer snapshot marks the node's Selected column.
+		md.applySelect(ev, tr)
 	}
 	g.reset()
 }
@@ -532,11 +531,11 @@ func (md *MoveDispatch) setHover(node, port string, isInput bool, tr *T.Trace) {
 // node selection); a node/port hit selects that node (clearing any edge selection); an
 // empty-space hit CLEARS the transient highlight (md.selected / md.selectedEdge) — this is
 // the original click-empty-clears behavior.
-func (md *MoveDispatch) applySelect(ev rawInputMsg, tr *T.Trace, own bool) {
+func (md *MoveDispatch) applySelect(ev rawInputMsg, tr *T.Trace) {
 	if ev.Hit.Kind == "empty" {
 		md.selected = ""
 		md.selectedEdge = ""
-		tr.Select("", own)
+		tr.Select("")
 		return
 	}
 	if ev.Hit.Kind == "edge" {
@@ -562,7 +561,7 @@ func (md *MoveDispatch) applySelect(ev rawInputMsg, tr *T.Trace, own bool) {
 	}
 	md.selected = node
 	md.selectedEdge = ""
-	tr.Select(node, own)
+	tr.Select(node)
 }
 
 // ToggleFadeSelection flips the fade state of the CURRENTLY-SELECTED entity (the pre-branch

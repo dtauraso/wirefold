@@ -24,7 +24,7 @@
 package Buffer
 
 // BufLayoutVersion is the schema version. Bump when any column changes.
-const BufLayoutVersion = 28
+const BufLayoutVersion = 29
 
 // BufInteriorSlotsPerNode is the fixed number of interior grid slots reserved per
 // node in the Interior block (a 2x2 held/interior-bead grid: slot = row*2 + col).
@@ -137,22 +137,14 @@ type bufLayoutInterior struct {
 
 // bufLayoutEdge defines one row of the edges column block.
 // One row per edge (wire). Matched from KindGeometry trace events.
-// SrcNodeRow/DstNodeRow are the buffer NODE-ROW indices of this edge's source and
-// destination nodes (same first-seen node order as the Node block); -1 = not yet
-// resolved. They carry the edge-graph topology the on-surface selection highlight
-// needs (the pre-branch computed this from the React edge list; the buffer path has
-// no such list, so Go streams the adjacency here). Stored as i32 (the generator has
-// no i16 tag) — node counts are small, so the width is inconsequential.
 type bufLayoutEdge struct {
-	SX         float32 `buf:"f32"` // start (source OUT-port) world x
-	SY         float32 `buf:"f32"` // start world y
-	SZ         float32 `buf:"f32"` // start world z
-	EX         float32 `buf:"f32"` // end (dest IN-port) world x
-	EY         float32 `buf:"f32"` // end world y
-	EZ         float32 `buf:"f32"` // end world z
-	SrcNodeRow int32   `buf:"i32"` // source node's buffer node-row index (-1 = unresolved)
-	DstNodeRow int32   `buf:"i32"` // destination node's buffer node-row index (-1 = unresolved)
-	Selected   uint8   `buf:"u8"`  // persistent: 1 = this edge is the click-selected edge
+	SX       float32 `buf:"f32"` // start (source OUT-port) world x
+	SY       float32 `buf:"f32"` // start world y
+	SZ       float32 `buf:"f32"` // start world z
+	EX       float32 `buf:"f32"` // end (dest IN-port) world x
+	EY       float32 `buf:"f32"` // end world y
+	EZ       float32 `buf:"f32"` // end world z
+	Selected uint8   `buf:"u8"`  // persistent: 1 = this edge is the click-selected edge
 	// Faded is the fixpoint fade mask for this edge (1 = dimmed). Set by Go's fade fixpoint
 	// (computeFade) each snapshot; the renderer dims a faded edge's tube. A faded edge's
 	// transit bead is suppressed Go-side (its bead rows are written Live=0).
@@ -266,12 +258,6 @@ type bufLayoutOverlay struct {
 	// only when this is set. NOT the same thing as the LayoutLink block existing: the data
 	// streams every snapshot regardless, this just gates the render.
 	DoubleLinks uint8 `buf:"u8"` // 1 = layout-link overlay visible
-	// SelMode is NOT an overlay flag — it rides the overlay singleton row only because
-	// it is a single global value that changes with selection. 1 = "own" (secondary /
-	// two-finger select: owners = [selected]); 0 = "surface" (primary click: owners =
-	// nodes that output TO selected). Set by KindSelect from the gesture button. The
-	// on-surface highlight reads it to pick the pre-branch owner/surface mode.
-	SelMode uint8 `buf:"u8"`
 }
 
 // bufLayoutScene defines the scene-sphere column block (always 1 row).

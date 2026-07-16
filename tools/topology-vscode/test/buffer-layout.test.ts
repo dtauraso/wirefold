@@ -33,10 +33,10 @@ import {
   readInteriorPresent, readInteriorValue, readInteriorOX, readInteriorOY, readInteriorOZ,
   // Edge
   EDGE_COL_SX, EDGE_COL_SY, EDGE_COL_SZ, EDGE_COL_EX, EDGE_COL_EY, EDGE_COL_EZ,
-  EDGE_COL_SRC_NODE_ROW, EDGE_COL_DST_NODE_ROW, EDGE_COL_SELECTED, EDGE_COL_FADED,
+  EDGE_COL_SELECTED, EDGE_COL_FADED,
   EDGE_STRIDE,
   readEdgeSX, readEdgeSY, readEdgeSZ, readEdgeEX, readEdgeEY, readEdgeEZ,
-  readEdgeSrcNodeRow, readEdgeDstNodeRow, readEdgeSelected, readEdgeFaded,
+  readEdgeSelected, readEdgeFaded,
   // Camera
   CAMERA_COL_PX, CAMERA_COL_PY, CAMERA_COL_PZ, CAMERA_COL_R,
   CAMERA_COL_POS_THETA, CAMERA_COL_POS_PHI, CAMERA_COL_UP_THETA, CAMERA_COL_UP_PHI,
@@ -48,12 +48,11 @@ import {
   OVERLAY_COL_SEL_SPHERE_POLES, OVERLAY_COL_HANDHOLDS,
   OVERLAY_COL_LABELS_GLOBAL, OVERLAY_COL_OVERLAYS_VIS,
   OVERLAY_COL_DOUBLE_LINKS,
-  OVERLAY_COL_SEL_MODE, OVERLAY_STRIDE,
+  OVERLAY_STRIDE,
   readOverlaySceneTori, readOverlayScenePoles, readOverlayNodePoles,
   readOverlaySelSpherePoles, readOverlayHandholds,
   readOverlayLabelsGlobal, readOverlayOverlaysVis,
   readOverlayDoubleLinks,
-  readOverlaySelMode,
   // Port block
   PORT_COL_NODE_ROW, PORT_COL_IS_INPUT, PORT_COL_HOVERED, PORT_STRIDE,
   readPortNodeRow, readPortIsInput, readPortHovered,
@@ -226,8 +225,8 @@ describe("buffer-layout — Interior block", () => {
 
 describe("buffer-layout — Edge block", () => {
   it("stride equals packed field sizes", () => {
-    // 6×f32 + 2×i32 + 2×u8 (selected + faded) + 2×u32 (edge-label off/len) = 42
-    expect(EDGE_STRIDE).toBe(42);
+    // 6×f32 + 2×u8 (selected + faded) + 2×u32 (edge-label off/len) = 34
+    expect(EDGE_STRIDE).toBe(34);
   });
 
   it("read helpers decode known bytes correctly", () => {
@@ -240,8 +239,6 @@ describe("buffer-layout — Edge block", () => {
     dv.setFloat32(EDGE_COL_EX, 4.0, true);
     dv.setFloat32(EDGE_COL_EY, 5.0, true);
     dv.setFloat32(EDGE_COL_EZ, 6.0, true);
-    dv.setInt32(EDGE_COL_SRC_NODE_ROW, 2, true);
-    dv.setInt32(EDGE_COL_DST_NODE_ROW, -1, true);
     dv.setUint8(EDGE_COL_SELECTED, 1);
     dv.setUint8(EDGE_COL_FADED, 1);
 
@@ -251,8 +248,6 @@ describe("buffer-layout — Edge block", () => {
     expectF32(readEdgeEX(dv, 0), 4.0);
     expectF32(readEdgeEY(dv, 0), 5.0);
     expectF32(readEdgeEZ(dv, 0), 6.0);
-    expect(readEdgeSrcNodeRow(dv, 0)).toBe(2);
-    expect(readEdgeDstNodeRow(dv, 0)).toBe(-1);
     expect(readEdgeSelected(dv, 0)).toBe(1);
     expect(readEdgeFaded(dv, 0)).toBe(1);
   });
@@ -294,11 +289,11 @@ describe("buffer-layout — Camera block", () => {
 
 describe("buffer-layout — Overlay block", () => {
   it("stride equals packed field sizes", () => {
-    // 9×u8 = 9 (8 overlay flags + SelMode)
-    expect(OVERLAY_STRIDE).toBe(9);
+    // 8×u8 = 8 (8 overlay flags)
+    expect(OVERLAY_STRIDE).toBe(8);
   });
 
-  it("column offsets are 0..8", () => {
+  it("column offsets are 0..7", () => {
     expect(OVERLAY_COL_SCENE_TORI).toBe(0);
     expect(OVERLAY_COL_SCENE_POLES).toBe(1);
     expect(OVERLAY_COL_NODE_POLES).toBe(2);
@@ -307,14 +302,13 @@ describe("buffer-layout — Overlay block", () => {
     expect(OVERLAY_COL_LABELS_GLOBAL).toBe(5);
     expect(OVERLAY_COL_OVERLAYS_VIS).toBe(6);
     expect(OVERLAY_COL_DOUBLE_LINKS).toBe(7);
-    expect(OVERLAY_COL_SEL_MODE).toBe(8);
   });
 
   it("read helpers decode known bytes (alternating pattern)", () => {
     const buf = new ArrayBuffer(OVERLAY_STRIDE);
     const bytes = new Uint8Array(buf);
-    // Alternating 1/0: sceneTori=1, scenePoles=0, nodePoles=1, ..., doubleLinks=1, selMode=0.
-    ([1, 0, 1, 0, 1, 0, 1, 0, 0] as const).forEach((v, i) => { bytes[i] = v; });
+    // Alternating 1/0: sceneTori=1, scenePoles=0, nodePoles=1, ..., doubleLinks=0.
+    ([1, 0, 1, 0, 1, 0, 1, 0] as const).forEach((v, i) => { bytes[i] = v; });
 
     const dv = new DataView(buf);
     expect(readOverlaySceneTori(dv)).toBe(1);
@@ -325,7 +319,6 @@ describe("buffer-layout — Overlay block", () => {
     expect(readOverlayLabelsGlobal(dv)).toBe(0);
     expect(readOverlayOverlaysVis(dv)).toBe(1);
     expect(readOverlayDoubleLinks(dv)).toBe(0);
-    expect(readOverlaySelMode(dv)).toBe(0);
   });
 });
 
@@ -344,8 +337,8 @@ describe("buffer-layout — event enum", () => {
 // ─ Meta ───────────────────────────────────────────────────────────────────────
 
 describe("buffer-layout — meta", () => {
-  it("schema version is 28", () => {
-    expect(BUF_LAYOUT_VERSION).toBe(28);
+  it("schema version is 29", () => {
+    expect(BUF_LAYOUT_VERSION).toBe(29);
   });
 
   it("header size is 40 bytes (10×u32)", () => {

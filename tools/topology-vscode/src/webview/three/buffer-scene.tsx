@@ -87,7 +87,7 @@ export function BufferScene({ cameraRef }: {
       <NodeInstances capacity={nodeCap} />
       <PortInstances capacity={portCap} />
       <InteriorBeadInstances capacity={nodeCap * INTERIOR_SLOTS_PER_NODE} />
-      <SelectionHighlight capacity={nodeCap} />
+      <SelectionHighlight />
       <HoverHighlight />
       <SphereRings />
       <EdgeTubes     capacity={edgeCap} />
