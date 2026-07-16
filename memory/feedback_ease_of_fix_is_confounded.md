@@ -1,18 +1,40 @@
 ---
-name: local clocks vs global runner (one factor among several)
-description: Per-PulseInstance clock locality contributed to the easy pause-freeze fix, but recency, small surface, simple problem shape, and written-down contracts also contributed. Don't use ease-of-fix as a single-factor signal.
-type: project
+name: ease-of-fix is confounded evidence
+description: Don't use "this fix was easy/hard" as standalone evidence that an architecture change is or isn't paying off; recency, surface area, and problem shape are usually present as confounds.
+metadata:
+  type: feedback
 ---
 
-**Fact (2026-05-07):** The pause/resume mid-arc fix landed in one commit (`34b8c20`). Each `PulseInstance` owns its own rAF clock and freezes/rebases on a `subscribeWiresPause` signal — no global runner state involved on the matched path.
+**Rule:** "This fix landed in one commit" is not standalone evidence that a
+migration is paying off, and "this fix was painful" is not standalone evidence
+that the old structure is in the way. Separate the factors before drawing an
+architectural conclusion.
 
-**Why it was easy — multiple factors, not just locality:**
-- **Locality.** Per-instance clock means the fix doesn't have to reason about `sim/runner` + `legacyRunnerState` + `pauseRunner` + `isPlaying` together.
-- **Recency.** Wires runtime was rebuilt days earlier; it's fresh, small, and the contracts are already named in comments/tests.
-- **Surface area.** Wires runtime is small; legacy runner is split across many files. Easier to hold in head independent of architecture.
-- **Problem shape.** Pause-as-freeze (capture `t`, rebase on resume) is simple in any runtime. A harder fix wouldn't have benchmarked locality as cleanly.
+**Why:** The tempting inference is single-factor — *the fix was easy, therefore
+the new locality is working*. But at least four things move together on any
+recent migration, and they are hard to tell apart from the inside:
+
+- **Locality.** The fix didn't have to reason about several pieces of global
+  state at once.
+- **Recency.** The rewritten code is days old, so it's fresh, and its contracts
+  are already named in comments and tests.
+- **Surface area.** New code is small; the thing it replaced was split across
+  many files. Easier to hold in your head, independent of architecture.
+- **Problem shape.** Some fixes are simple in *any* runtime. Those don't
+  benchmark locality cleanly, so they can't be evidence for it.
+
+Recency and surface area in particular are guaranteed to favor whatever was
+built most recently — which is always the thing being evaluated. That is the
+confound to distrust first.
 
 **How to apply:**
-- Don't use "this fix was easy" as standalone evidence that legacy-removal is paying off, or "this fix was hard" as standalone evidence a global is in the way. Confounds (recency, file size, problem shape, whether contracts are written down) are usually present.
-- When the user reports ease/pain on a transport fix, separate the factors before drawing a Go-layer conclusion. Ask which one the user means.
-- Carry the conceptual frame forward regardless: **concurrent clocks frozen on command**, not a global clock. That framing is right on its own merits, separate from "fixes got easier."
+- When the user reports ease or pain on a fix, don't convert it into a verdict
+  on the architecture. Name the factors, and ask which one they mean.
+- Be most suspicious when the evidence flatters a recent decision — that's when
+  recency and surface area are doing the work unnoticed.
+- This is a rule about *evidence*, not about clocks or transport. The original
+  2026-05-07 instance (a pause/resume mid-arc fix in the retired pre-Go-clock
+  runtime) is deliberately not detailed here: every symbol in it is dead, and
+  the reasoning error survives its vocabulary. See
+  [[feedback_dont_invent_doctrine]] for the adjacent failure — generalizing one
+  incident into a rule.
