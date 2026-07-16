@@ -185,3 +185,31 @@ func (c *RealClock) SleepCycle(ctx context.Context) error {
 
 // Compile-time assertion that RealClock satisfies Clock.
 var _ Clock = (*RealClock)(nil)
+
+// inertClock is the Clock handed to an unwired In when no shared clock exists at all
+// (a test build with no loader — see PortBindings.clock). It is the clock analogue of
+// deadEndIn's placeholder channel: it exists only so In.Clock() has something non-nil
+// to return, because a nil Clock is a nil-interface method call waiting to happen and
+// every pacing loop calls SleepCycle unconditionally.
+//
+// SleepCycle blocks until ctx is done rather than returning immediately: a node with no
+// clock has no cycle to sleep for, and returning nil would spin its pacing loop hot. The
+// node's loop sees the ctx error and exits — inert, which is the contract for an unfed
+// port (validate.go). Tick is 0 and Halt/Resume are no-ops: with no clock there is no
+// time to report or stop.
+//
+// Production never sees this: the loader always sets PortBindings.clock (loader.go), so
+// an unwired In gets the SAME shared clock every wired node runs on and stays alive,
+// polling a port that never delivers — inert by precondition-gating, not by exiting.
+type inertClock struct{}
+
+func (inertClock) Tick() int64 { return 0 }
+func (inertClock) SleepCycle(ctx context.Context) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+func (inertClock) Halt()   {}
+func (inertClock) Resume() {}
+
+// Compile-time assertion that inertClock satisfies Clock.
+var _ Clock = inertClock{}

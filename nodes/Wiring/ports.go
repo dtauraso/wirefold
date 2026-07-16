@@ -35,6 +35,12 @@ type In struct {
 	node  string
 	port  string
 	trace *T.Trace
+	// clock is the fallback Clock for an UNWIRED In (chan mode), where there is no
+	// PacedWire to read one from. The loader sets it to the same shared clock every
+	// wired node runs on, so an unfed node paces normally and stays inert by polling
+	// a port that never delivers. Never read in paced mode (pw.clock wins). See
+	// In.Clock.
+	clock Clock
 }
 
 // PollRecv is the non-blocking receive used by windowed nodes. In paced mode it
@@ -68,15 +74,34 @@ func (i *In) PollRecv() (int, bool) {
 	}
 }
 
-// Clock returns the wire's shared human-speed Clock, or nil in chan mode / for a
-// nil In (no wire, no clock). A future non-blocking node Update loop reads this
-// to pace itself off the same clock the wire times delivery on, without owning
-// a clock reference of its own.
+// Clock returns the shared human-speed Clock this port paces on. A node's Update loop
+// reads it to pace off the same clock the wire times delivery on, without owning a clock
+// reference of its own.
+//
+// NEVER RETURNS NIL — that is the point, not a convenience. Every caller does
+// `clk := X.In.Clock()` then `clk.SleepCycle(ctx)` with no guard, so a nil here is a nil-
+// interface method call that panics; with no recover() over a node goroutine, one unfed
+// port took down every other node and the buffer stream with it. An unwired In is a
+// LOADABLE state on purpose (validate.go has no required-inbound-edge check: an unfed
+// node loads and stays inert by precondition-gating), so the nil was reachable from an
+// ordinary topology. It is now unrepresentable rather than guarded at five call sites:
+// an unwired In holds a real clock the same way deadEndIn gives it a real channel.
+//
+// Contrast Out.Clock, which DOES return nil and must keep doing so: there nil is a
+// deliberate mode selector (gatecommon.RunGate reads ToPassed.Clock() to choose paced vs
+// chan mode). Nil means "no wire" for an Out; for an In it only ever meant "about to
+// panic".
 func (i *In) Clock() Clock {
-	if i == nil || i.pw == nil {
-		return nil
+	if i == nil {
+		return inertClock{}
 	}
-	return i.pw.clock
+	if i.pw != nil && i.pw.clock != nil {
+		return i.pw.clock
+	}
+	if i.clock != nil {
+		return i.clock
+	}
+	return inertClock{}
 }
 
 // Wired reports whether this In port is bound to a real edge (paced-wire
@@ -222,7 +247,15 @@ func (o *Out) placementFrom(g outGeom) beadPlacement {
 }
 
 // Clock returns the wire's shared human-speed Clock, or nil in chan mode / for a
-// nil Out (no wire, no clock). Mirrors In.Clock(); see its doc.
+// nil Out (no wire, no clock).
+//
+// DOES NOT mirror In.Clock, which never returns nil. Here nil is load-bearing: it is the
+// paced-vs-chan MODE SELECTOR. gatecommon.RunGate and DriveHeld both branch on
+// `clk := out.Clock(); if clk != nil` to choose sleeping on the shared clock plus
+// StepOnce (paced) over a wall-clock sleep (chan mode, unit tests). Do not "fix" this nil
+// to match In's: an Out's nil means "no wire, take the other branch", whereas an In's nil
+// meant only "the next SleepCycle panics" — which is why it was removed there and kept
+// here.
 func (o *Out) Clock() Clock {
 	if o == nil || o.pw == nil {
 		return nil
