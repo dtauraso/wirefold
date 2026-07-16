@@ -1,27 +1,26 @@
-// SphereRings.tsx — "show the sphere" visualization: for each sphere OWNER of the current
-// selection, two thin see-through great-circle tori are drawn AT the owner's center showing
-// the sphere boundary. Split out of buffer-scene.tsx: pure buffer→GPU render, no state
-// authority beyond the geometry-rebuild-on-change React state SphereRings already held.
+// SphereRings.tsx — "show the sphere" visualization: for the currently-SELECTED node, two
+// thin see-through great-circle tori are drawn AT its center showing its own reach-sphere
+// boundary. Split out of buffer-scene.tsx: pure buffer→GPU render, no state authority
+// beyond the geometry-rebuild-on-change React state SphereRings already held.
 
 import { useRef, useState, useMemo, useEffect } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { getLatestSnapshot } from "../snapshot-buffer";
 import { decodeSnapshot } from "./buffer-decode";
-import { ownerRowSet, type EdgeAdj, type SelMode } from "./buffer-surface";
 import {
   readNodeCX, readNodeCY, readNodeCZ, readNodeRadius, readNodeSelected, readNodeSphereR,
   readNodeVRX, readNodeVRY, readNodeVRZ, readNodeFRX, readNodeFRY, readNodeFRZ,
-  readEdgeSrcNodeRow, readEdgeDstNodeRow, readOverlaySelMode,
 } from "../../schema/buffer-layout";
 import { NODE_SPHERE_RADIUS, NORMAL_DEGENERATE_EPS, SPHERE_RING_MIN_RADIUS, nodeRowColors } from "./buffer-scene-shared";
 
-// Mirrors the pre-branch SphereRing (scene-graph.tsx) EXACTLY: major radius R = the owner's
-// Go-streamed sphereR (buffer SphereR column), tube = max(0.5, radius*0.08), two tori
-// oriented by the node's two ring-plane normals (VR vertical, FR flat), material = owner
-// stroke color, emissiveIntensity 0.25, opacity 0.55, depthWrite false, raycast disabled
-// (purely decorative — clicks pass through to the nodes inside). Owners come from
-// ownerRowSet over the Edge-block adjacency; only drawn when a selection exists.
+// Mirrors the pre-branch SphereRing (scene-graph.tsx) EXACTLY: major radius R = the
+// selected node's Go-streamed sphereR (buffer SphereR column), tube = max(0.5,
+// radius*0.08), two tori oriented by the node's two ring-plane normals (VR vertical, FR
+// flat), material = node stroke color, emissiveIntensity 0.25, opacity 0.55, depthWrite
+// false, raycast disabled (purely decorative — clicks pass through to the node inside).
+// Drawn only when a selection exists AND that node's SphereR is Go-streamed non-degenerate
+// (SPHERE_RING_MIN_RADIUS filters out nodes that don't center a sphere at all).
 const SPHERE_RING_EMISSIVE_INTENSITY = 0.25;
 const SPHERE_RING_OPACITY = 0.55;
 const SPHERE_RING_TUBE_RATIO = 0.08; // pre-branch: nodeRadius(owner) * 0.08
@@ -106,34 +105,26 @@ function sameRings(a: OwnerRing[], b: OwnerRing[]): boolean {
 export function SphereRings() {
   const [rings, setRings] = useState<OwnerRing[]>([]);
   const prevRef = useRef<OwnerRing[]>([]);
-  const edgesRef = useRef<EdgeAdj[]>([]);
 
   useFrame(() => {
     const snap = getLatestSnapshot();
     const decoded = snap ? decodeSnapshot(snap) : null;
     const next: OwnerRing[] = [];
     if (decoded) {
-      const { nodeCount, nodeView, edgeCount, edgeView, overlayView } = decoded;
+      const { nodeCount, nodeView } = decoded;
 
-      // Selected row (at most one).
+      // Selected row (at most one) — the ONLY row this draws a sphere ring for.
       let selectedRow = -1;
       for (let i = 0; i < nodeCount; i++) {
         if (readNodeSelected(nodeView, i)) { selectedRow = i; break; }
       }
 
       if (selectedRow >= 0) {
-        const edges = edgesRef.current;
-        edges.length = 0;
-        for (let e = 0; e < edgeCount; e++) {
-          edges.push({ src: readEdgeSrcNodeRow(edgeView, e), dst: readEdgeDstNodeRow(edgeView, e) });
-        }
-        const mode: SelMode = readOverlaySelMode(overlayView) ? "own" : "surface";
-        for (const row of ownerRowSet(selectedRow, mode, edges)) {
-          if (row < 0 || row >= nodeCount) continue;
-          // R = Go-streamed reach radius (sphereR); fall back to node radius pre-emit.
-          const radius = readNodeRadius(nodeView, row) || NODE_SPHERE_RADIUS;
-          const R = readNodeSphereR(nodeView, row) || radius;
-          if (R < SPHERE_RING_MIN_RADIUS) continue;
+        const row = selectedRow;
+        // R = Go-streamed reach radius (sphereR); fall back to node radius pre-emit.
+        const radius = readNodeRadius(nodeView, row) || NODE_SPHERE_RADIUS;
+        const R = readNodeSphereR(nodeView, row) || radius;
+        if (R >= SPHERE_RING_MIN_RADIUS) {
           const tube = Math.max(SPHERE_RING_TUBE_MIN, radius * SPHERE_RING_TUBE_RATIO);
           const ring: OwnerRing = {
             row,
@@ -147,7 +138,7 @@ export function SphereRings() {
         }
       }
     }
-    // Rebuild only when the owner set / geometry / color actually changed.
+    // Rebuild only when the ring set / geometry / color actually changed.
     if (!sameRings(prevRef.current, next)) {
       prevRef.current = next;
       setRings(next);
