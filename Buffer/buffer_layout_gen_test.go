@@ -114,8 +114,8 @@ func TestSetNodeRow(t *testing.T) {
 
 func TestSetEdgeRow(t *testing.T) {
 	buf := make([]byte, BufEdgeStride*2)
-	SetEdgeRow(buf, 0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 2, 5, 1, 1, 11, 22)
-	SetEdgeRow(buf, 1, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, -1, -1, 0, 0, 0, 0)
+	SetEdgeRow(buf, 0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 1, 1, 11, 22)
+	SetEdgeRow(buf, 1, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 0, 0, 0, 0)
 
 	assertF32At(t, buf, BufEdgeColSX, 1.0, "row0.SX")
 	assertF32At(t, buf, BufEdgeColSY, 2.0, "row0.SY")
@@ -123,8 +123,6 @@ func TestSetEdgeRow(t *testing.T) {
 	assertF32At(t, buf, BufEdgeColEX, 4.0, "row0.EX")
 	assertF32At(t, buf, BufEdgeColEY, 5.0, "row0.EY")
 	assertF32At(t, buf, BufEdgeColEZ, 6.0, "row0.EZ")
-	assertI32At(t, buf, BufEdgeColSrcNodeRow, 2, "row0.SrcNodeRow")
-	assertI32At(t, buf, BufEdgeColDstNodeRow, 5, "row0.DstNodeRow")
 	assertU8At(t, buf, BufEdgeColSelected, 1, "row0.Selected")
 	assertU8At(t, buf, BufEdgeColFaded, 1, "row0.Faded")
 	assertU32At(t, buf, BufEdgeColEdgeLabelOff, 11, "row0.EdgeLabelOff")
@@ -134,8 +132,6 @@ func TestSetEdgeRow(t *testing.T) {
 	assertU8At(t, buf, base+BufEdgeColFaded, 0, "row1.Faded")
 	assertF32At(t, buf, base+BufEdgeColSX, 7.0, "row1.SX")
 	assertF32At(t, buf, base+BufEdgeColEZ, 12.0, "row1.EZ")
-	assertI32At(t, buf, base+BufEdgeColSrcNodeRow, -1, "row1.SrcNodeRow")
-	assertI32At(t, buf, base+BufEdgeColDstNodeRow, -1, "row1.DstNodeRow")
 }
 
 func TestSetCameraRow(t *testing.T) {
@@ -154,7 +150,7 @@ func TestSetCameraRow(t *testing.T) {
 
 func TestSetOverlayRow(t *testing.T) {
 	buf := make([]byte, BufOverlayStride)
-	SetOverlayRow(buf, 1, 0, 1, 0, 1, 0, 0, 1, 0)
+	SetOverlayRow(buf, 1, 0, 1, 0, 1, 0, 0, 1)
 
 	assertU8At(t, buf, BufOverlayColSceneTori, 1, "SceneTori")
 	assertU8At(t, buf, BufOverlayColScenePoles, 0, "ScenePoles")
@@ -164,7 +160,6 @@ func TestSetOverlayRow(t *testing.T) {
 	assertU8At(t, buf, BufOverlayColLabelsGlobal, 0, "LabelsGlobal")
 	assertU8At(t, buf, BufOverlayColOverlaysVis, 0, "OverlaysVis")
 	assertU8At(t, buf, BufOverlayColDoubleLinks, 1, "DoubleLinks")
-	assertU8At(t, buf, BufOverlayColSelMode, 0, "SelMode")
 }
 
 func TestBeadStrideIsPackedSize(t *testing.T) {
@@ -185,8 +180,8 @@ func TestNodeStrideIsPackedSize(t *testing.T) {
 }
 
 func TestEdgeStrideIsPackedSize(t *testing.T) {
-	// Edge block: 6×f32 + 2×i32 + 2×u8 (selected + faded) + 2×u32 (edge-label off/len) = 42
-	want := 6*4 + 2*4 + 2 + 2*4
+	// Edge block: 6×f32 + 2×u8 (selected + faded) + 2×u32 (edge-label off/len) = 34
+	want := 6*4 + 2 + 2*4
 	if BufEdgeStride != want {
 		t.Errorf("BufEdgeStride = %d, want %d (packed size)", BufEdgeStride, want)
 	}
@@ -201,8 +196,8 @@ func TestCameraStrideIsPackedSize(t *testing.T) {
 }
 
 func TestOverlayStrideIsPackedSize(t *testing.T) {
-	// Overlay block: 9×u8 = 9 (8 overlay flags + SelMode)
-	want := 9
+	// Overlay block: 8×u8 = 8 (8 overlay flags)
+	want := 8
 	if BufOverlayStride != want {
 		t.Errorf("BufOverlayStride = %d, want %d (packed size)", BufOverlayStride, want)
 	}

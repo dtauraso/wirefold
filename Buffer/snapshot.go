@@ -328,9 +328,6 @@ type overlaySnapState struct {
 	labelsGlobal   uint8
 	overlaysVis    uint8
 	doubleLinks    uint8
-	// selMode is the current select mode (1 = own, 0 = surface), set by KindSelect.
-	// Not an overlay flag — rides the overlay singleton row for the on-surface highlight.
-	selMode uint8
 }
 
 // NewSnapshotState creates an empty SnapshotState that writes framed snapshots
@@ -482,17 +479,8 @@ func (s *SnapshotState) Update(ev T.Event) {
 		// in the buffer immediately.
 		if ev.Edge != "" {
 			s.setSelectedEdge(ev.Edge)
-			// Edge selection has no surface/own owner set; reset the mode to surface.
-			s.overlay.selMode = 0
 		} else {
 			s.setSelected(ev.Node)
-			// Value carries the select mode (1 = own, 0 = surface); store it for the
-			// on-surface highlight. Cleared to surface when the selection is cleared.
-			if ev.Node == "" {
-				s.overlay.selMode = 0
-			} else {
-				s.overlay.selMode = uint8(ev.Value)
-			}
 		}
 		s.emitSnapshot()
 
@@ -1137,8 +1125,7 @@ func (s *SnapshotState) writeEdgeBlock(buf []byte, off int, b *snapshotBuild) in
 	for i, e := range s.edges {
 		SetEdgeRow(edgeBuf, i,
 			float32(e.sx), float32(e.sy), float32(e.sz),
-			float32(e.ex), float32(e.ey), float32(e.ez),
-			int32(s.nodeRowIndex(e.srcNode)), int32(s.nodeRowIndex(e.dstNode)), e.selected,
+			float32(e.ex), float32(e.ey), float32(e.ez), e.selected,
 			boolU8(b.fadedEdges[s.edgeLabels[i]]), b.edgeLabelOffs[i], b.edgeLabelLens[i])
 	}
 	return off + int(b.edgeCount)*BufEdgeStride
@@ -1213,7 +1200,7 @@ func (s *SnapshotState) writeOverlayBlock(buf []byte, off int) int {
 		ov.sceneTori, ov.scenePoles, ov.nodePoles,
 		ov.selSpherePoles, ov.handholds,
 		ov.labelsGlobal,
-		ov.overlaysVis, ov.doubleLinks, ov.selMode)
+		ov.overlaysVis, ov.doubleLinks)
 	return off + BufOverlayStride
 }
 
