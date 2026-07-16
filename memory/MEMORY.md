@@ -8,7 +8,7 @@ These rarely change; skim once per session and apply throughout.
 - [feedback_code_self_defends.md](feedback_code_self_defends.md) — Solid code structure preferred over memory entries for preventing AI drift toward industry defaults
 - [feedback_branch_cleanup.md](feedback_branch_cleanup.md) — Delete task branches locally and on remote once merged into main, without re-asking
 - [feedback_memory_location.md](feedback_memory_location.md) — Save memory files only to repo `memory/`; skip the local Claude memory dir for this project
-- [feedback_check_the_signal_the_check_emits.md](feedback_check_the_signal_the_check_emits.md) — stop-checks ALWAYS exits 0 (failure = JSON on stdout; clean = empty stdout). Before claiming "verified", make the check fail once and name the channel you read.
+- [feedback_check_the_signal_the_check_emits.md](feedback_check_the_signal_the_check_emits.md) — Self-derived: before claiming "verified", make the check fail once; a check that can't fail reads like a passing one. (The stop-checks exit-code fact itself lives in CLAUDE.md's verify recipe.)
 - [feedback_bash_cwd_persistence.md](feedback_bash_cwd_persistence.md) — Bash cwd persists across calls; use absolute paths for destructive ops
 - [feedback_feature_audit_two_layers.md](feedback_feature_audit_two_layers.md) — Feature-audit removals need both data.js and the hand-authored features/<slug>.html page; rendered page caches data.js
 - [feedback_finish_calibrated_work.md](feedback_finish_calibrated_work.md) — Once scope/style are agreed, finish every in-scope item; don't stop one short to ask
@@ -47,7 +47,6 @@ Each entry can drift; if it conflicts with current code, update or remove the me
 - [feedback_hook_block_means_stop.md](feedback_hook_block_means_stop.md) — When a PreToolUse hook returns exit 2, stop and report to the user; do not route around the block via python3, sed -i, shell redirect, or any other write path.
 - [project_v0_cost_calibration.md](project_v0_cost_calibration.md) — Phase 5 v0 cost calibration; mechanical ~10%, hardening ~12%, refactor/exploratory ~15–20% of original estimate
 - [project_lock_persistence_survives_respawn.md](project_lock_persistence_survives_respawn.md) — Polar node-node locks enforce only in mover memory; each follower must self-persist or run/respawn reloads stale positions
-- [project_emitter_packs_from_a_fan_in_channel.md](project_emitter_packs_from_a_fan_in_channel.md) — The buffer emitter is a fan-in channel consumer (goroutines send via `tr.*` → one drain goroutine packs), not a central decider; single-writer is enforced by a real data race — send an event, never touch `SnapshotState`.
 - [project_probe_log_layout.md](project_probe_log_layout.md) — Runtime logs are 5 .probe/ JSONL files (go/ts × log/errors + go-debug.jsonl Go breadcrumbs); go.jsonl now decodes from the buffer EVENT block (not JSON trace); probe-merge.sh merges them
 - [project_interaction_control_is_substance.md](project_interaction_control_is_substance.md) — 3D-editor interaction control is substance (not medium); OrbitControls sacrifices control = wrong pattern-match; use the recoverable-by-device test
 - [feedback_subagent_discovery_mandate.md](feedback_subagent_discovery_mandate.md) — Give subagents a grep-first discovery mandate, not a curated reading list, or integration points get missed

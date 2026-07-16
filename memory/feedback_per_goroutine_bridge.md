@@ -21,9 +21,11 @@ decodes and draws it (`readBeadX/Y/Z`) and interpolates nothing. The
 content-buffer work closed this. `NodeMoveRegistry`, cited as the central
 node-move emitter, now survives only in a `loader.go` comment.
 
-**The buffer does not deviate from the invariant.** Go packing the whole scene
-into one streamed buffer looks central, but the emitter is a fan-in channel
-consumer: goroutines send via `tr.*`, Trace's channel carries it, one drain
-goroutine packs. Goroutines still send. See
-[[project_emitter_packs_from_a_fan_in_channel]] for the wiring, the single-writer
-contract, and the data race that enforces it.
+**The buffer does not deviate from the invariant either.** Go packing the whole
+scene into one streamed buffer looks central, but the emitter is a **fan-in
+channel consumer**: goroutines send via `tr.*`, Trace's channel carries it, and
+one drain goroutine packs. Goroutines still send — a fan-in channel with a single
+consumer is the ordinary Go shape, not a coordinator. Read `main.go` around the
+`NewWithSinkHook` wiring and the seeding comment above the node-launch loop; both
+explain the seam and the single-writer contract better than a memory can, and
+they cannot drift from the code the way this file did.
