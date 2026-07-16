@@ -51,9 +51,11 @@ absent: multi-node selection, undo, edge waypoints/auto-layout lib).
 - *Copy / paste / duplicate* (M → **L**). Node selection is
   SINGLE-select only (`md.selected` = one id, `node_move.go`). Needs a
   new Go-side multi-node selection set + buffer column + TS highlight
-  loop — none exists. (Multi-select exists only for polar-equation
-  LOCKS via `selectedLocks`/`SelectLock`, a partial pattern to borrow,
-  not reuse.) Surface when the user duplicates subgraphs by hand.
+  loop — none exists. (An earlier note pointed at a polar-equation lock
+  multi-select as a partial pattern to borrow; `selectedLocks`/`SelectLock`
+  now grep to zero hits, so that pattern is gone too — there is no
+  multi-select anywhere to borrow from.) Surface when the user duplicates
+  subgraphs by hand.
 - *Multi-node alignment guides* (S → **L**). Depends on multi-node
   selection (absent) AND alignment guides (absent — `NavGuides.tsx` /
   `SelectedEquationGuides.tsx` are unrelated polar/equation overlays).
@@ -84,10 +86,15 @@ absent: multi-node selection, undo, edge waypoints/auto-layout lib).
   in the edge stride. Manual waypoints need the same new plumbing.
   Surface when three preset routes don't suffice for one edge.
 
-**Keybindings registry** (placeholder → **S** greenfield). Shortcuts
-are hardcoded scattered `keydown` listeners (`"f"` fade toggle in
-`ThreeView.tsx`; equation-panel keys). No fit-view binding exists —
-"home" is a button (`HomeButton`). A small registry is genuinely small.
+**Keybindings registry** (placeholder → **S** greenfield, and now
+unmotivated — 2026-07-15). The original case was "consolidate the
+scattered hardcoded `keydown` listeners." There are none left: the
+`"f"` fade toggle went with the fade feature (58557356), and a repo-wide
+grep for `keydown` across `src/` now returns **zero hits**. The editor
+has no keyboard shortcuts at all. No fit-view binding exists — "home" is
+a button (`HomeButton`). A registry would be pure greenfield with nothing
+to consolidate, so there is no longer a consolidation argument for it;
+only build it if David wants shortcuts as a feature.
 
 **Why:** the review identified these as real gaps vs. industry
 norms, but the post-v0 rule is don't open branches preemptively —
@@ -115,10 +122,9 @@ erase deleted the files they lived in:
 - `flashRejectedHandle` (was in `app.tsx`) — GONE. `app.tsx` itself is
   gone (entry is `main.tsx`). A general validation/user-feedback channel
   is still unbuilt.
-- `f` / `shift+f` keybindings — the `cmd-z` effect that hosted them is
-  gone; only a hardcoded `"f"` fade-toggle listener remains in
-  `ThreeView.tsx`. Fold into a keybinding registry when a third shortcut
-  shows up.
+- `f` / `shift+f` keybindings — GONE. The `cmd-z` effect that hosted
+  them went first; the `"f"` fade-toggle listener went with the fade
+  feature (58557356). No `keydown` listener remains anywhere in `src/`.
 - `MiniMap` — GONE (no match).
 
 Dead-code cleanup candidates surfaced during this re-scope (still compiled,

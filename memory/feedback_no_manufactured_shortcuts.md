@@ -11,4 +11,4 @@ When the Go model already prescribes how a change should land, do not present "s
 
 **How to apply:** Before listing options, check whether the model/contract already decides the question. If yes, dispatch the model-correct path and only ask the user about genuinely open sub-decisions (units, naming, scope edges). If you catch yourself listing a "smaller" option whose only virtue is "less code to write" or "fewer files touched," delete it — that's manufactured. Real tradeoffs involve correctness, blast radius, user-facing behavior, or future-flexibility — not typist effort.
 
-Related: [[feedback-go-vs-coordinator-bias]] (knob-tuning is the wrong shape; find the missing local signal), [[feedback-derive-model-from-visual-spec]] (derive the implied model up front; refuse cheap patches that preserve a wrong model).
+Related: [[feedback_go_vs_coordinator_bias]] (knob-tuning is the wrong shape; find the missing local signal), [[feedback_derive_model_from_visual_spec]] (derive the implied model up front; refuse cheap patches that preserve a wrong model).

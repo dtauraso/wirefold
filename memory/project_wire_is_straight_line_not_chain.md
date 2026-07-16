@@ -11,4 +11,4 @@ Wires render as straight `wireSegment` / `lerp` lines drawn by `PacedWire` + `Si
 
 **Key distinction David drew:** neighbor-to-neighbor messaging (local, bounded fan-out — it's CSP/actors) is NOT the thing to avoid; GLOBAL scope (one place knowing all nodes, or all-to-all) is. A single `lerp` is cheaper for a straight wire, and *drawing* is a render concern, not the computational substance.
 
-Don't re-propose the bead-chain wire model for straight wires. Two fixes from the detour were kept: node body follows local React Flow position (drag fix), and the straight `wireSegment`/`lerp` in PacedWire. See [[feedback_uniform_pulse_speed]] and [[project_local_clocks_beat_global_runner]].
+Don't re-propose the bead-chain wire model for straight wires. Two fixes from the detour were kept: node body follows local React Flow position (drag fix), and the straight `wireSegment`/`lerp` in PacedWire. See [[feedback_uniform_pulse_speed]] and [[feedback_ease_of_fix_is_confounded]].

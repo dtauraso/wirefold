@@ -30,7 +30,7 @@ behavior?" If that line reaches for an existing global mechanism
 sneaking in. The right shape is almost always a per-primitive
 observable signal that the primitive itself reads, with no central
 authority. This is the workflow-level generalization of
-[[go-vs-coordinator-bias]]: that memory says coordinator-shaped
+[[feedback_go_vs_coordinator_bias]]: that memory says coordinator-shaped
 fixes are drift; this one says *when* the drift happens — at the
 moment a behavior is specified only at the UI layer.
 
