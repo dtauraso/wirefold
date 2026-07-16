@@ -154,9 +154,9 @@ when a bead has arrived. Go owns the clock.
   advance, so beads, in-node animations, and node windows all freeze; the
   editor reflects the last known state.
 - **Bridge surface — binary BOTH ways.** **Go → TS:** the binary content
-  buffer ALONE (`buffer-snapshot` on fd 3; no sidecar — node id is the row
-  index, label rides the buffer's label section, kind is the numeric `KindId`
-  column). **TS → Go:** framed binary records on stdin (`[len:u32-LE][record]`,
+  buffer ALONE (`buffer-snapshot` on fd 3) — stated in full under "Go → TS is
+  the binary content buffer" above; not restated here, so the two copies cannot
+  drift apart. **TS → Go:** framed binary records on stdin (`[len:u32-LE][record]`,
   symmetric with fd 3) — `raw-input` (raw pointer/wheel + the stateless raycast
   hit as numeric rows; Go's gesture FSM decides what each gesture MEANS), the
   geometry-CRUD `edit` (`op` = create / update / delete — exactly three ops;
