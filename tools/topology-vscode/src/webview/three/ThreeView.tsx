@@ -14,10 +14,8 @@ import { Scene } from "./scene-content";
 import { BufferScene, BufferLabelProjector } from "./buffer-scene";
 import { ProceduralEnvProvider } from "./scene-env";
 import type { BufferLabelPos } from "./buffer-scene";
-import { getLatestSnapshot } from "../snapshot-buffer";
-import { decodeSnapshot } from "./buffer-decode";
-import { readOverlayLabelsGlobal } from "../../schema/buffer-layout";
 import { NavGuides } from "./NavGuides";
+import { useOverlayFlags } from "./overlay-flags";
 
 // ---------------------------------------------------------------------------
 // ThreeView: Canvas wrapper + interaction + label overlay + widgets
@@ -91,18 +89,13 @@ export function ThreeView() {
     return () => el.removeEventListener("wheel", onWheelNative);
   }, [onWheelNative]);
 
-  // Label global visibility comes from the buffer overlay column (Go-owned). Read at
-  // render time: ThreeView re-renders every frame (bufferLabelPositions updates each rAF), so
-  // a toggle change — which Go reflects into the buffer overlay row — is picked up within a
-  // frame. Buffer sense: LabelsGlobal == 1 means VISIBLE, so hidden = (col === 0).
-  let bufLabelsHidden = false;
-  {
-    const snap = getLatestSnapshot();
-    const decoded = snap ? decodeSnapshot(snap) : null;
-    if (decoded) {
-      bufLabelsHidden = readOverlayLabelsGlobal(decoded.overlayView) === 0;
-    }
-  }
+  // Label global visibility comes from the buffer overlay column (Go-owned), reflected
+  // read-only via the sanctioned useOverlayFlags hook so this component re-renders the
+  // instant the flag flips — independent of the label-positioning rAF loop below.
+  // overlay-flags.ts already stores labelsGlobal in HIDDEN-sense (it inverts the buffer's
+  // visible-sense column), so bufLabelsHidden is that flag directly.
+  const bufFlags = useOverlayFlags();
+  const bufLabelsHidden = bufFlags?.labelsGlobal ?? false;
 
   return (
     <div ref={containerRef} style={{ position: "absolute", inset: 0 }}>
