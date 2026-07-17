@@ -1,13 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Verifies that the BUF_LAYOUT_FINGERPRINT embedded in the generated Go and TS
-# buffer-layout files are identical, confirming that both sides were produced from
-# the same Buffer/layout.go schema.
-#
-# The generator (tools/gen-node-defs) writes an identical fingerprint line into:
+# Verifies that the BUF_LAYOUT_FINGERPRINT embedded in the two GENERATED
+# buffer-layout files is identical:
 #   Buffer/buffer_layout_gen.go
 #   tools/topology-vscode/src/schema/buffer-layout.ts
+#
+# SCOPE — read this before trusting the guard's name. Both files are written by ONE
+# generator run (tools/gen-node-defs) from Buffer/layout.go, with the SAME fingerprint
+# line. So this guard is generated-vs-generated: it stays clean whenever the two agree,
+# which is any state produced by a full regen — INCLUDING a stale regen where layout.go
+# changed but neither file was regenerated (both stay matching). It therefore does NOT
+# catch an unregenerated layout.go column; check-generated.sh does (it regenerates from
+# layout.go and diffs). What THIS guard uniquely catches is the two generated files
+# DISAGREEING — a botched/partial regen that touched one file, a hand-edited fingerprint,
+# or a deleted checked-in generated Go file (which check-generated silently recreates).
+# It never reads layout.go, and a generated reader existing for a column says nothing
+# about whether any production code CONSUMES it (dead columns can pass every guard).
 #
 # Exit 0 if clean; exit 1 with a report if the fingerprints diverge.
 
