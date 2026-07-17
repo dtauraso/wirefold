@@ -127,6 +127,26 @@ function ensureBinaryBuilt(
   };
 }
 
+// Per-process incremental parse state for Go's two output byte-streams. Each field
+// holds a partial fragment straddling a chunk boundary — a partial newline-delimited
+// stdout line, and a partial length-prefixed fd3 binary frame — and is meaningful ONLY
+// within a single Go process's stream: a leftover tail is a fragment of THAT process's
+// output. Its lifetime is therefore the process's, not the runner's.
+interface StreamParseState {
+  stdoutBuf: string;
+  fd3Buf: Buffer;
+}
+
+// freshStreamState mints empty parse state for a newly spawned process. run() calls it
+// at every spawn so no respawn/restart path can carry a dead process's tail bytes into
+// the next process — concatenating them would make splitFrames read a frame length from
+// inside stale bytes and freeze (or silently starve) the scene. Binding the reset to the
+// spawn, not to each exit handler, makes "start a process with leftover bytes" impossible
+// to express rather than a rule every exit path must remember.
+function freshStreamState(): StreamParseState {
+  return { stdoutBuf: "", fd3Buf: Buffer.alloc(0) };
+}
+
 export class BuildAndRunRunner {
   private proc: cp.ChildProcess | undefined;
   // Explicit cancel flag — distinguishing cancellation by signal name races
@@ -138,10 +158,10 @@ export class BuildAndRunRunner {
   // `cancelled`, and the close handler's cancelled branch suppresses the respawn.
   private looping = false;
   private channel: vscode.OutputChannel | undefined;
-  // Partial line buffer for stdout — trace lines are newline-delimited.
-  private stdoutBuf = "";
-  // Partial binary frame buffer for fd3 — length-prefixed binary frames.
-  private fd3Buf: Buffer = Buffer.alloc(0);
+  // Per-process partial-frame parse state (stdout line + fd3 binary frame). Rebuilt at
+  // every spawn by run() (freshStreamState), so its lifetime tracks the Go process, not
+  // this long-lived runner — see freshStreamState for why that reset is at the spawn.
+  private stream: StreamParseState = freshStreamState();
   private probeFile: string | undefined;
   private goErrorsFile: string | undefined;
   private goDebugFile: string | undefined;
@@ -220,6 +240,10 @@ export class BuildAndRunRunner {
     this.channel.appendLine("$ " + binPath + " " + topArgs.join(" "));
     this.cancelled = false;
     this.looping = true;
+    // Fresh parse state for this spawn: a prior process's leftover partial frame must
+    // never prefix this one's stream (see freshStreamState). This is the single reset
+    // point every restart path funnels through, including the looping respawn.
+    this.stream = freshStreamState();
     // detached: true makes the child the leader of a new process group; the
     // prebuilt binary is the sole group member, so kill(-pid) reaches it
     // directly. Without this, SIGTERM could leave it orphaned on macOS.
@@ -292,8 +316,8 @@ export class BuildAndRunRunner {
   }
 
   private handleStdout(chunk: string) {
-    const { lines, rest } = splitJsonlLines(this.stdoutBuf, chunk);
-    this.stdoutBuf = rest;
+    const { lines, rest } = splitJsonlLines(this.stream.stdoutBuf, chunk);
+    this.stream.stdoutBuf = rest;
     for (const line of lines) {
       // Breadcrumb lines are the Go-side DEBUG BREADCRUMB channel (Trace.Breadcrumb →
       // stdout {"kind":"breadcrumb",...}). They are logging-only (no step ordinal, outside
@@ -319,8 +343,8 @@ export class BuildAndRunRunner {
   }
 
   private handleFd3(chunk: Buffer) {
-    const { frames, rest } = splitFrames(this.fd3Buf, chunk);
-    this.fd3Buf = rest;
+    const { frames, rest } = splitFrames(this.stream.fd3Buf, chunk);
+    this.stream.fd3Buf = rest;
     for (const ab of frames) {
       // Decode the snapshot's EVENT block into full trace-event .probe lines (the buffer-
       // decoded log — the DECODE of the same binary that replaces Go's JSON-on-stdout path).
