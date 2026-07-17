@@ -19,6 +19,7 @@ import {
   SHADING_PARAM_NODE_CLEARCOAT_ROUGHNESS,
   SHADING_PARAM_NODE_ENV_MAP_INTENSITY,
   SHADING_PARAM_NODE_OPACITY,
+  SHADING_PARAM_RING_ROUGHNESS,
 } from "../../schema/shading-params";
 import {
   readNodeCX, readNodeCY, readNodeCZ, readNodeRadius,
@@ -126,7 +127,7 @@ export function NodeInstances({ capacity }: { capacity: number }) {
       </instancedMesh>
       <instancedMesh ref={ringRef} args={[undefined, undefined, capacity]} userData={{ [BUFFER_RING_TAG]: true }} frustumCulled={false}>
         <torusGeometry args={[1, NODE_RING_TUBE_RATIO, 8, 32]} />
-        <meshStandardMaterial roughness={0.6} metalness={0} depthWrite={false} />
+        <meshStandardMaterial roughness={SHADING_PARAM_RING_ROUGHNESS} metalness={0} depthWrite={false} />
       </instancedMesh>
       {/* Invisible pick-proxy torus: same per-instance transform as the visible ring above,
           but a much thicker tube (RING_PICK_TUBE_RATIO) so the ring band is a generous
