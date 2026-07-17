@@ -45,10 +45,17 @@ of this file is the only entry point you need.
    correct. Guard: `check-kind-imports.sh`; the parity test
    `kind_registry_parity_test.go` catches it from the registry side.
 
-If a new kind needs a **new column in the content buffer**, add it to the buffer layout
-(`Buffer/` + `tools/topology-vscode/src/schema/buffer-layout.ts`) and its reader in the
-same commit — `check-buffer-layout-parity.sh` fails otherwise. This is the one
-grep-discoverable edit the four items above don't cover.
+If a new kind needs a **new column in the content buffer**, add it to the hand-authored
+schema (`Buffer/layout.go`, the `buf:"…"` struct tags) and regenerate in the same commit —
+`Buffer/buffer_layout_gen.go` and `tools/topology-vscode/src/schema/buffer-layout.ts` are
+BOTH generated from `layout.go`, and `check-generated.sh` fails if either is stale relative
+to it (it regenerates and diffs). `check-buffer-layout-parity.sh` does NOT catch this: it
+only asserts the two GENERATED files carry the same `BUF_LAYOUT_FINGERPRINT` — it never reads
+`layout.go`, so it catches a botched/partial regen or a deleted generated file, not an
+unregenerated column. A generated READER exists for every column automatically; nothing forces
+a production CONSUMER, so an unconsumed column is dead surface (grep the reader in non-test
+`src/` to confirm one exists), not a guard failure. This is the one grep-discoverable edit the
+four items above don't cover.
 
 **Wire props:** Wire props (`WireProps` from `tools/topology-vscode/src/schema/wire-defs.ts`,
 generated from `wire:"prop,..."` tags on `specEdge` in `nodes/Wiring/loader.go`) are
