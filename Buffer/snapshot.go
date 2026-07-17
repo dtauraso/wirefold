@@ -37,6 +37,7 @@ package Buffer
 
 import (
 	"encoding/binary"
+	"fmt"
 	"io"
 	"sync/atomic"
 
@@ -145,6 +146,15 @@ type SnapshotState struct {
 	// lastPosEmitTick is the tick at which a KindPosition event last actually triggered an
 	// emitSnapshot; -1 = none yet (so the first position event on a fresh tick always emits).
 	lastPosEmitTick int64
+
+	// breadcrumb, if set, receives the DEBUG BREADCRUMB channel (wired to tr.Breadcrumb in
+	// main.go). SnapshotState runs on the single Trace-drain goroutine, so calling it from a
+	// build method is goroutine-safe. Nil in headless tests (a no-op).
+	breadcrumb func(label, node, port, value string)
+	// lastDroppedLayoutLinks is the count of layout links dropped by resolvableLayoutLinks
+	// last build, so the drop is breadcrumbed only when it CHANGES — never per-snapshot (the
+	// build path runs hundreds of times/sec; a per-build breadcrumb would flood the channel).
+	lastDroppedLayoutLinks int
 
 	// positionDirty is true when bead state has changed since the last emitSnapshot call for
 	// any reason. Set on every KindPosition update; cleared inside emitSnapshot (which publishes
@@ -846,8 +856,13 @@ func (s *SnapshotState) eventReady(e eventRec) bool {
 type snapshotBuild struct {
 	beadCount, nodeCount, edgeCount uint32
 	layoutLinkCount                 uint32
-	interiorCount, portCount        int
-	eventCount                      int
+	// renderableLayoutLinks is the layout-link pairs whose BOTH endpoints resolve to a live
+	// node row this build (resolvableLayoutLinks). layoutLinkCount == len(this), and
+	// writeLayoutLinkBlock iterates THIS — never s.layoutLinks — so an unresolvable endpoint
+	// is filtered before emit and a -1 SrcNodeRow/DstNodeRow can never reach the buffer.
+	renderableLayoutLinks    []layoutLinkSnapState
+	interiorCount, portCount int
+	eventCount               int
 
 	labelBytes      []byte
 	labelOffs       []uint32
@@ -922,11 +937,13 @@ func (s *SnapshotState) buildEdgeLabelSection() ([]byte, []uint32, []uint32) {
 // buildSnapshot call, plus the total buffer size. The block-writer helpers read from
 // the returned struct only — none of them recompute this data.
 func (s *SnapshotState) newSnapshotBuild() *snapshotBuild {
+	renderableLayoutLinks := s.resolvableLayoutLinks()
 	b := &snapshotBuild{
-		beadCount:       uint32(len(s.beads)),
-		nodeCount:       uint32(len(s.nodes)),
-		edgeCount:       uint32(len(s.edges)),
-		layoutLinkCount: uint32(len(s.layoutLinks)),
+		beadCount:             uint32(len(s.beads)),
+		nodeCount:             uint32(len(s.nodes)),
+		edgeCount:             uint32(len(s.edges)),
+		layoutLinkCount:       uint32(len(renderableLayoutLinks)),
+		renderableLayoutLinks: renderableLayoutLinks,
 	}
 	b.interiorCount = int(b.nodeCount) * BufInteriorSlotsPerNode
 
@@ -1074,12 +1091,49 @@ func (s *SnapshotState) edgeRowForPair(a, b string) int32 {
 // fallback: node centers).
 func (s *SnapshotState) writeLayoutLinkBlock(buf []byte, off int, b *snapshotBuild) int {
 	llBuf := buf[off : off+int(b.layoutLinkCount)*BufLayoutLinkStride]
-	for i, ll := range s.layoutLinks {
+	// Iterates b.renderableLayoutLinks (pre-filtered by resolvableLayoutLinks), NOT
+	// s.layoutLinks — so nodeRowIndex is guaranteed >= 0 for both endpoints and the
+	// packed SrcNodeRow/DstNodeRow are always valid node rows. EdgeRow may still be -1
+	// (the declared node-centers fallback), whose consumers now read valid endpoint rows.
+	for i, ll := range b.renderableLayoutLinks {
 		SetLayoutLinkRow(llBuf, i,
 			int32(s.nodeRowIndex(ll.srcNode)), int32(s.nodeRowIndex(ll.dstNode)),
 			s.edgeRowForPair(ll.srcNode, ll.dstNode))
 	}
 	return off + int(b.layoutLinkCount)*BufLayoutLinkStride
+}
+
+// resolvableLayoutLinks returns the layout-link pairs whose BOTH endpoints resolve to a live
+// node row in the CURRENT snapshot. A pair with an unresolvable endpoint (nodeRowIndex == -1)
+// is dropped here so it never reaches the buffer: the LayoutLink block's SrcNodeRow/DstNodeRow
+// are consumed UNCONDITIONALLY by the renderer's EdgeRow==-1 fallback (node centers), so a -1
+// row there is an out-of-bounds read, not a drawable segment. Endpoints always resolve under
+// the current build order (every node row is registered before layout links emit); this filter
+// makes that a guarantee of the emitted bytes rather than an unenforced assumption. Returns a
+// fresh backing slice — never aliases or mutates s.layoutLinks. A drop is surfaced on the
+// DEBUG BREADCRUMB channel, but only when the dropped COUNT changes from the prior build —
+// this path runs hundreds of times/sec, so a per-build breadcrumb would flood the channel.
+func (s *SnapshotState) resolvableLayoutLinks() []layoutLinkSnapState {
+	out := s.layoutLinks[:0:0] // len 0, cap 0: the first append allocates, leaving s.layoutLinks intact
+	for _, ll := range s.layoutLinks {
+		if s.nodeRowIndex(ll.srcNode) >= 0 && s.nodeRowIndex(ll.dstNode) >= 0 {
+			out = append(out, ll)
+		}
+	}
+	if dropped := len(s.layoutLinks) - len(out); dropped != s.lastDroppedLayoutLinks {
+		if s.breadcrumb != nil {
+			s.breadcrumb("layout-link-unresolvable-endpoint", "", "",
+				fmt.Sprintf("dropped=%d kept=%d total=%d", dropped, len(out), len(s.layoutLinks)))
+		}
+		s.lastDroppedLayoutLinks = dropped
+	}
+	return out
+}
+
+// SetBreadcrumbSink wires the DEBUG BREADCRUMB channel (tr.Breadcrumb in production, nil in
+// headless tests). Called once at construction from the same goroutine that drives Update.
+func (s *SnapshotState) SetBreadcrumbSink(f func(label, node, port, value string)) {
+	s.breadcrumb = f
 }
 
 // writePortBlock writes the Port block: flattened over nodes in stable node-row order — for

@@ -59,6 +59,10 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 	// in .probe/ without scattering fmt.Fprintf(os.Stderr, ...). It is sparse (control events,
 	// not a per-tick firehose) and fire-and-forget.
 	tr.SetDebugSink(os.Stdout)
+	// Give the snapshot builder the same breadcrumb channel, so a layout link dropped for an
+	// unresolvable endpoint (resolvableLayoutLinks) surfaces on go-debug.jsonl instead of
+	// vanishing silently. Sparse: it fires only when the dropped count changes.
+	snapState.SetBreadcrumbSink(tr.Breadcrumb)
 
 	// The clock is free-running (no play/pause gate): it starts ticking at construction
 	// and never halts. Startup geometry is NOT emitted here — each node's own goroutine

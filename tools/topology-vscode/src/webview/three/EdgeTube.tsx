@@ -214,7 +214,7 @@ function sameSegs(a: EdgeSeg[], b: EdgeSeg[]): boolean {
   return true;
 }
 
-export function EdgeTubes({ capacity }: { capacity: number }) {
+export function EdgeTubes({ capacity, layoutLinkCapacity }: { capacity: number; layoutLinkCapacity: number }) {
   const [segs, setSegs] = useState<EdgeSeg[]>([]);
   // The Go-selected edge's buffer row (-1 = none). Tracked separately from the segment set
   // so a selection change (which does NOT move any endpoint) toggles the halo without
@@ -264,8 +264,13 @@ export function EdgeTubes({ capacity }: { capacity: number }) {
     // (EdgeRow === -1, no bead edge for this pair): the two nodes' CENTERS from the Node
     // block — an honest degradation, rendered dimmer (viaEdge=false) so it never looks like a
     // real port-anchored link.
-    const dbl = !!readOverlayOverlaysVis(overlayView) && !!readOverlayDoubleLinks(overlayView);
-    const linkN = Math.min(layoutLinkCount, capacity);
+    // Both overlay flags (0/1 columns) must be set. Coerce each side explicitly with `> 0`
+    // — a per-operand boolean check, no `!!`, and independent of which flag is set.
+    const dbl = readOverlayOverlaysVis(overlayView) > 0 && readOverlayDoubleLinks(overlayView) > 0;
+    // Clamp with the layout-link's OWN capacity, never the edge `capacity`: layout links
+    // come from LocalPolars (not the Edge block), so layoutLinkCount is independent of
+    // edgeCount and can exceed edgeCap — clamping by edgeCap silently dropped links.
+    const linkN = Math.min(layoutLinkCount, layoutLinkCapacity);
     const nextLinks: EdgeSeg[] = new Array<EdgeSeg>(linkN);
     const nextViaEdge: boolean[] = new Array<boolean>(linkN);
     for (let i = 0; i < linkN; i++) {

@@ -45,6 +45,7 @@ const INITIAL_BEAD_CAP  = 64;
 const INITIAL_NODE_CAP  = 32;
 const INITIAL_EDGE_CAP  = 32; // edge positions buffer: N edges × 2 endpoints × 3 floats
 const INITIAL_PORT_CAP  = 64; // port spheres: one per node port (input + output), grows as needed
+const INITIAL_LAYOUTLINK_CAP = 32; // layout double-link overlay pairs — from LocalPolars, NOT the Edge block, so its count is independent of edgeCount and needs its OWN cap
 
 // ── BufferScene ───────────────────────────────────────────────────────────────
 // Capacity manager: checks the latest snapshot each frame and grows per-block
@@ -58,25 +59,28 @@ export function BufferScene({ cameraRef }: {
   const [nodeCap,  setNodeCap]  = useState(INITIAL_NODE_CAP);
   const [edgeCap,  setEdgeCap]  = useState(INITIAL_EDGE_CAP);
   const [portCap,  setPortCap]  = useState(INITIAL_PORT_CAP);
+  const [layoutLinkCap, setLayoutLinkCap] = useState(INITIAL_LAYOUTLINK_CAP);
 
-  // Capacity-growth guard: runs every frame to detect need for reallocation.
+  // Capacity-growth guard: runs every frame to detect need for reallocation. EVERY
+  // variable-length streamed block must have a row here — a block whose count outgrows a
+  // cap that isn't tracked is silently clamped (the layout-link overlay lost links this
+  // way, borrowing edgeCap). Listing them in ONE table (not scattered ifs) makes a new
+  // block's capacity a single obvious edit and its omission a visible gap in this list.
   useFrame(() => {
     const snap = getLatestSnapshot();
     if (!snap) return;
     const decoded = decodeSnapshot(snap);
     if (!decoded) return;
 
-    if (decoded.beadCount > beadCap) {
-      setBeadCap(Math.ceil(decoded.beadCount * 1.5));
-    }
-    if (decoded.nodeCount > nodeCap) {
-      setNodeCap(Math.ceil(decoded.nodeCount * 1.5));
-    }
-    if (decoded.edgeCount > edgeCap) {
-      setEdgeCap(Math.ceil(decoded.edgeCount * 1.5));
-    }
-    if (decoded.portCount > portCap) {
-      setPortCap(Math.ceil(decoded.portCount * 1.5));
+    const grow: { count: number; cap: number; set: (n: number) => void }[] = [
+      { count: decoded.beadCount,       cap: beadCap,       set: setBeadCap },
+      { count: decoded.nodeCount,       cap: nodeCap,       set: setNodeCap },
+      { count: decoded.edgeCount,       cap: edgeCap,       set: setEdgeCap },
+      { count: decoded.portCount,       cap: portCap,       set: setPortCap },
+      { count: decoded.layoutLinkCount, cap: layoutLinkCap, set: setLayoutLinkCap },
+    ];
+    for (const g of grow) {
+      if (g.count > g.cap) g.set(Math.ceil(g.count * 1.5));
     }
   });
 
@@ -90,7 +94,7 @@ export function BufferScene({ cameraRef }: {
       <SelectionHighlight />
       <HoverHighlight />
       <SphereRings />
-      <EdgeTubes     capacity={edgeCap} />
+      <EdgeTubes     capacity={edgeCap} layoutLinkCapacity={layoutLinkCap} />
     </>
   );
 }
