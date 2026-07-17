@@ -78,11 +78,6 @@ type SnapshotState struct {
 	// Live in-flight beads, keyed by (sourceNode, sourcePort, gen).
 	beads map[beadSnapKey]beadSnapState
 
-	// srcToDest maps (sourceNode, sourcePort) → destination node ID.
-	// Populated from KindSend Target fields so arrive events can route EvArrive
-	// to the correct destination node.
-	srcToDest map[srcPortKey]string
-
 	// Camera, overlay, and scene-sphere singletons (always one row each in the snapshot).
 	camera  cameraSnapState
 	overlay overlaySnapState
@@ -193,13 +188,9 @@ type beadSnapKey struct {
 	gen  uint64
 }
 
-type srcPortKey struct {
-	node string
-	port string
-}
-
-// nodeSnapState holds persistent geometry + status + transient event flags for
-// one node. Transient fields (evRecv…evDone) are cleared after each snapshot.
+// nodeSnapState holds persistent geometry + status for one node. (Recv/Fire/Send/
+// Arrive/Done events are carried by the EVENT block only, via recordEvent — not
+// stored per-node here.)
 type nodeSnapState struct {
 	cx, cy, cz      float64
 	radius, sphereR float64
@@ -210,12 +201,7 @@ type nodeSnapState struct {
 	// label is the node's human label (from the node-geometry event's Label; data.label
 	// else the id). Streamed as UTF-8 bytes in the snapshot's trailing label section, keyed
 	// by this node's LabelOff/LabelLen columns — no sidecar.
-	label    string
-	evRecv   uint8
-	evFire   uint8
-	evSend   uint8
-	evArrive uint8
-	evDone   uint8
+	label string
 	// selected is PERSISTENT (not a transient event flag): 1 marks this node as the
 	// current click-selected node. Set/cleared by KindSelect; NOT reset in clearTransients.
 	selected uint8
@@ -327,7 +313,6 @@ func NewSnapshotState(out io.Writer) *SnapshotState {
 		edgeIndex:       map[string]int{},
 		layoutLinkIndex: map[string]int{},
 		beads:           map[beadSnapKey]beadSnapState{},
-		srcToDest:       map[srcPortKey]string{},
 		out:             out,
 		kindID:          buildKindIDMap(),
 		lastPosEmitTick: -1,
@@ -416,30 +401,22 @@ func (s *SnapshotState) Update(ev T.Event) {
 	case T.KindArrive:
 		// Bead completed traversal: remove it from live beads.
 		delete(s.beads, beadSnapKey{ev.Node, ev.Port, ev.Bead})
-		// Set EvArrive on the DESTINATION node. The arrive event carries the SOURCE
-		// (node+port); look up the destination via the srcToDest map built from sends.
-		if dest, ok := s.srcToDest[srcPortKey{ev.Node, ev.Port}]; ok {
-			s.setNodeEvent(dest, BufEventArriveID)
-		}
 
 	case T.KindPulseCancelled:
 		delete(s.beads, beadSnapKey{ev.Node, ev.Port, ev.Bead})
 
 	case T.KindRecv:
-		s.setNodeEvent(ev.Node, BufEventRecvID)
+		// No per-node state to update; the event itself is already recorded above
+		// (recordEvent) for the EVENT block.
 
 	case T.KindFire:
-		s.setNodeEvent(ev.Node, BufEventFireID)
+		// No per-node state to update; see KindRecv comment above.
 
 	case T.KindSend:
-		s.setNodeEvent(ev.Node, BufEventSendID)
-		// Record the src→dest mapping when Target is present (wire sends).
-		if ev.Target != "" {
-			s.srcToDest[srcPortKey{ev.Node, ev.Port}] = ev.Target
-		}
+		// Nothing further to record here; see KindRecv comment above.
 
 	case T.KindDone:
-		s.setNodeEvent(ev.Node, BufEventDoneID)
+		// No per-node state to update; see KindRecv comment above.
 
 	case T.KindNodeBead:
 		// One interior grid slot's authoritative state (node's 2x2 held/interior
@@ -619,27 +596,6 @@ func (s *SnapshotState) onLayoutLink(ev T.Event) {
 	s.layoutLinks = append(s.layoutLinks, layoutLinkSnapState{srcNode: ev.Node, dstNode: ev.Target})
 }
 
-// setNodeEvent sets one transient event flag on a node by BufEvent* id.
-func (s *SnapshotState) setNodeEvent(nodeID string, eventID int) {
-	idx, ok := s.nodeIndex[nodeID]
-	if !ok {
-		return
-	}
-	n := &s.nodes[idx]
-	switch eventID {
-	case BufEventRecvID:
-		n.evRecv = 1
-	case BufEventFireID:
-		n.evFire = 1
-	case BufEventSendID:
-		n.evSend = 1
-	case BufEventArriveID:
-		n.evArrive = 1
-	case BufEventDoneID:
-		n.evDone = 1
-	}
-}
-
 // setInteriorSlot records one interior grid slot's state on a node. slot = row*2 + col;
 // out-of-range (row,col) or unknown nodes are ignored. Persistent — survives across
 // snapshots until the next node-bead updates the slot.
@@ -777,18 +733,9 @@ func (s *SnapshotState) nodeRowIndex(nodeID string) int {
 	return -1
 }
 
-// clearTransients resets all transient node event flags to 0 after snapshot emit.
+// clearTransients drops the per-tick causal events now that they have been packed
+// into the emitted snapshot's EVENT block.
 func (s *SnapshotState) clearTransients() {
-	for i := range s.nodes {
-		n := &s.nodes[i]
-		n.evRecv = 0
-		n.evFire = 0
-		n.evSend = 0
-		n.evArrive = 0
-		n.evDone = 0
-	}
-	// Drop the per-tick causal events now that they have been packed into the emitted
-	// snapshot's EVENT block (same accumulate-then-flush lifecycle as the flags above).
 	s.pendingEvents = s.pendingEvents[:0]
 }
 
@@ -1034,7 +981,7 @@ func (s *SnapshotState) writeNodeBlock(buf []byte, off int, b *snapshotBuild) in
 			float32(n.radius), float32(n.sphereR),
 			float32(n.vrx), float32(n.vry), float32(n.vrz),
 			float32(n.frx), float32(n.fry), float32(n.frz),
-			n.evRecv, n.evFire, n.evSend, n.evArrive, n.evDone, n.selected, n.kindID,
+			n.selected, n.kindID,
 			b.labelOffs[i], b.labelLens[i], n.hovered, n.latchedSel)
 	}
 	return off + int(b.nodeCount)*BufNodeStride

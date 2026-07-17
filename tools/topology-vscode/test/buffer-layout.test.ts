@@ -15,7 +15,6 @@ import {
   readBeadLive,
   // Node
   NODE_COL_CX, NODE_COL_CY, NODE_COL_CZ, NODE_COL_RADIUS, NODE_COL_SPHERE_R,
-  NODE_COL_EV_RECV, NODE_COL_EV_FIRE, NODE_COL_EV_SEND, NODE_COL_EV_ARRIVE, NODE_COL_EV_DONE,
   NODE_COL_SELECTED,
   NODE_COL_KIND_ID,
   NODE_COL_LABEL_OFF, NODE_COL_LABEL_LEN, NODE_COL_HOVERED,
@@ -23,7 +22,6 @@ import {
   NODE_COL_VRX, NODE_COL_VRY, NODE_COL_VRZ, NODE_COL_FRX, NODE_COL_FRY, NODE_COL_FRZ,
   readNodeCX, readNodeCY, readNodeCZ, readNodeRadius, readNodeSphereR,
   readNodeVRX, readNodeVRY, readNodeVRZ, readNodeFRX, readNodeFRY, readNodeFRZ,
-  readNodeEvRecv, readNodeEvFire, readNodeEvSend, readNodeEvArrive, readNodeEvDone,
   readNodeSelected,
   readNodeKindId,
   readNodeLabelOff, readNodeLabelLen, readNodeHovered,
@@ -115,11 +113,11 @@ describe("buffer-layout — Bead block", () => {
 
 describe("buffer-layout — Node block", () => {
   it("stride equals packed field sizes", () => {
-    // 5×f32 + 6×f32 (vr/fr normals) + 5×u8 (events) + 1×u8 (selected)
+    // 5×f32 + 6×f32 (vr/fr normals) + 1×u8 (selected)
     //   + 1×u8 (kindId) + 2×u32 (label off/len)
     //   + 1×u8 (hovered) + 1×u8 (latchedSel)
-    //   = (5+6)×4 + 5 + 1 + 1 + 8 + 1 + 1 = 61
-    expect(NODE_STRIDE).toBe(61);
+    //   = (5+6)×4 + 1 + 1 + 8 + 1 + 1 = 56
+    expect(NODE_STRIDE).toBe(56);
   });
 
   it("read helpers decode known bytes correctly", () => {
@@ -137,11 +135,6 @@ describe("buffer-layout — Node block", () => {
     dv.setFloat32(NODE_COL_FRX, 0.4, true);
     dv.setFloat32(NODE_COL_FRY, 0.5, true);
     dv.setFloat32(NODE_COL_FRZ, 0.6, true);
-    dv.setUint8(NODE_COL_EV_RECV, 1);
-    dv.setUint8(NODE_COL_EV_FIRE, 0);
-    dv.setUint8(NODE_COL_EV_SEND, 1);
-    dv.setUint8(NODE_COL_EV_ARRIVE, 0);
-    dv.setUint8(NODE_COL_EV_DONE, 1);
     dv.setUint8(NODE_COL_SELECTED, 1);
     dv.setUint8(NODE_COL_KIND_ID, 5); // Pulse = index 5
     dv.setUint32(NODE_COL_LABEL_OFF, 7, true);
@@ -159,11 +152,6 @@ describe("buffer-layout — Node block", () => {
     expectF32(readNodeFRX(dv, 0), 0.4);
     expectF32(readNodeFRY(dv, 0), 0.5);
     expectF32(readNodeFRZ(dv, 0), 0.6);
-    expect(readNodeEvRecv(dv, 0)).toBe(1);
-    expect(readNodeEvFire(dv, 0)).toBe(0);
-    expect(readNodeEvSend(dv, 0)).toBe(1);
-    expect(readNodeEvArrive(dv, 0)).toBe(0);
-    expect(readNodeEvDone(dv, 0)).toBe(1);
     expect(readNodeSelected(dv, 0)).toBe(1);
     expect(readNodeKindId(dv, 0)).toBe(5);
     expect(readNodeLabelOff(dv, 0)).toBe(7);
