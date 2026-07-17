@@ -78,7 +78,6 @@ func TestSetNodeRow(t *testing.T) {
 		0.5, 0.25, // radius, sphereR
 		0.1, 0.2, 0.3, // vrx, vry, vrz
 		0.4, 0.5, 0.6, // frx, fry, frz
-		1, 0, 1, 0, 1, // evRecv, evFire, evSend, evArrive, evDone
 		1,    // selected
 		3,    // kindID (Input = index 3 in NODE_DEFS_ARRAY)
 		7, 4, // labelOff, labelLen
@@ -97,11 +96,6 @@ func TestSetNodeRow(t *testing.T) {
 	assertF32At(t, buf, BufNodeColFRX, 0.4, "FRX")
 	assertF32At(t, buf, BufNodeColFRY, 0.5, "FRY")
 	assertF32At(t, buf, BufNodeColFRZ, 0.6, "FRZ")
-	assertU8At(t, buf, BufNodeColEvRecv, 1, "EvRecv")
-	assertU8At(t, buf, BufNodeColEvFire, 0, "EvFire")
-	assertU8At(t, buf, BufNodeColEvSend, 1, "EvSend")
-	assertU8At(t, buf, BufNodeColEvArrive, 0, "EvArrive")
-	assertU8At(t, buf, BufNodeColEvDone, 1, "EvDone")
 	assertU8At(t, buf, BufNodeColSelected, 1, "Selected")
 	assertU8At(t, buf, BufNodeColKindId, 3, "KindId")
 	assertU32At(t, buf, BufNodeColLabelOff, 7, "LabelOff")
@@ -167,9 +161,9 @@ func TestBeadStrideIsPackedSize(t *testing.T) {
 }
 
 func TestNodeStrideIsPackedSize(t *testing.T) {
-	// Node block: 5×f32 + 6×f32 (vr/fr normals) + 5×u8 (events) + 1×u8 (selected) + 1×u8 (kindID) + 2×u32 (label off/len) + 1×u8 (hovered) + 1×u8 (latchedSel)
-	//           = (5+6)×4 + 5 + 1 + 1 + 8 + 1 + 1 = 61
-	want := 5*4 + 6*4 + 5*1 + 1*1 + 1*1 + 2*4 + 1*1 + 1*1
+	// Node block: 5×f32 + 6×f32 (vr/fr normals) + 1×u8 (selected) + 1×u8 (kindID) + 2×u32 (label off/len) + 1×u8 (hovered) + 1×u8 (latchedSel)
+	//           = (5+6)×4 + 1 + 1 + 8 + 1 + 1 = 56
+	want := 5*4 + 6*4 + 1*1 + 1*1 + 2*4 + 1*1 + 1*1
 	if BufNodeStride != want {
 		t.Errorf("BufNodeStride = %d, want %d (packed size)", BufNodeStride, want)
 	}

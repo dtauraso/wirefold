@@ -148,7 +148,7 @@ func TestSnapshotRoundTrip(t *testing.T) {
 	// Toggle an overlay flag.
 	s.Update(T.Event{Kind: T.KindSceneTori, Visible: true})
 
-	// Inject a send event to build the srcToDest mapping (so arrive can route EvArrive).
+	// Inject a send event (recorded into the EVENT block by recordEvent).
 	s.Update(T.Event{
 		Kind: T.KindSend, Node: "node-A", Port: "out", Value: 42,
 		Target: "node-B",
@@ -161,7 +161,7 @@ func TestSnapshotRoundTrip(t *testing.T) {
 		X: 2.5, Y: 3.5, Z: 4.5, Value: 42, F: 0.6, Bead: 1,
 	})
 
-	// Set a transient event on node-A (recv) and node-B (arrive via srcToDest lookup).
+	// Inject recv/arrive events too (they land in the EVENT block only; no per-node columns).
 	s.Update(T.Event{Kind: T.KindRecv, Node: "node-A", Port: "in", Value: 42})
 	s.Update(T.Event{Kind: T.KindArrive, Node: "node-A", Port: "out", Value: 42, Bead: 2})
 
@@ -242,19 +242,14 @@ func TestSnapshotRoundTrip(t *testing.T) {
 	// ── Node block ───────────────────────────────────────────────────────────
 	nodeOff := BufHeaderSize + int(beadCount)*BufBeadStride
 
-	// node-A (row 0): geometry + evRecv=1 (set above) + evArrive=0 (arrive was on dest node-B)
+	// node-A (row 0): geometry only (recv/arrive events live in the EVENT block, not
+	// per-node columns).
 	nA := nodeOff
 	if readF32(snap, nA+BufNodeColCX) != 1.0 {
 		t.Errorf("nodeA.CX: got %v, want 1.0", readF32(snap, nA+BufNodeColCX))
 	}
 	if readF32(snap, nA+BufNodeColRadius) != 0.5 {
 		t.Errorf("nodeA.Radius: got %v, want 0.5", readF32(snap, nA+BufNodeColRadius))
-	}
-	if snap[nA+BufNodeColEvRecv] != 1 {
-		t.Errorf("nodeA.EvRecv: got %v, want 1", snap[nA+BufNodeColEvRecv])
-	}
-	if snap[nA+BufNodeColEvArrive] != 0 {
-		t.Errorf("nodeA.EvArrive: got %v, want 0 (arrive routes to dest node-B)", snap[nA+BufNodeColEvArrive])
 	}
 	// Ring-plane normals (vr vertical, fr flat) reach the node columns for SphereRing.
 	if readF32(snap, nA+BufNodeColVRZ) != 1.0 {
@@ -264,13 +259,10 @@ func TestSnapshotRoundTrip(t *testing.T) {
 		t.Errorf("nodeA.FRX: got %v, want 1.0", readF32(snap, nA+BufNodeColFRX))
 	}
 
-	// node-B (row 1): geometry + evArrive=1 (arrive routed from node-A/out → node-B)
+	// node-B (row 1): geometry only.
 	nB := nodeOff + BufNodeStride
 	if readF32(snap, nB+BufNodeColCX) != 4.0 {
 		t.Errorf("nodeB.CX: got %v, want 4.0", readF32(snap, nB+BufNodeColCX))
-	}
-	if snap[nB+BufNodeColEvArrive] != 1 {
-		t.Errorf("nodeB.EvArrive: got %v, want 1", snap[nB+BufNodeColEvArrive])
 	}
 
 	// ── Edge block ───────────────────────────────────────────────────────────
@@ -608,8 +600,9 @@ func TestSnapshotFraming(t *testing.T) {
 	}
 }
 
-// TestTransientFlagsCleared verifies that transient event flags are reset to
-// zero after each snapshot emit (they must not bleed into subsequent ticks).
+// TestTransientFlagsCleared verifies that the per-tick causal events accumulated
+// in pendingEvents are reset after each snapshot emit (they must not bleed into
+// subsequent ticks' EVENT block).
 func TestTransientFlagsCleared(t *testing.T) {
 	s := NewSnapshotState(nil)
 
@@ -618,7 +611,7 @@ func TestTransientFlagsCleared(t *testing.T) {
 		NX: 0, NY: 0, NZ: 0, Radius: 1, SphereR: 0.5,
 	})
 
-	// Set evFire on n1 and emit (via position).
+	// Fire on n1 and emit (via position).
 	s.Update(T.Event{Kind: T.KindFire, Node: "n1"})
 	s.Update(T.Event{
 		Kind: T.KindPosition, Node: "n1", Port: "out",
@@ -626,11 +619,11 @@ func TestTransientFlagsCleared(t *testing.T) {
 	})
 
 	// After the position-triggered snapshot, transients should be cleared.
-	// Build a second snapshot immediately (without setting any event flags).
+	// Build a second snapshot immediately (without producing any new events).
 	snap := s.BuildSnapshot()
-	nodeOff := BufHeaderSize + BufBeadStride // 1 live bead
-	if snap[nodeOff+BufNodeColEvFire] != 0 {
-		t.Errorf("EvFire not cleared after snapshot: got %v, want 0", snap[nodeOff+BufNodeColEvFire])
+	eventCount := readU32(snap, 24)
+	if eventCount != 0 {
+		t.Errorf("eventCount not cleared after snapshot: got %d, want 0", eventCount)
 	}
 }
 
