@@ -487,6 +487,47 @@ func TestHoverColumn(t *testing.T) {
 	}
 }
 
+// TestLayoutLinkUnresolvableEndpointFiltered verifies that a layout-link pair whose endpoint
+// node id never resolves to a live buffer node row (nodeRowIndex == -1) is dropped from the
+// LayoutLink block entirely — it must not be packed with SrcNodeRow/DstNodeRow == -1, which
+// would crash the webview reader. A control pair whose both endpoints resolve is kept.
+func TestLayoutLinkUnresolvableEndpointFiltered(t *testing.T) {
+	s := NewSnapshotState(nil)
+	s.Update(T.Event{Kind: T.KindNodeGeometry, Node: "n0", Radius: 1})
+	s.Update(T.Event{Kind: T.KindNodeGeometry, Node: "n1", Radius: 1})
+
+	// Control: both endpoints resolve.
+	s.Update(T.Event{Kind: T.KindLayoutLink, Node: "n0", Target: "n1"})
+	// Broken: "ghost" was never registered as a node, so nodeRowIndex("ghost") == -1.
+	s.Update(T.Event{Kind: T.KindLayoutLink, Node: "n0", Target: "ghost"})
+
+	snap := s.BuildSnapshot()
+
+	beadCount := int(readU32(snap, 4))
+	nodeCount := int(readU32(snap, 8))
+	edgeCount := int(readU32(snap, 12))
+	layoutLinkCount := int(readU32(snap, 36))
+
+	if layoutLinkCount != 1 {
+		t.Fatalf("layoutLinkCount: got %d, want 1 (unresolvable pair must be dropped)", layoutLinkCount)
+	}
+
+	llOff := BufHeaderSize +
+		beadCount*BufBeadStride +
+		nodeCount*BufNodeStride +
+		nodeCount*BufInteriorSlotsPerNode*BufInteriorStride +
+		edgeCount*BufEdgeStride
+
+	for i := 0; i < layoutLinkCount; i++ {
+		base := llOff + i*BufLayoutLinkStride
+		src := readI32(snap, base+BufLayoutLinkColSrcNodeRow)
+		dst := readI32(snap, base+BufLayoutLinkColDstNodeRow)
+		if src < 0 || dst < 0 {
+			t.Errorf("layout link row %d: SrcNodeRow=%d DstNodeRow=%d, want both >= 0", i, src, dst)
+		}
+	}
+}
+
 // parseFrameStream reads all framed snapshots from raw and returns their payloads.
 // Each frame is [len:u32-LE][payload]; returns an error string on malformed input.
 func parseFrameStream(t *testing.T, raw []byte) [][]byte {
