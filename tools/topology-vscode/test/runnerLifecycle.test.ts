@@ -189,6 +189,48 @@ describe("lastSnapshot cache (getLastSnapshot) — resend replacement", () => {
   });
 });
 
+describe("fd3 partial-frame parse state does not survive a respawn", () => {
+  // Pins the fix: stdoutBuf/fd3Buf were runner-lifetime fields reset only at declaration,
+  // so a process killed mid-frame left a partial frame that concatenated with the NEXT
+  // (respawned) process's first chunk — splitFrames then read a frame length from inside
+  // the stale bytes and froze/starved the scene. run() now mints fresh parse state at every
+  // spawn (freshStreamState), so a dead process's tail can never prefix the next stream.
+
+  // Build a length-prefixed fd3 frame: [len:u32-LE][body].
+  function frameBuf(body: number[]): Buffer {
+    const out = Buffer.alloc(4 + body.length);
+    out.writeUInt32LE(body.length, 0);
+    Buffer.from(body).copy(out, 4);
+    return out;
+  }
+
+  // The fd3 "data" listener run() registered on this process's stdio[3] stub.
+  function fd3DataCb(proc: FakeProc): (d: Buffer) => void {
+    const on = proc.stdio[3]!.on as ReturnType<typeof vi.fn>;
+    const call = on.mock.calls.find((c) => c[0] === "data");
+    return call![1] as (d: Buffer) => void;
+  }
+
+  it("discards a dead process's leftover partial frame before decoding the next process's stream", () => {
+    const snaps: number[][] = [];
+    const r = new BuildAndRunRunner((msg) => snaps.push([...new Uint8Array(msg.buffer)]));
+    r.run();
+
+    // proc0 dies mid-frame: header claims an 8-byte body, only 2 body bytes arrive.
+    fd3DataCb(spawned[0])(frameBuf([1, 2, 3, 4, 5, 6, 7, 8]).slice(0, 6));
+    expect(snaps).toEqual([]); // incomplete — nothing decoded yet
+
+    // Natural exit → respawn (proc1).
+    spawned[0].emit("close", 0);
+    expect(spawned.length).toBe(2);
+
+    // proc1 sends ONE complete, valid frame. With the leftover discarded it decodes cleanly;
+    // if the stale 6 bytes had carried over, splitFrames would have mis-framed into garbage.
+    fd3DataCb(spawned[1])(frameBuf([0xaa, 0xbb]));
+    expect(snaps).toEqual([[0xaa, 0xbb]]);
+  });
+});
+
 describe("respawn / looping", () => {
   it("a natural exit while looping respawns", () => {
     const r = newRunner();
