@@ -1,28 +1,39 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Verifies that the SendRule string constants in nodes/Wiring/ports.go match
-# the SEND_RULES array in tools/topology-vscode/src/schema/types.ts.
+# Verifies that the SendRule string constants declared anywhere in the
+# nodes/Wiring/ Go package match the SEND_RULES array in
+# tools/topology-vscode/src/schema/types.ts.
 # Both sides are hand-maintained; this guard fails on any divergence.
 # Exit 0 if clean; exit 1 with a report if they diverge.
+#
+# NOTE: SendRule consts are not confined to one file (ports.go today) — a
+# future file split (e.g. ports_extra.go) could add a const elsewhere in the
+# same package. Scrape ALL tracked .go files under nodes/Wiring/, not one
+# hardcoded filename, so the guard can't go blind on a split.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-PORTS_GO="$REPO_ROOT/nodes/Wiring/ports.go"
+WIRING_DIR="$REPO_ROOT/nodes/Wiring"
 TYPES_TS="$REPO_ROOT/tools/topology-vscode/src/schema/types.ts"
 
-for f in "$PORTS_GO" "$TYPES_TS"; do
-  if [[ ! -f "$f" ]]; then
-    echo "send-rule-parity: MISCONFIGURED — file not found: $f" >&2
-    exit 1
-  fi
-done
+if [[ ! -d "$WIRING_DIR" ]]; then
+  echo "send-rule-parity: MISCONFIGURED — dir not found: $WIRING_DIR" >&2
+  exit 1
+fi
+if [[ ! -f "$TYPES_TS" ]]; then
+  echo "send-rule-parity: MISCONFIGURED — file not found: $TYPES_TS" >&2
+  exit 1
+fi
 
-# Extract SendRule const values from Go:
+# Extract SendRule const values from every tracked .go file in nodes/Wiring/:
 #   lines of the form:  RuleFoo SendRule = "someValue"
 rules_from_go() {
-  grep -aE 'SendRule[[:space:]]*=[[:space:]]*"[^"]+"' "$PORTS_GO" \
+  local go_files
+  go_files=$(cd "$REPO_ROOT" && git ls-files 'nodes/Wiring/*.go')
+  [[ -z "$go_files" ]] && return
+  ( cd "$REPO_ROOT" && grep -haE 'SendRule[[:space:]]*=[[:space:]]*"[^"]+"' $go_files ) \
     | grep -o '"[^"]*"' \
     | tr -d '"' \
     | sort
