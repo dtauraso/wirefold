@@ -12,7 +12,6 @@ import {
   SHADING_PARAM_SCENE_AMBIENT_INTENSITY,
   SHADING_PARAM_SCENE_DIR_INTENSITY,
 } from "../../schema/shading-params";
-import { ProceduralEnvProvider } from "./scene-env";
 import { BUFFER_NODE_TAG, BUFFER_PORT_TAG, BUFFER_EDGE_TAG, BUFFER_RING_TAG } from "./buffer-scene";
 import { HANDHOLD_TERM_TAG } from "./NavGuides";
 
@@ -157,10 +156,10 @@ export function Scene({
   >;
 }) {
   return (
-    <ProceduralEnvProvider>
+    <>
       <RaycasterHelper onPickRequest={onPickRequest} />
       <ambientLight intensity={SHADING_PARAM_SCENE_AMBIENT_INTENSITY} />
       <directionalLight position={[0, 0, 10]} intensity={SHADING_PARAM_SCENE_DIR_INTENSITY} />
-    </ProceduralEnvProvider>
+    </>
   );
 }

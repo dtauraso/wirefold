@@ -128,7 +128,8 @@ export function ThreeView() {
               the binary buffer (Go-owned node centers/radii/sphereR + selection column). */}
           <NavGuides />
           {/* BufferScene's node bodies use a glassy PMREM-lit meshPhysicalMaterial, so it needs
-              the env texture. Scene's own ProceduralEnvProvider wraps only the lighting. */}
+              the env texture. This is the sole ProceduralEnvProvider mount in the Canvas —
+              Scene's lighting/RaycasterHelper don't read EnvTexContext, so they aren't wrapped. */}
           <ProceduralEnvProvider>
             <BufferScene cameraRef={cameraRef} />
           </ProceduralEnvProvider>
