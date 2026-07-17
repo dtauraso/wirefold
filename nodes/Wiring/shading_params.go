@@ -54,6 +54,13 @@ const ShadingParamNodeEnvMapIntensity = 1.0
 // ShadingParamNodeOpacity is the node-body opacity.
 const ShadingParamNodeOpacity = 0.92
 
+// --- Node ring: border torus (NodeInstances) -------------------------------
+// The border ring drawn around each node body (meshStandardMaterial torus).
+// Mirrors the roughness on the ring material in NodeInstances.tsx exactly.
+
+// ShadingParamRingRoughness is the surface roughness of the node border ring.
+const ShadingParamRingRoughness = 0.6
+
 // --- Procedural environment map (ProceduralEnvProvider) -------------------
 // A tiny gradient-sky scene baked into a PMREM env texture. The env-map vertex
 // tint is interpolated between a top color and a bottom color over the sky
