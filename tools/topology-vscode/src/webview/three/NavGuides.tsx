@@ -311,6 +311,11 @@ export function NavGuides() {
   // since it is constant after the first snapshot.
   const sceneSphereRef = useRef<{ center: THREE.Vector3; radius: number }>({ center: new THREE.Vector3(), radius: 100 });
   useFrame(() => {
+    // Visibility gate FIRST: if none of the guides this component renders is on, skip the
+    // per-node decode/allocate work entirely (decodeNavNodes/sceneSphereFromSnapshot/
+    // navSignature all allocate per node, per frame). Mirrors the exact flag set the JSX
+    // below gates on, read early instead of only at render time.
+    if (!showTori && !showScenePoles && !showNodePoles && !showSelPoles && !showHandholds) return;
     const snap = getLatestSnapshot();
     if (!snap) return;
     const decoded = decodeSnapshot(snap);
