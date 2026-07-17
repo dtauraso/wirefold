@@ -143,44 +143,6 @@ func TestGestureCtrlWheelZoomsToCursor(t *testing.T) {
 	}
 }
 
-// Edge creation by port→port drag reuses the EXISTING create-edge slot path: dropping an
-// unconnected OUT port onto another node's IN port un-silences (Restore) that dest slot's
-// wire — the same effect as an op=create edit.
-func TestGestureWireCreatesEdgeViaExistingCreatePath(t *testing.T) {
-	md := newGestureMD(canonicalViewpoint())
-	md.SetPortRowResolver(stubPortRows{
-		{Node: "A", Port: "out", IsInput: false},
-		{Node: "B", Port: "in", IsInput: true},
-	})
-	// A silenced (deleted) wire at dest slot B.in — as if the edge had been deleted.
-	pw := NewPacedWire(10, 1)
-	pw.Target, pw.TargetHandle = "B", "in"
-	pw.Delete() // silence it (as if the edge had been deleted)
-	slotReg := SlotRegistry{"B.in": pw}
-
-	down := rawEvent("pointerdown", 400, 300)
-	down.Hit = rawHit{Kind: "port", PortRow: 0, IsInput: false}
-	md.HandleRawInput(down, slotReg, nil)
-	if md.gest.wireNode != "A" || md.gest.wirePort != "out" || md.gest.wireInput {
-		t.Fatalf("after port down: wireNode=%q wirePort=%q wireInput=%v", md.gest.wireNode, md.gest.wirePort, md.gest.wireInput)
-	}
-	// Drag past slop → wiring.
-	md.HandleRawInput(rawEvent("pointermove", 460, 300), slotReg, nil)
-	if md.gest.phase != gestWiring {
-		t.Fatalf("phase=%v want wiring", md.gest.phase)
-	}
-	// Drop on B's IN port → create-edge (Restore) on B.in.
-	up := rawEvent("pointerup", 460, 300)
-	up.Hit = rawHit{Kind: "port", PortRow: 1, IsInput: true}
-	md.HandleRawInput(up, slotReg, nil)
-	if pw.deleted {
-		t.Fatalf("wire B.in still deleted; create-edge path did not Restore it")
-	}
-	if md.gest.phase != gestIdle {
-		t.Fatalf("after wire up phase=%v want idle", md.gest.phase)
-	}
-}
-
 // stubNodeRows is a fixed node-row table for the new-system node-hit resolution tests: it
 // maps a numeric buffer NODE-ROW index → node id, mirroring Buffer's
 // SnapshotState.LookupNodeRow without pulling in the Buffer package.
@@ -275,46 +237,6 @@ func TestGestureClickSelectsEdgeGoOwned(t *testing.T) {
 	md.HandleRawInput(rawEvent("pointerup", 400, 300), nil, nil)
 	if md.selected != "" || md.selectedEdge != "" {
 		t.Fatalf("after empty click: selected=%q selectedEdge=%q want empty,empty (cleared)", md.selected, md.selectedEdge)
-	}
-}
-
-// New-system wiring: a port hit carries ONLY a numeric buffer PORT-ROW index (no port-name
-// string). The gesture FSM resolves each row → (node, port) via its injected port-row table,
-// then drives the SAME create-edge slot path. Drives a full port-row→port-row drag and
-// asserts the dest wire is un-silenced (edge created) — end-to-end with NO strings.
-func TestGestureWireFromPortRows(t *testing.T) {
-	md := newGestureMD(canonicalViewpoint())
-	// Port-row table: row 0 = A.out (output), row 1 = B.in (input).
-	md.SetPortRowResolver(stubPortRows{
-		{Node: "A", Port: "out", IsInput: false},
-		{Node: "B", Port: "in", IsInput: true},
-	})
-
-	pw := NewPacedWire(10, 1)
-	pw.Target, pw.TargetHandle = "B", "in"
-	pw.Delete()
-	slotReg := SlotRegistry{"B.in": pw}
-
-	// Grab A's OUT port by ROW INDEX 0 (Id empty — the string sidecar does not exist).
-	down := rawEvent("pointerdown", 400, 300)
-	down.Hit = rawHit{Kind: "port", PortRow: 0}
-	md.HandleRawInput(down, slotReg, nil)
-	if md.gest.wireNode != "A" || md.gest.wirePort != "out" || md.gest.wireInput {
-		t.Fatalf("port-row down: wireNode=%q wirePort=%q wireInput=%v", md.gest.wireNode, md.gest.wirePort, md.gest.wireInput)
-	}
-	md.HandleRawInput(rawEvent("pointermove", 460, 300), slotReg, nil)
-	if md.gest.phase != gestWiring {
-		t.Fatalf("phase=%v want wiring", md.gest.phase)
-	}
-	// Drop on B's IN port by ROW INDEX 1.
-	up := rawEvent("pointerup", 460, 300)
-	up.Hit = rawHit{Kind: "port", PortRow: 1}
-	md.HandleRawInput(up, slotReg, nil)
-	if pw.deleted {
-		t.Fatalf("wire B.in still deleted; port-row create-edge path did not Restore it")
-	}
-	if md.gest.phase != gestIdle {
-		t.Fatalf("after wire up phase=%v want idle", md.gest.phase)
 	}
 }
 

@@ -14,14 +14,15 @@
 //
 // MSG_TYPES_DOC_START
 //
-//  1. "edit" — geometry-CRUD. EXACTLY THREE ops: create/update/delete.
-//     create/delete add or remove an edge by destination slot. update sets an ATTRIBUTE on
-//     a typed entity; the sole live entity is overlays:
-//       create (record 20): un-silence the destination slot's wire.
-//       delete (record 21): silence it + cancel any in-flight bead.
+//  1. "edit" — geometry-CRUD. The sole op is update, which sets an ATTRIBUTE on a
+//     typed entity; the live entities are overlays and clock:
 //       update overlays attr=toggle: flip one named overlay flag.
-//     Camera / node-move / port-anchor are NOT edits: the gesture FSM produces them
-//     in-process from raw-input, so they never cross this seam as an edit op.
+//       update clock attr=speed: set the playback multiplier.
+//     A create/delete op pair (records 20/21) once added or removed an edge by
+//     destination slot; both were removed end-to-end (no live TS sender, and create's
+//     only trigger tore down a live wire's beads via PacedWire.Restore) — records 20/21
+//     are now GAPS. Camera / node-move / port-anchor are NOT edits: the gesture FSM
+//     produces them in-process from raw-input, so they never cross this seam as an edit op.
 //
 //  2. "save" — Go persists its OWN authoritative scene state (overlay visibility →
 //     scene.json, preserving the Go-owned cameraPolar). Bare command, no payload; the
@@ -65,17 +66,19 @@ type EdgeEndpoints struct {
 	TargetHandle string
 }
 
-// stdinCRUDPayload holds the destination-slot fields for the create/delete ops.
+// stdinCRUDPayload held the destination-slot fields for the removed create/delete edit
+// ops. Those ops were deleted end-to-end (no live TS sender ever emitted them, and their
+// only trigger tore down live in-flight beads via PacedWire.Restore()); the struct is kept
+// embedded for now since nothing currently populates it.
 type stdinCRUDPayload struct {
 	Target       string
 	TargetHandle string
 }
 
-// stdinMsg is the single editor→Go bridge shape. For type=="edit", op is one of exactly
-// three values (create/update/delete). create/delete name a destination slot (Target/
-// TargetHandle). op=="update" sets an attribute on a typed entity — the sole live entity is
-// overlays: Attr=="toggle" (Flag names one overlay). The other top-level types are
-// raw-input (Event) and the bare command (save).
+// stdinMsg is the single editor→Go bridge shape. For type=="edit", op is the sole
+// remaining value "update", which sets an attribute on a typed entity — the sole live
+// entity is overlays: Attr=="toggle" (Flag names one overlay). The other top-level types
+// are raw-input (Event) and the bare command (save).
 //
 // These structs carry NO json tags: this seam is framed binary end to end and nothing
 // unmarshals them (input_codec.go decodes the record). The wire field order is the
@@ -149,8 +152,9 @@ type rawHit struct {
 }
 
 // SlotRegistry maps "targetNodeId.targetHandle" → *PacedWire.
-// It is the stable, slot-keyed identity used to resolve an edit's create/delete op
-// to the wire owned by that destination port.
+// It is the stable, slot-keyed identity for the wire owned by each destination port,
+// consumed by md.Bind to seed edgeMovers (the create/delete edit ops that once indexed
+// it were removed end-to-end).
 type SlotRegistry map[string]*PacedWire
 
 // RunStdinReader reads FRAMED BINARY records from r, dispatching geometry-CRUD "edit"
@@ -161,9 +165,9 @@ type SlotRegistry map[string]*PacedWire
 // exit reclaims it), but a caller that wants the goroutine itself to unwind on cancel
 // must close r. Call in a goroutine alongside the node run loop.
 //
-// slotReg is keyed by "target.targetHandle" and resolves create/delete ops to the
-// destination port's wire. md may be nil; if non-nil, update (node-move)
-// ops mail-sort each entry to the owning node/edge goroutine's inbox.
+// slotReg is keyed by "target.targetHandle" (the destination port's wire); it stays
+// live for delivery/movers though no edit op indexes it any longer. md may be nil; if
+// non-nil, update (node-move) ops mail-sort each entry to the owning node/edge goroutine's inbox.
 // tr emits control breadcrumbs for the edit ops.
 // maxFrameBytes bounds a single framed-binary record: the reader buffer size and the
 // upper limit a decoded [len:u32] is allowed to request, so a corrupt/hostile length can't
@@ -230,7 +234,7 @@ func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *
 			// MSG_TYPES_START
 			switch msg.Type {
 			case "edit":
-				applyEdit(msg, slotReg, md, tr, clk)
+				applyEdit(msg, md, tr, clk)
 			case "raw-input":
 				handleRawInputMsg(msg, slotReg, md, tr)
 			case "save":
@@ -268,72 +272,24 @@ func handleSaveMsg(md *MoveDispatch) {
 // overlay_gen.go from OVERLAY_FLAG_NAMES. Parity guarded by check-edit-op-parity.sh via
 // the OVERLAY_TOGGLES sentinels in overlay_gen.go.
 
-// applyEdit dispatches one geometry-CRUD edit by its op. There are EXACTLY THREE
-// ops: create/update/delete (matched by value so they stay invisible to the
-// message-kind-parity guard, which fences only top-level msg.Type kinds).
+// applyEdit dispatches one geometry-CRUD edit by its op. The sole op is update
+// (matched by value so it stays invisible to the message-kind-parity guard, which
+// fences only top-level msg.Type kinds).
 //
-//   - create: un-silence the destination port's wire (edge re-added) — Restore.
-//   - delete: silence the wire AND cancel any in-flight bead's clock-delivery,
-//     echoing pulse-cancelled (PacedWire.Delete owns both, atomically).
-//   - update: set an ATTRIBUTE on a typed entity (msg.Kind). The sole live entity is
-//     overlays:
-//       overlays + attr "toggle": flip the named flag via overlayToggles.
-//     (Camera / node-move / port-anchor edits are now produced in-process by
-//     the gesture FSM from raw-input, so they no longer cross this seam.
-//     The former attr="set" full-visibility install was removed: its only caller, the
-//     load-time main.tsx push, was deleted; no live TS sender remains.)
+//   - update: set an ATTRIBUTE on a typed entity (msg.Kind). Live entities are
+//     overlays (attr "toggle": flip the named flag) and clock (attr "speed").
+//     (Camera / node-move / port-anchor edits are produced in-process by the
+//     gesture FSM from raw-input, so they never cross this seam.)
+//
+// The create/delete edge ops were removed end-to-end: no TS sender ever emitted them,
+// and the create path's only live trigger — a port-drop gesture — tore down a live
+// wire's in-flight beads via PacedWire.Restore. The destination-keyed SlotRegistry
+// stays live for delivery/movers (md.Bind), but the reader no longer indexes it here.
 //
 // Unknown ops/kinds/attrs are ignored (forward-compat).
-
-// destPortKey is the slot-registry key for an edit's destination port
-// ("target.targetHandle"), matching how slotReg is keyed at load.
-func destPortKey(msg stdinMsg) string {
-	return msg.Target + "." + msg.TargetHandle
-}
-
-// createEdgeInSlot un-silences the wire at the given destination slot — the op=create
-// path (an existing edge whose slot was silenced is RESTORED so it carries beads again).
-// Returns true when a matching slot existed. Shared by applyEdit's create op AND the
-// gesture FSM's wire-completion outcome, so a port→port drag reuses the EXACT existing
-// create-edge path rather than any new add-edge machinery. tr may be nil (Breadcrumb
-// tolerates a nil receiver).
-func createEdgeInSlot(slotReg SlotRegistry, dstNode, dstPort string, tr *T.Trace) bool {
-	if dstNode == "" || dstPort == "" {
-		return false
-	}
-	tr.Breadcrumb("edit-create-recv", dstNode, dstPort, "")
-	destKey := dstNode + "." + dstPort
-	pw, found := slotReg[destKey]
-	if !found {
-		tr.Breadcrumb("edit-create-notfound", dstNode, dstPort, destKey)
-		return false
-	}
-	tr.Breadcrumb("edit-create-restore", pw.Target, pw.TargetHandle, "")
-	pw.Restore()
-	return true
-}
-
-func applyEdit(msg stdinMsg, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace, clk Clock) {
+func applyEdit(msg stdinMsg, md *MoveDispatch, tr *T.Trace, clk Clock) {
 	// EDIT_OPS_START
 	switch msg.Op {
-	case "create":
-		createEdgeInSlot(slotReg, msg.Target, msg.TargetHandle, tr)
-	case "delete":
-		if msg.Target == "" || msg.TargetHandle == "" {
-			return
-		}
-		tr.Breadcrumb("edit-delete-recv", msg.Target, msg.TargetHandle, "")
-		destKey := destPortKey(msg)
-		pw, found := slotReg[destKey]
-		if !found {
-			tr.Breadcrumb("edit-delete-notfound", msg.Target, msg.TargetHandle, destKey)
-			return
-		}
-		// "delete" breadcrumb emitted here (PacedWire.Delete has no Trace reference)
-		// carrying the wire's authoritative slot identity and the dest key. Delete cancels
-		// any in-flight bead's clock-delivery and echoes pulse-cancelled atomically.
-		tr.Breadcrumb("delete", pw.Target, pw.TargetHandle, destKey)
-		pw.Delete()
 	case "update":
 		applyUpdate(msg, md, tr, clk)
 	}

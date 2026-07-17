@@ -17,9 +17,11 @@
 // into the shared orderings. There is NO JSON on the wire: every record is fully numeric.
 // The live editor→Go traffic is raw-input, overlays toggle (numeric flag-id), and
 // the bare `save` COMMAND (Go persists its OWN authoritative scene state).
-// create/delete/edit-update record kinds stay defined (the
-// 3-op create/update/delete concept), though the gesture FSM now produces edge create/delete
-// in-process from raw-input.
+// edit-create and edit-delete record kinds were REMOVED end-to-end — no live TS
+// sender ever emitted them, and their only trigger (a port-drop gesture calling
+// PacedWire.Restore()) unconditionally tore down a live wire's in-flight beads. Their
+// kind bytes (20, 21) are left as GAPS below, never renumbered. Only edit-update
+// remains.
 //
 // Kind 3 was inKindResend (removed: the ext host now caches the last fd3 snapshot and
 // replays it on webview "ready" instead of asking Go to re-emit geometry — see
@@ -39,8 +41,8 @@ import (
 // to INPUT_LAYOUT_FINGERPRINT in input-layout.ts (guarded by check-input-layout-parity.sh).
 // Bump on both sides whenever any record kind, field, or enum ordering changes.
 //
-// INPUT_LAYOUT_FINGERPRINT: v17 kinds=save:4,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays,clock updateAttrs=toggle,speed overlayFlags=tori,scenePoles,nodePoles,selSpherePoles,handholds,labelsGlobal,overlays,doubleLinks
-const InputLayoutFingerprint = "v17 kinds=save:4,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays,clock updateAttrs=toggle,speed overlayFlags=tori,scenePoles,nodePoles,selSpherePoles,handholds,labelsGlobal,overlays,doubleLinks"
+// INPUT_LAYOUT_FINGERPRINT: v18 kinds=save:4,raw-input:10,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays,clock updateAttrs=toggle,speed overlayFlags=tori,scenePoles,nodePoles,selSpherePoles,handholds,labelsGlobal,overlays,doubleLinks
+const InputLayoutFingerprint = "v18 kinds=save:4,raw-input:10,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays,clock updateAttrs=toggle,speed overlayFlags=tori,scenePoles,nodePoles,selSpherePoles,handholds,labelsGlobal,overlays,doubleLinks"
 
 // Record kind bytes (first byte of every record).
 const (
@@ -49,9 +51,10 @@ const (
 	// Kind 3 (inKindResend) removed — intentional gap, see comment above.
 	inKindSave = 4 // save  — Go persists its OWN scene state (bare command)
 	// Kind 5 (inKindFadeToggle) removed — the fade feature was deleted end-to-end.
-	inKindRawInput   = 10 // raw pointer/wheel/home event
-	inKindEditCreate = 20 // edit op=create (2 strings)
-	inKindEditDelete = 21 // edit op=delete (2 strings)
+	inKindRawInput = 10 // raw pointer/wheel/home event
+	// Kind 20 (inKindEditCreate) removed — edge creation via edit op was deleted
+	// end-to-end. Intentional gap, per house style (never renumber a live wire value).
+	// Kind 21 (inKindEditDelete) removed — same removal as above.
 	inKindEditUpdate = 22 // edit op=update (entity byte + attr byte + numeric payload)
 )
 
@@ -145,15 +148,6 @@ func (r *recReader) i32() (int32, error) {
 	return v, nil
 }
 
-func (r *recReader) u32() (uint32, error) {
-	if r.pos+4 > len(r.b) {
-		return 0, errShortRecord
-	}
-	v := binary.LittleEndian.Uint32(r.b[r.pos:])
-	r.pos += 4
-	return v, nil
-}
-
 func (r *recReader) f64() (float64, error) {
 	if r.pos+8 > len(r.b) {
 		return 0, errShortRecord
@@ -161,19 +155,6 @@ func (r *recReader) f64() (float64, error) {
 	v := math.Float64frombits(binary.LittleEndian.Uint64(r.b[r.pos:]))
 	r.pos += 8
 	return v, nil
-}
-
-func (r *recReader) str() (string, error) {
-	n, err := r.u32()
-	if err != nil {
-		return "", err
-	}
-	if r.pos+int(n) > len(r.b) {
-		return "", errShortRecord
-	}
-	s := string(r.b[r.pos : r.pos+int(n)])
-	r.pos += int(n)
-	return s, nil
 }
 
 func (r *recReader) boolByte() (bool, error) {
@@ -205,21 +186,6 @@ func decodeInputRecord(rec []byte) (stdinMsg, bool) {
 			return stdinMsg{}, false
 		}
 		return stdinMsg{Type: "raw-input", Event: &ev}, true
-	case inKindEditCreate, inKindEditDelete:
-		target, err1 := r.str()
-		handle, err2 := r.str()
-		if err1 != nil || err2 != nil {
-			return stdinMsg{}, false
-		}
-		op := "create"
-		if rec[0] == inKindEditDelete {
-			op = "delete"
-		}
-		return stdinMsg{
-			Type:             "edit",
-			Op:               op,
-			stdinCRUDPayload: stdinCRUDPayload{Target: target, TargetHandle: handle},
-		}, true
 	case inKindEditUpdate:
 		// [entityKind][attr][numeric payload]. entity="overlays" (attr toggle, u8 flag-id).
 		kindByte, err1 := r.u8()
@@ -326,10 +292,6 @@ type recWriter struct{ b []byte }
 func (w *recWriter) u8(v byte)     { w.b = append(w.b, v) }
 func (w *recWriter) i32(v int32)   { w.b = binary.LittleEndian.AppendUint32(w.b, uint32(v)) }
 func (w *recWriter) f64(v float64) { w.b = binary.LittleEndian.AppendUint64(w.b, math.Float64bits(v)) }
-func (w *recWriter) str(s string) {
-	w.b = binary.LittleEndian.AppendUint32(w.b, uint32(len(s)))
-	w.b = append(w.b, s...)
-}
 func (w *recWriter) boolByte(v bool) {
 	if v {
 		w.u8(1)
@@ -349,15 +311,6 @@ func enumIndex(list []string, s string) byte {
 
 // encodeControl builds a payload-less control record (save).
 func encodeControl(kind byte) []byte { return []byte{kind} }
-
-// encodeEditCreateDelete builds an edit create/delete record.
-func encodeEditCreateDelete(kind byte, target, handle string) []byte {
-	w := &recWriter{}
-	w.u8(kind)
-	w.str(target)
-	w.str(handle)
-	return w.b
-}
 
 // encodeOverlaysToggle builds an overlays TOGGLE record (test helper).
 func encodeOverlaysToggle(flag string) []byte {

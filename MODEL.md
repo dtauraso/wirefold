@@ -155,7 +155,8 @@ when a bead has arrived. Go owns the clock.
   drift apart. **TS → Go:** framed binary records on stdin (`[len:u32-LE][record]`,
   symmetric with fd 3) — `raw-input` (raw pointer/wheel + the stateless raycast
   hit as numeric rows; Go's gesture FSM decides what each gesture MEANS), the
-  geometry-CRUD `edit` (`op` = create / update / delete — exactly three ops;
+  geometry-CRUD `edit` (`op` = update — the sole remaining op; a `create` /
+  `delete` op pair was removed end-to-end, no live TS sender ever emitted them.
   `update` sets a numeric attribute on a typed entity, e.g. overlays toggle/set
   as a flag-id / bitfield), a bare `save` command (Go persists its OWN current
   state — camera + overlays — the editor sends no scene payload). There is NO JSON on

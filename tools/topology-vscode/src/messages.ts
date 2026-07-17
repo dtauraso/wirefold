@@ -3,11 +3,12 @@
 // at type-narrow time rather than silently writing `[object Object]` to disk.
 
 // "active" means "a Go process is spawned" — a genuine, instant, ext-host-owned fact
-// Geometry-CRUD edit sent webview → host → Go. ONE message kind ("edit") with
-// EXACTLY THREE ops: create / update / delete (mirroring nodes/Wiring/stdin_reader.go
-// applyEdit). Go owns the clock; this seam carries no delivery signal.
+// Geometry-CRUD edit sent webview → host → Go. ONE message kind ("edit") whose sole op is
+// "update" (mirroring nodes/Wiring/stdin_reader.go applyEdit). Go owns the clock; this
+// seam carries no delivery signal. The create/delete ops were removed end-to-end: no live
+// TS sender ever emitted them, and their only trigger (a port-drop gesture) unconditionally
+// tore down a live wire's in-flight beads via PacedWire.Restore().
 //
-//   - create / delete: add or remove an edge by its destination slot (target + targetHandle).
 //   - update: set an ATTRIBUTE on a typed entity. `kind` names the entity
 //     (node / edge / camera / overlays / scene); there is NO per-feature op — fading
 //     an edge, moving a port anchor, orbiting the camera and toggling an overlay are
@@ -45,17 +46,14 @@ export type OverlayFlag = (typeof OVERLAY_FLAG_NAMES)[number];
 export const OVERLAY_FLAG_ORDER = OVERLAY_FLAG_NAMES;
 
 // EDIT_MSG_START
-// The geometry-CRUD edit surface. THREE ops (create / update / delete). create/delete
-// name an edge by its destination slot (kept as the 3-op concept though the gesture FSM
-// now creates/deletes edges in-process from raw-input, so TS sends no create/delete). The
-// live update entities are overlays (toggle one flag) and clock (set the playback-speed
-// multiplier); node/edge/camera edits became gesture-FSM-in-process (raw-input) and scene
-// became the bare `save` command — none cross this seam any more. The former attr="set"
-// full-visibility install was dead (its only caller, the load-time main.tsx push, was
-// removed); only attr="toggle" is live for overlays.
+// The geometry-CRUD edit surface. The sole op is "update" — create/delete were removed
+// end-to-end (see the comment above). The live update entities are overlays (toggle one
+// flag) and clock (set the playback-speed multiplier); node/edge/camera edits became
+// gesture-FSM-in-process (raw-input) and scene became the bare `save` command — none
+// cross this seam any more. The former attr="set" full-visibility install was dead (its
+// only caller, the load-time main.tsx push, was removed); only attr="toggle" is live for
+// overlays.
 type EditMsg =
-  | { type: "edit"; op: "create"; target: string; targetHandle: string }
-  | { type: "edit"; op: "delete"; target: string; targetHandle: string }
   // op="update" — set an attribute on a typed entity (kind discriminator).
   | { type: "edit"; op: "update"; kind: "overlays"; attr: "toggle"; flag: OverlayFlag }
   | { type: "edit"; op: "update"; kind: "clock"; attr: "speed"; value: number };
@@ -64,7 +62,7 @@ type EditMsg =
 // RAW INPUT (Phase 6, OFF by default behind USE_RAW_INPUT). A single raw pointer/wheel
 // event plus the stateless three.js raycast hit, forwarded fire-and-forget to Go. TS does
 // NOT interpret the gesture — Go's gesture state machine (nodes/Wiring/gesture.go) decides
-// what the raw event means (orbit / zoom / pan / create / delete). The hit carries only the
+// what the raw event means (orbit / zoom / pan / drag). The hit carries only the
 // rendered ENTITY under the pointer (three.js computes the geometry); topology facts like
 // "is this port already connected?" are Go's to decide, not carried here.
 //

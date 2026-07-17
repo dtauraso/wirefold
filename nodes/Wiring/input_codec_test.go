@@ -30,17 +30,6 @@ func TestDecodeControlRecords(t *testing.T) {
 	}
 }
 
-func TestDecodeEditCreateDelete(t *testing.T) {
-	msg, ok := decodeInputRecord(encodeEditCreateDelete(inKindEditCreate, "nodeA", "in"))
-	if !ok || msg.Type != "edit" || msg.Op != "create" || msg.Target != "nodeA" || msg.TargetHandle != "in" {
-		t.Fatalf("create decode = %+v ok=%v", msg, ok)
-	}
-	msg, ok = decodeInputRecord(encodeEditCreateDelete(inKindEditDelete, "nÖde", "port:β"))
-	if !ok || msg.Op != "delete" || msg.Target != "nÖde" || msg.TargetHandle != "port:β" {
-		t.Fatalf("delete decode (utf8) = %+v ok=%v", msg, ok)
-	}
-}
-
 func TestDecodeEditUpdateOverlaysToggle(t *testing.T) {
 	// Exact bytes: [22][entityKind=0][attr=toggle=0][flagId(tori)=0].
 	rec := encodeOverlaysToggle("tori")
@@ -90,10 +79,10 @@ func TestDecodeTruncatedAndUnknown(t *testing.T) {
 	if _, ok := decodeInputRecord([]byte{99}); ok {
 		t.Fatal("unknown kind byte should not decode")
 	}
-	// A create record missing its second string must be rejected, not panic.
-	rec := encodeEditCreateDelete(inKindEditCreate, "nodeA", "in")
-	if _, ok := decodeInputRecord(rec[:len(rec)-3]); ok {
-		t.Fatal("truncated create record should not decode")
+	// A truncated overlays-toggle record must be rejected, not panic.
+	rec := encodeOverlaysToggle("tori")
+	if _, ok := decodeInputRecord(rec[:len(rec)-1]); ok {
+		t.Fatal("truncated update record should not decode")
 	}
 }
 
@@ -108,7 +97,7 @@ func TestSavePersistsCurrentOverlayState(t *testing.T) {
 	if !ok {
 		t.Fatal("decode toggle failed")
 	}
-	applyEdit(toggle, SlotRegistry{}, md, nil, nil)
+	applyEdit(toggle, md, nil, nil)
 	if err := writeSceneOverlays(sceneCameraPath(root), md.ov); err != nil {
 		t.Fatalf("writeSceneOverlays: %v", err)
 	}

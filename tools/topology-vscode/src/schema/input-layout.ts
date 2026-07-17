@@ -14,18 +14,19 @@
 // There is NO JSON on the wire: every record is fully numeric. The live editor→Go traffic
 // is raw-input (numeric), overlays toggle (numeric flag-id), the bare save
 // COMMAND (kind byte only — Go persists its OWN authoritative scene state), and the
-// play/pause control bytes. The create/delete/edit-update record kinds stay defined
-// (the 3-op create/update/delete concept) though the gesture FSM now produces edge
-// create/delete in-process from raw-input, so TS sends no create/delete today.
+// play/pause control bytes. The edit-create/edit-delete record kinds were removed
+// end-to-end — no live TS sender ever emitted them, and their only trigger (a port-drop
+// gesture) unconditionally tore down a live wire's in-flight beads via
+// PacedWire.Restore(). Only edit-update remains.
 //
 // Kind 3 was IN_KIND_RESEND (removed: the ext host now caches the last fd3 snapshot and
 // replays it on webview "ready" instead of asking Go to re-emit geometry — see
 // BuildAndRunRunner.lastSnapshot / getLastSnapshot in runCommand.ts). Left as an
 // intentional GAP rather than renumbered, so no other kind's wire value moves.
 
-// INPUT_LAYOUT_FINGERPRINT: v17 kinds=save:4,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays,clock updateAttrs=toggle,speed overlayFlags=tori,scenePoles,nodePoles,selSpherePoles,handholds,labelsGlobal,overlays,doubleLinks
+// INPUT_LAYOUT_FINGERPRINT: v18 kinds=save:4,raw-input:10,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays,clock updateAttrs=toggle,speed overlayFlags=tori,scenePoles,nodePoles,selSpherePoles,handholds,labelsGlobal,overlays,doubleLinks
 export const INPUT_LAYOUT_FINGERPRINT =
-  "v17 kinds=save:4,raw-input:10,edit-create:20,edit-delete:21,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays,clock updateAttrs=toggle,speed overlayFlags=tori,scenePoles,nodePoles,selSpherePoles,handholds,labelsGlobal,overlays,doubleLinks";
+  "v18 kinds=save:4,raw-input:10,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays,clock updateAttrs=toggle,speed overlayFlags=tori,scenePoles,nodePoles,selSpherePoles,handholds,labelsGlobal,overlays,doubleLinks";
 
 // Record kind bytes (first byte of every record). Must match input_codec.go.
 // Kinds 1 (resume) and 2 (pause) removed — the play/pause clock gate was deleted
@@ -34,8 +35,9 @@ export const INPUT_LAYOUT_FINGERPRINT =
 export const IN_KIND_SAVE = 4;
 // Kind 5 (IN_KIND_FADE_TOGGLE) removed — the fade feature was deleted end-to-end.
 export const IN_KIND_RAW_INPUT = 10;
-export const IN_KIND_EDIT_CREATE = 20;
-export const IN_KIND_EDIT_DELETE = 21;
+// Kind 20 (IN_KIND_EDIT_CREATE) removed — edge creation via edit op was deleted
+// end-to-end. Intentional gap, per house style (never renumber a live wire value).
+// Kind 21 (IN_KIND_EDIT_DELETE) removed — same removal as above.
 export const IN_KIND_EDIT_UPDATE = 22;
 
 // Enum orderings (u8 index → string), shared with input_codec.go.
@@ -132,12 +134,10 @@ export function encodeControl(kind: number): ArrayBuffer {
 const IN_OVERLAY_ATTR_TOGGLE = 0;
 const IN_CLOCK_ATTR_SPEED = 1;
 
-// NOTE: there is no encodeSave/encodeEditCreate/encodeEditDelete here. IN_KIND_SAVE and
-// IN_KIND_EDIT_CREATE/IN_KIND_EDIT_DELETE stay defined (Go reads them and they are in the
-// INPUT_LAYOUT_FINGERPRINT), but no live TS sender builds those records: `save` has no UI
-// affordance today, and the gesture FSM creates/deletes edges in-process from raw-input.
-// decodeInputRecord below still decodes all three kinds (round-trip-tested from raw bytes
-// in input-layout.test.ts) since Go's codec and the fingerprint both carry them.
+// NOTE: there is no encodeSave here. IN_KIND_SAVE stays defined (Go reads it and it is in
+// the INPUT_LAYOUT_FINGERPRINT), but no live TS sender builds that record: `save` has no
+// UI affordance today. IN_KIND_EDIT_CREATE/IN_KIND_EDIT_DELETE were removed end-to-end
+// (see the file-header comment); their kind bytes (20, 21) are left as gaps.
 
 /** Build an overlays TOGGLE record: [22][entityKind=overlays][attr=toggle][u8 flagId].
  *  flagId is the index of `flag` in OVERLAY_FLAG_ORDER — no flag name crosses the wire. */
@@ -246,7 +246,6 @@ class ByteReader {
 export type DecodedInput =
   | { kind: "save" }
   | { kind: "raw-input"; event: RawInputEvent }
-  | { kind: "edit-create" | "edit-delete"; target: string; targetHandle: string }
   | { kind: "edit-update"; entity: "overlays"; attr: "toggle"; flag: OverlayFlag }
   | { kind: "edit-update"; entity: "clock"; attr: "speed"; value: number };
 
@@ -289,13 +288,6 @@ export function decodeInputRecord(record: ArrayBuffer): DecodedInput | undefined
       };
       return { kind: "raw-input", event };
     }
-    case IN_KIND_EDIT_CREATE:
-    case IN_KIND_EDIT_DELETE:
-      return {
-        kind: bytes[0] === IN_KIND_EDIT_CREATE ? "edit-create" : "edit-delete",
-        target: r.str(),
-        targetHandle: r.str(),
-      };
     case IN_KIND_EDIT_UPDATE: {
       // entityKind byte selects the entity; attr byte + numeric payload follow.
       const entityKind = IN_UPDATE_KINDS[r.u8()];
