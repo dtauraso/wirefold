@@ -2,7 +2,6 @@ package Wiring
 
 import (
 	"context"
-	"fmt"
 	"sync"
 
 	T "github.com/dtauraso/wirefold/Trace"
@@ -120,9 +119,8 @@ type PacedWire struct {
 	// and is also bumped on teardown to invalidate ALL outstanding beads at once.
 	nextGen uint64
 	// teardownGen: a bead whose gen is < teardownGen is invalidated wholesale
-	// (Reset/Delete). Beads placed after a teardown get gen >= teardownGen.
+	// (Reset). Beads placed after a teardown get gen >= teardownGen.
 	teardownGen uint64
-	deleted     bool // when true, the edge was deleted; source places no beads
 	// clock is the one monotonic clock this wire reads to time its own delivery.
 	clock      Clock
 	pulseSpeed float64
@@ -188,8 +186,7 @@ func (pw *PacedWire) SetClock(c Clock) {
 
 // PlaceDeliverOnly places a delivery-only bead (no position stream) WITHOUT
 // spawning a walker goroutine. Delivery is driven by the caller's subsequent
-// per-cycle StepOnce/StepOnceAt calls. Returns false if the wire is
-// deleted (nothing placed). Cross-package tests that only exercise
+// per-cycle StepOnce/StepOnceAt calls. Cross-package tests that only exercise
 // delivery timing use this (see gatetesthelper.Send).
 func (pw *PacedWire) PlaceDeliverOnly(value int, inFlightMs float64) bool {
 	_, ok := pw.placeBeadNoWalker(value, beadPlacement{InFlightMs: inFlightMs})
@@ -204,7 +201,6 @@ const msToArcWu = PulseSpeedWuPerMs
 
 // placeBeadNoWalker appends a bead WITHOUT launching a walker goroutine,
 // returning the bead's gen so the caller can drive delivery synchronously.
-// Returns (0, false) when deleted (nothing placed).
 func (pw *PacedWire) placeBeadNoWalker(value int, bp beadPlacement) (gen uint64, ok bool) {
 	return pw.placeBeadNoWalkerAt(value, bp, pw.clock.Tick())
 }
@@ -219,10 +215,6 @@ func (pw *PacedWire) placeBeadNoWalker(value int, bp beadPlacement) (gen uint64,
 // equal latency.
 func (pw *PacedWire) placeBeadNoWalkerAt(value int, bp beadPlacement, tick int64) (gen uint64, ok bool) {
 	pw.mu.Lock()
-	if pw.deleted {
-		pw.mu.Unlock()
-		return 0, false
-	}
 	pw.nextGen++
 	if pw.nextGen < pw.teardownGen {
 		pw.nextGen = pw.teardownGen
@@ -423,11 +415,11 @@ func (pw *PacedWire) PollRecvTick() (any, int64, bool) {
 // remaining time is recomputed from the NEW arc so UNIFORM PULSE SPEED holds —
 // remaining = (1−t)·newArc/pulseSpeed. The driven loop re-reads each bead's live
 // arc/seg every frame, so the new geometry takes effect without any relaunch.
-// No-op when no bead is in flight or the wire is deleted.
+// No-op when no bead is in flight.
 func (pw *PacedWire) ReviseInFlightGeometry(newArc float64, newSeg wireSegment) {
 	pw.mu.Lock()
 	defer pw.mu.Unlock()
-	if pw.deleted || len(pw.inflight) == 0 {
+	if len(pw.inflight) == 0 {
 		return
 	}
 	nowTick := float64(pw.clock.Tick())
@@ -572,50 +564,4 @@ func (pw *PacedWire) Reset() {
 	pw.mu.Lock()
 	pw.teardownLocked()
 	pw.mu.Unlock()
-}
-
-// Delete persistently silences the wire: sets deleted=true so the source stops
-// placing beads, then tears down all in-flight beads and emits one pulse-cancelled
-// trace per dropped bead (keyed by the bead's SOURCE node+port — the renderer
-// removes each bead sprite). Cancel identities are captured under the lock; the
-// traces are emitted after unlocking (Trace.PulseCancelled sends on a channel and
-// must not hold the wire lock).
-func (pw *PacedWire) Delete() {
-	pw.mu.Lock()
-	pw.deleted = true
-	inFlightCount := len(pw.inflight)
-	pw.Trace.Breadcrumb("wire_delete_drop_pulse",
-		pw.Target, pw.TargetHandle,
-		fmt.Sprintf("in_flight=%d delivered=%d", inFlightCount, len(pw.delivered)))
-	cancelled := pw.teardownLocked()
-	pw.mu.Unlock()
-
-	for _, ai := range cancelled {
-		if ai.emit {
-			pw.Trace.PulseCancelled(ai.node, ai.port, ai.value, ai.gen)
-		}
-	}
-}
-
-// Restore clears the deleted flag set by Delete so the wire carries pulses again.
-//
-// In the live flow Restore only runs to un-silence a wire that is currently deleted
-// (the "create" edit re-adds a previously-deleted edge), and while deleted the source
-// places no beads — so Delete's teardown already drained inflight and it stays empty.
-// The teardown here is therefore a no-op for beads in practice. But rather than rely on
-// that invariant, Restore matches Delete: it emits one pulse-cancelled per dropped bead
-// (captured under the lock, emitted after unlock — PulseCancelled sends on a channel and
-// must not hold the wire lock) so a Restore that ever did race a live bead cannot orphan
-// a sprite. In the normal empty case no traces are emitted, so behavior is unchanged.
-func (pw *PacedWire) Restore() {
-	pw.mu.Lock()
-	pw.deleted = false
-	cancelled := pw.teardownLocked()
-	pw.mu.Unlock()
-
-	for _, ai := range cancelled {
-		if ai.emit {
-			pw.Trace.PulseCancelled(ai.node, ai.port, ai.value, ai.gen)
-		}
-	}
 }

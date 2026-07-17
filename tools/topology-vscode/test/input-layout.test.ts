@@ -5,8 +5,6 @@ import { describe, it, expect } from "vitest";
 import {
   IN_KIND_SAVE,
   IN_KIND_RAW_INPUT,
-  IN_KIND_EDIT_CREATE,
-  IN_KIND_EDIT_DELETE,
   IN_KIND_EDIT_UPDATE,
   IN_EVENT_KINDS,
   IN_HIT_KINDS,
@@ -21,26 +19,10 @@ import {
 import { OVERLAY_FLAG_ORDER } from "../src/messages";
 
 /** Build a bare kind-byte control record (mirrors ByteWriter's u8-only shape). No live
- *  TS encoder builds a "save"/"edit-create"/"edit-delete" record today (Go still decodes
- *  them and they are in the fingerprint), so tests construct the raw bytes directly. */
+ *  TS encoder builds a "save" record today (Go still decodes it and it is in the
+ *  fingerprint), so tests construct the raw bytes directly. */
 function controlBytes(kind: number): ArrayBuffer {
   return new Uint8Array([kind]).buffer;
-}
-
-/** Build a [kind][len:u32-LE][utf8][len:u32-LE][utf8] record — the edit create/delete shape. */
-function createDeleteBytes(kind: number, target: string, targetHandle: string): ArrayBuffer {
-  const enc = new TextEncoder();
-  const t = enc.encode(target);
-  const h = enc.encode(targetHandle);
-  const out = new Uint8Array(1 + 4 + t.length + 4 + h.length);
-  const view = new DataView(out.buffer);
-  let pos = 0;
-  out[pos] = kind; pos += 1;
-  view.setUint32(pos, t.length, true); pos += 4;
-  out.set(t, pos); pos += t.length;
-  view.setUint32(pos, h.length, true); pos += 4;
-  out.set(h, pos);
-  return out.buffer;
 }
 
 describe("control records — exact bytes", () => {
@@ -57,27 +39,6 @@ describe("control records — exact bytes", () => {
 
   it("decode control", () => {
     expect(decodeInputRecord(controlBytes(IN_KIND_SAVE))).toEqual({ kind: "save" });
-  });
-});
-
-describe("edit create/delete — exact bytes + round-trip", () => {
-  it("create encodes kind byte + two length-prefixed UTF-8 strings", () => {
-    const bytes = new Uint8Array(createDeleteBytes(IN_KIND_EDIT_CREATE, "ab", "c"));
-    // [20][len=2 LE][a][b][len=1 LE][c]
-    expect(bytes).toEqual(new Uint8Array([IN_KIND_EDIT_CREATE, 2, 0, 0, 0, 0x61, 0x62, 1, 0, 0, 0, 0x63]));
-  });
-
-  it("round-trips create + delete (incl. multibyte UTF-8)", () => {
-    expect(decodeInputRecord(createDeleteBytes(IN_KIND_EDIT_CREATE, "n1", "out"))).toEqual({
-      kind: "edit-create",
-      target: "n1",
-      targetHandle: "out",
-    });
-    expect(decodeInputRecord(createDeleteBytes(IN_KIND_EDIT_DELETE, "nÖde", "port:β"))).toEqual({
-      kind: "edit-delete",
-      target: "nÖde",
-      targetHandle: "port:β",
-    });
   });
 });
 
@@ -136,14 +97,14 @@ describe("fingerprint self-consistency", () => {
     // from the fingerprint's hardcoded numbers, this fails instead of silently passing.
     const expected =
       `kinds=save:${IN_KIND_SAVE},raw-input:${IN_KIND_RAW_INPUT},` +
-      `edit-create:${IN_KIND_EDIT_CREATE},edit-delete:${IN_KIND_EDIT_DELETE},edit-update:${IN_KIND_EDIT_UPDATE}`;
+      `edit-update:${IN_KIND_EDIT_UPDATE}`;
     expect(INPUT_LAYOUT_FINGERPRINT).toContain(expected);
   });
 });
 
 describe("frameRecord", () => {
   it("prefixes the record with its u32-LE length", () => {
-    const rec = createDeleteBytes(IN_KIND_EDIT_CREATE, "a", "b");
+    const rec = controlBytes(IN_KIND_SAVE);
     const framed = frameRecord(rec);
     const len = new DataView(framed.buffer, framed.byteOffset, 4).getUint32(0, true);
     expect(len).toBe(rec.byteLength);

@@ -29,10 +29,13 @@ import (
 //   portMove  — a CONNECTED port is being dragged along its node's ring (ring-anchor snap).
 //   handhold  — a handhold grab-sphere is dragged for axis-locked (constrained) orbit.
 //
-// Phase 7 closed the interaction gaps: edge creation reuses the existing create-edge slot
-// path (createEdgeInSlot); click-select is Go-owned (md.selected + KindSelect trace →
-// buffer Selected column); handhold-constrained orbit and connected-port ring-move are
-// ported here formula-faithfully from interaction-handlers.ts.
+// Phase 7 closed the interaction gaps: click-select is Go-owned (md.selected +
+// KindSelect trace → buffer Selected column); handhold-constrained orbit and
+// connected-port ring-move are ported here formula-faithfully from
+// interaction-handlers.ts. Wire-drop no longer creates an edge — the create/delete edit
+// ops were removed end-to-end (no live sender ever emitted them; the only trigger was
+// this drop path, which unconditionally tore down live in-flight beads via
+// PacedWire.Restore()). A wiring drag now simply resets on pointer-up.
 
 type gesturePhase int
 
@@ -449,29 +452,6 @@ func (md *MoveDispatch) applyNodeDragTarget(ev rawInputMsg) bool {
 func (md *MoveDispatch) gestPointerUp(ev rawInputMsg, slotReg SlotRegistry, tr *T.Trace) {
 	g := &md.gest
 	switch {
-	case g.wireNode != "" && (g.phase == gestWiring || g.phase == gestPending):
-		// Wiring completed: if dropped on a port of another node with the opposite
-		// direction, the intent is an OUT→IN edge. The FSM orients the pair and hands the
-		// destination slot to the EXISTING create-edge path (createEdgeInSlot — the same
-		// helper op=create uses); it un-silences that wire so it carries beads again.
-		if ev.Hit.Kind == "port" {
-			tn, tp, ti, ok := md.portFromHit(ev.Hit)
-			if ok && tn != g.wireNode {
-				var srcNode, srcPort, dstNode, dstPort string
-				oriented := false
-				if !g.wireInput && ti { // source out → target in
-					srcNode, srcPort, dstNode, dstPort = g.wireNode, g.wirePort, tn, tp
-					oriented = true
-				} else if g.wireInput && !ti { // grabbed an in, dropped on an out
-					srcNode, srcPort, dstNode, dstPort = tn, tp, g.wireNode, g.wirePort
-					oriented = true
-				}
-				if oriented {
-					tr.Breadcrumb("gesture-wire", srcNode+":"+srcPort, dstNode+":"+dstPort, "")
-					createEdgeInSlot(slotReg, dstNode, dstPort, tr)
-				}
-			}
-		}
 	case g.phase == gestPortMove:
 		md.applyPortMove(ev) // final ring-anchor flush
 	case g.phase == gestDragging:

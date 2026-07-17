@@ -3,13 +3,15 @@ set -euo pipefail
 
 # Verifies the editor->Go geometry-CRUD "edit" bridge stays in parity across every
 # axis below the top-level msg.Type (which check-message-kind-parity.sh covers).
-# The bridge has EXACTLY THREE ops (create/update/delete); op="update" sets an
-# attribute on a typed ENTITY (kind: node/edge/camera/overlays/scene). Overlay
-# visibility is one named-boolean FLAG attribute per overlay. A value added on one
-# side and forgotten on another silently no-ops at runtime (CLAUDE.md "Bridge
-# surface"). Three axes are checked:
+# The bridge's sole op is "update" (create/delete were removed end-to-end — no live
+# TS sender ever emitted them, and their only trigger tore down a live wire's in-flight
+# beads via PacedWire.Restore()); op="update" sets an attribute on a typed ENTITY (kind:
+# node/edge/camera/overlays/scene). Overlay visibility is one named-boolean FLAG
+# attribute per overlay. A value added on one side and forgotten on another silently
+# no-ops at runtime (CLAUDE.md "Bridge surface"). Three axes are checked:
 #
-#   1. ops          — messages.ts EditMsg  vs  stdin_reader.go applyEdit op switch.
+#   1. ops          — messages.ts EditMsg  vs  stdin_reader.go applyEdit op switch
+#                     (both now reduce to the single set {update}).
 #   2. update kinds — messages.ts EditMsg  vs  stdin_reader.go applyUpdate kind switch
 #                     vs  handle-message.ts update-dispatch switch (3-way).
 #   3. overlay flags— messages.ts OVERLAY_FLAG_NAMES  vs  the HAND-AUTHORED overlay-flags.ts
