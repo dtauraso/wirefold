@@ -39,10 +39,13 @@ state is updated.
 | bg | #rrggbb |
 | border | #rrggbb |
 | text | #rrggbb |
-| accent | #rrggbb |
 | minWidth | 90 |
-| displays | queue, repeat |
-| defaultLabel | <rfType> |
+| role | <kind-lowercased> |
+| shape | rect |
+| fill | #rrggbb |
+| stroke | #rrggbb |
+| width | 110 |
+| height | 60 |
 
 ## Runtime status
 
@@ -93,19 +96,32 @@ The `## View` section is required for any kind that has a TSX render. It drives 
 | bg | #1a1f2e |
 | border | #3fb950 |
 | text | #c9d1d9 |
-| accent | #3fb950 |
 | minWidth | 90 |
-| displays | queue, repeat |
-| defaultLabel | input |
+| role | input |
+| shape | rect |
+| fill | #1a1f2e |
+| stroke | #3fb950 |
+| width | 110 |
+| height | 60 |
 ```
 
-- `kind` — required. The RF camelCase type name (= spec kind with first char lowercased). Defines the key in `node-defs.ts`.
-- `bg`, `border`, `text`, `accent` — required hex colors.
+- `kind` — required (non-empty), but **write-only/vestigial today**: `tools/gen-node-defs/main.go`
+  parses it and fails loudly if it's empty, but it is never used as the `NODE_DEFS` key. The
+  actual `node-defs.ts` key is the **PascalCase Go kind name** from `Wiring.Register(...)`
+  (`goKind`), matching `CLAUDE.md`. Keep `kind` populated (any non-empty string; convention is
+  the spec kind with first char lowercased) so a half-migrated SPEC.md still fails the required
+  check, but do not rely on its value meaning anything downstream.
+- `bg`, `border`, `text` — required hex colors.
 - `minWidth` — optional integer pixel width.
-- `displays` — optional comma-separated list of display features. Valid values: `queue`, `repeat`, `held`.
-- `defaultLabel` — optional default label string (falls back to `kind` if omitted).
+- `role`, `shape`, `fill`, `stroke`, `width`, `height` — optional `NodeTypeDef`-compatible
+  fields consumed by schema/adapter code; `width`/`height` also drive the generated Go
+  `nodes/Wiring/node_dims_gen.go` (used for port-to-port arc length), falling back to
+  110×60 if omitted.
 
-SPEC.md files without a `## View` section are skipped by the generator (treated as not-yet-migrated).
+A missing `## View` section (or one missing the `Field`/`Value` table columns) is a **hard
+error**: the generator (`tools/gen-node-defs/main.go`) fails the whole build (`fatalf`), it is
+not skipped or treated as not-yet-migrated. Every `nodes/<Kind>/` directory with a
+`Wiring.Register(...)` call MUST have a valid `## View` section.
 
 ## Banned content
 

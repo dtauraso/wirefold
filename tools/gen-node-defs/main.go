@@ -45,14 +45,11 @@ type dataField struct {
 
 // viewDef holds the SPEC.md ## View section fields.
 type viewDef struct {
-	kind         string
-	bg           string
-	border       string
-	text         string
-	accent       string
-	minWidth     string
-	displays     string
-	defaultLabel string
+	kind     string
+	bg       string
+	border   string
+	text     string
+	minWidth string
 	// NodeTypeDef-compatible fields (used by schema/node-types consumers).
 	role   string
 	shape  string
@@ -574,20 +571,17 @@ func parseSpecMD(pkgDir string) (viewDef, map[string]string, map[string]string, 
 		}
 	}
 	view := viewDef{
-		kind:         vmap["kind"],
-		bg:           vmap["bg"],
-		border:       vmap["border"],
-		text:         vmap["text"],
-		accent:       vmap["accent"],
-		minWidth:     vmap["minWidth"],
-		displays:     vmap["displays"],
-		defaultLabel: vmap["defaultLabel"],
-		role:         vmap["role"],
-		shape:        vmap["shape"],
-		fill:         vmap["fill"],
-		stroke:       vmap["stroke"],
-		width:        vmap["width"],
-		height:       vmap["height"],
+		kind:     vmap["kind"],
+		bg:       vmap["bg"],
+		border:   vmap["border"],
+		text:     vmap["text"],
+		minWidth: vmap["minWidth"],
+		role:     vmap["role"],
+		shape:    vmap["shape"],
+		fill:     vmap["fill"],
+		stroke:   vmap["stroke"],
+		width:    vmap["width"],
+		height:   vmap["height"],
 	}
 
 	// Parse Ports section for accent, edgeKind overrides, and optional flags.
