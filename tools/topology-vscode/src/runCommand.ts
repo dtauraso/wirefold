@@ -186,12 +186,10 @@ export class BuildAndRunRunner {
 
   run(topologyPath?: string) {
     if (this.proc) {
-      // Already spawned: re-announce liveness rather than returning silently. "active" is
-      // STATE, not a one-shot event — a webview that remounts (reopened file, hot reload)
-      // missed the post from the original spawn below and would otherwise never learn a
-      // process exists, leaving its run/stop buttons inert while Go streams frames at it.
-      // The "ready" case replays the cached snapshot for the same reason; this is its
-      // status half. post() is idempotent for an unchanged state.
+      // Already spawned: return silently, posting nothing. A webview that remounts
+      // (reopened file, hot reload) re-learns liveness via the "ready" handler, which
+      // replays the ext host's cached snapshot instead (see handle-message.ts's
+      // wasRunning branch / BuildAndRunRunner.getLastSnapshot).
       return;
     }
     if (topologyPath) this.topologyPath = topologyPath;
