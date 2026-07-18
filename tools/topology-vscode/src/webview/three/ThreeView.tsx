@@ -74,7 +74,7 @@ export function ThreeView() {
     };
   }, []);
 
-  const { onPointerDown, onPointerMove, onPointerUp, onWheelNative } = useInteractionControls(
+  const { onPointerDown, onPointerMove, onPointerUp, onPointerCancel, onWheelNative } = useInteractionControls(
     cameraRef,
     pickRequest,
   );
@@ -106,6 +106,7 @@ export function ThreeView() {
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
+        onPointerCancel={onPointerCancel}
         onContextMenu={(e) => e.preventDefault()}
       >
         <Canvas
