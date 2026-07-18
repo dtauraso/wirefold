@@ -262,8 +262,8 @@ type bufLayoutScene struct {
 
 // bufLayoutEvent defines one row of the per-tick EVENT column block.
 // The block is self-sizing via an eventCount field in the snapshot header; it carries
-// the causal trace events that occurred since the previous snapshot (recv/fire/send/done/
-// arrive/pulse-cancelled/position and the state-change kinds), cleared each emit like the
+// the causal trace events that occurred since the previous snapshot (recv/fire/send/
+// arrive/position and the state-change kinds), cleared each emit like the
 // transient node flags. It is consumed ONLY by the ext-host buffer-decoded .probe logger —
 // the render path ignores it. Kind is the event's index into TRACE_EVENT_KINDS (shared
 // Go/TS vocabulary); the row/label references resolve identities via the existing row

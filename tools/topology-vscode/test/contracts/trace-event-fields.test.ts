@@ -30,7 +30,7 @@ describe("trace-event-fields contract", () => {
 
   it("fixture has one event for each kind variant", () => {
     const kinds = new Set(events.map((e) => e.kind));
-    expect(kinds).toEqual(new Set(["recv", "fire", "send", "done", "edge-bead", "geometry", "pulse-cancelled", "node-geometry", "arrive", "node-bead", "camera", "scene-tori", "scene-poles", "node-poles", "sel-sphere-poles", "handholds", "labels-global", "overlays-vis", "double-links", "select", "hover", "scene-sphere", "layout-link"]));
+    expect(kinds).toEqual(new Set(["recv", "fire", "send", "edge-bead", "geometry", "node-geometry", "arrive", "node-bead", "camera", "scene-tori", "scene-poles", "node-poles", "sel-sphere-poles", "handholds", "labels-global", "overlays-vis", "double-links", "select", "hover", "scene-sphere", "layout-link"]));
   });
 
   it("every fixture event kind is in TRACE_EVENT_KINDS", () => {
@@ -73,14 +73,6 @@ describe("trace-event-fields contract", () => {
     expect(typeof asObj["value"]).toBe("number");
   });
 
-  it("done event has step, kind, node, port", () => {
-    const e = events.find((ev) => ev.kind === "done")!;
-    expect(typeof e.step).toBe("number");
-    expect(e.kind).toBe("done");
-    expect(typeof e.node).toBe("string");
-    expect(typeof (e as Extract<DecodedEventLine, { kind: "done" }> & { port?: string }).port).toBe("string");
-  });
-
   it("edge-bead event has step, kind, node, port, x, y, z, f (Phase 2)", () => {
     const e = events.find((ev) => ev.kind === "edge-bead")! as Extract<DecodedEventLine, { kind: "edge-bead" }>;
     expect(typeof e.step).toBe("number");
@@ -101,14 +93,6 @@ describe("trace-event-fields contract", () => {
     for (const key of ["sx", "sy", "sz", "ex", "ey", "ez"] as const) {
       expect(typeof e[key]).toBe("number");
     }
-  });
-
-  it("pulse-cancelled event has step, kind, node, port (Phase 3)", () => {
-    const e = events.find((ev) => ev.kind === "pulse-cancelled")! as Extract<DecodedEventLine, { kind: "pulse-cancelled" }>;
-    expect(typeof e.step).toBe("number");
-    expect(e.kind).toBe("pulse-cancelled");
-    expect(typeof e.node).toBe("string");
-    expect(typeof e.port).toBe("string");
   });
 
   it("arrive event has step, kind, node, port", () => {

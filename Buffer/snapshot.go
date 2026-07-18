@@ -402,9 +402,6 @@ func (s *SnapshotState) Update(ev T.Event) {
 		// Bead completed traversal: remove it from live beads.
 		delete(s.beads, beadSnapKey{ev.Node, ev.Port, ev.Bead})
 
-	case T.KindPulseCancelled:
-		delete(s.beads, beadSnapKey{ev.Node, ev.Port, ev.Bead})
-
 	case T.KindRecv:
 		// No per-node state to update; the event itself is already recorded above
 		// (recordEvent) for the EVENT block.
@@ -414,9 +411,6 @@ func (s *SnapshotState) Update(ev T.Event) {
 
 	case T.KindSend:
 		// Nothing further to record here; see KindRecv comment above.
-
-	case T.KindDone:
-		// No per-node state to update; see KindRecv comment above.
 
 	case T.KindNodeBead:
 		// One interior grid slot's authoritative state (node's 2x2 held/interior
