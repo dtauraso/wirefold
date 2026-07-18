@@ -654,8 +654,7 @@ func (b *buildCtx) computeReachRadii() {
 //   - destWire: "destNode.destPort" → *PacedWire (owned by the destination).
 //   - edgeWire: edge label → *PacedWire (same pointer; for stdin_reader lookup).
 //   - edgeEndpoints: edge label → source/target node IDs + handles (for NodeMoveRegistry).
-//   - edgeArc / edgeLatency: each edge's OWN travel-time (per-edge geometry),
-//     distinct from the dest wire's MaxIncomingSimLatencyMs aggregate.
+//   - edgeArc / edgeLatency: each edge's OWN travel-time (per-edge geometry).
 //   - edgeSegments: each edge's straight-segment endpoints (Start/End) so the
 //     bead's position stream evaluates P(t)=Start+t*(End-Start).
 //
@@ -689,11 +688,6 @@ func (b *buildCtx) allocateWires() {
 			pw.SetClock(b.clk) // one clock shared by every wire; times its own delivery
 			destWire[destKey] = pw
 		}
-		// Fan-in MaxIncomingSimLatencyMs is NOT pre-written here. md.Bind (called from
-		// bindDispatch) calls PacedWire.SetIncomingLatency for every feeding edge, which
-		// is the CANONICAL source: it records each edge's SimLatencyMs and recomputes the
-		// per-port aggregate as the max over all of them. A manual raise here would just
-		// be overwritten by that authoritative pass.
 		edgeWire[e.Label] = pw
 		edgeEndpoints[e.Label] = EdgeEndpoints{
 			Source: e.Source, Target: e.Target,
@@ -943,9 +937,7 @@ func (b *buildCtx) emitLayoutLinks() {
 }
 
 // bindDispatch binds per-edge source Outs and dest wires into each edgeMover so
-// a node-move updates per-edge travel-time and the per-port window aggregate,
-// and seeds each dest wire's per-edge latency for the MaxIncomingSimLatencyMs
-// aggregate.
+// a node-move updates per-edge travel-time.
 func (b *buildCtx) bindDispatch() {
 	b.md.Bind(b.outSink, SlotRegistry(b.destWire))
 }

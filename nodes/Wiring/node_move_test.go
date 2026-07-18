@@ -117,14 +117,6 @@ func TestDecentralizedNodeMove(t *testing.T) {
 		t.Fatalf("Out segment = %+v..%+v, want %+v..%+v", out.Geom().Start, out.Geom().End, wantSeg.Start, wantSeg.End)
 	}
 
-	// Wire latency aggregate updated to the moved edge's latency.
-	pw.mu.Lock()
-	gotMax := pw.MaxIncomingSimLatencyMs
-	pw.mu.Unlock()
-	if !approxEq(gotMax, wantArc/PulseSpeedWuPerMs) {
-		t.Fatalf("MaxIncomingSimLatencyMs = %v, want %v", gotMax, wantArc/PulseSpeedWuPerMs)
-	}
-
 	// In-flight bead's geometry was revised to the new segment (still in flight).
 	pw.mu.Lock()
 	var revisedSeg wireSegment
