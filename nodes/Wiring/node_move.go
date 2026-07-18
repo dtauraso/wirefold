@@ -71,6 +71,18 @@ const (
 	// Scoped to node 6 only: node 6 is a FREE move (not in gateNeighbors), so there is
 	// no equal-radii solve to run before committing.
 	moveMsgKindDrag = "drag"
+	// moveMsgKindRequantize: receiver requantizes ITS OWN local polar to SenderID about
+	// its own pole, then persists — decentralizes the former cross-goroutine
+	// neighbor-holder write in requantizeLocalPolars (the mover X used to reach directly
+	// into each domain neighbor M's LayoutHolder; now X sends M this message and M's own
+	// goroutine does the write).
+	moveMsgKindRequantize = "requantize"
+	// moveMsgKindRequantizeSetC: like moveMsgKindRequantize, but additionally overrides
+	// the receiver's own edge-c record TO SenderID with SnapC — decentralizes the former
+	// cross-goroutine far-neighbor-holder write in moveNodeAndSetEdgeCs's setEdgeC (node
+	// 6's gate cascade: the gate node used to reach directly into its far neighbor's
+	// LayoutHolder to set the shared edge-c; now it sends the far neighbor this message).
+	moveMsgKindRequantizeSetC = "requantizeSetC"
 )
 
 // Per-node cascade rule data (sourceID, followers, forwardTargets, isGate,
@@ -133,15 +145,24 @@ type moveMsg struct {
 	// FromCenter / TargetC (Kind == "equalize"): the follower's neighbor's new world
 	// center and the c-length to hold. The receiver moves ITSELF to
 	// FromCenter + unit(self_old - FromCenter) * TargetC — receiver-computes.
+	// Also used, overloaded, by Kind == "requantize"/"requantizeSetC": FromCenter is the
+	// SENDER's (SenderID's) fresh committed world center; the receiver computes its own
+	// offset to the sender as FromCenter - (receiver's own snap center) and requantizes
+	// its own local polar to SenderID from that — receiver-computes, mirroring equalize.
 	FromCenter vec3
 	TargetC    float64
 	// SenderID (Kind == "trigger"): the id that sent this trigger, so the receiving
 	// rule-node does not forward the trigger back to whoever just triggered it.
 	// Also used, overloaded, by Kind == "gatePlace" to name the ANCHOR node (always "6")
 	// so the receiver (9 or 10) can find its OTHER fixed neighbor via gateNeighbors.
+	// Also used, overloaded, by Kind == "requantize"/"requantizeSetC" to name the mover
+	// whose fresh FromCenter the receiver requantizes its own local polar against.
 	SenderID string
 	// SnapC (Kind == "gatePlace"): the propagated shortest c (whole ticks of localStepR)
 	// to write onto both of the receiver's edge-c records via moveNodeAndSetEdgeCs.
+	// Also used, overloaded, by Kind == "requantizeSetC": the shared edge-c to write onto
+	// the receiver's OWN edge-c record to SenderID (the far-neighbor half of a gate
+	// node's edge-c equalize, decentralized off moveNodeAndSetEdgeCs's setEdgeC).
 	SnapC int
 	// Target (Kind == "drag"): the raw drag target world position for NodeID's
 	// owner-goroutine commit. Node 6 is a free move,
@@ -247,6 +268,19 @@ type nodeMover struct {
 	// node) so the equal-radii solve, like the commit, runs on the node's own
 	// goroutine rather than the stdin goroutine.
 	placeEqualRadii func(target vec3) vec3
+	// requantizeSelf runs THIS node's own local-polar requantize (about its own rotating
+	// pole) against SenderID's fresh center, then persists — bound to
+	// md.requantizeNeighborSelf. Dispatched from moveMsgKindRequantize so a domain
+	// neighbor's holder is written only by that neighbor's OWN goroutine, decentralizing
+	// requantizeLocalPolars' former cross-goroutine neighbor-holder write. nil in tests
+	// that build a bare nodeMover directly.
+	requantizeSelf func(selfID, fromID string, off vec3)
+	// requantizeSelfSetC is requantizeSelf plus overriding THIS node's own edge-c record
+	// to SenderID with the given shared c — bound to md.requantizeNeighborSelfSetC.
+	// Dispatched from moveMsgKindRequantizeSetC so a gate node's FAR neighbor writes its
+	// own holder itself, decentralizing moveNodeAndSetEdgeCs's former cross-goroutine
+	// far-neighbor-holder write. nil in tests that build a bare nodeMover directly.
+	requantizeSelfSetC func(selfID, fromID string, off vec3, c int)
 	// Cascade rule fields — DERIVED once at load (loader.go deriveCascadeRules) from
 	// this node's own LocalPolars roles and Gate flag; see the package doc comment
 	// above where the old ruleSource/ruleFollowers/gateNeighbors maps used to live.
@@ -376,6 +410,26 @@ func (m *nodeMover) handle(msg moveMsg) {
 		if m.gatePlace != nil {
 			m.gatePlace(m.id, msg.SenderID, msg.FromCenter, msg.TargetC, msg.SnapC)
 			m.tr.Breadcrumb("cascade.gateplace", m.id, "", fmt.Sprintf("anchor=%q d=%.4f", msg.SenderID, msg.TargetC))
+		}
+		return
+	}
+	if msg.Kind == moveMsgKindRequantize {
+		// Decentralized neighbor-holder write: SenderID (the mover X) just committed a
+		// new center (FromCenter); THIS node requantizes its OWN local polar to X about
+		// its own pole and persists — receiver-computes, no cross-goroutine write.
+		if s := m.snap.Load(); s != nil && m.requantizeSelf != nil {
+			off := msg.FromCenter.sub(s.c)
+			m.requantizeSelf(m.id, msg.SenderID, off)
+		}
+		return
+	}
+	if msg.Kind == moveMsgKindRequantizeSetC {
+		// Decentralized far-neighbor-holder write (gate node edge-c equalize): same as
+		// moveMsgKindRequantize, plus overriding THIS node's own edge-c record to
+		// SenderID with the shared c (SnapC).
+		if s := m.snap.Load(); s != nil && m.requantizeSelfSetC != nil {
+			off := msg.FromCenter.sub(s.c)
+			m.requantizeSelfSetC(m.id, msg.SenderID, off, msg.SnapC)
 		}
 		return
 	}
@@ -1006,6 +1060,8 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 		nm.commitLocal = md.commitNodeMoveLocal
 		nm.gateEqualize = md.gateEqualizeNode
 		nm.gatePlace = md.gatePlaceNode
+		nm.requantizeSelf = md.requantizeNeighborSelf
+		nm.requantizeSelfSetC = md.requantizeNeighborSelfSetC
 		md.nodeMovers[id] = nm
 		md.dispatch[id] = nm.inbox
 	}
@@ -1359,6 +1415,57 @@ func (md *MoveDispatch) requantizePoleTraced(lh *LayoutHolder, updates map[strin
 	return pole
 }
 
+// requantizeNeighborSelf requantizes selfID's OWN local polar to fromID (offset off, in
+// selfID's own frame) about selfID's own rotating pole, then persists. This is the
+// OWNER-GOROUTINE half of the decentralized requantize: it must be called only from
+// selfID's own nodeMover goroutine (dispatched via moveMsgKindRequantize), never
+// reached into from another node's mover — that cross-goroutine write is exactly what
+// this decentralizes. No-op for an unknown selfID.
+func (md *MoveDispatch) requantizeNeighborSelf(selfID, fromID string, off vec3) {
+	lh, ok := md.layoutHolders[selfID]
+	if !ok {
+		return
+	}
+	md.requantizePoleTraced(lh, map[string]vec3{fromID: off}, selfID)
+	if md.quantOffsetPersist != nil {
+		if root := md.quantOffsetPersist.root; root != "" {
+			pole, hasPole := lh.LocalPole()
+			if err := WriteLocalPolarsAndPole(root, selfID, lh.LocalPolarsSnapshot(), pole, hasPole); err != nil {
+				logPersistErr("local_polar_persist", selfID, err)
+			}
+		}
+	}
+}
+
+// requantizeNeighborSelfSetC is requantizeNeighborSelf plus overriding selfID's own
+// edge-c record to fromID with c, preserving that record's own bearing/step constants —
+// the OWNER-GOROUTINE half of a gate node's edge-c equalize on its FAR neighbor
+// (dispatched via moveMsgKindRequantizeSetC, decentralizing moveNodeAndSetEdgeCs's
+// former direct write into the far neighbor's LayoutHolder). No-op for an unknown
+// selfID.
+func (md *MoveDispatch) requantizeNeighborSelfSetC(selfID, fromID string, off vec3, c int) {
+	lh, ok := md.layoutHolders[selfID]
+	if !ok {
+		return
+	}
+	md.requantizePoleTraced(lh, map[string]vec3{fromID: off}, selfID)
+	st, sp, sr := lh.localPolarSteps(fromID)
+	for _, lp := range lh.LocalPolarsSnapshot() {
+		if lp.To == fromID {
+			lh.SetLocalPolar(fromID, lp.QuantITheta, lp.QuantIPhi, c, st, sp, sr)
+			break
+		}
+	}
+	if md.quantOffsetPersist != nil {
+		if root := md.quantOffsetPersist.root; root != "" {
+			pole, hasPole := lh.LocalPole()
+			if err := WriteLocalPolarsAndPole(root, selfID, lh.LocalPolarsSnapshot(), pole, hasPole); err != nil {
+				logPersistErr("local_polar_persist", selfID, err)
+			}
+		}
+	}
+}
+
 // equalizeEdgeCLocal is a two-neighbor gate node's edge-c requantize step — the per-node
 // replacement for requantizeLocalPolars, called from rootMove AFTER the node has already
 // moved through the normal path (fan + scene c refresh, so it repositions on screen like any
@@ -1501,8 +1608,7 @@ func (md *MoveDispatch) moveNodeAndSetEdgeCs(nodeID string, newPos vec3, edgeA, 
 	// still requantizes (and persists) per-edge: it does not MOVE, only its edge-length
 	// record to nodeID is refreshed, and each far node is independent.
 	setEdgeC := func(far string) {
-		fc, ok := fcs[far]
-		if !ok {
+		if _, ok := fcs[far]; !ok {
 			return
 		}
 		st, sp, sr := lh.localPolarSteps(far)
@@ -1512,19 +1618,12 @@ func (md *MoveDispatch) moveNodeAndSetEdgeCs(nodeID string, newPos vec3, edgeA, 
 				break
 			}
 		}
-		flh, ok := md.layoutHolders[far]
-		if !ok {
-			return
-		}
-		md.requantizePoleTraced(flh, map[string]vec3{nodeID: newPos.sub(fc)}, far)
-		fst, fsp, fsr := flh.localPolarSteps(nodeID)
-		for _, lp := range flh.LocalPolarsSnapshot() {
-			if lp.To == nodeID {
-				flh.SetLocalPolar(nodeID, lp.QuantITheta, lp.QuantIPhi, c, fst, fsp, fsr)
-				break
-			}
-		}
-		persist(far, flh)
+		// The FAR neighbor's own requantize + edge-c override is decentralized: route it
+		// as a message to far's OWN inbox (moveMsgKindRequantizeSetC) instead of reaching
+		// into far's LayoutHolder from nodeID's (this node's) goroutine. far's own
+		// goroutine computes its offset to nodeID from FromCenter (nodeID's fresh newPos)
+		// and its own published snap center, then requantizes+persists itself.
+		md.sendMove(far, moveMsg{Kind: moveMsgKindRequantizeSetC, NodeID: far, SenderID: nodeID, FromCenter: newPos, SnapC: c})
 	}
 	setEdgeC(edgeA)
 	setEdgeC(edgeB)
@@ -1691,14 +1790,13 @@ func (md *MoveDispatch) rootMoveViaMessages(nodeID string, target vec3) bool {
 // local-polar analogue: nothing rebuilds X's position from a local polar). Both ends'
 // LayoutHolders are updated in memory and persisted.
 //
-// NOT YET decentralized (left for a follow-up, per the quantizedOffsets data-race fix):
-// this writes the NEIGHBOR M's own LayoutHolder from nodeID's (the mover's own) goroutine
-// — a cross-goroutine write, unlike quantOffset above. It is memory-safe today because
-// each LayoutHolder guards itself with its own mu (LayoutHolder.mu), not because it is
-// message-routed; moveNodeAndSetEdgeCs's setBothEnds does the same cross-write to the far
-// neighbor's holder. Converting these into node-to-node messages (so a holder is mutated
-// only by its own node's goroutine, mirroring nodeMover.quantOffset) is the next
-// decentralization step, not required to fix the reported crash.
+// Decentralized (mirrors nodeMover.quantOffset): X requantizes+persists its OWN holder
+// synchronously here, on its own (the mover's) goroutine — the single-writer case. Each
+// domain neighbor M's own holder is written only by M's own goroutine: X sends M a
+// moveMsgKindRequantize message (X's fresh newPos as FromCenter) instead of reaching
+// into M's LayoutHolder directly, so a holder is mutated only by its own node's
+// goroutine, exactly like quantOffset. moveNodeAndSetEdgeCs's far-neighbor edge-c write
+// is decentralized the same way, via moveMsgKindRequantizeSetC.
 func (md *MoveDispatch) requantizeLocalPolars(nodeID string, newPos vec3) {
 	lhX, okX := md.layoutHolders[nodeID]
 	if !okX {
@@ -1733,23 +1831,12 @@ func (md *MoveDispatch) requantizeLocalPolars(nodeID string, newPos vec3) {
 	// pole (rotating_pole.go) in ONE pass — the pole must see the WHOLE neighbor set, not
 	// just one at a time, so a kick from one offset is checked against every other.
 	updatesX := map[string]vec3{}
-	type mUpdate struct {
-		lh  *LayoutHolder
-		id  string
-		off vec3
-	}
-	var mUpdates []mUpdate
 	for m := range neighbors {
-		lhM, okM := md.layoutHolders[m]
-		if !okM {
-			continue
-		}
 		cM, ok := md.centerOfNode(m)
 		if !ok {
 			continue
 		}
 		updatesX[m] = cM.sub(newPos)
-		mUpdates = append(mUpdates, mUpdate{lh: lhM, id: m, off: newPos.sub(cM)})
 	}
 	if len(updatesX) == 0 {
 		return
@@ -1757,11 +1844,14 @@ func (md *MoveDispatch) requantizeLocalPolars(nodeID string, newPos vec3) {
 	md.requantizePoleTraced(lhX, updatesX, nodeID)
 	writePersist(nodeID, lhX)
 
-	// M's local polar TO X, on M's own rotating local pole — each M is a SEPARATE node,
-	// so its pole only needs to see M's own (reconstructed + this fresh) neighbor set.
-	for _, u := range mUpdates {
-		md.requantizePoleTraced(u.lh, map[string]vec3{nodeID: u.off}, u.id)
-		writePersist(u.id, u.lh)
+	// M's local polar TO X, on M's own rotating local pole: routed as a message to M's
+	// OWN inbox instead of reaching into M's LayoutHolder from X's (this) goroutine. M's
+	// own moveMsgKindRequantize handler computes its offset to X from FromCenter (X's
+	// fresh newPos) and its own published snap center, then requantizes+persists itself
+	// — each M is a SEPARATE node whose pole only needs to see M's own (reconstructed +
+	// this fresh) neighbor set.
+	for m := range updatesX {
+		md.sendMove(m, moveMsg{Kind: moveMsgKindRequantize, NodeID: m, SenderID: nodeID, FromCenter: newPos})
 	}
 }
 
