@@ -149,11 +149,12 @@ type SlotRegistry map[string]*PacedWire
 
 // RunStdinReader reads FRAMED BINARY records from r, dispatching geometry-CRUD "edit"
 // messages and the bare save command. RunStdinReader itself returns
-// when ctx is done or r reaches EOF. CAVEAT: its background frame-reader goroutine
-// (which blocks in io.ReadFull) has NO ctx-cancel exit path — on ctx-done it keeps
-// parked in the read until r reaches EOF or is closed. Benign in production (process
-// exit reclaims it), but a caller that wants the goroutine itself to unwind on cancel
-// must close r. Call in a goroutine alongside the node run loop.
+// when ctx is done or r reaches EOF. Its background frame-reader goroutine (which
+// blocks in io.ReadFull) unwinds on ctx-done too: if r implements io.Closer,
+// RunStdinReader closes it on ctx-done, which unblocks the parked read (returns an
+// error) so the reader goroutine exits via its close(recCh); return path. In production
+// r is os.Stdin and this only runs as the process is already exiting, so the close is
+// harmless. Call in a goroutine alongside the node run loop.
 //
 // slotReg is keyed by "target.targetHandle" (the destination port's wire); it stays
 // live for delivery/movers though no edit op indexes it any longer. md may be nil; if
@@ -179,6 +180,17 @@ func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *
 	br := bufio.NewReaderSize(r, maxFrameBytes)
 	done := ctx.Done()
 	recCh := make(chan []byte, 8)
+	// Unblock the background frame-reader's io.ReadFull on ctx-cancel even when r stays
+	// open (no EOF): if r is an io.Closer, close it once ctx is done so the parked read
+	// returns an error and the reader goroutine can exit via its close(recCh); return path.
+	// In production r is os.Stdin and this runs only as the process is already exiting, so
+	// closing it is harmless; the goroutine simply outlives it until then.
+	if c, ok := r.(io.Closer); ok {
+		go func() {
+			<-done
+			c.Close()
+		}()
+	}
 	go func() {
 		var lenBuf [4]byte
 		for {
