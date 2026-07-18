@@ -1,0 +1,981 @@
+t?
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>The layout pole singularity — φ grid vs great-circle bearing</title>
+  <style>
+    :root {
+      --ground: #f3f1ea;
+      --panel: #fbfaf6;
+      --ink: #1b1e26;
+      --muted: #616676;
+      --line: #dcd9cf;
+      --grid: #e7e4da;
+      --amber: #c9702a;
+      --amber-soft: #e0a066;
+      --teal: #188b7f;
+      --teal-soft: #59c1b4;
+      --danger: #c0392b;
+      --ok: #1f8f5a;
+      --psi: #7a5cc0;
+      --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+      --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+
+    @media (prefers-color-scheme:dark) {
+      :root {
+        --ground: #111319;
+        --panel: #171a21;
+        --ink: #e9e7e0;
+        --muted: #99a0ae;
+        --line: #292d37;
+        --grid: #222631;
+        --amber: #e2924c;
+        --amber-soft: #b9773e;
+        --teal: #4fc4b6;
+        --teal-soft: #2f8478;
+        --danger: #e5695b;
+        --ok: #5ac48a;
+        --psi: #a98be6;
+      }
+    }
+
+    :root[data-theme="light"] {
+      --ground: #f3f1ea;
+      --panel: #fbfaf6;
+      --ink: #1b1e26;
+      --muted: #616676;
+      --line: #dcd9cf;
+      --grid: #e7e4da;
+      --amber: #c9702a;
+      --amber-soft: #e0a066;
+      --teal: #188b7f;
+      --teal-soft: #59c1b4;
+      --danger: #c0392b;
+      --ok: #1f8f5a;
+      --psi: #7a5cc0;
+    }
+
+    :root[data-theme="dark"] {
+      --ground: #111319;
+      --panel: #171a21;
+      --ink: #e9e7e0;
+      --muted: #99a0ae;
+      --line: #292d37;
+      --grid: #222631;
+      --amber: #e2924c;
+      --amber-soft: #b9773e;
+      --teal: #4fc4b6;
+      --teal-soft: #2f8478;
+      --danger: #e5695b;
+      --ok: #5ac48a;
+      --psi: #a98be6;
+    }
+
+    * {
+      box-sizing: border-box
+    }
+
+    body {
+      margin: 0;
+      background: var(--ground);
+      color: var(--ink);
+      font-family: var(--sans);
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased
+    }
+
+    .wrap {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 26px 20px 60px
+    }
+
+    header {
+      margin-bottom: 16px
+    }
+
+    .eyebrow {
+      font-family: var(--mono);
+      font-size: 11.5px;
+      letter-spacing: .15em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin: 0 0 8px
+    }
+
+    h1 {
+      font-size: clamp(21px, 3.6vw, 31px);
+      line-height: 1.12;
+      margin: 0;
+      font-weight: 640;
+      text-wrap: balance;
+      letter-spacing: -.01em;
+      max-width: 22ch
+    }
+
+    .tabs {
+      display: flex;
+      gap: 6px;
+      margin: 20px 0 0;
+      border-bottom: 1px solid var(--line)
+    }
+
+    .tab {
+      appearance: none;
+      border: 0;
+      background: none;
+      cursor: pointer;
+      font-family: var(--sans);
+      font-size: 14px;
+      font-weight: 560;
+      color: var(--muted);
+      padding: 11px 15px;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -1px;
+      display: flex;
+      align-items: center;
+      gap: 9px
+    }
+
+    .tab:hover {
+      color: var(--ink)
+    }
+
+    .tab[aria-selected="true"] {
+      color: var(--ink);
+      border-bottom-color: var(--tabc)
+    }
+
+    .tab .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--tabc)
+    }
+
+    .tab:focus-visible {
+      outline: 2px solid var(--tabc);
+      outline-offset: 3px;
+      border-radius: 4px
+    }
+
+    .panel {
+      display: none
+    }
+
+    .panel[data-active] {
+      display: block;
+      animation: fade .28s ease
+    }
+
+    @keyframes fade {
+      from {
+        opacity: 0
+      }
+
+      to {
+        opacity: 1
+      }
+    }
+
+    @media (prefers-reduced-motion:reduce) {
+      .panel {
+        animation: none
+      }
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 1fr 300px;
+      gap: 18px;
+      align-items: stretch;
+      margin-top: 18px
+    }
+
+    @media (max-width:800px) {
+      .layout {
+        grid-template-columns: 1fr
+      }
+    }
+
+    .stage {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      overflow: hidden;
+      position: relative
+    }
+
+    canvas.scene {
+      display: block;
+      width: 100%;
+      height: auto;
+      touch-action: none;
+      cursor: grab
+    }
+
+    canvas.scene:active {
+      cursor: grabbing
+    }
+
+    .scenetag {
+      position: absolute;
+      left: 12px;
+      top: 11px;
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: .03em;
+      display: flex;
+      gap: 7px;
+      align-items: center;
+      pointer-events: none
+    }
+
+    .scenetag b {
+      color: var(--tabc)
+    }
+
+    /* instrument panel */
+    .inst {
+      display: flex;
+      flex-direction: column;
+      gap: 12px
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 14px 15px
+    }
+
+    .card .lab {
+      font-size: 11.5px;
+      letter-spacing: .05em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-family: var(--mono);
+      margin: 0 0 8px;
+      display: flex;
+      justify-content: space-between
+    }
+
+    .big {
+      font-family: var(--mono);
+      font-variant-numeric: tabular-nums;
+      font-weight: 640;
+      line-height: 1;
+      letter-spacing: -.01em
+    }
+
+    .big.xl {
+      font-size: 40px
+    }
+
+    .big.unit {
+      font-size: 15px;
+      color: var(--muted);
+      font-weight: 520;
+      margin-left: 6px
+    }
+
+    .meter {
+      height: 12px;
+      border-radius: 7px;
+      background: var(--grid);
+      overflow: hidden;
+      position: relative;
+      margin-top: 4px
+    }
+
+    .meter>i {
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      border-radius: 7px;
+      transition: width .12s ease
+    }
+
+    .meter.amber>i {
+      background: linear-gradient(90deg, var(--amber-soft), var(--amber))
+    }
+
+    .meter.teal>i {
+      background: linear-gradient(90deg, var(--teal-soft), var(--teal))
+    }
+
+    .metrow {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 9px
+    }
+
+    .metrow .name {
+      font-size: 12px;
+      color: var(--muted);
+      width: 74px;
+      flex: none
+    }
+
+    .metrow .num {
+      font-family: var(--mono);
+      font-variant-numeric: tabular-nums;
+      font-size: 13px;
+      width: 64px;
+      text-align: right;
+      flex: none
+    }
+
+    .kv {
+      display: flex;
+      flex-direction: column
+    }
+
+    .kv-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      padding: 7px 0;
+      border-bottom: 1px solid var(--grid);
+      gap: 12px
+    }
+
+    .kv-row:last-child {
+      border-bottom: 0
+    }
+
+    .kv-row .k {
+      font-size: 12.5px;
+      color: var(--muted)
+    }
+
+    .kv-row .k small {
+      font-family: var(--mono);
+      font-size: 10.5px;
+      opacity: .7;
+      margin-left: 5px
+    }
+
+    .kv-row .v {
+      font-family: var(--mono);
+      font-variant-numeric: tabular-nums;
+      font-size: 13.5px;
+      font-weight: 520
+    }
+
+    .pill {
+      font-family: var(--mono);
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-weight: 600
+    }
+
+    .pill.ok {
+      color: var(--ok);
+      background: color-mix(in srgb, var(--ok) 13%, transparent)
+    }
+
+    .pill.bad {
+      color: var(--danger);
+      background: color-mix(in srgb, var(--danger) 13%, transparent)
+    }
+
+    .status {
+      border-radius: 9px;
+      padding: 11px 13px;
+      font-family: var(--mono);
+      font-size: 12.5px;
+      font-weight: 600;
+      border: 1px solid;
+      display: flex;
+      gap: 9px;
+      align-items: center;
+      letter-spacing: .01em
+    }
+
+    .status.ok {
+      color: var(--ok);
+      border-color: color-mix(in srgb, var(--ok) 42%, transparent);
+      background: color-mix(in srgb, var(--ok) 9%, transparent)
+    }
+
+    .status.bad {
+      color: var(--danger);
+      border-color: color-mix(in srgb, var(--danger) 42%, transparent);
+      background: color-mix(in srgb, var(--danger) 9%, transparent)
+    }
+
+    .status .ico {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: currentColor;
+      flex: none
+    }
+
+    .ctl {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 12.5px;
+      color: var(--muted);
+      flex-wrap: wrap
+    }
+
+    .ctl input[type=range] {
+      accent-color: var(--tabc);
+      flex: 1;
+      min-width: 80px
+    }
+
+    .ctl .val {
+      font-family: var(--mono);
+      color: var(--ink);
+      width: 38px;
+      text-align: right
+    }
+
+    .toggle {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      cursor: pointer
+    }
+
+    footer {
+      margin-top: 26px;
+      padding-top: 16px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 12.5px;
+      line-height: 1.55
+    }
+
+    footer code {
+      font-family: var(--mono);
+      font-size: 11.5px;
+      background: color-mix(in srgb, var(--ink) 7%, transparent);
+      padding: 1px 6px;
+      border-radius: 5px;
+      color: var(--ink)
+    }
+
+    .themebtn {
+      position: fixed;
+      top: 12px;
+      right: 12px;
+      font-family: var(--mono);
+      font-size: 12px;
+      cursor: pointer;
+      background: var(--panel);
+      color: var(--muted);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 6px 10px
+    }
+
+    .themebtn:hover {
+      color: var(--ink)
+    }
+
+    .legend {
+      display: flex;
+      gap: 14px;
+      flex-wrap: wrap;
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 2px
+    }
+
+    .legend span {
+      display: flex;
+      gap: 6px;
+      align-items: center
+    }
+
+    .legend i {
+      width: 16px;
+      height: 3px;
+      border-radius: 2px;
+      display: inline-block
+    }
+  </style>
+</head>
+
+<body>
+  <button class="themebtn" id="themebtn" title="Toggle light / dark">◐</button>
+  <div class="wrap">
+    <header>
+      <p class="eyebrow">wirefold · layout geometry · task/layout-pole-singularity</p>
+      <h1>One coordinate dies at the pole. The other never does.</h1>
+    </header>
+
+    <div class="tabs" role="tablist" aria-label="Two formulations">
+      <button class="tab" id="tab1" role="tab" aria-selected="true" aria-controls="panel1" style="--tabc:var(--amber)">
+        <span class="dot"></span>φ about fixed +y
+      </button>
+      <button class="tab" id="tab2" role="tab" aria-selected="false" aria-controls="panel2" style="--tabc:var(--teal)">
+        <span class="dot"></span>great-circle bearing
+      </button>
+    </div>
+
+    <!-- ============ TAB 1 ============ -->
+    <section class="panel" id="panel1" role="tabpanel" aria-labelledby="tab1" data-active style="--tabc:var(--amber)">
+      <div class="layout">
+        <div class="stage">
+          <canvas id="c1" class="scene" width="640" height="560"
+            aria-label="3D sphere. Longitude cells converge at the +y pole; drag the node toward the pole to watch a fixed nudge cross many cells."></canvas>
+          <div class="scenetag"><b>drag</b> the node · <b>orbit</b> the empty space</div>
+        </div>
+        <div class="inst">
+          <div class="card">
+            <p class="lab"><span>nudge crosses</span><span id="c1sectorlab">cells</span></p>
+            <div><span class="big xl" id="c1dqp" style="color:var(--amber)">0</span><span class="big unit">cells</span>
+            </div>
+            <div class="meter amber" style="margin-top:12px"><i id="c1dqpbar" style="width:0%"></i></div>
+          </div>
+          <div class="card">
+            <p class="lab"><span>one φ-cell, in world units</span><span>r·sinθ·sp</span></p>
+            <div class="meter amber"><i id="c1cellbar" style="width:100%"></i></div>
+            <div class="legend" style="margin-top:9px">
+              <span><i style="background:var(--muted)"></i>θ&nbsp;<b id="c1theta"
+                  style="color:var(--ink); font-weight:600">—</b></span>
+              <span>Δφ&nbsp;<b id="c1dphi" style="color:var(--ink); font-weight:600">—</b></span>
+            </div>
+          </div>
+          <div class="card">
+            <p class="lab"><span>fixed world nudge δ</span><span class="val" id="c1nv">0.05</span></p>
+            <div class="ctl"><input type="range" id="c1nudge" min="0.01" max="0.20" step="0.01" value="0.05"></div>
+            <label class="toggle" style="margin-top:11px; font-size:12.5px; color:var(--muted)"><input type="checkbox"
+                id="c1jit"> show input jitter</label>
+          </div>
+          <div class="status ok" id="c1status"><span class="ico"></span>absorbed</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ TAB 2 ============ -->
+    <section class="panel" id="panel2" role="tabpanel" aria-labelledby="tab2" style="--tabc:var(--teal)">
+      <div class="layout">
+        <div class="stage">
+          <canvas id="c2" class="scene" width="640" height="560"
+            aria-label="3D sphere with a reference point and a target node. The great circle through them, and its perpendicular axis, stay well-behaved as the target crosses the pole."></canvas>
+          <div class="scenetag"><b>drag</b> the target anywhere · ref keeps its distance</div>
+        </div>
+        <div class="inst">
+          <div class="card">
+            <p class="lab"><span>sensitivity per δ nudge</span><span>cells</span></p>
+            <div class="metrow"><span class="name" style="color:var(--amber)">φ / +y</span>
+              <div class="meter amber" style="flex:1"><i id="c2llbar" style="width:0%"></i></div>
+              <span class="num tag-bad" id="c2ll" style="color:var(--amber)">—</span>
+            </div>
+            <div class="metrow"><span class="name" style="color:var(--teal)">great-circle</span>
+              <div class="meter teal" style="flex:1"><i id="c2gcbar" style="width:0%"></i></div>
+              <span class="num" id="c2gc" style="color:var(--teal)">—</span>
+            </div>
+          </div>
+          <div class="card">
+            <p class="lab"><span>target · stored properties</span><span id="c2health" class="pill ok">frame safe</span>
+            </p>
+            <div class="kv">
+              <div class="kv-row"><span class="k">r_edge <small>‖neighbor − node‖</small></span><span class="v"
+                  id="c2r">—</span></div>
+              <div class="kv-row"><span class="k">range c <small>∠ ref→target</small></span><span class="v" id="c2c"
+                  style="color:var(--teal)">—</span></div>
+              <div class="kv-row"><span class="k">bearing ψ <small>central azimuth about ref</small></span><span
+                  class="v" id="c2psi" style="color:var(--psi)">—</span></div>
+              <div class="kv-row"><span class="k">gain <small>Δstore / Δworld = 1/r_edge</small></span><span class="v"
+                  id="c2gain" style="color:var(--teal)">—</span></div>
+              <div class="kv-row"><span class="k">separation from ref</span><span class="v" id="c2sep">—</span></div>
+            </div>
+            <label class="toggle" style="margin-top:11px; font-size:12.5px; color:var(--muted)"><input type="checkbox"
+                id="c2cells" checked> show snapping cells (ref frame)</label>
+          </div>
+          <div class="card" style="padding:11px 13px">
+            <div class="legend">
+              <span><i style="background:var(--teal)"></i>c · range arc</span>
+              <span><i style="background:var(--psi)"></i>ψ · central azimuth about ref</span>
+              <span><i style="height:2px; border-top:2px dashed var(--muted); background:none"></i>ref × target
+                axis</span>
+              <span><i style="background:var(--amber-soft)"></i>old +y φ grid</span>
+            </div>
+          </div>
+          <div class="status ok" id="c2status"><span class="ico"></span>teal flat through the pole</div>
+        </div>
+      </div>
+    </section>
+
+    <footer>
+      <b style="color:var(--ink)">Root cause</b> — position is stored as φ about the fixed +y pole, then quantized,
+      locked, and persisted; φ is degenerate there so a nudge crosses many grid cells and the lock freezes a wrong one.
+      <b style="color:var(--ink)">Fix</b> — mirror <code>spherical.go</code>'s great-circle bearing
+      (<code>azimuthFrom</code>/<code>fromAxisFrame</code>, no <code>/sinθ</code>) at the
+      <code>cart2polar</code>→quantize sites in <code>node_move.go</code> (1372, 1470, 1688).
+    </footer>
+  </div>
+
+  <script>
+    (() => {
+      "use strict";
+      const R = 1, TAU = Math.PI * 2, D2R = Math.PI / 180, R2D = 180 / Math.PI;
+      const R_WORLD = 10, SP_DEG = 15, SP = SP_DEG * D2R;   // illustrative φ grid cell
+      const cssv = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+      const isDark = () => (document.documentElement.getAttribute("data-theme") || (matchMedia("(prefers-color-scheme:dark)").matches ? "dark" : "light")) === "dark";
+      const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+
+      // ---- camera (shared orbit) ----
+      const cam = { az: 0.7, el: 0.42 };
+      function rot(p) { // world -> camera space (orthographic). depth>0 = toward viewer
+        let x = p.x * Math.cos(cam.az) + p.z * Math.sin(cam.az);
+        let z = -p.x * Math.sin(cam.az) + p.z * Math.cos(cam.az);
+        let y = p.y;
+        let y2 = y * Math.cos(cam.el) - z * Math.sin(cam.el);
+        let z2 = y * Math.sin(cam.el) + z * Math.cos(cam.el);
+        return { x, y: y2, d: z2 };
+      }
+      function unrot(X, Y, Z) { // camera space -> world
+        let y = Y * Math.cos(cam.el) + Z * Math.sin(cam.el);
+        let z1 = -Y * Math.sin(cam.el) + Z * Math.cos(cam.el);
+        let x = X * Math.cos(cam.az) - z1 * Math.sin(cam.az);
+        let z = X * Math.sin(cam.az) + z1 * Math.cos(cam.az);
+        return { x, y, z };
+      }
+      const sph = (th, ph) => ({ x: R * Math.sin(th) * Math.cos(ph), y: R * Math.cos(th), z: R * Math.sin(th) * Math.sin(ph) });
+
+      // ---- a tiny scene rig per canvas ----
+      function rig(cv) {
+        const g = cv.getContext("2d"); let w, h, cx, cy, S;
+        function size() {
+          const dpr = Math.min(devicePixelRatio || 1, 2); const cw = cv.clientWidth || 600; const ch = Math.round(cw * 0.875);
+          cv.width = Math.round(cw * dpr); cv.height = Math.round(ch * dpr); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+          w = cw; h = ch; cx = w * 0.46; cy = h * 0.5; S = Math.min(w, h) * 0.40;
+        }
+        const scr = p => { const c = rot(p); return { x: cx + c.x * S, y: cy - c.y * S, d: c.d, front: c.d >= 0 }; };
+        return { g, size, scr, get w() { return w }, get h() { return h }, get cx() { return cx }, get cy() { return cy }, get S() { return S } };
+      }
+
+      function ball(r, cx, cy, S) { // shaded sphere fill
+        const R2 = R * S, lx = cx - R2 * 0.4, ly = cy - R2 * 0.45;
+        const grd = r.g.createRadialGradient(lx, ly, R2 * 0.1, cx, cy, R2 * 1.15);
+        if (isDark()) { grd.addColorStop(0, "#2b313d"); grd.addColorStop(.55, "#1a1e27"); grd.addColorStop(1, "#0c0e13"); }
+        else { grd.addColorStop(0, "#ffffff"); grd.addColorStop(.6, "#e9e5da"); grd.addColorStop(1, "#cfcabb"); }
+        // soft ground shadow
+        r.g.save(); r.g.globalAlpha = isDark() ? 0.35 : 0.16; r.g.fillStyle = "#000";
+        r.g.beginPath(); r.g.ellipse(cx, cy + R2 * 0.98, R2 * 0.82, R2 * 0.16, 0, 0, TAU); r.g.fill(); r.g.restore();
+        r.g.beginPath(); r.g.arc(cx, cy, R2, 0, TAU); r.g.fillStyle = grd; r.g.fill();
+        r.g.lineWidth = 1; r.g.strokeStyle = isDark() ? "rgba(120,130,150,.25)" : "rgba(90,90,110,.18)"; r.g.stroke();
+      }
+      // draw a 3D polyline with front/back depth alpha
+      function path3(r, pts, col, wFront, aBack) {
+        for (let i = 1; i < pts.length; i++) {
+          const a = r.scr(pts[i - 1]), b = r.scr(pts[i]);
+          const front = (a.d + b.d) >= 0;
+          r.g.globalAlpha = front ? 1 : aBack; r.g.lineWidth = front ? wFront : wFront * 0.8;
+          r.g.strokeStyle = col; r.g.beginPath(); r.g.moveTo(a.x, a.y); r.g.lineTo(b.x, b.y); r.g.stroke();
+        }
+        r.g.globalAlpha = 1;
+      }
+      // dashed 3D polyline (construction lines), front/back depth alpha
+      function dashPath3(r, pts, col, wFront, aBack) {
+        r.g.save(); r.g.setLineDash([5, 5]);
+        for (let i = 1; i < pts.length; i++) {
+          const a = r.scr(pts[i - 1]), b = r.scr(pts[i]); const front = (a.d + b.d) >= 0;
+          r.g.globalAlpha = front ? 0.95 : aBack; r.g.lineWidth = wFront; r.g.strokeStyle = col;
+          r.g.beginPath(); r.g.moveTo(a.x, a.y); r.g.lineTo(b.x, b.y); r.g.stroke();
+        }
+        r.g.restore(); r.g.globalAlpha = 1;
+      }
+      function dot3(r, p, rad, col, ring) {
+        const s = r.scr(p);
+        r.g.globalAlpha = s.front ? 1 : 0.32; r.g.beginPath(); r.g.arc(s.x, s.y, rad, 0, TAU); r.g.fillStyle = col; r.g.fill();
+        if (ring) { r.g.lineWidth = 2; r.g.strokeStyle = ring; r.g.stroke(); } r.g.globalAlpha = 1; return s;
+      }
+      function arrowHead(r, pA, pB, col) {
+        const a = r.scr(pA), b = r.scr(pB); if (!b.front) return;
+        const ang = Math.atan2(b.y - a.y, b.x - a.x), L = 8.5;
+        r.g.globalAlpha = 1; r.g.fillStyle = col; r.g.beginPath(); r.g.moveTo(b.x, b.y);
+        r.g.lineTo(b.x - L * Math.cos(ang - 0.42), b.y - L * Math.sin(ang - 0.42));
+        r.g.lineTo(b.x - L * Math.cos(ang + 0.42), b.y - L * Math.sin(ang + 0.42));
+        r.g.closePath(); r.g.fill();
+      }
+      function label3(r, p, txt, col, dx, dy) {
+        const s = r.scr(p); if (!s.front) return;
+        r.g.globalAlpha = 1; r.g.font = "12px " + cssv("--mono"); r.g.fillStyle = col; r.g.textAlign = "left"; r.g.textBaseline = "middle";
+        r.g.fillText(txt, s.x + (dx || 8), s.y + (dy || 0));
+      }
+      const meridian = ph => { const a = []; for (let i = 0; i <= 64; i++)a.push(sph(i / 64 * Math.PI, ph)); return a; };
+      const parallel = th => { const a = []; for (let i = 0; i <= 72; i++)a.push(sph(th, i / 72 * TAU)); return a; };
+
+      // ---- unproject screen -> sphere front point -> (theta,phi) ----
+      // unproject to the sphere. Inside the silhouette (ρ≤1) → near hemisphere. Past it (ρ>1) we
+      // reflect: effective radius 2−ρ on the FAR hemisphere — so dragging outward from centre sweeps
+      // front-pole → equator → back-pole in ONE motion, all the way around, no state.
+      function pickHemi(r, mx, my) {
+        let X = (mx - r.cx) / r.S, Y = -(my - r.cy) / r.S; const rho = Math.hypot(X, Y);
+        let back = false;
+        if (rho > 1) { back = true; const rr = Math.max(0, 2 - rho), s = rho > 0 ? rr / rho : 0; X *= s; Y *= s; }
+        const q = X * X + Y * Y, Zm = Math.sqrt(Math.max(0, 1 - q)), Z = back ? -Zm : Zm;
+        const p = unrot(X, Y, Z); const th = Math.acos(clamp(p.y, -1, 1)); const ph = Math.atan2(p.z, p.x);
+        return { th: clamp(th, 0.6 * D2R, Math.PI - 0.6 * D2R), ph };
+      }
+
+      // ============ TAB 1 scene ============
+      const r1 = rig(document.getElementById("c1"));
+      const n1 = { th: 5 * D2R, ph: 0.6 }; let nudge1 = 0.05, jit1 = false, jitP = 0;
+      function draw1() {
+        const r = r1; r.g.clearRect(0, 0, r.w, r.h); ball(r, r.cx, r.cy, r.S);
+        // parallels (faint)
+        for (let d = 30; d <= 150; d += 30) path3(r, parallel(d * D2R), cssv("--grid"), 1, 0.10);
+        // φ cells = meridians converging at pole (amber)
+        for (let a = 0; a < 360; a += SP_DEG) path3(r, meridian(a * D2R), cssv("--amber-soft"), 1.1, 0.10);
+        // pole marker
+        dot3(r, sph(0, 0), 4, cssv("--muted")); label3(r, sph(0, 0), "+y", cssv("--muted"), 8, -2);
+
+        // node phi with optional world-jitter
+        let ph = n1.ph;
+        if (jit1) { jitP += 0.14; const wob = 0.018 * Math.sin(jitP * 1.7) + 0.013 * Math.sin(jitP * 0.9); ph += wob / (R_WORLD * Math.sin(n1.th)); }
+
+        // the node's own φ-cell: highlight its two bounding meridians (they pinch at the pole)
+        const k = Math.floor(ph / SP);
+        path3(r, meridian(k * SP), cssv("--amber"), 2.4, 0.18);
+        path3(r, meridian((k + 1) * SP), cssv("--amber"), 2.4, 0.18);
+
+        // fixed world nudge -> Δφ, swept as a thick arc along the node's parallel
+        const dphi = nudge1 / (R_WORLD * Math.sin(n1.th));
+        const cellWorld = R_WORLD * Math.sin(n1.th) * SP;
+        const sweep = []; for (let i = 0; i <= 40; i++) sweep.push(sph(n1.th, ph - dphi + (2 * dphi) * i / 40));
+        path3(r, sweep, cssv("--amber"), 6, 0.5);
+        const dqp = Math.round((ph + dphi) / SP) - Math.round(ph / SP);
+
+        // node puck (glossy)
+        dot3(r, sph(n1.th, ph), 7, cssv("--ink"), cssv("--panel"));
+
+        // instruments
+        setTxt("c1theta", (n1.th * R2D).toFixed(1) + "°"); setTxt("c1dphi", (dphi * R2D).toFixed(1) + "°");
+        setTxt("c1dqp", (dqp >= 0 ? "" : "−") + Math.abs(dqp)); setTxt("c1sectorlab", Math.abs(dqp) === 1 ? "cell" : "cells");
+        document.getElementById("c1dqpbar").style.width = clamp(Math.abs(dqp) / 12, 0, 1) * 100 + "%";
+        // cell-width meter: full at equator cell (r*1*sp), shrinks toward pole
+        const cellMax = R_WORLD * SP;
+        document.getElementById("c1cellbar").style.width = clamp(cellWorld / cellMax, 0, 1) * 100 + "%";
+        const st = document.getElementById("c1status");
+        if (Math.abs(dqp) === 0) { st.className = "status ok"; st.innerHTML = '<span class="ico"></span>absorbed — the grid hides the nudge'; }
+        else { st.className = "status bad"; st.innerHTML = '<span class="ico"></span>amplified — a ' + nudge1.toFixed(2) + ' nudge flips the stored cell by ' + Math.abs(dqp); }
+        if (jit1 && !dragging) requestAnimationFrame(draw1);
+      }
+
+      // ============ TAB 2 scene ============
+      const r2 = rig(document.getElementById("c2"));
+      const ref = { th: 78 * D2R, ph: -1.9 };          // reference direction (recedes from the target)
+      const tgt = { th: 9 * D2R, ph: 0.7 };            // draggable target
+      let showCells = true;                      // draw the ref-frame snapping cells
+      function vec(o) { return sph(o.th, o.ph); }
+      function norm(v) { const m = Math.hypot(v.x, v.y, v.z) || 1; return { x: v.x / m, y: v.y / m, z: v.z / m }; }
+      function cross(a, b) { return { x: a.y * b.z - a.z * b.y, y: a.z * b.x - a.x * b.z, z: a.x * b.y - a.y * b.x }; }
+      function dot(a, b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+      const vsub = (a, b) => ({ x: a.x - b.x, y: a.y - b.y, z: a.z - b.z });
+      const vscale = (a, s) => ({ x: a.x * s, y: a.y * s, z: a.z * s });
+      function rotAbout(v, k, ang) {
+        const c = Math.cos(ang), s = Math.sin(ang), kv = dot(k, v), cr = cross(k, v);
+        return { x: v.x * c + cr.x * s + k.x * kv * (1 - c), y: v.y * c + cr.y * s + k.y * kv * (1 - c), z: v.z * c + cr.z * s + k.z * kv * (1 - c) };
+      }
+      let refE1 = null, refPrevU = null;           // ref-frame azimuth origin, parallel-transported
+      function draw2() {
+        const r = r2; r.g.clearRect(0, 0, r.w, r.h); ball(r, r.cx, r.cy, r.S);
+        // faint +y φ grid for contrast
+        for (let a = 0; a < 360; a += 30) path3(r, meridian(a * D2R), cssv("--amber-soft"), 1, 0.07);
+        for (let d = 30; d <= 150; d += 30) path3(r, parallel(d * D2R), cssv("--grid"), 1, 0.07);
+        dot3(r, sph(0, 0), 3, cssv("--muted"));
+
+        // THE FIX: the reference keeps its distance. Each frame it slides along the geodesic so
+        // the target stays between MIN and 180−MIN away — so ref × target never collapses and the
+        // singular configuration simply never happens. Drag the target anywhere, even over +y.
+        {
+          const tt = norm(vec(tgt)); let uu = norm(vec(ref)); const MIN = 15 * D2R;
+          const a = Math.acos(clamp(dot(uu, tt), -1, 1)); const d = clamp(a, MIN, Math.PI - MIN);
+          let tan = { x: uu.x - dot(uu, tt) * tt.x, y: uu.y - dot(uu, tt) * tt.y, z: uu.z - dot(uu, tt) * tt.z };
+          let tm = Math.hypot(tan.x, tan.y, tan.z);
+          if (tm < 1e-4) { const hlp = Math.abs(tt.y) < 0.9 ? { x: 0, y: 1, z: 0 } : { x: 1, y: 0, z: 0 }; tan = cross(tt, hlp); tm = Math.hypot(tan.x, tan.y, tan.z); }
+          tan = { x: tan.x / tm, y: tan.y / tm, z: tan.z / tm };
+          const nr = { x: Math.cos(d) * tt.x + Math.sin(d) * tan.x, y: Math.cos(d) * tt.y + Math.sin(d) * tan.y, z: Math.cos(d) * tt.z + Math.sin(d) * tan.z };
+          ref.th = Math.acos(clamp(nr.y, -1, 1)); ref.ph = Math.atan2(nr.z, nr.x);
+        }
+        const u = norm(vec(ref)), t = norm(vec(tgt));
+        const ang = Math.acos(clamp(dot(u, t), -1, 1));
+        const deg = Math.min(ang, Math.PI - ang);
+        const EPS = 9 * D2R;
+        const fade = clamp((deg - EPS) / (15 * D2R), 0, 1);   // stays ~1 now — ref never lets it degenerate
+
+        // ref-frame basis (pole = ref), PARALLEL-TRANSPORTED as the ref moves so the cells/wedge
+        // translate WITH the ref instead of spinning (the "sphere rotates in reverse" artifact).
+        if (!refE1) {
+          let up = Math.abs(u.y) < 0.9 ? { x: 0, y: 1, z: 0 } : { x: 1, y: 0, z: 0 };
+          refE1 = norm(vsub(up, vscale(u, dot(up, u)))); refPrevU = { x: u.x, y: u.y, z: u.z };
+        }
+        else {
+          const ax = cross(refPrevU, u), axm = Math.hypot(ax.x, ax.y, ax.z);
+          if (axm > 1e-6) {
+            const a2 = Math.acos(clamp(dot(refPrevU, u), -1, 1));
+            refE1 = rotAbout(refE1, { x: ax.x / axm, y: ax.y / axm, z: ax.z / axm }, a2);
+          }
+          refE1 = norm(vsub(refE1, vscale(u, dot(refE1, u)))); refPrevU = { x: u.x, y: u.y, z: u.z };
+        }
+        const e1 = refE1, e2 = cross(u, e1);
+        const psiR = Math.atan2(dot(t, e2), dot(t, e1));            // bearing ψ (radians), about the ref frame
+        const P = (c, a) => ({
+          x: Math.cos(c) * u.x + Math.sin(c) * (Math.cos(a) * e1.x + Math.sin(a) * e2.x),
+          y: Math.cos(c) * u.y + Math.sin(c) * (Math.cos(a) * e1.y + Math.sin(a) * e2.y),
+          z: Math.cos(c) * u.z + Math.sin(c) * (Math.cos(a) * e1.z + Math.sin(a) * e2.z)
+        });
+        // SNAPPING CELLS in the ref frame: range bands (const c) + bearing meridians (const ψ).
+        // They converge on the ref (kept away), so where the target sits they never collapse.
+        const SC = 20 * D2R, SPS = 20 * D2R;
+        if (showCells) {
+          for (let c = SC; c < Math.PI - 1e-3; c += SC) { const a = []; for (let i = 0; i <= 64; i++)a.push(P(c, i / 64 * TAU)); path3(r, a, cssv("--teal-soft"), 1, 0.09); }
+          for (let b = 0; b < TAU - 1e-3; b += SPS) { const a = []; for (let i = 0; i <= 48; i++)a.push(P(i / 48 * Math.PI, b)); path3(r, a, cssv("--teal-soft"), 1, 0.09); }
+          const bp = ((psiR % TAU) + TAU) % TAU, ci = Math.floor(ang / SC) * SC, bi = Math.floor(bp / SPS) * SPS;   // target's own cell
+          [ci, ci + SC].forEach(c => { if (c <= 0 || c >= Math.PI) return; const a = []; for (let i = 0; i <= 64; i++)a.push(P(c, i / 64 * TAU)); path3(r, a, cssv("--teal"), 1.7, 0.18); });
+          [bi, bi + SPS].forEach(b => { const a = []; for (let i = 0; i <= 48; i++)a.push(P(i / 48 * Math.PI, b)); path3(r, a, cssv("--teal"), 1.7, 0.18); });
+        }
+
+        let vv = { x: t.x - dot(t, u) * u.x, y: t.y - dot(t, u) * u.y, z: t.z - dot(t, u) * u.z };
+        const vm = Math.hypot(vv.x, vv.y, vv.z);
+        if (fade > 0 && vm > 1e-4) {
+          vv = { x: vv.x / vm, y: vv.y / vm, z: vv.z / vm };
+          r.g.globalAlpha = fade;
+          const circ = []; for (let i = 0; i <= 96; i++) { const a = i / 96 * TAU; circ.push({ x: u.x * Math.cos(a) + vv.x * Math.sin(a), y: u.y * Math.cos(a) + vv.y * Math.sin(a), z: u.z * Math.cos(a) + vv.z * Math.sin(a) }); }
+          path3(r, circ, cssv("--teal-soft"), 1.6, 0.16);
+          const arc = [];
+          for (let i = 0; i <= 48; i++) { const a = ang * i / 48; arc.push({ x: u.x * Math.cos(a) + vv.x * Math.sin(a), y: u.y * Math.cos(a) + vv.y * Math.sin(a), z: u.z * Math.cos(a) + vv.z * Math.sin(a) }); }
+          path3(r, arc, cssv("--teal"), 4.5, 0.4);
+          if (arc.length > 2) arrowHead(r, arc[arc.length - 2], arc[arc.length - 1], cssv("--teal"));
+          const midc = { x: u.x * Math.cos(ang / 2) + vv.x * Math.sin(ang / 2), y: u.y * Math.cos(ang / 2) + vv.y * Math.sin(ang / 2), z: u.z * Math.cos(ang / 2) + vv.z * Math.sin(ang / 2) };
+          label3(r, midc, "c", cssv("--teal"), 8, -6);
+          // measurement axis = ref × target, oriented to a stable hemisphere so it doesn't pop
+          let ax = norm(cross(u, t)); if (ax.y < 0) { ax = { x: -ax.x, y: -ax.y, z: -ax.z }; }
+          dashPath3(r, [{ x: -ax.x * R, y: -ax.y * R, z: -ax.z * R }, { x: ax.x * R, y: ax.y * R, z: ax.z * R }], cssv("--muted"), 1.6, 0.3);
+          dot3(r, ax, 3.5, cssv("--muted")); dot3(r, { x: -ax.x, y: -ax.y, z: -ax.z }, 3.5, cssv("--muted"));
+          label3(r, ax, "axis", cssv("--muted"), 9, -2);
+          r.g.globalAlpha = 1;
+        }
+        // degenerate marker: target sitting on ref (or its antipode)
+        if (fade < 1) {
+          r.g.globalAlpha = 1 - fade;
+          const s = r.scr(t); r.g.strokeStyle = cssv("--danger"); r.g.lineWidth = 2; r.g.setLineDash([4, 4]);
+          r.g.beginPath(); r.g.arc(s.x, s.y, 16, 0, TAU); r.g.stroke(); r.g.setLineDash([]);
+          r.g.font = "12px " + cssv("--mono"); r.g.fillStyle = cssv("--danger"); r.g.textAlign = "left"; r.g.textBaseline = "middle";
+          r.g.globalAlpha = 1;
+        }
+        // ref + target pucks
+        dot3(r, u, 6, cssv("--teal"), cssv("--panel")); label3(r, u, "ref", cssv("--teal"), 9, -2);
+        dot3(r, t, 7, cssv("--ink"), cssv("--panel")); label3(r, t, "target", cssv("--ink"), 9, -2);
+        // r_edge: the offset magnitude (node → neighbor), drawn as the radius out to the target
+        dashPath3(r, [{ x: 0, y: 0, z: 0 }, { x: t.x, y: t.y, z: t.z }], cssv("--ink"), 1.2, 0.3);
+        label3(r, { x: t.x * 0.52, y: t.y * 0.52, z: t.z * 0.52 }, "r_edge", cssv("--ink"), 8, -2);
+        // ψ is a CENTRAL azimuth about the ref axis — same kind of angle as φ (about +y), just a
+        // different axis. Draw it BOTH ways: a wedge at the centre (the definition) and the surface
+        // arc / bearing it maps to (the navigation reading) — same number.
+        if (fade > 0) {
+          const pd = psiR * R2D;
+          // (1) central wedge: two radii in the plane ⟂ ref, through the centre
+          const rad = 0.5;
+          const d1 = { x: Math.cos(psiR) * e1.x + Math.sin(psiR) * e2.x, y: Math.cos(psiR) * e1.y + Math.sin(psiR) * e2.y, z: Math.cos(psiR) * e1.z + Math.sin(psiR) * e2.z };
+          dashPath3(r, [{ x: 0, y: 0, z: 0 }, { x: e1.x * rad, y: e1.y * rad, z: e1.z * rad }], cssv("--psi"), 1.2, 0.3);   // ψ=0 radius
+          path3(r, [{ x: 0, y: 0, z: 0 }, { x: d1.x * rad, y: d1.y * rad, z: d1.z * rad }], cssv("--psi"), 1.7, 0.35);        // ψ radius
+          const Nw = Math.max(2, Math.round(Math.abs(psiR) / (4 * D2R))), wedge = [];
+          for (let i = 0; i <= Nw; i++) { const a = psiR * i / Nw; wedge.push({ x: (Math.cos(a) * e1.x + Math.sin(a) * e2.x) * rad * 0.62, y: (Math.cos(a) * e1.y + Math.sin(a) * e2.y) * rad * 0.62, z: (Math.cos(a) * e1.z + Math.sin(a) * e2.z) * rad * 0.62 }); }
+          path3(r, wedge, cssv("--psi"), 2.6, 0.4);
+          if (wedge.length > 2) arrowHead(r, wedge[wedge.length - 2], wedge[wedge.length - 1], cssv("--psi"));
+          label3(r, { x: d1.x * rad, y: d1.y * rad, z: d1.z * rad }, "ψ", cssv("--psi"), 8, -2);
+          // (2) same angle, read on the surface as the departure bearing
+          const cpsi = 26 * D2R;
+          const zero = []; for (let i = 0; i <= 20; i++) zero.push(P(cpsi * i / 20, 0));
+          dashPath3(r, zero, cssv("--psi"), 1.1, 0.2);
+          const N = Math.max(2, Math.round(Math.abs(psiR) / (3 * D2R))), sweep = [];
+          for (let i = 0; i <= N; i++) sweep.push(P(cpsi, psiR * i / N));
+          path3(r, sweep, cssv("--psi"), 2.4, 0.25);
+        }
+
+        // instruments — sensitivity vs the target's colatitude from +y
+        const th = tgt.th;
+        const ll = nudge1 / (R_WORLD * Math.sin(th)) / SP;   // φ about fixed +y
+        const gc = nudge1 / (R_WORLD) / SP;                // great-circle range: uniform
+        setTxt("c2theta", (th * R2D).toFixed(1) + "°");
+        setTxt("c2ll", ll.toFixed(2)); setTxt("c2gc", gc.toFixed(2)); setTxt("c2ratio", (ll / gc).toFixed(0));
+
+        // ---- target's stored great-circle properties (basis e1/e2 + psiR computed above) ----
+        // r_edge is the NEIGHBOR distance (offset = neighbor − thisNode), not the scene-sphere radius.
+        const psi = psiR * R2D;
+        const sepDeg = deg * R2D, safe = deg >= EPS;
+        setTxt("c2r", "10.0 wu"); setTxt("c2c", (ang * R2D).toFixed(1) + "°");
+        setTxt("c2psi", (psi >= 0 ? "" : "−") + Math.abs(psi).toFixed(1) + "°");
+        setTxt("c2gain", "0.100 /wu");
+        const sepEl = document.getElementById("c2sep"); sepEl.textContent = sepDeg.toFixed(1) + "°";
+        sepEl.style.color = safe ? "var(--ok)" : "var(--danger)";
+        const hp = document.getElementById("c2health");
+        hp.className = "pill " + (safe ? "ok" : "bad"); hp.textContent = safe ? "frame safe" : "degenerate";
+        const cap = 4; // meter full-scale = 4 cells
+        document.getElementById("c2llbar").style.width = clamp(ll / cap, 0, 1) * 100 + "%";
+        document.getElementById("c2gcbar").style.width = clamp(gc / cap, 0, 1) * 100 + "%";
+        const st = document.getElementById("c2status");
+        if (fade < 0.5) { st.className = "status bad"; st.innerHTML = '<span class="ico"></span>the frame\'s one singular point — put ref away from your data'; }
+        else if (ll / gc > 3) { st.className = "status bad"; st.innerHTML = '<span class="ico"></span>φ grid ' + (ll / gc).toFixed(0) + '× more sensitive — teal unmoved'; }
+        else { st.className = "status ok"; st.innerHTML = '<span class="ico"></span>both calm here — drag the target to the pole'; }
+      }
+
+      // ---- interaction: orbit vs drag-node ----
+      let dragging = false;
+      function bind(cv, r, node, redraw) {
+        let mode = null, lastX = 0, lastY = 0;
+        const local = e => { const b = cv.getBoundingClientRect(); return [(e.clientX - b.left) * (r.w / b.width), (e.clientY - b.top) * (r.h / b.height)]; };
+        cv.addEventListener("pointerdown", e => {
+          cv.setPointerCapture(e.pointerId); const [x, y] = local(e);
+          const s = r.scr(sph(node.th, node.ph)); dragging = true;
+          // grab the node whether it's on the near OR far side (its screen dot is drawn either way)
+          mode = (Math.hypot(x - s.x, y - s.y) < 22) ? "node" : "orbit"; lastX = x; lastY = y;
+          if (mode === "node") { const p = pickHemi(r, x, y); node.th = p.th; node.ph = p.ph; } redraw();
+        });
+        cv.addEventListener("pointermove", e => {
+          if (!dragging) return; const [x, y] = local(e);
+          if (mode === "node") { const p = pickHemi(r, x, y); node.th = p.th; node.ph = p.ph; }
+          else { cam.az += (x - lastX) * 0.008; cam.el = clamp(cam.el - (y - lastY) * 0.008, -1.35, 1.35); }
+          lastX = x; lastY = y; redraw();
+        });
+        const up = () => { dragging = false; mode = null; if (jit1) draw1(); };
+        cv.addEventListener("pointerup", up); cv.addEventListener("pointercancel", up);
+      }
+      bind(document.getElementById("c1"), r1, n1, draw1);
+      bind(document.getElementById("c2"), r2, tgt, draw2);
+
+      // ---- controls ----
+      document.getElementById("c1nudge").addEventListener("input", e => { nudge1 = +e.target.value; setTxt("c1nv", nudge1.toFixed(2)); draw1(); draw2(); });
+      document.getElementById("c1jit").addEventListener("change", e => { jit1 = e.target.checked; draw1(); });
+      document.getElementById("c2cells").addEventListener("change", e => { showCells = e.target.checked; draw2(); });
+      document.getElementById("themebtn").addEventListener("click", () => { const d = isDark(); document.documentElement.setAttribute("data-theme", d ? "light" : "dark"); draw1(); draw2(); });
+
+      // ---- tabs ----
+      const tabs = [document.getElementById("tab1"), document.getElementById("tab2")];
+      const panels = [document.getElementById("panel1"), document.getElementById("panel2")];
+      tabs.forEach((t, i) => t.addEventListener("click", () => {
+        tabs.forEach((x, j) => x.setAttribute("aria-selected", j === i));
+        panels.forEach((p, j) => { if (j === i) p.setAttribute("data-active", ""); else p.removeAttribute("data-active"); });
+        if (i === 0) { r1.size(); draw1(); } else { r2.size(); draw2(); }
+      }));
+
+      function setTxt(id, t) { document.getElementById(id).textContent = t; }
+      function boot() { r1.size(); r2.size(); draw1(); draw2(); }
+      addEventListener("resize", () => { r1.size(); r2.size(); draw1(); draw2(); });
+      boot();
+    })();
+  </script>
+</body>
+
+</html>

@@ -133,21 +133,20 @@ func WriteLocalPolars(root, id string, lps []LocalPolar) error {
 	path := filepath.Join(root, "nodes", id, "meta.json")
 	return entityReadModifyWrite(path, func(obj map[string]json.RawMessage) {
 		type localPolarJSON struct {
-			To          string  `json:"to"`
-			Role        string  `json:"role,omitempty"`
-			QuantITheta int     `json:"quantITheta"`
-			QuantIPhi   int     `json:"quantIPhi"`
-			QuantIR     int     `json:"quantIR"`
-			StepTheta   float64 `json:"stepTheta"`
-			StepPhi     float64 `json:"stepPhi"`
-			StepR       float64 `json:"stepR"`
+			To      string  `json:"to"`
+			Role    string  `json:"role,omitempty"`
+			DirX    float64 `json:"dirX"`
+			DirY    float64 `json:"dirY"`
+			DirZ    float64 `json:"dirZ"`
+			QuantIR int     `json:"quantIR"`
+			StepR   float64 `json:"stepR"`
 		}
 		out := make([]localPolarJSON, 0, len(lps))
 		for _, lp := range lps {
-			t, p, r := lp.effectiveSteps()
+			r := lp.effectiveSteps()
 			out = append(out, localPolarJSON{
-				To: lp.To, Role: lp.Role, QuantITheta: lp.QuantITheta, QuantIPhi: lp.QuantIPhi, QuantIR: lp.QuantIR,
-				StepTheta: t, StepPhi: p, StepR: r,
+				To: lp.To, Role: lp.Role, DirX: lp.Dir.X, DirY: lp.Dir.Y, DirZ: lp.Dir.Z, QuantIR: lp.QuantIR,
+				StepR: r,
 			})
 		}
 		b, _ := json.Marshal(out)

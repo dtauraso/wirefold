@@ -84,13 +84,15 @@ type specLocalPolar struct {
 	// Role names this neighbor's part in the decentralized cascade rule
 	// (node_move.go) — "source" / "follower" / "" (neither). See
 	// layout_holder.go LocalPolar.Role's doc.
-	Role        string  `json:"role,omitempty"`
-	QuantITheta int     `json:"quantITheta"`
-	QuantIPhi   int     `json:"quantIPhi"`
-	QuantIR     int     `json:"quantIR"`
-	StepTheta   float64 `json:"stepTheta,omitempty"`
-	StepPhi     float64 `json:"stepPhi,omitempty"`
-	StepR       float64 `json:"stepR,omitempty"`
+	Role string `json:"role,omitempty"`
+	// DirX/DirY/DirZ is the EXACT unit direction of (neighbor − owner) — stored
+	// faithfully rather than as a quantized (θ,φ) pair about the fixed +y pole
+	// (layout_holder.go LocalPolar.Dir's doc explains why).
+	DirX    float64 `json:"dirX"`
+	DirY    float64 `json:"dirY"`
+	DirZ    float64 `json:"dirZ"`
+	QuantIR int     `json:"quantIR"`
+	StepR   float64 `json:"stepR,omitempty"`
 }
 
 // label returns the node's human label: data.label when present and non-empty,
@@ -503,19 +505,20 @@ func (b *buildCtx) computeLocalPolars() {
 		sort.Strings(ids) // deterministic order
 
 		ownCenter, hasOwn := b.centers[n.ID]
-		// Local-polar quantization uses its OWN small, uniform cells (layout_holder.go
-		// localStepTheta/localStepPhi/localStepR) — NOT the scene-center triple's
-		// coarser stepTheta/stepPhi/stepR (the point of the double-link model: every
-		// distance lands on a whole tick of a small grid).
-		t, p, r := LocalPolar{}.effectiveSteps()
+		// Local-polar quantization uses its OWN small, uniform radius cell
+		// (layout_holder.go localStepR) — NOT the scene-center triple's coarser
+		// stepR (the point of the double-link model: every distance lands on a
+		// whole tick of a small grid). Direction is stored as an exact unit
+		// vector, never quantized.
+		r := LocalPolar{}.effectiveSteps()
 
 		list := make([]LocalPolar, 0, len(ids))
 		for _, mid := range ids {
 			if sm, ok := stored[n.ID]; ok {
 				if lp, ok2 := sm[mid]; ok2 {
 					list = append(list, LocalPolar{
-						To: mid, Role: lp.Role, QuantITheta: lp.QuantITheta, QuantIPhi: lp.QuantIPhi, QuantIR: lp.QuantIR,
-						StepTheta: lp.StepTheta, StepPhi: lp.StepPhi, StepR: lp.StepR,
+						To: mid, Role: lp.Role, Dir: vec3{X: lp.DirX, Y: lp.DirY, Z: lp.DirZ}, QuantIR: lp.QuantIR,
+						StepR: lp.StepR,
 					})
 					continue
 				}
@@ -525,12 +528,11 @@ func (b *buildCtx) computeLocalPolars() {
 				list = append(list, LocalPolar{To: mid}) // centerless → zero offset, nothing to measure
 				continue
 			}
-			pol := cart2polar(mCenter.sub(ownCenter))
+			offset := mCenter.sub(ownCenter)
 			list = append(list, LocalPolar{
-				To:          mid,
-				QuantITheta: int(math.Round(pol.Theta / t)),
-				QuantIPhi:   int(math.Round(pol.Phi / p)),
-				QuantIR:     int(math.Round(pol.R / r)),
+				To:      mid,
+				Dir:     offset.normalize(),
+				QuantIR: int(math.Round(offset.length() / r)),
 			})
 		}
 		result[n.ID] = list
