@@ -2,7 +2,6 @@
 // Both sides import from here so unknown / malformed messages are caught
 // at type-narrow time rather than silently writing `[object Object]` to disk.
 
-// "active" means "a Go process is spawned" — a genuine, instant, ext-host-owned fact
 // Geometry-CRUD edit sent webview → host → Go. ONE message kind ("edit") whose sole op is
 // "update" (mirroring nodes/Wiring/stdin_reader.go applyEdit). Go owns the clock; this
 // seam carries no delivery signal. The create/delete ops were removed end-to-end: no live
@@ -163,7 +162,7 @@ const HOST_TO_WEBVIEW_TYPES: ReadonlySet<HostToWebviewMsg["type"]> = new Set([
 // RawInputEvent) and decoded + bounds-checked in Go (input_codec.go). The host no longer
 // sees a JSON edit/raw-input envelope to validate — it receives an opaque "go-record"
 // ArrayBuffer and writes it framed to Go. parseWebviewToHost below validates only the
-// remaining host-CONTROL messages (run/stop/…/webview-log) plus the go-record envelope.
+// remaining host-CONTROL messages (webview-log/go-record/etc.) plus the go-record envelope.
 
 export function parseWebviewToHost(raw: unknown): WebviewToHostMsg | undefined {
   if (!raw || typeof raw !== "object") return undefined;
@@ -173,8 +172,6 @@ export function parseWebviewToHost(raw: unknown): WebviewToHostMsg | undefined {
   }
   const m = raw as Record<string, unknown>;
   switch (t) {
-    case "run":
-      return m as unknown as WebviewToHostMsg;
     case "webview-log":
       return typeof m.entry === "string" ? (m as unknown as WebviewToHostMsg) : undefined;
     case "go-record":

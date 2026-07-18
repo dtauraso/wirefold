@@ -12,12 +12,11 @@
 // Numbers are little-endian (matching fd 3). Enum discriminators (event kind, hit kind,
 // update entity kind, update attr, overlay flag) are u8 indices into the shared orderings.
 // There is NO JSON on the wire: every record is fully numeric. The live editor→Go traffic
-// is raw-input (numeric), overlays toggle (numeric flag-id), the bare save
-// COMMAND (kind byte only — Go persists its OWN authoritative scene state), and the
-// play/pause control bytes. The edit-create/edit-delete record kinds were removed
-// end-to-end — no live TS sender ever emitted them, and their only trigger (a port-drop
-// gesture) unconditionally tore down a live wire's in-flight beads via
-// PacedWire.Restore(). Only edit-update remains.
+// is raw-input (numeric), overlays toggle (numeric flag-id), and the bare save
+// COMMAND (kind byte only — Go persists its OWN authoritative scene state). The
+// edit-create/edit-delete record kinds were removed end-to-end — no live TS sender ever
+// emitted them, and their only trigger (a port-drop gesture) unconditionally tore down a
+// live wire's in-flight beads via PacedWire.Restore(). Only edit-update remains.
 //
 // Kind 3 was IN_KIND_RESEND (removed: the ext host now caches the last fd3 snapshot and
 // replays it on webview "ready" instead of asking Go to re-emit geometry — see
@@ -121,14 +120,6 @@ class ByteWriter {
     return this.buf.buffer.slice(0, this.pos);
   }
 }
-
-/** Build a payload-less control/command record (play / pause / save). */
-export function encodeControl(kind: number): ArrayBuffer {
-  const w = new ByteWriter();
-  w.u8(kind);
-  return w.toArrayBuffer();
-}
-
 
 // Update attr indices (must match IN_UPDATE_ATTRS ordering).
 const IN_OVERLAY_ATTR_TOGGLE = 0;
