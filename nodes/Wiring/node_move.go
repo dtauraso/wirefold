@@ -196,14 +196,15 @@ type nodeMover struct {
 	geom  nodeGeom
 	inbox chan moveMsg
 	tr    *T.Trace
-	// geomMu guards m.geom against the two remaining goroutines that touch it
-	// concurrently since SLICE 3: this node's OWN Update() goroutine (applyCenter,
-	// the sole writer of position fields) and nodeMover's own inbox-drain goroutine
-	// (handle's anchor/default cases, the sole writer of port-anchor fields
-	// and the reader for every re-emit). Position is still single-writer by
-	// construction (only applyCenter ever writes it); this mutex exists purely so
-	// emitGeometry's full-struct read on one goroutine never races a concurrent
-	// field write on the other — it is NOT a second position-writer.
+	// geomMu guards m.geom's full-struct read in emitGeometry (which runs on a
+	// different goroutine) against the field writes, which ALL happen on nodeMover's
+	// own inbox-drain goroutine: applyCenter (the sole writer of position fields) and
+	// handle's anchor/default cases (the sole writer of port-anchor fields). There is
+	// no separate per-node "Update()" writer goroutine — that was the retired SLICE 3
+	// architecture; position is single-writer by construction (only applyCenter, on
+	// the mover goroutine, ever writes it). This mutex exists purely so emitGeometry's
+	// cross-goroutine read never races a concurrent field write — it is NOT a second
+	// position-writer.
 	geomMu sync.Mutex
 	// snap is an atomically-published immutable snapshot of this node's current
 	// center+reachR. Written only by the mover's own goroutine after every center
