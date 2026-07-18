@@ -41,6 +41,10 @@ func TestPulseDrivesHeldValueLean(t *testing.T) {
 	clk := Wiring.NewRealClock()
 	inPw.SetClock(clk)
 	stepWire(ctx, inPw)
+	// inSrc is a test-only seeding source on inPw: PlaceDriven places a bead
+	// (no walker) that the stepWire loop above then drives to delivery,
+	// reusing the production placement API to inject the test's input value.
+	inSrc := Wiring.NewPacedOutNoGeom(inPw, ctx, "seed", "Out", tr, Wiring.RuleFireAndForget, 0, 0, "")
 
 	outPw := Wiring.NewPacedWire(latMs*Wiring.PulseSpeedWuPerMs, Wiring.PulseSpeedWuPerMs)
 	outPw.SetClock(clk)
@@ -68,8 +72,8 @@ func TestPulseDrivesHeldValueLean(t *testing.T) {
 		t.Fatal("timeout waiting for startup bead")
 	}
 
-	if !inPw.PlaceDeliverOnly(5, 0) {
-		t.Fatal("PlaceDeliverOnly returned false")
+	if !inSrc.PlaceDriven(5).Live() {
+		t.Fatal("PlaceDriven returned false")
 	}
 
 	// The interior bead updates the instant input arrives.

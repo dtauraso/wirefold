@@ -41,6 +41,10 @@ func TestPacerChangeStepFeedbackLean(t *testing.T) {
 	clk := Wiring.NewRealClock()
 	inPw.SetClock(clk)
 	stepWire(ctx, inPw)
+	// inSrc is a test-only seeding source on inPw: PlaceDriven places a bead
+	// (no walker) that the stepWire loop above then drives to delivery,
+	// reusing the production placement API to inject the test's input value.
+	inSrc := Wiring.NewPacedOutNoGeom(inPw, ctx, "seed", "Out", tr, Wiring.RuleFireAndForget, 0, 0, "")
 
 	outPw := Wiring.NewPacedWire(latMs*Wiring.PulseSpeedWuPerMs, Wiring.PulseSpeedWuPerMs)
 	outPw.SetClock(clk)
@@ -72,20 +76,20 @@ func TestPacerChangeStepFeedbackLean(t *testing.T) {
 	}
 
 	// First value ever seen -> step=1 (change from noValue).
-	if !inPw.PlaceDeliverOnly(5, 0) {
-		t.Fatal("PlaceDeliverOnly returned false")
+	if !inSrc.PlaceDriven(5).Live() {
+		t.Fatal("PlaceDriven returned false")
 	}
 	waitFor(1)
 
 	// Same value again -> step=0.
-	if !inPw.PlaceDeliverOnly(5, 0) {
-		t.Fatal("PlaceDeliverOnly returned false")
+	if !inSrc.PlaceDriven(5).Live() {
+		t.Fatal("PlaceDriven returned false")
 	}
 	waitFor(0)
 
 	// Different value -> step=1.
-	if !inPw.PlaceDeliverOnly(6, 0) {
-		t.Fatal("PlaceDeliverOnly returned false")
+	if !inSrc.PlaceDriven(6).Live() {
+		t.Fatal("PlaceDriven returned false")
 	}
 	waitFor(1)
 

@@ -54,6 +54,12 @@ func runGate(t *testing.T, left, right int) int {
 	rightPw.SetClock(clk)
 	stepWire(ctx, rightPw)
 
+	// leftSrc/rightSrc are test-only seeding sources: PlaceDriven places a
+	// bead (no walker) that the stepWire loops above then drive to delivery,
+	// reusing the production placement API to inject the test's input values.
+	leftSrc := Wiring.NewPacedOutNoGeom(leftPw, ctx, "seed", "Out", tr, Wiring.RuleFireAndForget, 0, 0, "")
+	rightSrc := Wiring.NewPacedOutNoGeom(rightPw, ctx, "seed", "Out", tr, Wiring.RuleFireAndForget, 0, 0, "")
+
 	outPw := Wiring.NewPacedWire(latMs*Wiring.PulseSpeedWuPerMs, Wiring.PulseSpeedWuPerMs)
 	outPw.SetClock(clk)
 
@@ -77,11 +83,11 @@ func runGate(t *testing.T, left, right int) int {
 		}
 	}()
 
-	if !leftPw.PlaceDeliverOnly(left, 0) {
-		t.Fatal("PlaceDeliverOnly(left) returned false")
+	if !leftSrc.PlaceDriven(left).Live() {
+		t.Fatal("PlaceDriven(left) returned false")
 	}
-	if !rightPw.PlaceDeliverOnly(right, 0) {
-		t.Fatal("PlaceDeliverOnly(right) returned false")
+	if !rightSrc.PlaceDriven(right).Live() {
+		t.Fatal("PlaceDriven(right) returned false")
 	}
 
 	// Both inputs held → window (3000ms) not an issue since both arrive
