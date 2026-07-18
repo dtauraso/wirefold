@@ -1161,6 +1161,37 @@ func (md *MoveDispatch) sendMove(id string, msg moveMsg) {
 	}
 }
 
+// sendMoveLossy is sendMove's non-blocking twin, reserved for the two decentralized
+// requantize-cascade kinds (moveMsgKindRequantize, moveMsgKindRequantizeSetC) ONLY.
+// Per MODEL.md there is no cross-goroutine delivery guarantee — a goroutine does its
+// own work and drives its own outputs, fire-and-forget. Every OTHER sendMove call
+// (drag, equalize, trigger, gatePlace, center, anchor) carries a node's actual
+// position and MUST stay blocking: dropping one of those leaves a node's committed
+// geometry stale with no self-heal. Requantize messages are different: they exist
+// only to keep a neighbor's cached bearing/offset fresh, and a full inbox means the
+// receiver is already mid-cascade and about to requantize itself from its own next
+// commit anyway (or self-heals on reload) — so a drop here is redundant, not just
+// tolerable. Blocking would instead risk deadlock: domain adjacency is symmetric, so
+// two mutually-adjacent nodes committing concurrently with full inboxes could each
+// block sending a requantize to the other while neither is draining (handle runs
+// synchronously inside commitLocal), hanging both nodeMover goroutines.
+func (md *MoveDispatch) sendMoveLossy(id string, msg moveMsg) {
+	if tap := md.msgTap.Load(); tap != nil {
+		(*tap)(id, msg)
+	}
+	if ch, ok := md.dispatch[id]; ok {
+		select {
+		case ch <- msg:
+		default:
+			// Inbox full: receiver is mid-cascade and will self-requantize on its own
+			// next commit (or self-heals on reload) — dropping is safe, not just tolerated.
+			if md.tr != nil {
+				md.tr.Breadcrumb("requantize.drop", id, "", msg.Kind)
+			}
+		}
+	}
+}
+
 // cascadeRoleSpec is one node's authored cascade role — the per-node replacement for
 // what used to be entries in three hardcoded package-level tables
 // (ruleSource/ruleFollowers/gateNeighbors). loader.go's deriveCascadeRoles builds
@@ -1622,8 +1653,11 @@ func (md *MoveDispatch) moveNodeAndSetEdgeCs(nodeID string, newPos vec3, edgeA, 
 		// as a message to far's OWN inbox (moveMsgKindRequantizeSetC) instead of reaching
 		// into far's LayoutHolder from nodeID's (this node's) goroutine. far's own
 		// goroutine computes its offset to nodeID from FromCenter (nodeID's fresh newPos)
-		// and its own published snap center, then requantizes+persists itself.
-		md.sendMove(far, moveMsg{Kind: moveMsgKindRequantizeSetC, NodeID: far, SenderID: nodeID, FromCenter: newPos, SnapC: c})
+		// and its own published snap center, then requantizes+persists itself. Sent via
+		// sendMoveLossy (non-blocking): a full far inbox means far is already mid-cascade
+		// and will requantize itself on its own next commit, so the drop is safe — and
+		// blocking here risks deadlock against far's own symmetric send back to nodeID.
+		md.sendMoveLossy(far, moveMsg{Kind: moveMsgKindRequantizeSetC, NodeID: far, SenderID: nodeID, FromCenter: newPos, SnapC: c})
 	}
 	setEdgeC(edgeA)
 	setEdgeC(edgeB)
@@ -1849,9 +1883,12 @@ func (md *MoveDispatch) requantizeLocalPolars(nodeID string, newPos vec3) {
 	// own moveMsgKindRequantize handler computes its offset to X from FromCenter (X's
 	// fresh newPos) and its own published snap center, then requantizes+persists itself
 	// — each M is a SEPARATE node whose pole only needs to see M's own (reconstructed +
-	// this fresh) neighbor set.
+	// this fresh) neighbor set. Sent via sendMoveLossy (non-blocking): a full M inbox
+	// means M is already mid-cascade and will requantize itself on its own next commit,
+	// so the drop is safe — and blocking here risks deadlock against M's own symmetric
+	// send back to X when both commit concurrently with full inboxes.
 	for m := range updatesX {
-		md.sendMove(m, moveMsg{Kind: moveMsgKindRequantize, NodeID: m, SenderID: nodeID, FromCenter: newPos})
+		md.sendMoveLossy(m, moveMsg{Kind: moveMsgKindRequantize, NodeID: m, SenderID: nodeID, FromCenter: newPos})
 	}
 }
 
