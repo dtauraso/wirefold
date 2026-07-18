@@ -66,15 +66,6 @@ type EdgeEndpoints struct {
 	TargetHandle string
 }
 
-// stdinCRUDPayload held the destination-slot fields for the removed create/delete edit
-// ops. Those ops were deleted end-to-end (no live TS sender ever emitted them, and their
-// only trigger tore down live in-flight beads via PacedWire.Restore()); the struct is kept
-// embedded for now since nothing currently populates it.
-type stdinCRUDPayload struct {
-	Target       string
-	TargetHandle string
-}
-
 // stdinMsg is the single editor→Go bridge shape. For type=="edit", op is the sole
 // remaining value "update", which sets an attribute on a typed entity — the sole live
 // entity is overlays: Attr=="toggle" (Flag names one overlay). The other top-level types
@@ -94,7 +85,6 @@ type stdinMsg struct {
 	Num int
 	// Event is the payload for the top-level type=="raw-input" message; nil otherwise.
 	Event *rawInputMsg
-	stdinCRUDPayload
 }
 
 // rawInputMsg carries the payload for a top-level type=="raw-input" message (Phase 6):

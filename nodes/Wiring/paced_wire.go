@@ -107,8 +107,7 @@ func (pw *PacedWire) ticksToCross(arc float64) float64 {
 // until placementTick + ticksToCross is reached, then moves the bead from
 // `inflight` to `delivered`. There is no TS "delivered" signal and no central
 // scheduler — every wire reads the same clock independently. Pause freezes the
-// tick (the clock does not advance while halted); Reset/Delete bump teardownGen
-// so the driven loop drops the bead.
+// tick (the clock does not advance while halted).
 type PacedWire struct {
 	mu sync.Mutex
 	// inflight holds beads traversing the wire, in send order. delivered holds
@@ -118,8 +117,9 @@ type PacedWire struct {
 	// nextGen mints a unique id for each placed bead (its StepOnce self-cancel key)
 	// and is also bumped on teardown to invalidate ALL outstanding beads at once.
 	nextGen uint64
-	// teardownGen: a bead whose gen is < teardownGen is invalidated wholesale
-	// (Reset). Beads placed after a teardown get gen >= teardownGen.
+	// teardownGen: a bead whose gen is < teardownGen is invalidated wholesale.
+	// No current caller bumps it above 0 (the Reset path was removed as dead
+	// code); kept because tryDeliverHeadLocked/StepOnce still gate on it.
 	teardownGen uint64
 	// clock is the one monotonic clock this wire reads to time its own delivery.
 	clock        Clock
@@ -511,31 +511,4 @@ func (pw *PacedWire) advanceBeadLocked(gen uint64, nowTick float64) (emit bool, 
 		}
 	}
 	return
-}
-
-// teardownLocked cancels ALL in-flight beads (invalidating their gen so any
-// subsequent StepOnce drops them), clears both queues, and returns the per-bead
-// source identities for any in-flight beads so the caller can emit one
-// PulseCancelled per dropped STREAMING bead after unlocking (emit mirrors the
-// bead's streams flag — delivery-only beads carry no sprite and emit nothing,
-// matching tryDeliverHeadLocked's emit: db.streams). Must be called with pw.mu held.
-func (pw *PacedWire) teardownLocked() []arriveInfo {
-	var cancelled []arriveInfo
-	for i := range pw.inflight {
-		b := pw.inflight[i]
-		cancelled = append(cancelled, arriveInfo{emit: b.streams, node: b.node, port: b.port, value: b.val, gen: b.gen})
-	}
-	pw.inflight = nil
-	pw.delivered = nil
-	// Invalidate every outstanding driven loop at once.
-	pw.teardownGen = pw.nextGen + 1
-	return cancelled
-}
-
-// Reset drops all in-flight/delivered beads and invalidates their gen so any
-// subsequent StepOnce drops them; used when an edge is deleted in the editor.
-func (pw *PacedWire) Reset() {
-	pw.mu.Lock()
-	pw.teardownLocked()
-	pw.mu.Unlock()
 }

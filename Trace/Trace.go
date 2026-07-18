@@ -30,7 +30,6 @@ const (
 	KindRecv = "recv"
 	KindFire = "fire"
 	KindSend = "send"
-	KindDone = "done"
 	// KindPosition is the per-frame bead-position event (Phase 2). The wire's
 	// delivery goroutine emits one every ~16 ms while a bead is in flight,
 	// carrying the bead's evaluated 3-D position so the renderer plots it without
@@ -42,11 +41,6 @@ const (
 	// segment, so the renderer draws the wire tube from Go's endpoints and
 	// computes no geometry of its own. Keyed by edge label (== the TS edge id).
 	KindGeometry = "geometry"
-	// KindPulseCancelled tells the renderer to remove an in-flight bead's sprite
-	// (Phase 3). Go emits it when a wire drops a bead mid-flight (edge deleted while
-	// the bead was traversing). Keyed by the bead's SOURCE node+port — the same
-	// routing key as send/position — so the renderer drops the sprite by source.
-	KindPulseCancelled = "pulse-cancelled"
 	// KindNodeGeometry carries one node's authoritative center + per-port world
 	// positions/directions (item 1). Each node's goroutine emits this once on
 	// startup via its injected EmitGeometry closure — the node owns its own
@@ -55,11 +49,8 @@ const (
 	// KindArrive marks a bead COMPLETING its traversal on a wire — the bead has
 	// reached the destination port and is delivered into the slot. The wire emits
 	// it from deliverLocked (the single delivery path), keyed by the bead's SOURCE
-	// node+port — the same routing key as send/position/pulse-cancelled — so the
-	// renderer clears the transit pulse the instant the bead arrives. This is
-	// DISTINCT from "done" (the consumer finished USING the held value): the transit
-	// pulse represents a bead in flight and must vanish on arrival, not linger at the
-	// port until the node's firing rule consumes the held value.
+	// node+port — the same routing key as send/position — so the renderer clears
+	// the transit pulse the instant the bead arrives.
 	KindArrive = "arrive"
 	// KindNodeBead carries one INTERIOR slot's authoritative grid-slot state
 	// (node 1's depleting/refilling buffer). Node 1's Update computes the 2x2 grid
@@ -146,7 +137,7 @@ const (
 // buffer EVENT block for the .probe log. There is no tsc exhaustiveness
 // check derived from it — adding a kind here does not force a TS branch
 // anywhere; it only extends the lookup table.
-var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindDone, KindPosition, KindGeometry, KindPulseCancelled, KindNodeGeometry, KindArrive, KindNodeBead, KindCamera, KindSceneTori, KindScenePoles, KindNodePoles, KindSelSpherePoles, KindHandholds, KindLabelsGlobal, KindOverlaysVis, KindDoubleLinks, KindLayoutLink, KindSelect, KindHover, KindSceneSphere}
+var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindPosition, KindGeometry, KindNodeGeometry, KindArrive, KindNodeBead, KindCamera, KindSceneTori, KindScenePoles, KindNodePoles, KindSelSpherePoles, KindHandholds, KindLabelsGlobal, KindOverlaysVis, KindDoubleLinks, KindLayoutLink, KindSelect, KindHover, KindSceneSphere}
 
 // PortGeom is one port's authoritative world geometry on a node-geometry event:
 // its name, whether it is an input, its sphere-surface world position (PX/PY/PZ),
@@ -164,12 +155,12 @@ type Event struct {
 	Node  string `json:"node"`
 	Port  string `json:"port,omitempty"`  // recv: input port; send: output port
 	Value int    `json:"value,omitempty"` // recv/send only
-	// Bead is the per-wire monotonic bead id (paced_wire.go gen). Set on the four
-	// wire-bead events (send, edge-bead/position, arrive, pulse-cancelled) so the
-	// renderer keys each in-flight bead independently and a wire can show N beads at
-	// once. Bead ids are 1-based (nextGen increments before it is read, so the first
-	// bead is gen 1); 0 never occurs, so omitempty safely marks "no bead" — the four
-	// wire-bead kinds always carry a real id ≥1, every other kind omits it (TS reads
+	// Bead is the per-wire monotonic bead id (paced_wire.go gen). Set on the three
+	// wire-bead events (send, edge-bead/position, arrive) so the renderer keys each
+	// in-flight bead independently and a wire can show N beads at once. Bead ids are
+	// 1-based (nextGen increments before it is read, so the first bead is gen 1);
+	// 0 never occurs, so omitempty safely marks "no bead" — the three wire-bead
+	// kinds always carry a real id ≥1, every other kind omits it (TS reads
 	// `bead ?? 0`).
 	Bead uint64 `json:"bead,omitempty"`
 	// Wire geometry fields — populated on send events when the outgoing port
@@ -354,13 +345,6 @@ func (t *Trace) SendWire(node, port string, value int, arcLength, simLatencyMs f
 	t.emit(Event{Kind: KindSend, Node: node, Port: port, Value: value, ArcLength: arcLength, SimLatencyMs: simLatencyMs, Target: target, TargetHandle: targetHandle})
 }
 
-// Done emits a done event for `(node, port)` when the receiver has finished
-// using a value. The node and port identify the input port that was Done'd,
-// matching the edge by target node + targetHandle in the webview.
-func (t *Trace) Done(node, port string) {
-	t.emit(Event{Kind: KindDone, Node: node, Port: port})
-}
-
 // Position emits a per-frame bead-position event (Phase 2). node/port are the
 // SOURCE node id + output port — the same identity carried by the send event, so
 // the renderer routes the position to the right edge(s) by source+sourceHandle
@@ -405,8 +389,8 @@ func (t *Trace) NodeGeometry(nodeID, label, nodeKind string, cx, cy, cz, radius,
 
 // Arrive marks a bead completing its traversal — delivered into the destination
 // slot. Keyed by the bead's SOURCE node+port (the same routing key as send/
-// position/pulse-cancelled), so the renderer clears the transit pulse on arrival.
-// The wire's deliverLocked is the single caller; it fires exactly once per bead.
+// position), so the renderer clears the transit pulse on arrival. The wire's
+// deliverLocked is the single caller; it fires exactly once per bead.
 func (t *Trace) Arrive(node, port string, value int, bead uint64) {
 	t.emit(Event{Kind: KindArrive, Node: node, Port: port, Value: value, Bead: bead})
 }
@@ -526,13 +510,6 @@ func (t *Trace) Hover(node, port string, isInput bool) {
 	t.emit(Event{Kind: KindHover, Node: node, Port: port, Value: v})
 }
 
-// PulseCancelled tells the renderer to drop an in-flight bead's sprite (Phase 3),
-// keyed by the bead's SOURCE node+port (the same routing key as send/position). Go
-// emits it when a wire drops a bead mid-flight (edge deleted during traversal).
-func (t *Trace) PulseCancelled(node, port string, value int, bead uint64) {
-	t.emit(Event{Kind: KindPulseCancelled, Node: node, Port: port, Value: value, Bead: bead})
-}
-
 // Breadcrumb writes a free-form diagnostic line directly to the sink
 // (if any) in real time. It is logging-only: breadcrumbs are NOT added
 // to the buffered event slice, do NOT receive a Step ordinal, and are
@@ -542,7 +519,7 @@ func (t *Trace) PulseCancelled(node, port string, value int, bead uint64) {
 // relay can route it to go.jsonl alongside real trace events.
 //
 // Used to trace one-off control events (e.g. edge delete / wire reset)
-// that have no place in the recv/fire/send/done lifecycle.
+// that have no place in the recv/fire/send lifecycle.
 func (t *Trace) Breadcrumb(label, node, port, value string) {
 	if t == nil {
 		return
@@ -761,12 +738,6 @@ func eventValue(e Event) (any, error) {
 		Kind string `json:"kind"`
 		Node string `json:"node"`
 	}
-	type doneEvent struct {
-		Step int    `json:"step"`
-		Kind string `json:"kind"`
-		Node string `json:"node"`
-		Port string `json:"port"`
-	}
 	type position struct {
 		Step  int     `json:"step"`
 		Kind  string  `json:"kind"`
@@ -790,7 +761,7 @@ func eventValue(e Event) (any, error) {
 		EY   float64 `json:"ey"`
 		EZ   float64 `json:"ez"`
 	}
-	type pulseCancelled struct {
+	type arriveShape struct {
 		Step  int    `json:"step"`
 		Kind  string `json:"kind"`
 		Node  string `json:"node"`
@@ -847,8 +818,6 @@ func eventValue(e Event) (any, error) {
 			return sendWire{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value, ArcLength: e.ArcLength, SimLatencyMs: e.SimLatencyMs, Target: e.Target, TargetHandle: e.TargetHandle}, nil
 		}
 		return recvOrSend{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value}, nil
-	case KindDone:
-		return doneEvent{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port}, nil
 	case KindPosition:
 		// All three coordinates always emitted (0,0,0 is a valid position).
 		return position{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value, X: e.X, Y: e.Y, Z: e.Z, F: e.F, Bead: e.Bead}, nil
@@ -857,11 +826,8 @@ func eventValue(e Event) (any, error) {
 		return geometry{Step: e.Step, Kind: e.Kind, Edge: e.Edge,
 			SX: e.SX, SY: e.SY, SZ: e.SZ,
 			EX: e.EX, EY: e.EY, EZ: e.EZ}, nil
-	case KindPulseCancelled:
-		return pulseCancelled{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value, Bead: e.Bead}, nil
 	case KindArrive:
-		// Same wire shape as pulse-cancelled: source node+port+value+bead routing key.
-		return pulseCancelled{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value, Bead: e.Bead}, nil
+		return arriveShape{Step: e.Step, Kind: e.Kind, Node: e.Node, Port: e.Port, Value: e.Value, Bead: e.Bead}, nil
 	case KindNodeGeometry:
 		ports := make([]portGeomJSON, len(e.Ports))
 		for i, p := range e.Ports {

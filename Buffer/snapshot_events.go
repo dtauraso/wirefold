@@ -21,7 +21,7 @@ import (
 func (s *SnapshotState) recordEvent(ev T.Event) {
 	r := eventRec{kind: ev.Kind, node: ev.Node, port: ev.Port, slot: -1, value: ev.Value, bead: ev.Bead}
 	switch ev.Kind {
-	case T.KindRecv, T.KindDone:
+	case T.KindRecv:
 		r.portIsInput = true
 	case T.KindSend:
 		r.portIsInput = false
@@ -32,7 +32,7 @@ func (s *SnapshotState) recordEvent(ev T.Event) {
 	case T.KindPosition:
 		r.portIsInput = false
 		r.x, r.y, r.z, r.f = ev.X, ev.Y, ev.Z, ev.F
-	case T.KindArrive, T.KindPulseCancelled:
+	case T.KindArrive:
 		r.portIsInput = false
 	case T.KindGeometry:
 		r.edge = ev.Edge
@@ -113,7 +113,7 @@ func (s *SnapshotState) writeEventBlock(buf []byte, portRows map[portLookupKey]i
 }
 
 // FinalFlush emits one last snapshot if events accumulated since the last emit (e.g. trailing
-// recv/fire/done/arrive that were not followed by a position emit), OR if a KindPosition update
+// recv/fire/arrive that were not followed by a position emit), OR if a KindPosition update
 // was coalesced away (tickSource set, still on the same tick as the last emit) and so never
 // published — otherwise the run's very last bead positions could be dropped. Call AFTER
 // Trace.Close has drained every event into Update, so nothing trailing is lost from the buffer.

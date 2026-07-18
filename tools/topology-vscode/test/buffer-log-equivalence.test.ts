@@ -1,6 +1,6 @@
 // buffer-log-equivalence.test.ts — proves the ext-host buffer-decoded .probe log carries
 // the SAME trace-event content as Go's (removed) JSON-on-stdout path. Spawns a PLAYING sim
-// (sends the resume/play record so flow events — position/recv/send/arrive/done — actually
+// (sends the resume/play record so flow events — position/recv/send/arrive — actually
 // fire, not just startup/state events), captures BOTH streams, and compares the canonicalized
 // event multisets. Floats are compared at 3-decimal precision (the buffer is float32; the old
 // JSON was float64 — an inherent, expected precision nuance).
