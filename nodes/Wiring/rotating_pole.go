@@ -90,9 +90,13 @@ func kickPoleAwayFrom(pole, oDir dir, c float64) dir {
 // pole (ignored if hasPole is false) and a set of neighbor directions, it seeds the pole
 // if unset, then kicks it away from any offense (bounded to maxPoleKicks iterations,
 // re-checking every direction after each kick — a kick can put a second offset below
-// threshold). Returns the final pole. Pure — no I/O, no locking, no world positions;
-// callers persist the result and quantize bearings against it separately (azimuthFrom).
-func resolveLocalPole(pole dir, hasPole bool, dirs map[string]dir) dir {
+// threshold). Returns the final pole and whether every offset ended up clear of
+// poleKickTheta (false iff the loop exited by hitting maxPoleKicks with a still-offending
+// offset — e.g. an exactly-antipodal-neighbor pathology that can never fully satisfy every
+// offset). Pure — no I/O, no locking, no world positions; callers persist the result,
+// quantize bearings against it separately (azimuthFrom), and should surface a false return
+// via a breadcrumb (this case is rare and should be observable, not silent).
+func resolveLocalPole(pole dir, hasPole bool, dirs map[string]dir) (dir, bool) {
 	if !hasPole {
 		ordered := make([]dir, 0, len(dirs))
 		for _, d := range dirs {
@@ -100,6 +104,7 @@ func resolveLocalPole(pole dir, hasPole bool, dirs map[string]dir) dir {
 		}
 		pole = initLocalPole(ordered)
 	}
+	converged := false
 	for i := 0; i < maxPoleKicks; i++ {
 		worstID, worstC := "", math.Pi
 		for id, d := range dirs {
@@ -109,11 +114,12 @@ func resolveLocalPole(pole dir, hasPole bool, dirs map[string]dir) dir {
 			}
 		}
 		if worstID == "" {
-			break // every offset clear of the threshold (or the loop ran out of budget)
+			converged = true
+			break // every offset clear of the threshold
 		}
 		pole = kickPoleAwayFrom(pole, dirs[worstID], worstC)
 	}
-	return pole
+	return pole, converged
 }
 
 // requantizeLocalPolarsAboutPole is the SINGLE site every LOCAL-polar write routes
@@ -124,8 +130,12 @@ func resolveLocalPole(pole dir, hasPole bool, dirs map[string]dir) dir {
 // (QuantITheta,QuantIPhi) under the OLD pole (fromAxisFrame is azimuthFrom's exact
 // inverse) — not re-measured, just re-expressed under the (possibly kicked) new pole. The
 // pole is always resolved against the WHOLE neighbor set, never just the neighbor being
-// touched, so a kick sees the full picture. Returns the final pole (also stored on lh).
-func requantizeLocalPolarsAboutPole(lh *LayoutHolder, updates map[string]vec3) dir {
+// touched, so a kick sees the full picture. Returns the final pole (also stored on lh) and
+// whether resolveLocalPole converged (false iff it hit maxPoleKicks with a still-offending
+// offset — rare, e.g. an antipodal-neighbor pathology). Callers with a *T.Trace reachable
+// should breadcrumb a false return ("pole.kick.uncapped") so the case is observable rather
+// than silent.
+func requantizeLocalPolarsAboutPole(lh *LayoutHolder, updates map[string]vec3) (dir, bool) {
 	pole, hasPole := lh.LocalPole()
 	existing := lh.LocalPolarsSnapshot()
 
@@ -146,7 +156,7 @@ func requantizeLocalPolarsAboutPole(lh *LayoutHolder, updates map[string]vec3) d
 		radii[id] = r
 	}
 
-	finalPole := resolveLocalPole(pole, hasPole, dirs)
+	finalPole, converged := resolveLocalPole(pole, hasPole, dirs)
 	lh.SetLocalPole(finalPole)
 
 	// Re-quantize every UNCHANGED neighbor's bearing about the (possibly kicked) final
@@ -171,5 +181,5 @@ func requantizeLocalPolarsAboutPole(lh *LayoutHolder, updates map[string]vec3) d
 		c, psi := azimuthFrom(finalPole, d)
 		lh.SetLocalPolar(id, int(math.Round(c/t)), int(math.Round(psi/p)), int(math.Round(radii[id]/rStep)), t, p, rStep)
 	}
-	return finalPole
+	return finalPole, converged
 }

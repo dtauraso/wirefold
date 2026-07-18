@@ -165,6 +165,83 @@ func TestRotatingPolePersistReload(t *testing.T) {
 	}
 }
 
+// TestComputeLocalPolarsRequantizesStoredBearingAboutResolvedPole guards the load-time
+// bug where a STORED localPolars entry's bearing was copied verbatim even though the
+// node's pole is resolved from LIVE geometry — so a bearing quantized about a different
+// pole (e.g. pre-rotating-pole data quantized about world +y) would be inconsistent with
+// the resolved pole. Writes a tree whose src/meta.json carries a stored localPolars
+// entry with a bearing that is NOT consistent with the live dst offset (no persisted
+// pole, so computeLocalPolars must seed+resolve one from live geometry), and asserts
+// that after load, reconstructing the stored bearing under the resolved pole
+// (fromAxisFrame) lands within one step cell of the live offset direction, while Role
+// and QuantIR are preserved verbatim.
+func TestComputeLocalPolarsRequantizesStoredBearingAboutResolvedPole(t *testing.T) {
+	root := t.TempDir()
+	mk := func(rel, body string) {
+		p := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", p, err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatalf("write %s: %v", p, err)
+		}
+	}
+	// src's stored localPolars entry for dst carries a bearing (quantITheta/quantIPhi)
+	// that is deliberately bogus/stale — NOT what src↔dst's live geometry implies about
+	// any pole — and no localPoleTheta/Phi, so computeLocalPolars must seed a fresh pole
+	// from live geometry and (per the fix) re-quantize this stored bearing about it
+	// rather than trusting the stale numbers. Role and quantIR must survive untouched.
+	mk("nodes/src/meta.json", `{"id":"src","type":"FanInSrc","r":100,"scenePolarR":37.4165738677,"scenePolarTheta":1.00685368543,"scenePolarPhi":1.2490457724,"localPolars":[{"to":"dst","role":"source","quantITheta":9999,"quantIPhi":-9999,"quantIR":42}]}`)
+	mk("nodes/src/outputs/Out.json", `{"name":"Out"}`)
+	mk("nodes/dst/meta.json", `{"id":"dst","type":"FanInSink","r":100,"scenePolarR":87.7496438739,"scenePolarTheta":0.96453035788,"scenePolarPhi":-2.15879893034}`)
+	mk("nodes/dst/inputs/In.json", `{"name":"In"}`)
+	mk("edges/e0.json", `{"label":"e0","kind":"data","source":"src","sourceHandle":"Out","target":"dst","targetHandle":"In"}`)
+
+	md := loadTreeMD(t, root)
+	lhSrc, ok := md.layoutHolders["src"]
+	if !ok {
+		t.Fatal("no LayoutHolder for src")
+	}
+	pole, hasPole := lhSrc.LocalPole()
+	if !hasPole {
+		t.Fatal("src has no resolved local pole after load")
+	}
+	srcCenter, ok := md.centerOfNode("src")
+	if !ok {
+		t.Fatal("no center for src")
+	}
+	dstCenter, ok := md.centerOfNode("dst")
+	if !ok {
+		t.Fatal("no center for dst")
+	}
+	wantDir, _ := dirFromOffset(dstCenter.sub(srcCenter))
+
+	var got *LocalPolar
+	for _, lp := range lhSrc.LocalPolarsSnapshot() {
+		if lp.To == "dst" {
+			cp := lp
+			got = &cp
+		}
+	}
+	if got == nil {
+		t.Fatal("src has no local polar entry for dst after load")
+	}
+	if got.Role != "source" {
+		t.Fatalf("Role not preserved: got %q want %q", got.Role, "source")
+	}
+	if got.QuantIR != 42 {
+		t.Fatalf("QuantIR not preserved: got %d want 42", got.QuantIR)
+	}
+	if got.QuantITheta == 9999 || got.QuantIPhi == -9999 {
+		t.Fatalf("stored stale bearing was copied verbatim instead of re-quantized about the resolved pole: %+v", got)
+	}
+	st, sp, _ := got.effectiveSteps()
+	gotDir := fromAxisFrame(pole, float64(got.QuantITheta)*st, float64(got.QuantIPhi)*sp)
+	if d := angularDistance(gotDir, wantDir); d > st+sp {
+		t.Fatalf("re-quantized bearing does not match live offset direction within one step cell: angularDistance=%v (steps theta=%v phi=%v) pole=%+v got=%+v want=%+v", d, st, sp, pole, gotDir, wantDir)
+	}
+}
+
 // containsKey is a minimal raw-JSON substring check for a top-level key's presence —
 // avoids re-parsing into a map just to check existence.
 func containsKey(raw []byte, key string) bool {

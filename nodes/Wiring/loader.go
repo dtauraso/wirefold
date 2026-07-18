@@ -542,17 +542,34 @@ func (b *buildCtx) computeLocalPolars() {
 				}
 			}
 		}
-		finalPole := resolveLocalPole(pole, hasPole, dirs)
+		finalPole, converged := resolveLocalPole(pole, hasPole, dirs)
+		if !converged && b.tr != nil {
+			b.tr.Breadcrumb("pole.kick.uncapped", n.ID, "", fmt.Sprintf("neighbors=%d", len(dirs)))
+		}
 		poles[n.ID] = finalPole
 
 		list := make([]LocalPolar, 0, len(ids))
 		for _, mid := range ids {
 			if sm, ok := stored[n.ID]; ok {
 				if lp, ok2 := sm[mid]; ok2 {
-					list = append(list, LocalPolar{
+					entry := LocalPolar{
 						To: mid, Role: lp.Role, QuantITheta: lp.QuantITheta, QuantIPhi: lp.QuantIPhi, QuantIR: lp.QuantIR,
 						StepTheta: lp.StepTheta, StepPhi: lp.StepPhi, StepR: lp.StepR,
-					})
+					}
+					// The stored bearing may have been quantized about a DIFFERENT pole
+					// (pre-feature data quantized about world +y, or a kick since moved
+					// the pole) — re-quantize the bearing about finalPole from the live
+					// offset when one is available, preserving Role/QuantIR/step
+					// constants exactly (QuantIR carries the equal-radii shared-c
+					// contract and must not be recomputed).
+					if mCenter, ok3 := b.centers[mid]; hasOwn && ok3 {
+						d, _ := dirFromOffset(mCenter.sub(ownCenter))
+						et, ep, _ := entry.effectiveSteps()
+						c, psi := azimuthFrom(finalPole, d)
+						entry.QuantITheta = int(math.Round(c / et))
+						entry.QuantIPhi = int(math.Round(psi / ep))
+					}
+					list = append(list, entry)
 					continue
 				}
 			}
