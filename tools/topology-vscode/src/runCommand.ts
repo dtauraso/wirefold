@@ -242,6 +242,12 @@ export class BuildAndRunRunner {
     // never prefix this one's stream (see freshStreamState). This is the single reset
     // point every restart path funnels through, including the looping respawn.
     this.stream = freshStreamState();
+    // Also drop the cached keyframe: it belongs to the PRIOR process. Without this,
+    // a webview remounting in the window between "ready" and the new process's first
+    // fd3 frame would be replayed the previous process's snapshot via getLastSnapshot().
+    // The freshly spawned Go emits its full scene as its first frame, so continuity is
+    // preserved by that emit — not by re-serving one process's bytes as another's.
+    this.lastSnapshot = undefined;
     // detached: true makes the child the leader of a new process group; the
     // prebuilt binary is the sole group member, so kill(-pid) reaches it
     // directly. Without this, SIGTERM could leave it orphaned on macOS.
