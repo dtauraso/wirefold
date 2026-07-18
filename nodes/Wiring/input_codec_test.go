@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -151,6 +152,58 @@ func TestFramedPartialReads(t *testing.T) {
 		time.Sleep(2 * time.Millisecond)
 	}
 	pw.Close()
+}
+
+// TestStdinReaderCancelWithoutEOF asserts the background frame-reader goroutine unwinds
+// on ctx-cancel even when the pipe write end stays open (no EOF/close from the writer
+// side). Before the close-on-cancel fix, the reader goroutine stayed parked in
+// io.ReadFull forever once RunStdinReader itself returned via <-done — a goroutine leak
+// for any in-process caller that cancels without closing r (production relies on process
+// exit to reclaim it, so this went unnoticed there).
+func TestStdinReaderCancelWithoutEOF(t *testing.T) {
+	// Let any goroutines from earlier tests/GC settle so the baseline below is stable.
+	runtime.GC()
+	time.Sleep(20 * time.Millisecond)
+	base := runtime.NumGoroutine()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	pr, pw := io.Pipe()
+	defer pw.Close()
+
+	readerDone := make(chan struct{})
+	go func() {
+		RunStdinReader(ctx, pr, SlotRegistry{}, nil, nil, nil)
+		close(readerDone)
+	}()
+
+	cancel()
+
+	// RunStdinReader's own select loop exits promptly on cancel; wait for that first so
+	// this test's timing budget below is spent solely on the background frame-reader
+	// goroutine's unwind, which is what the fix targets.
+	select {
+	case <-readerDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunStdinReader did not return on ctx cancel")
+	}
+
+	// The background frame-reader goroutine has no direct completion signal exposed by
+	// RunStdinReader, so drive it out indirectly: it exits by unblocking io.ReadFull once
+	// r is closed. Detect completion via runtime.NumGoroutine returning to (at most) the
+	// pre-test baseline, bounded by a short deadline — this times out before the fix
+	// (goroutine stays parked forever) and passes after.
+	deadline := time.Now().Add(500 * time.Millisecond)
+	settled := false
+	for time.Now().Before(deadline) {
+		if runtime.NumGoroutine() <= base {
+			settled = true
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !settled {
+		t.Fatalf("background frame-reader goroutine still parked after ctx cancel (goroutine leak); NumGoroutine=%d base=%d", runtime.NumGoroutine(), base)
+	}
 }
 
 // TestFrameLenPrefix documents the transport frame is [len:u32-LE][record].
