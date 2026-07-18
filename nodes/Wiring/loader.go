@@ -69,12 +69,10 @@ type specNode struct {
 	// LocalPolar) — one per domain double-link this node is an endpoint of, measured
 	// with ITSELF as center. Absent (nil) → computed fresh at load (computeLocalPolars).
 	LocalPolars []specLocalPolar `json:"localPolars,omitempty"`
-	// LocalPole is this node's rotating local pole (rotating_pole.go LayoutHolder) — the
-	// frame every entry in LocalPolars above is quantized about. Absent (nil) → no pole
-	// persisted yet; computeLocalPolars seeds one (initLocalPole) and it persists on the
-	// node's next local-polar write.
-	LocalPoleTheta *float64 `json:"localPoleTheta,omitempty"`
-	LocalPolePhi   *float64 `json:"localPolePhi,omitempty"`
+	// There is no persisted pole field: the measurement pole every LocalPolars entry is
+	// quantized about is a pure function of live geometry
+	// (docs/planning/visual-editor/deterministic-local-pole.md, rotating_pole.go
+	// localPole), recomputed on load from the composed world centers.
 	// Gate marks this node as a two-neighbor GATE node (node_move.go): on a direct
 	// drag it solves its own equal-radii landing position against its two domain
 	// neighbors (derived from LocalPolars, in the same order), commits, and
@@ -285,10 +283,6 @@ type buildCtx struct {
 	// injected into each built node's LocalPolars field (buildNodes) — additive,
 	// does not feed back into position (quantizedOffsets stays authoritative).
 	localPolars map[string][]LocalPolar
-	// localPoles is each node's resolved rotating local pole (rotating_pole.go), computed
-	// alongside localPolars above from the SAME composed world centers — persisted
-	// (specNode.LocalPoleTheta/Phi) if present, otherwise freshly seeded+kicked.
-	localPoles map[string]dir
 
 	// Phase 4: per-destination-port wire allocation + per-edge geometry.
 	destWire      map[string]*PacedWire
@@ -489,9 +483,7 @@ func (b *buildCtx) computeLocalPolars() {
 	}
 
 	stored := map[string]map[string]specLocalPolar{}
-	specByID := map[string]specNode{}
 	for _, n := range b.spec.Nodes {
-		specByID[n.ID] = n
 		if len(n.LocalPolars) == 0 {
 			continue
 		}
@@ -503,7 +495,6 @@ func (b *buildCtx) computeLocalPolars() {
 	}
 
 	result := map[string][]LocalPolar{}
-	poles := map[string]dir{}
 	for _, n := range b.spec.Nodes {
 		nbrs := neighbors[n.ID]
 		if len(nbrs) == 0 {
@@ -522,31 +513,20 @@ func (b *buildCtx) computeLocalPolars() {
 		// distance lands on a whole tick of a small grid).
 		t, p, r := LocalPolar{}.effectiveSteps()
 
-		// Resolve this node's rotating local pole (rotating_pole.go) from EVERY
-		// neighbor's CURRENT world offset (available for all ids regardless of whether
-		// that neighbor's own bearing entry is stored or freshly measured below — the
-		// pole tracks the live geometry, not the persisted quant cache), seeded from
-		// the persisted pole when present.
-		sn := specByID[n.ID]
-		pole := dir{}
-		hasPole := sn.LocalPoleTheta != nil && sn.LocalPolePhi != nil
-		if hasPole {
-			pole = dir{Theta: *sn.LocalPoleTheta, Phi: *sn.LocalPolePhi}
-		}
-		dirs := map[string]dir{}
+		// The measurement pole is a pure function of live geometry
+		// (docs/planning/visual-editor/deterministic-local-pole.md, rotating_pole.go
+		// localPole) — resolved from EVERY neighbor's CURRENT world offset, never a
+		// stored/persisted value.
+		dirs := make([]dir, 0, len(ids))
 		if hasOwn {
 			for _, mid := range ids {
 				if mCenter, ok := b.centers[mid]; ok {
 					d, _ := dirFromOffset(mCenter.sub(ownCenter))
-					dirs[mid] = d
+					dirs = append(dirs, d)
 				}
 			}
 		}
-		finalPole, converged := resolveLocalPole(pole, hasPole, dirs)
-		if !converged && b.tr != nil {
-			b.tr.Breadcrumb("pole.kick.uncapped", n.ID, "", fmt.Sprintf("neighbors=%d", len(dirs)))
-		}
-		poles[n.ID] = finalPole
+		finalPole := localPole(dirs)
 
 		list := make([]LocalPolar, 0, len(ids))
 		for _, mid := range ids {
@@ -590,7 +570,6 @@ func (b *buildCtx) computeLocalPolars() {
 		result[n.ID] = list
 	}
 	b.localPolars = result
-	b.localPoles = poles
 }
 
 // deriveCascadeRoles builds the per-node cascadeRoleSpec map node_move.go's
@@ -923,13 +902,10 @@ func (b *buildCtx) buildNodes() error {
 					if lps, ok := b.localPolars[n.ID]; ok {
 						lh.LoadLocalPolars(lps)
 					}
-					// Attach this node's resolved rotating local pole (rotating_pole.go),
-					// computed alongside LocalPolars above (persisted verbatim if present,
-					// otherwise freshly seeded+kicked) — always set when the node has any
-					// neighbors (computeLocalPolars only populates b.localPoles for those).
-					if pole, ok := b.localPoles[n.ID]; ok {
-						lh.SetLocalPole(pole)
-					}
+					// No pole to attach: the measurement pole is a pure function of live
+					// geometry (docs/planning/visual-editor/deterministic-local-pole.md,
+					// rotating_pole.go localPole), recomputed on demand — never stored on
+					// the holder.
 					// Register this node's embedded *Wiring.LayoutHolder with the move
 					// dispatcher so a later drag (RootMove) can route a local-polar
 					// re-quantize to the OWNING node's own holder — MoveDispatch never

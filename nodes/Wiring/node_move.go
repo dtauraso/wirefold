@@ -1404,14 +1404,57 @@ func (md *MoveDispatch) placeEqualRadii(target vec3, aID, bID string) vec3 {
 	return target.sub(nhat.scale(target.sub(mid).dot(nhat)))
 }
 
-// requantizePoleTraced wraps rotating_pole.go's requantizeLocalPolarsAboutPole with a
-// breadcrumb on the rare non-convergent case (resolveLocalPole hit maxPoleKicks with a
-// still-offending offset) — md.tr is reachable at every node_move.go call site, so every
-// one of them routes through here rather than the bare function.
+// requantizePoleTraced is the SINGLE site every LOCAL-polar write routes through once a
+// node's LayoutHolder exists (this file's several call sites). `updates` carries the FRESH
+// offset (vec3, THIS node — nodeID — as origin) for each neighbor whose distance/direction
+// just changed. Every OTHER neighbor already on lh has its LIVE offset re-measured via
+// md.centerOfNode (nodeID's own live center minus that neighbor's live center) rather than
+// reconstructed from a stored quant — there is no stored pole to reconstruct against
+// (docs/planning/visual-editor/deterministic-local-pole.md): `pole = localPole(dirs)` is a
+// pure function of the WHOLE neighbor set's current directions, recomputed on every call,
+// never stored, never persisted, never carried in a message. Every neighbor (fresh or
+// unchanged) is then quantized about that pole; a fresh neighbor's radius is re-measured,
+// an unchanged neighbor's radius is preserved exactly (matching the old reconstruction
+// contract — only bearing was ever re-expressed for an unchanged neighbor).
 func (md *MoveDispatch) requantizePoleTraced(lh *LayoutHolder, updates map[string]vec3, nodeID string) dir {
-	pole, converged := requantizeLocalPolarsAboutPole(lh, updates)
-	if !converged && md.tr != nil {
-		md.tr.Breadcrumb("pole.kick.uncapped", nodeID, "", fmt.Sprintf("neighbors=%d", len(updates)))
+	existing := lh.LocalPolarsSnapshot()
+	existingIR := make(map[string]int, len(existing))
+	for _, lp := range existing {
+		existingIR[lp.To] = lp.QuantIR
+	}
+
+	selfCenter, hasSelf := md.centerOfNode(nodeID)
+	offsets := make(map[string]vec3, len(existing)+len(updates))
+	for id, o := range updates {
+		offsets[id] = o
+	}
+	if hasSelf {
+		for _, lp := range existing {
+			if _, fresh := offsets[lp.To]; fresh {
+				continue
+			}
+			if c, ok := md.centerOfNode(lp.To); ok {
+				offsets[lp.To] = c.sub(selfCenter)
+			}
+		}
+	}
+
+	dirs := make([]dir, 0, len(offsets))
+	for _, o := range offsets {
+		d, _ := dirFromOffset(o)
+		dirs = append(dirs, d)
+	}
+	pole := localPole(dirs)
+
+	for id, o := range offsets {
+		d, r := dirFromOffset(o)
+		t, p, rStep := lh.localPolarSteps(id)
+		c, psi := azimuthFrom(pole, d)
+		iR, hadEntry := existingIR[id]
+		if _, fresh := updates[id]; fresh || !hadEntry {
+			iR = int(math.Round(r / rStep))
+		}
+		lh.SetLocalPolar(id, int(math.Round(c/t)), int(math.Round(psi/p)), iR, t, p, rStep)
 	}
 	return pole
 }
@@ -1430,8 +1473,7 @@ func (md *MoveDispatch) requantizeNeighborSelf(selfID, fromID string, off vec3) 
 	md.requantizePoleTraced(lh, map[string]vec3{fromID: off}, selfID)
 	if md.quantOffsetPersist != nil {
 		if root := md.quantOffsetPersist.root; root != "" {
-			pole, hasPole := lh.LocalPole()
-			if err := WriteLocalPolarsAndPole(root, selfID, lh.LocalPolarsSnapshot(), pole, hasPole); err != nil {
+			if err := WriteLocalPolars(root, selfID, lh.LocalPolarsSnapshot()); err != nil {
 				logPersistErr("local_polar_persist", selfID, err)
 			}
 		}
@@ -1459,8 +1501,7 @@ func (md *MoveDispatch) requantizeNeighborSelfSetC(selfID, fromID string, off ve
 	}
 	if md.quantOffsetPersist != nil {
 		if root := md.quantOffsetPersist.root; root != "" {
-			pole, hasPole := lh.LocalPole()
-			if err := WriteLocalPolarsAndPole(root, selfID, lh.LocalPolarsSnapshot(), pole, hasPole); err != nil {
+			if err := WriteLocalPolars(root, selfID, lh.LocalPolarsSnapshot()); err != nil {
 				logPersistErr("local_polar_persist", selfID, err)
 			}
 		}
@@ -1510,8 +1551,7 @@ func (md *MoveDispatch) equalizeEdgeCLocal(nodeID, aID, bID string, newPos vec3)
 	}
 	if md.quantOffsetPersist != nil {
 		if root := md.quantOffsetPersist.root; root != "" {
-			pole, hasPole := lh.LocalPole()
-			if err := WriteLocalPolarsAndPole(root, nodeID, lh.LocalPolarsSnapshot(), pole, hasPole); err != nil {
+			if err := WriteLocalPolars(root, nodeID, lh.LocalPolarsSnapshot()); err != nil {
 				logPersistErr("local_polar_persist", nodeID, err)
 			}
 		}
@@ -1594,16 +1634,15 @@ func (md *MoveDispatch) moveNodeAndSetEdgeCs(nodeID string, newPos vec3, edgeA, 
 		if root == "" {
 			return
 		}
-		pole, hasPole := holder.LocalPole()
-		if err := WriteLocalPolarsAndPole(root, id, holder.LocalPolarsSnapshot(), pole, hasPole); err != nil {
+		if err := WriteLocalPolars(root, id, holder.LocalPolarsSnapshot()); err != nil {
 			logPersistErr("local_polar_persist", id, err)
 		}
 	}
-	// nodeID's own requantize+pole-resolve is a full-node operation (rotating_pole.go
-	// requantizeLocalPolarsAboutPole re-checks EVERY neighbor's bearing against the whole
-	// dirs set on every call) — so batch both edges' fresh offsets into ONE call on lh
-	// rather than once per edge; only the two edges' fresh centers need measuring up
-	// front, everything else about lh's own polars is exactly as before.
+	// nodeID's own requantize+pole-resolve is a full-node operation (requantizePoleTraced
+	// re-checks EVERY neighbor's bearing against the whole live offset set on every call)
+	// — so batch both edges' fresh offsets into ONE call on lh rather than once per edge;
+	// only the two edges' fresh centers need measuring up front, everything else about
+	// lh's own polars is exactly as before.
 	fcs := map[string]vec3{}
 	updates := map[string]vec3{}
 	for _, far := range []string{edgeA, edgeB} {
@@ -1843,8 +1882,7 @@ func (md *MoveDispatch) requantizeLocalPolars(nodeID string, newPos vec3) {
 		if root == "" {
 			return
 		}
-		pole, hasPole := holder.LocalPole()
-		if err := WriteLocalPolarsAndPole(root, id, holder.LocalPolarsSnapshot(), pole, hasPole); err != nil {
+		if err := WriteLocalPolars(root, id, holder.LocalPolarsSnapshot()); err != nil {
 			logPersistErr("local_polar_persist", id, err)
 		}
 	}
