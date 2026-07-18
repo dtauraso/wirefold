@@ -146,7 +146,7 @@ func readEntityObjRequired(path string) (map[string]json.RawMessage, error) {
 }
 
 // entityFileMus serializes read-modify-write cycles PER per-entity file path, so independent
-// writers of the SAME nodes/<id>/meta.json (WriteLocalPolars called synchronously during a
+// writers of the SAME nodes/<id>/meta.json (WriteLocalPolarsAndPole called synchronously during a
 // drag AND writeQuantOffset fired from the quant-offset debounce timer goroutine) never race:
 // without this, two concurrent read-modify-writes both write meta.json.tmp and the second
 // os.Rename fails with "no such file or directory" (the first already renamed the shared tmp),

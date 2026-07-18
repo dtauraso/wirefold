@@ -69,6 +69,12 @@ type specNode struct {
 	// LocalPolar) — one per domain double-link this node is an endpoint of, measured
 	// with ITSELF as center. Absent (nil) → computed fresh at load (computeLocalPolars).
 	LocalPolars []specLocalPolar `json:"localPolars,omitempty"`
+	// LocalPole is this node's rotating local pole (rotating_pole.go LayoutHolder) — the
+	// frame every entry in LocalPolars above is quantized about. Absent (nil) → no pole
+	// persisted yet; computeLocalPolars seeds one (initLocalPole) and it persists on the
+	// node's next local-polar write.
+	LocalPoleTheta *float64 `json:"localPoleTheta,omitempty"`
+	LocalPolePhi   *float64 `json:"localPolePhi,omitempty"`
 	// Gate marks this node as a two-neighbor GATE node (node_move.go): on a direct
 	// drag it solves its own equal-radii landing position against its two domain
 	// neighbors (derived from LocalPolars, in the same order), commits, and
@@ -84,15 +90,13 @@ type specLocalPolar struct {
 	// Role names this neighbor's part in the decentralized cascade rule
 	// (node_move.go) — "source" / "follower" / "" (neither). See
 	// layout_holder.go LocalPolar.Role's doc.
-	Role string `json:"role,omitempty"`
-	// DirX/DirY/DirZ is the EXACT unit direction of (neighbor − owner) — stored
-	// faithfully rather than as a quantized (θ,φ) pair about the fixed +y pole
-	// (layout_holder.go LocalPolar.Dir's doc explains why).
-	DirX    float64 `json:"dirX"`
-	DirY    float64 `json:"dirY"`
-	DirZ    float64 `json:"dirZ"`
-	QuantIR int     `json:"quantIR"`
-	StepR   float64 `json:"stepR,omitempty"`
+	Role        string  `json:"role,omitempty"`
+	QuantITheta int     `json:"quantITheta"`
+	QuantIPhi   int     `json:"quantIPhi"`
+	QuantIR     int     `json:"quantIR"`
+	StepTheta   float64 `json:"stepTheta,omitempty"`
+	StepPhi     float64 `json:"stepPhi,omitempty"`
+	StepR       float64 `json:"stepR,omitempty"`
 }
 
 // label returns the node's human label: data.label when present and non-empty,
@@ -281,6 +285,10 @@ type buildCtx struct {
 	// injected into each built node's LocalPolars field (buildNodes) — additive,
 	// does not feed back into position (quantizedOffsets stays authoritative).
 	localPolars map[string][]LocalPolar
+	// localPoles is each node's resolved rotating local pole (rotating_pole.go), computed
+	// alongside localPolars above from the SAME composed world centers — persisted
+	// (specNode.LocalPoleTheta/Phi) if present, otherwise freshly seeded+kicked.
+	localPoles map[string]dir
 
 	// Phase 4: per-destination-port wire allocation + per-edge geometry.
 	destWire      map[string]*PacedWire
@@ -481,7 +489,9 @@ func (b *buildCtx) computeLocalPolars() {
 	}
 
 	stored := map[string]map[string]specLocalPolar{}
+	specByID := map[string]specNode{}
 	for _, n := range b.spec.Nodes {
+		specByID[n.ID] = n
 		if len(n.LocalPolars) == 0 {
 			continue
 		}
@@ -493,6 +503,7 @@ func (b *buildCtx) computeLocalPolars() {
 	}
 
 	result := map[string][]LocalPolar{}
+	poles := map[string]dir{}
 	for _, n := range b.spec.Nodes {
 		nbrs := neighbors[n.ID]
 		if len(nbrs) == 0 {
@@ -505,21 +516,60 @@ func (b *buildCtx) computeLocalPolars() {
 		sort.Strings(ids) // deterministic order
 
 		ownCenter, hasOwn := b.centers[n.ID]
-		// Local-polar quantization uses its OWN small, uniform radius cell
-		// (layout_holder.go localStepR) — NOT the scene-center triple's coarser
-		// stepR (the point of the double-link model: every distance lands on a
-		// whole tick of a small grid). Direction is stored as an exact unit
-		// vector, never quantized.
-		r := LocalPolar{}.effectiveSteps()
+		// Local-polar quantization uses its OWN small, uniform cells (layout_holder.go
+		// localStepTheta/localStepPhi/localStepR) — NOT the scene-center triple's
+		// coarser stepTheta/stepPhi/stepR (the point of the double-link model: every
+		// distance lands on a whole tick of a small grid).
+		t, p, r := LocalPolar{}.effectiveSteps()
+
+		// Resolve this node's rotating local pole (rotating_pole.go) from EVERY
+		// neighbor's CURRENT world offset (available for all ids regardless of whether
+		// that neighbor's own bearing entry is stored or freshly measured below — the
+		// pole tracks the live geometry, not the persisted quant cache), seeded from
+		// the persisted pole when present.
+		sn := specByID[n.ID]
+		pole := dir{}
+		hasPole := sn.LocalPoleTheta != nil && sn.LocalPolePhi != nil
+		if hasPole {
+			pole = dir{Theta: *sn.LocalPoleTheta, Phi: *sn.LocalPolePhi}
+		}
+		dirs := map[string]dir{}
+		if hasOwn {
+			for _, mid := range ids {
+				if mCenter, ok := b.centers[mid]; ok {
+					d, _ := dirFromOffset(mCenter.sub(ownCenter))
+					dirs[mid] = d
+				}
+			}
+		}
+		finalPole, converged := resolveLocalPole(pole, hasPole, dirs)
+		if !converged && b.tr != nil {
+			b.tr.Breadcrumb("pole.kick.uncapped", n.ID, "", fmt.Sprintf("neighbors=%d", len(dirs)))
+		}
+		poles[n.ID] = finalPole
 
 		list := make([]LocalPolar, 0, len(ids))
 		for _, mid := range ids {
 			if sm, ok := stored[n.ID]; ok {
 				if lp, ok2 := sm[mid]; ok2 {
-					list = append(list, LocalPolar{
-						To: mid, Role: lp.Role, Dir: vec3{X: lp.DirX, Y: lp.DirY, Z: lp.DirZ}, QuantIR: lp.QuantIR,
-						StepR: lp.StepR,
-					})
+					entry := LocalPolar{
+						To: mid, Role: lp.Role, QuantITheta: lp.QuantITheta, QuantIPhi: lp.QuantIPhi, QuantIR: lp.QuantIR,
+						StepTheta: lp.StepTheta, StepPhi: lp.StepPhi, StepR: lp.StepR,
+					}
+					// The stored bearing may have been quantized about a DIFFERENT pole
+					// (pre-feature data quantized about world +y, or a kick since moved
+					// the pole) — re-quantize the bearing about finalPole from the live
+					// offset when one is available, preserving Role/QuantIR/step
+					// constants exactly (QuantIR carries the equal-radii shared-c
+					// contract and must not be recomputed).
+					if mCenter, ok3 := b.centers[mid]; hasOwn && ok3 {
+						d, _ := dirFromOffset(mCenter.sub(ownCenter))
+						et, ep, _ := entry.effectiveSteps()
+						c, psi := azimuthFrom(finalPole, d)
+						entry.QuantITheta = int(math.Round(c / et))
+						entry.QuantIPhi = int(math.Round(psi / ep))
+					}
+					list = append(list, entry)
 					continue
 				}
 			}
@@ -528,16 +578,19 @@ func (b *buildCtx) computeLocalPolars() {
 				list = append(list, LocalPolar{To: mid}) // centerless → zero offset, nothing to measure
 				continue
 			}
-			offset := mCenter.sub(ownCenter)
+			d, radius := dirFromOffset(mCenter.sub(ownCenter))
+			c, psi := azimuthFrom(finalPole, d)
 			list = append(list, LocalPolar{
-				To:      mid,
-				Dir:     offset.normalize(),
-				QuantIR: int(math.Round(offset.length() / r)),
+				To:          mid,
+				QuantITheta: int(math.Round(c / t)),
+				QuantIPhi:   int(math.Round(psi / p)),
+				QuantIR:     int(math.Round(radius / r)),
 			})
 		}
 		result[n.ID] = list
 	}
 	b.localPolars = result
+	b.localPoles = poles
 }
 
 // deriveCascadeRoles builds the per-node cascadeRoleSpec map node_move.go's
@@ -869,6 +922,13 @@ func (b *buildCtx) buildNodes() error {
 				if lh, ok := lhField.Addr().Interface().(*LayoutHolder); ok {
 					if lps, ok := b.localPolars[n.ID]; ok {
 						lh.LoadLocalPolars(lps)
+					}
+					// Attach this node's resolved rotating local pole (rotating_pole.go),
+					// computed alongside LocalPolars above (persisted verbatim if present,
+					// otherwise freshly seeded+kicked) — always set when the node has any
+					// neighbors (computeLocalPolars only populates b.localPoles for those).
+					if pole, ok := b.localPoles[n.ID]; ok {
+						lh.SetLocalPole(pole)
 					}
 					// Register this node's embedded *Wiring.LayoutHolder with the move
 					// dispatcher so a later drag (RootMove) can route a local-polar

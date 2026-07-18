@@ -120,36 +120,46 @@ func writeQuantOffset(root, id string, off quantizedOffset, scene polar) error {
 	})
 }
 
-// WriteLocalPolars sets the node's localPolars list (layout_holder.go LocalPolar,
-// one per domain-edge neighbor, measured with this node as center) in
+// WriteLocalPolarsAndPole sets the node's localPolars list (layout_holder.go
+// LocalPolar, one per domain-edge neighbor, measured with this node as center) plus
+// the node's rotating local pole (rotating_pole.go LayoutHolder.localPole) in
 // <root>/nodes/<id>/meta.json, preserving every other field — the same
-// read-modify-write contract as writeQuantOffset. Exported so a one-off
-// migration/stamp tool (or a future save path) can persist a computed list
-// without duplicating the read-modify-write plumbing.
-func WriteLocalPolars(root, id string, lps []LocalPolar) error {
+// read-modify-write contract as writeQuantOffset — in the SAME read-modify-write
+// pass, so a requantize's polars and pole never observe a torn intermediate file.
+// hasPole false (no pole seeded yet — should not happen once a node has any
+// neighbors, but kept explicit rather than writing meaningless zeros) skips the
+// pole keys entirely.
+func WriteLocalPolarsAndPole(root, id string, lps []LocalPolar, pole dir, hasPole bool) error {
 	if !safeTreePathComponent(id) {
 		return fmt.Errorf("unsafe node id %q", id)
 	}
 	path := filepath.Join(root, "nodes", id, "meta.json")
 	return entityReadModifyWrite(path, func(obj map[string]json.RawMessage) {
 		type localPolarJSON struct {
-			To      string  `json:"to"`
-			Role    string  `json:"role,omitempty"`
-			DirX    float64 `json:"dirX"`
-			DirY    float64 `json:"dirY"`
-			DirZ    float64 `json:"dirZ"`
-			QuantIR int     `json:"quantIR"`
-			StepR   float64 `json:"stepR"`
+			To          string  `json:"to"`
+			Role        string  `json:"role,omitempty"`
+			QuantITheta int     `json:"quantITheta"`
+			QuantIPhi   int     `json:"quantIPhi"`
+			QuantIR     int     `json:"quantIR"`
+			StepTheta   float64 `json:"stepTheta"`
+			StepPhi     float64 `json:"stepPhi"`
+			StepR       float64 `json:"stepR"`
 		}
 		out := make([]localPolarJSON, 0, len(lps))
 		for _, lp := range lps {
-			r := lp.effectiveSteps()
+			t, p, r := lp.effectiveSteps()
 			out = append(out, localPolarJSON{
-				To: lp.To, Role: lp.Role, DirX: lp.Dir.X, DirY: lp.Dir.Y, DirZ: lp.Dir.Z, QuantIR: lp.QuantIR,
-				StepR: r,
+				To: lp.To, Role: lp.Role, QuantITheta: lp.QuantITheta, QuantIPhi: lp.QuantIPhi, QuantIR: lp.QuantIR,
+				StepTheta: t, StepPhi: p, StepR: r,
 			})
 		}
 		b, _ := json.Marshal(out)
 		obj["localPolars"] = b
+		if hasPole {
+			tb, _ := json.Marshal(pole.Theta)
+			pb, _ := json.Marshal(pole.Phi)
+			obj["localPoleTheta"] = tb
+			obj["localPolePhi"] = pb
+		}
 	})
 }

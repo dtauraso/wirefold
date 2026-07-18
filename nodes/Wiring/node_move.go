@@ -1347,6 +1347,18 @@ func (md *MoveDispatch) placeEqualRadii(target vec3, aID, bID string) vec3 {
 	return target.sub(nhat.scale(target.sub(mid).dot(nhat)))
 }
 
+// requantizePoleTraced wraps rotating_pole.go's requantizeLocalPolarsAboutPole with a
+// breadcrumb on the rare non-convergent case (resolveLocalPole hit maxPoleKicks with a
+// still-offending offset) — md.tr is reachable at every node_move.go call site, so every
+// one of them routes through here rather than the bare function.
+func (md *MoveDispatch) requantizePoleTraced(lh *LayoutHolder, updates map[string]vec3, nodeID string) dir {
+	pole, converged := requantizeLocalPolarsAboutPole(lh, updates)
+	if !converged && md.tr != nil {
+		md.tr.Breadcrumb("pole.kick.uncapped", nodeID, "", fmt.Sprintf("neighbors=%d", len(updates)))
+	}
+	return pole
+}
+
 // equalizeEdgeCLocal is a two-neighbor gate node's edge-c requantize step — the per-node
 // replacement for requantizeLocalPolars, called from rootMove AFTER the node has already
 // moved through the normal path (fan + scene c refresh, so it repositions on screen like any
@@ -1362,27 +1374,36 @@ func (md *MoveDispatch) equalizeEdgeCLocal(nodeID, aID, bID string, newPos vec3)
 	if !ok {
 		return false
 	}
-	// the node's local polar (own frame) to a fixed neighbor, as the drag implies it.
-	local := func(to string) (dir vec3, qr int, sr float64, ok bool) {
-		c, okc := md.centerOfNode(to)
-		if !okc {
-			return vec3{}, 0, 0, false
-		}
-		sr = lh.localPolarSteps(to)
-		offset := c.sub(newPos)
-		return offset.normalize(), int(math.Round(offset.length() / sr)), sr, true
-	}
-	dirA, qrA, srA, okA := local(aID)
-	dirB, qrB, srB, okB := local(bID)
+	cA, okA := md.centerOfNode(aID)
+	cB, okB := md.centerOfNode(bID)
 	if !okA || !okB {
 		return false
 	}
+	// Re-quantize BOTH of this (2-neighbor gate) node's bearings about its rotating local
+	// pole (rotating_pole.go) in one pass, then override each entry's radius with the
+	// SHORTER of the two candidate quantIR — the equal-radii contract this function
+	// exists for — leaving the (pole-derived) bearing/step constants it just wrote alone.
+	md.requantizePoleTraced(lh, map[string]vec3{aID: cA.sub(newPos), bID: cB.sub(newPos)}, nodeID)
+	lps := lh.LocalPolarsSnapshot()
+	qrA, qrB := 0, 0
+	for _, lp := range lps {
+		if lp.To == aID {
+			qrA = lp.QuantIR
+		} else if lp.To == bID {
+			qrB = lp.QuantIR
+		}
+	}
 	cNew := min(qrA, qrB)
-	lh.SetLocalPolar(aID, dirA, cNew, srA)
-	lh.SetLocalPolar(bID, dirB, cNew, srB)
+	for _, lp := range lps {
+		if lp.To == aID || lp.To == bID {
+			t, p, r := lp.effectiveSteps()
+			lh.SetLocalPolar(lp.To, lp.QuantITheta, lp.QuantIPhi, cNew, t, p, r)
+		}
+	}
 	if md.quantOffsetPersist != nil {
 		if root := md.quantOffsetPersist.root; root != "" {
-			if err := WriteLocalPolars(root, nodeID, lh.LocalPolarsSnapshot()); err != nil {
+			pole, hasPole := lh.LocalPole()
+			if err := WriteLocalPolarsAndPole(root, nodeID, lh.LocalPolarsSnapshot(), pole, hasPole); err != nil {
 				logPersistErr("local_polar_persist", nodeID, err)
 			}
 		}
@@ -1453,33 +1474,60 @@ func (md *MoveDispatch) moveNodeAndSetEdgeCs(nodeID string, newPos vec3, edgeA, 
 		if root == "" {
 			return
 		}
-		if err := WriteLocalPolars(root, id, holder.LocalPolarsSnapshot()); err != nil {
+		pole, hasPole := holder.LocalPole()
+		if err := WriteLocalPolarsAndPole(root, id, holder.LocalPolarsSnapshot(), pole, hasPole); err != nil {
 			logPersistErr("local_polar_persist", id, err)
 		}
 	}
+	// nodeID's own requantize+pole-resolve is a full-node operation (rotating_pole.go
+	// requantizeLocalPolarsAboutPole re-checks EVERY neighbor's bearing against the whole
+	// dirs set on every call) — so batch both edges' fresh offsets into ONE call on lh
+	// rather than once per edge; only the two edges' fresh centers need measuring up
+	// front, everything else about lh's own polars is exactly as before.
+	fcs := map[string]vec3{}
+	updates := map[string]vec3{}
+	for _, far := range []string{edgeA, edgeB} {
+		if fc, ok := md.centerOfNode(far); ok {
+			fcs[far] = fc
+			updates[far] = fc.sub(newPos)
+		}
+	}
+	if len(updates) > 0 {
+		md.requantizePoleTraced(lh, updates, nodeID)
+	}
 	// Set BOTH ends of each edge to c so the double-link agrees: nodeID's record to the
-	// neighbor AND the neighbor's back-reference to nodeID. Each end quantizes its own
-	// bearing on its own step grid but shares the propagated c. Persists both holders — the
-	// far neighbor does not MOVE, only its edge-length record to nodeID is refreshed.
-	setBothEnds := func(far string) {
-		fc, ok := md.centerOfNode(far)
+	// neighbor AND the neighbor's back-reference to nodeID — the shared c OVERRIDES the
+	// radius lh's batched requantize above just wrote. The FAR neighbor's back-reference
+	// still requantizes (and persists) per-edge: it does not MOVE, only its edge-length
+	// record to nodeID is refreshed, and each far node is independent.
+	setEdgeC := func(far string) {
+		fc, ok := fcs[far]
 		if !ok {
 			return
 		}
-		sr := lh.localPolarSteps(far)
-		near := fc.sub(newPos)
-		lh.SetLocalPolar(far, near.normalize(), c, sr)
+		st, sp, sr := lh.localPolarSteps(far)
+		for _, lp := range lh.LocalPolarsSnapshot() {
+			if lp.To == far {
+				lh.SetLocalPolar(far, lp.QuantITheta, lp.QuantIPhi, c, st, sp, sr)
+				break
+			}
+		}
 		flh, ok := md.layoutHolders[far]
 		if !ok {
 			return
 		}
-		fsr := flh.localPolarSteps(nodeID)
-		back := newPos.sub(fc)
-		flh.SetLocalPolar(nodeID, back.normalize(), c, fsr)
+		md.requantizePoleTraced(flh, map[string]vec3{nodeID: newPos.sub(fc)}, far)
+		fst, fsp, fsr := flh.localPolarSteps(nodeID)
+		for _, lp := range flh.LocalPolarsSnapshot() {
+			if lp.To == nodeID {
+				flh.SetLocalPolar(nodeID, lp.QuantITheta, lp.QuantIPhi, c, fst, fsp, fsr)
+				break
+			}
+		}
 		persist(far, flh)
 	}
-	setBothEnds(edgeA)
-	setBothEnds(edgeB)
+	setEdgeC(edgeA)
+	setEdgeC(edgeB)
 	persist(nodeID, lh)
 }
 
@@ -1671,7 +1719,26 @@ func (md *MoveDispatch) requantizeLocalPolars(nodeID string, newPos vec3) {
 	if md.quantOffsetPersist != nil {
 		root = md.quantOffsetPersist.root
 	}
-	xChanged := false
+	writePersist := func(id string, holder *LayoutHolder) {
+		if root == "" {
+			return
+		}
+		pole, hasPole := holder.LocalPole()
+		if err := WriteLocalPolarsAndPole(root, id, holder.LocalPolarsSnapshot(), pole, hasPole); err != nil {
+			logPersistErr("local_polar_persist", id, err)
+		}
+	}
+
+	// X's local polars TO every reachable neighbor, resolved about X's rotating local
+	// pole (rotating_pole.go) in ONE pass — the pole must see the WHOLE neighbor set, not
+	// just one at a time, so a kick from one offset is checked against every other.
+	updatesX := map[string]vec3{}
+	type mUpdate struct {
+		lh  *LayoutHolder
+		id  string
+		off vec3
+	}
+	var mUpdates []mUpdate
 	for m := range neighbors {
 		lhM, okM := md.layoutHolders[m]
 		if !okM {
@@ -1681,34 +1748,20 @@ func (md *MoveDispatch) requantizeLocalPolars(nodeID string, newPos vec3) {
 		if !ok {
 			continue
 		}
-		xChanged = true
-
-		// X's local polar TO M, on X's own effective radius step constant.
-		rX := lhX.localPolarSteps(m)
-		offXtoM := cM.sub(newPos)
-		lhX.SetLocalPolar(m,
-			offXtoM.normalize(),
-			int(math.Round(offXtoM.length()/rX)),
-			rX)
-
-		// M's local polar TO X, on M's own effective radius step constant.
-		rM := lhM.localPolarSteps(nodeID)
-		offMtoX := newPos.sub(cM)
-		lhM.SetLocalPolar(nodeID,
-			offMtoX.normalize(),
-			int(math.Round(offMtoX.length()/rM)),
-			rM)
-
-		if root != "" {
-			if err := WriteLocalPolars(root, m, lhM.LocalPolarsSnapshot()); err != nil {
-				logPersistErr("local_polar_persist", m, err)
-			}
-		}
+		updatesX[m] = cM.sub(newPos)
+		mUpdates = append(mUpdates, mUpdate{lh: lhM, id: m, off: newPos.sub(cM)})
 	}
-	if xChanged && root != "" {
-		if err := WriteLocalPolars(root, nodeID, lhX.LocalPolarsSnapshot()); err != nil {
-			logPersistErr("local_polar_persist", nodeID, err)
-		}
+	if len(updatesX) == 0 {
+		return
+	}
+	md.requantizePoleTraced(lhX, updatesX, nodeID)
+	writePersist(nodeID, lhX)
+
+	// M's local polar TO X, on M's own rotating local pole — each M is a SEPARATE node,
+	// so its pole only needs to see M's own (reconstructed + this fresh) neighbor set.
+	for _, u := range mUpdates {
+		md.requantizePoleTraced(u.lh, map[string]vec3{nodeID: u.off}, u.id)
+		writePersist(u.id, u.lh)
 	}
 }
 
