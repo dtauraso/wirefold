@@ -78,6 +78,17 @@ func (p *quantOffsetPersister) flush() {
 	p.recordWrite()
 }
 
+// flushPending cancels any pending debounce timer and synchronously writes whatever is
+// still pending, for the clean-shutdown path (RunStdinReader) — a drag within the debounce
+// window of process exit would otherwise be silently lost.
+func (p *quantOffsetPersister) flushPending() {
+	if p == nil {
+		return
+	}
+	p.stop()
+	p.flush()
+}
+
 // writeQuantOffset writes the node's EXACT scenePolarR/Theta/Phi (the authoritative,
 // lossless position — see the package doc comment above) PLUS the quantized scalar
 // triple (iTheta,iPhi,iR) as a self-describing cache of the drag-time snap cells, into

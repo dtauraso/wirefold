@@ -175,6 +175,12 @@ type SlotRegistry map[string]*PacedWire
 const maxFrameBytes = 1 << 20
 
 func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace, clk Clock) {
+	// Flush every debounced persister's pending value on EVERY clean-shutdown return path
+	// (stdin EOF, channel close, ctx cancel) — the Go process exits on every webview reload
+	// / window close, and a drag within the 250ms debounce window of that exit would
+	// otherwise be silently abandoned (the node reverts on the next load). md is nil-guarded
+	// inside flushPendingPersists for headless/test callers that pass nil.
+	defer md.flushPendingPersists()
 	// Framed-binary reader: each record is [len:u32-LE][record bytes]. A background
 	// goroutine reads whole frames (io.ReadFull handles partial reads — a frame split
 	// across TCP/pipe chunks is reassembled before the record is decoded) and hands the

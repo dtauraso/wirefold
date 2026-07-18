@@ -1970,6 +1970,28 @@ func (md *MoveDispatch) PanViewpoint(delta vec3, tr *T.Trace) {
 	md.vp.PanViewpoint(delta, tr)
 }
 
+// flushPendingPersists synchronously flushes every debounced persister's pending value on
+// clean process shutdown (RunStdinReader's stdin-EOF/channel-close return paths). Without
+// this, a drag/gesture that lands within the 250ms debounce window of exit is silently
+// abandoned — the write never happens and the edit reverts on the next load. Each persister
+// is nil-guarded (some may be unarmed in tests/headless runs); posPersist is an inert stub
+// (writes nothing) and is intentionally skipped.
+func (md *MoveDispatch) flushPendingPersists() {
+	if md == nil {
+		return
+	}
+	md.quantOffsetPersist.flushPending()
+	md.anchorPersist.flushPending()
+	md.vpPersist.flushPending()
+	md.overlaysPersist.flushPending()
+	// The scene sphere is established once at load and never moves again (MODEL.md), so its
+	// debounce is rarely pending, but flushing it here too is cheap and matches the "save"
+	// command's behavior (handleSaveMsg) for completeness.
+	if md.spherePersist != nil {
+		md.spherePersist.flushNow(md.sceneSphere)
+	}
+}
+
 // EnableViewpointPersist arms gesture-driven camera persistence: every subsequent
 // EmitViewpoint (orbit/zoom/pan/home) debounces a write of the current viewpoint to
 // `<topologyPath>/view/scene.json`'s cameraPolar (scene_camera_persist.go). Call AFTER

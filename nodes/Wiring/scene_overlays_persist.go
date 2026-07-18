@@ -103,6 +103,17 @@ func (p *overlaysPersister) flush() {
 	p.recordWrite()
 }
 
+// flushPending cancels any pending debounce timer and synchronously writes whatever is
+// still pending, for the clean-shutdown path (RunStdinReader) — an overlay toggle within
+// the debounce window of process exit would otherwise be silently lost.
+func (p *overlaysPersister) flushPending() {
+	if p == nil {
+		return
+	}
+	p.stop()
+	p.flush()
+}
+
 // sceneOverlaysFile is the subset of scene.json the overlay loader reads. Pointer fields
 // distinguish an ABSENT key (keep the code default) from a present false/true — the writer
 // omits any key at its default, so absence must not be read as false. Key names + polarity

@@ -63,6 +63,17 @@ func (p *anchorPersister) flush() {
 	p.recordWrite()
 }
 
+// flushPending cancels any pending debounce timer and synchronously writes whatever is
+// still pending, for the clean-shutdown path (RunStdinReader) — a ring-move within the
+// debounce window of process exit would otherwise be silently lost.
+func (p *anchorPersister) flushPending() {
+	if p == nil {
+		return
+	}
+	p.stop()
+	p.flush()
+}
+
 // writePortAnchor sets ONLY the anchorId field of the port file, preserving the other fields
 // (name). The port file must already exist (a placed port always has one).
 func writePortAnchor(root, node, port string, isInput bool, anchorID int) error {
