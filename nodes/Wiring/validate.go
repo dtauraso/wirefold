@@ -135,22 +135,9 @@ func validateSpec(spec *topoSpec) error {
 		}
 	}
 
-	// Check 5: required data.state keys must be present for each node kind.
-	for _, n := range spec.Nodes {
-		bind, ok := Registry[n.Type]
-		if !ok {
-			continue // already reported in Check 1
-		}
-		for _, key := range bind.StateKeys {
-			if n.Data == nil || n.Data.State == nil {
-				errs = append(errs, fmt.Sprintf("reflectBuild: node %q (kind %q): wire:\"data.state\" field %s requires data.state[%q] in topology JSON", n.ID, n.Type, exportedFieldName(key), key))
-				continue
-			}
-			if _, ok := n.Data.State[key]; !ok {
-				errs = append(errs, fmt.Sprintf("reflectBuild: node %q (kind %q): wire:\"data.state\" field %s requires data.state[%q] in topology JSON", n.ID, n.Type, exportedFieldName(key), key))
-			}
-		}
-	}
+	// data.state seed keys are OPTIONAL: an absent key defaults to the kind's
+	// constructor value (the empty sentinel for held-bearing kinds), so there is
+	// nothing to require here — a missing seed means "start empty," not an error.
 
 	if len(errs) == 0 {
 		return nil
