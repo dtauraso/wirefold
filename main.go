@@ -155,6 +155,13 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 	// own emits do not write loaded state back.
 	md.EnableEditPersist(topologyPath)
 
+	// Install the scene sphere (persisted, or a content-fit centroid for a fresh
+	// scene) BEFORE launching the movers and the stdin reader. It only needs the
+	// movers to be BUILT (their seeded centers, available since LoadTopology), not
+	// running; installing it after Start left md.sceneSphere written unsynchronized
+	// while the mover/gesture goroutines could already read it on the drag path.
+	md.LoadSceneSphere(topologyPath)
+
 	// Launch the per-node and per-edge move-handler goroutines (decentralized
 	// node-move: each node/edge drains its own inbox and recomputes its own geometry).
 	md.Start(ctx)
@@ -181,8 +188,6 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 	// would exist purely to block. Spawning that loop is deferred to the slice
 	// that gives it actual work (drag-time local-polar recomputation); see
 	// memory/project_two_goroutine_node_split.md.
-
-	md.LoadSceneSphere(topologyPath)
 
 	// Wait for all nodes to exit, but never block forever: in a timed/cancelled
 	// run (e.g. -duration, or SIGINT) a node could still be mid-cycle when ctx is
