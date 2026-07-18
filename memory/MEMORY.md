@@ -25,7 +25,6 @@ Each entry can drift; if it conflicts with current code, update or remove the me
 - [project_two_goroutine_node_split.md](project_two_goroutine_node_split.md) — STALE: described LayoutPort.run, since removed; node-move is now decentralized nodeMover goroutines (see project_lock_propagation_decentralized.md); LayoutHolder.UpdateLayout is a vestigial no-op
 
 - [project_go_visual_vocabulary.md](project_go_visual_vocabulary.md) — Go visual vocabulary is chan→wire + per-node running indicator (with reloop); goroutine and select are not separate visual primitives
-- [project_industry_pattern_deferrals.md](project_industry_pattern_deferrals.md) — Deferred visual-editor gaps, re-scoped 2026-07-05 vs current buffer/Three.js arch: render-only items (edge labels S, hover tooltips XS) cheap; stateful items all L (no multi-select/undo/waypoints)
 - [feedback_ease_of_fix_is_confounded.md](feedback_ease_of_fix_is_confounded.md) — "This fix was easy/hard" is not standalone evidence an architecture change is paying off; recency and surface area always flatter the newest code.
 - [feedback_specify_go_layer_first.md](feedback_specify_go_layer_first.md) — State the Go-layer answer before/alongside the visible-layer spec; implicit Go-layer slots get filled with coordinator-shaped defaults from training data
 - [feedback_go_vs_coordinator_bias.md](feedback_go_vs_coordinator_bias.md) — Before fixing Go code, name the contract violated, not the symptom. Knob-tuning (interval, cap, timeout) is the wrong shape — find the missing local signal.
