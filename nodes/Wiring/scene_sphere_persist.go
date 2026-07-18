@@ -129,9 +129,11 @@ func (p *sceneSpherePersister) flushNow(s sceneSphere) {
 	if p == nil || p.path == "" {
 		return
 	}
-	if p.timer != nil {
-		p.timer.Stop()
-	}
+	// Cancel any pending debounce timer through the mutex-guarded stop() (matching
+	// the sibling persisters) rather than touching p.timer directly — the timer is
+	// unarmed today (no pan-scheduler calls arm()), but the unlocked access would be
+	// a live race the moment one is added.
+	p.stop()
 	if err := writeSceneSphere(p.path, s); err != nil {
 		logPersistErr("scene_sphere_persist", p.path, err)
 	}
