@@ -11,7 +11,7 @@
 // (docs/planning/visual-editor/deterministic-local-pole.md): `pole = localPole(dirs)`,
 // where `dirs` is the node's CURRENT neighbor offset directions. Home is world +y. Away
 // from the singularity the pole IS home; when the offset closest to +y falls inside the
-// singular zone (colatitude < poleKickTheta, 20°) the pole tilts a little (one closed-form
+// singular zone (colatitude < poleKickTheta, 1°) the pole tilts a little (one closed-form
 // step, never iterated) so that offset lands at exactly colatitude poleKickTheta. The pole
 // is never stored, never persisted, never carried in a message — every offset it quantizes
 // is expressed in the frame poled AT that direction via spherical.go's azimuthFrom, and the
@@ -25,12 +25,17 @@ package Wiring
 
 import "math"
 
-// poleKickTheta is the colatitude threshold (about a node's own local pole) below which
-// an offset's quantized bearing is considered too close to the singularity: rationale in
-// deterministic-local-pole.md — a φ-cell at 20° is still ~0.34x the equatorial width;
-// below it the bearing degrades fast toward the blow-up, and 20° is far enough from
-// typical neighbor spacing not to thrash the pole on every drag.
-const poleKickTheta = math.Pi / 9 // 20 degrees
+// poleKickTheta is BOTH the tiny singular zone around +y and the dodge target. Its point
+// is NOT to well-condition the bearing (near the pole you cannot — the φ-cell width scales
+// with sin(colatitude), so it is inherently coarse there) but to make the EXACT singularity
+// (colatitude 0, where φ is undefined) UNREACHABLE: an offset that would land at 0 is bumped
+// to exactly poleKickTheta, keeping the bearing defined and deterministic. A tiny zone (1°)
+// is deliberate: it keeps the pole at home almost always (minimal disturbance to every OTHER
+// neighbor's bearing, since the pole is their shared measurement axis), and it makes it rare
+// for even one — and rarer still for two — offsets to fall inside at once, so the single-step
+// dodge's one-offender limit is seldom exercised. Coarse-but-defined near the pole is fine;
+// the bearing has no placement consumer (radius/QuantIR drives placement, measured separately).
+const poleKickTheta = math.Pi / 180 // 1 degree
 
 // dirFromOffset converts a Cartesian, node-relative offset vector into its direction
 // (dir, on the unit sphere) and radius. Reuses polar.go's cart2polar — the "pole" baked
