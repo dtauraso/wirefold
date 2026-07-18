@@ -150,20 +150,6 @@ var (
 	tTickFunc           = reflect.TypeFor[func() int64]()
 )
 
-// reflectStateKeys returns the data.state map keys required by sample's
-// wire:"data.state" struct tags.
-func reflectStateKeys(sample any) []string {
-	t := reflect.TypeOf(sample).Elem()
-	var keys []string
-	for i := 0; i < t.NumField(); i++ {
-		f := t.Field(i)
-		if f.Tag.Get("wire") == "data.state" {
-			keys = append(keys, lowerFirst(f.Name))
-		}
-	}
-	return keys
-}
-
 // reflectPorts walks the exported fields of the struct pointed to by sample
 // and returns a PortSpec for each channel field that carries int.
 // Chan-of-chan fields and non-channel fields are silently skipped.
@@ -444,12 +430,15 @@ func populateData(v reflect.Value, nodePtr any, data *NodeData) {
 		const dataPrefix = "data."
 		const stateTag = "data.state"
 		if tag == stateTag {
-			// key is field name with first letter lowercased.
-			// validateSpec (Check 5) already verified data.State != nil and the key
-			// is present before LoadTopology calls reflectBuild, so no error check needed.
+			// key is field name with first letter lowercased. The seed is
+			// OPTIONAL: an absent key leaves the constructor default untouched
+			// (the empty sentinel for held-bearing kinds), so "unset" can never
+			// collide with a legitimately-held 0. Only a present key — a real
+			// authored starting value — overrides the default.
 			key := lowerFirst(f.Name)
-			val := data.State[key]
-			fv.Set(reflect.ValueOf(val))
+			if val, ok := data.State[key]; ok {
+				fv.Set(reflect.ValueOf(val))
+			}
 		} else if len(tag) > len(dataPrefix) && tag[:len(dataPrefix)] == dataPrefix {
 			key := tag[len(dataPrefix):]
 			if len(key) == 0 {
@@ -713,12 +702,9 @@ func emitRefillSlide(ctx context.Context, tr *T.Trace, nodeName string, clk Cloc
 
 // NodeBuilder is the public-facing type consumed by the loader.
 // Ports is derived lazily from reflection; Build delegates to reflectBuild.
-// StateKeys lists the data.state map keys required by this kind's
-// wire:"data.state" struct fields; used by validateSpec for parse-time checks.
 type NodeBuilder struct {
-	Ports     []PortSpec
-	StateKeys []string // required keys in NodeData.State; nil means none required
-	Build     func(ctx context.Context, name string, data *NodeData, pb PortBindings, tr *T.Trace, geom nodeGeom, partnerCenter partnerCenterFn) (Node, error)
+	Ports []PortSpec
+	Build func(ctx context.Context, name string, data *NodeData, pb PortBindings, tr *T.Trace, geom nodeGeom, partnerCenter partnerCenterFn) (Node, error)
 }
 
 // Registry is the loader-facing map, populated one kind at a time by

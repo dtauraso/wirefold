@@ -150,5 +150,9 @@ func (in *Node) Update(ctx context.Context) {
 }
 
 func init() {
-	Wiring.Register("HoldNewSendOld", func() any { return &Node{} })
+	// Held defaults to the empty sentinel, not the int zero-value: 0 is a
+	// legitimate held value (a real bead), so an unset seed must be empty
+	// (NoValue) rather than a phantom 0. The data.state seed overrides this
+	// only when the spec authors a real starting value.
+	Wiring.Register("HoldNewSendOld", func() any { return &Node{Held: gatecommon.NoValue} })
 }

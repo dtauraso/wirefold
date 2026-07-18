@@ -28,10 +28,8 @@ func Register(kind string, newNode func() any) {
 	// Also populate the loader-facing Registry immediately.
 	sample := e.newNode()
 	ports := reflectPorts(sample)
-	stateKeys := reflectStateKeys(sample)
 	Registry[kind] = NodeBuilder{
-		Ports:     ports,
-		StateKeys: stateKeys,
+		Ports: ports,
 		Build: func(ctx context.Context, name string, data *NodeData, pb PortBindings, tr *T.Trace, geom nodeGeom, partnerCenter partnerCenterFn) (Node, error) {
 			return reflectBuild(ctx, name, data, pb, e, tr, geom, partnerCenter)
 		},

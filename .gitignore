@@ -92,6 +92,7 @@ tools/topology-vscode/gen-node-defs
 
 # Tree-topology scene sidecar (auto-written by Go on each run; not for VCS).
 /topology/view/scene.json
+/topology/view/scene.json.tmp
 
 # Hook block log (local audit trail, not for VCS)
 .claude/hooks/go-blocks.log

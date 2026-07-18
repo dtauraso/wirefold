@@ -59,5 +59,7 @@ func (h *Node) Update(ctx context.Context) {
 }
 
 func init() {
-	Wiring.Register("Hold", func() any { return &Node{} })
+	// Held defaults to the empty sentinel, not the int zero-value (0 is a real
+	// held value). See holdnewsendold for the seed rationale.
+	Wiring.Register("Hold", func() any { return &Node{Held: noValue} })
 }
