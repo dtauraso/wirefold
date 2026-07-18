@@ -80,11 +80,10 @@ func TestIndividualSnap_OnlyDraggedNodePersists(t *testing.T) {
 	// unaffected by a drag of dst — no reference/parent concept, every node is a
 	// root for its scene-center position. src's localPolars entry to dst IS
 	// expected to change (task/double-link-local-polar: each end of a double
-	// link re-quantizes its own local polar to the moved neighbor), and so is its
-	// rotating local pole (task/rotating-pole-frame: the pole is resolved against
-	// the WHOLE neighbor set, including the one that just moved, and may get
-	// seeded/kicked for the first time on this very drag) — so compare everything
-	// EXCEPT localPolars/localPoleTheta/localPolePhi.
+	// link re-quantizes its own local polar to the moved neighbor, about a
+	// measurement pole recomputed from live geometry on every requantize — never
+	// stored, docs/planning/visual-editor/deterministic-local-pole.md) — so compare
+	// everything EXCEPT localPolars.
 	srcAfter, err := os.ReadFile(filepath.Join(root, "nodes", "src", "meta.json"))
 	if err != nil {
 		t.Fatalf("read src meta: %v", err)
@@ -96,7 +95,7 @@ func TestIndividualSnap_OnlyDraggedNodePersists(t *testing.T) {
 	if err := json.Unmarshal(srcAfter, &srcA); err != nil {
 		t.Fatalf("unmarshal src after: %v", err)
 	}
-	for _, k := range []string{"localPolars", "localPoleTheta", "localPolePhi"} {
+	for _, k := range []string{"localPolars"} {
 		delete(srcB, k)
 		delete(srcA, k)
 	}
