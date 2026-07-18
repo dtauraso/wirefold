@@ -170,6 +170,80 @@ type moveMsg struct {
 	testDone chan struct{}
 }
 
+// outboxItem is one queued (destination, message) pair awaiting delivery by a mover's
+// dedicated sender goroutine.
+type outboxItem struct {
+	destID string
+	msg    moveMsg
+}
+
+// outbox is a per-mover UNBOUNDED FIFO of outgoing messages, decoupling *enqueue* (done
+// by the mover's own inbox-drain goroutine, inside handle/handleTrigger — must never
+// block) from *delivery* (done by a dedicated sender goroutine, which blocks on the
+// target's inbox exactly like the old synchronous send did). See
+// docs/planning/visual-editor/cascade-deadlock-fix.md: two mutually-adjacent movers,
+// both mid-handle with full inboxes, would otherwise deadlock each blocking a send into
+// the other's full inbox while neither drains. Unbounded by design — a bounded queue
+// reintroduces the same blocking-enqueue deadlock; cascades are finite (idempotent
+// quiescence) so the queue drains in practice. Nothing is ever dropped and per-target
+// order is exactly enqueue order (a single sender pops FIFO), so "latest wins" still
+// holds — this defers delivery by a goroutine hop, it never re-derives or reorders.
+type outbox struct {
+	mu     sync.Mutex
+	cond   *sync.Cond
+	q      []outboxItem
+	closed bool
+}
+
+func newOutbox() *outbox {
+	ob := &outbox{}
+	ob.cond = sync.NewCond(&ob.mu)
+	return ob
+}
+
+// enqueue appends one item to the tail of the queue. Never blocks (unbounded slice
+// append) — this is what keeps the calling handler goroutine free to return to draining
+// its own inbox.
+func (ob *outbox) enqueue(destID string, msg moveMsg) {
+	ob.mu.Lock()
+	ob.q = append(ob.q, outboxItem{destID: destID, msg: msg})
+	ob.cond.Signal()
+	ob.mu.Unlock()
+}
+
+// run is the mover's dedicated sender goroutine: pop items in FIFO order and deliver
+// each via send (the existing BLOCKING channel write into the target's inbox). Exits
+// promptly on ctx cancellation (process shutdown — no need to flush; draining a queue on
+// a dying process delivers into inboxes nobody will ever read again).
+func (ob *outbox) run(ctx context.Context, send func(destID string, msg moveMsg)) {
+	cancelWatcherDone := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			ob.mu.Lock()
+			ob.closed = true
+			ob.cond.Broadcast()
+			ob.mu.Unlock()
+		case <-cancelWatcherDone:
+		}
+	}()
+	defer close(cancelWatcherDone)
+	for {
+		ob.mu.Lock()
+		for len(ob.q) == 0 && !ob.closed {
+			ob.cond.Wait()
+		}
+		if len(ob.q) == 0 && ob.closed {
+			ob.mu.Unlock()
+			return
+		}
+		item := ob.q[0]
+		ob.q = ob.q[1:]
+		ob.mu.Unlock()
+		send(item.destID, item.msg)
+	}
+}
+
 // setPortAnchorId sets the AnchorId on the named port within the given geom,
 // clearing any free-direction Anchor so AnchorId takes highest priority (matching
 // portDir's resolution order: AnchorId > Anchor > side/slot). Returns true if the
@@ -310,10 +384,17 @@ type nodeMover struct {
 	// forward its own re-trigger to whichever rule-node treats it as a follower,
 	// without a hardcoded target id.
 	followerOwner string
+	// outbox is this node's own outbound-message queue (see the outbox type doc
+	// comment). sendMove enqueues onto it (never blocks); a dedicated sender goroutine
+	// (spawned in MoveDispatch.Start) pops it in FIFO order and does the actual
+	// blocking delivery. This is what lets handle/handleTrigger's sends stay
+	// non-blocking while every OTHER send-in-handle property (order, no drops) is
+	// unchanged.
+	outbox *outbox
 }
 
 func newNodeMover(id string, geom nodeGeom, tr *T.Trace) *nodeMover {
-	nm := &nodeMover{id: id, geom: geom, inbox: make(chan moveMsg, 8), tr: tr}
+	nm := &nodeMover{id: id, geom: geom, inbox: make(chan moveMsg, 8), tr: tr, outbox: newOutbox()}
 	// Seed the atomic snapshot from the initial geometry (even when !HasPos, in which case
 	// nodeWorldPos falls back to the origin) so readers — including another node's aimed-port
 	// partnerCenter lookup — always have a valid center to read before the first center
@@ -1051,7 +1132,7 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 	}
 	for id, g := range geoms {
 		nm := newNodeMover(id, g, tr)
-		nm.sendMove = md.sendMove
+		nm.sendMove = md.enqueueFor(nm.outbox)
 		nm.centerOf = md.centerOfNode
 		nm.commitLocal = md.commitNodeMoveLocal
 		nm.gateEqualize = md.gateEqualizeNode
@@ -1114,6 +1195,12 @@ func (md *MoveDispatch) Bind(outSink map[string]*Out, slotReg SlotRegistry) {
 func (md *MoveDispatch) Start(ctx context.Context) {
 	for _, nm := range md.nodeMovers {
 		go nm.run(ctx)
+		// Dedicated sender goroutine for this node's outbound queue (see the outbox
+		// type doc comment / cascade-deadlock-fix.md): pops nm's queued messages in
+		// FIFO order and performs the actual blocking delivery, so nm's own
+		// inbox-drain goroutine (nm.run above) never blocks on a send and therefore
+		// always keeps draining its inbox.
+		go nm.outbox.run(ctx, md.deliverMove)
 	}
 	for _, em := range md.edgeMovers {
 		go em.run(ctx)
@@ -1148,6 +1235,45 @@ func (md *MoveDispatch) sendMove(id string, msg moveMsg) {
 	if tap := md.msgTap.Load(); tap != nil {
 		(*tap)(id, msg)
 	}
+	if ch, ok := md.dispatch[id]; ok {
+		ch <- msg
+	}
+}
+
+// enqueueFor returns the ENQUEUE half of the per-mover outbound-queue split
+// (cascade-deadlock-fix.md): it fires the msgTap (at enqueue time, so tap-based tests'
+// counts/ordering match today's synchronous-send behavior) and then appends to ob —
+// never blocking. Bound once per node at construction (nm.sendMove = md.enqueueFor(nm.outbox))
+// so every send a nodeMover's own handle/handleTrigger performs — including the ones
+// fanEdgesAndPartners makes on that node's behalf — goes through this node's own
+// outbox, never a raw blocking channel write.
+func (md *MoveDispatch) enqueueFor(ob *outbox) func(id string, msg moveMsg) {
+	return func(id string, msg moveMsg) {
+		if tap := md.msgTap.Load(); tap != nil {
+			(*tap)(id, msg)
+		}
+		ob.enqueue(id, msg)
+	}
+}
+
+// enqueueFuncFor resolves the enqueue closure for nodeID's own outbox (the SELF mover
+// whose handler is doing the sending), for use by MoveDispatch methods (fanEdgesAndPartners)
+// that are not themselves nodeMover methods. Falls back to the blocking md.sendMove only
+// for the (practically unreached in production) case of a nodeID with no live mover —
+// there is no outbox to enqueue onto in that case.
+func (md *MoveDispatch) enqueueFuncFor(nodeID string) func(id string, msg moveMsg) {
+	if nm, ok := md.nodeMovers[nodeID]; ok {
+		return nm.sendMove
+	}
+	return md.sendMove
+}
+
+// deliverMove is the DELIVERY half of the per-mover outbound-queue split: the actual
+// blocking channel write into the target's inbox, run only from a mover's dedicated
+// sender goroutine (outbox.run), never from a handler goroutine. No tap here — the tap
+// already fired once, at enqueue (md.enqueueFor), matching the pre-split single-fire
+// contract the tap-based tests assert against.
+func (md *MoveDispatch) deliverMove(id string, msg moveMsg) {
 	if ch, ok := md.dispatch[id]; ok {
 		ch <- msg
 	}
@@ -1309,9 +1435,15 @@ func (md *MoveDispatch) heldEdges() []sphereEdge {
 // moveNodeAndSetEdgeCs, turned out to run on the moved node's own goroutine too. See
 // commitNodeMoveLocal and moveNodeAndSetEdgeCs for the applyCenter + fanEdgesAndPartners
 // pattern).
-func (md *MoveDispatch) fanEdgesAndPartners(newCenters map[string]vec3) {
+func (md *MoveDispatch) fanEdgesAndPartners(newCenters map[string]vec3, enqueue func(id string, msg moveMsg)) {
 	// Per-edge: send ONE batched message carrying every moved endpoint of that edge,
 	// so an edge whose both endpoints moved this frame recomputes/emits exactly once.
+	// enqueue (the caller's own outbox — see enqueueFuncFor) defers the actual blocking
+	// delivery to that mover's dedicated sender goroutine (cascade-deadlock-fix.md), so
+	// this call — made from inside handle/handleTrigger via commitLocal/moveNodeAndSetEdgeCs
+	// — never blocks. The dispatch-existence check moved into deliverMove (the sender's
+	// eventual blocking write), matching enqueue's other call sites (m.sendMove), which
+	// already tap/enqueue unconditionally regardless of whether id resolves.
 	for edgeID, em := range md.edgeMovers {
 		eps := map[string]vec3{}
 		if c, ok := newCenters[em.srcID]; ok {
@@ -1323,9 +1455,7 @@ func (md *MoveDispatch) fanEdgesAndPartners(newCenters map[string]vec3) {
 		if len(eps) == 0 {
 			continue
 		}
-		if ch, ok := md.dispatch[edgeID]; ok {
-			ch <- moveMsg{Kind: moveMsgKindCenters, Centers: eps}
-		}
+		enqueue(edgeID, moveMsg{Kind: moveMsgKindCenters, Centers: eps})
 	}
 
 	// Aimed-port re-emit (see doc comment above): find every partner node — the OTHER
@@ -1353,20 +1483,20 @@ func (md *MoveDispatch) fanEdgesAndPartners(newCenters map[string]vec3) {
 		if _, ok := md.nodeMovers[partnerID]; !ok {
 			continue
 		}
-		if ch, ok := md.dispatch[partnerID]; ok {
-			// Center is deliberately nil (see the doc comment above): this is a PURE
-			// re-emit, not a position write. Sending a non-nil Center rebuilt from
-			// nm.snap.Load() here would re-apply partnerID's OWN current snapshot to
-			// itself — normally an idempotent no-op, but a genuine hazard when a
-			// second, concurrently-in-flight fanCenters call (e.g. the node-2→5
-			// drag-equalize cascade) has ALREADY queued partnerID's real new-position
-			// message on this same inbox: a stale non-nil re-read here would queue
-			// BEHIND the real update and clobber it back to the pre-move position on
-			// drain. nodeMover.handle's nil-Center branch re-emits from the mover's own
-			// live geom (whatever it is by the time this drains), so it can never race
-			// or clobber a pending position write.
-			ch <- moveMsg{Kind: moveMsgKindCenter, NodeID: partnerID, Center: nil}
-		}
+		// Center is deliberately nil (see the doc comment above): this is a PURE
+		// re-emit, not a position write. Sending a non-nil Center rebuilt from
+		// nm.snap.Load() here would re-apply partnerID's OWN current snapshot to
+		// itself — normally an idempotent no-op, but a genuine hazard when a
+		// second, concurrently-in-flight fanCenters call (e.g. the node-2→5
+		// drag-equalize cascade) has ALREADY queued partnerID's real new-position
+		// message on this same inbox: a stale non-nil re-read here would queue
+		// BEHIND the real update and clobber it back to the pre-move position on
+		// drain. nodeMover.handle's nil-Center branch re-emits from the mover's own
+		// live geom (whatever it is by the time this drains), so it can never race
+		// or clobber a pending position write. Per-target FIFO order (single sender
+		// goroutine per mover) preserves this ordering guarantee even now that
+		// delivery is deferred through the outbox.
+		enqueue(partnerID, moveMsg{Kind: moveMsgKindCenter, NodeID: partnerID, Center: nil})
 	}
 }
 
@@ -1605,7 +1735,7 @@ func (md *MoveDispatch) moveNodeAndSetEdgeCs(nodeID string, newPos vec3, edgeA, 
 	if hasMover {
 		nm.applyCenter(newPos, reach[nodeID])
 	}
-	md.fanEdgesAndPartners(map[string]vec3{nodeID: newPos})
+	md.fanEdgesAndPartners(map[string]vec3{nodeID: newPos}, md.enqueueFuncFor(nodeID))
 
 	if md.quantizedLayout && hasMover {
 		off := measureScalar(newPos, md.sceneSphere.Center, nm.quantOffset)
@@ -1703,7 +1833,7 @@ func (md *MoveDispatch) commitNodeMoveLocal(nodeID string, newPos vec3) {
 	if ok {
 		nm.applyCenter(newPos, reach[nodeID])
 	}
-	md.fanEdgesAndPartners(map[string]vec3{nodeID: newPos})
+	md.fanEdgesAndPartners(map[string]vec3{nodeID: newPos}, md.enqueueFuncFor(nodeID))
 
 	if md.quantizedLayout && ok {
 		off := measureScalar(newPos, md.sceneSphere.Center, nm.quantOffset)
