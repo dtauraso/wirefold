@@ -122,7 +122,15 @@ func TestFramedPartialReads(t *testing.T) {
 	// A real (empty) dispatch so the `save` command has an overlay snapshot to persist.
 	md := newMoveDispatch(map[string]nodeGeom{}, map[string]EdgeEndpoints{}, nil, nil, nil)
 	md.EnableEditPersist(root) // arms overlaysPersist so `save` can write scene.json
-	go RunStdinReader(ctx, pr, SlotRegistry{}, md, nil, nil)
+	readerDone := make(chan struct{})
+	go func() {
+		RunStdinReader(ctx, pr, SlotRegistry{}, md, nil, nil)
+		close(readerDone)
+	}()
+	// RunStdinReader now flushes pending debounced persisters (writes under root) on its
+	// own clean-shutdown return path. Wait for that goroutine to actually finish before this
+	// test's t.TempDir() cleanup removes root, or the flush can race the RemoveAll.
+	defer func() { <-readerDone }()
 
 	frame := frameRecord(encodeControl(inKindSave))
 	go func() {

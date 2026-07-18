@@ -64,6 +64,17 @@ func (p *viewpointPersister) flush() {
 	p.recordWrite()
 }
 
+// flushPending cancels any pending debounce timer and synchronously writes whatever is
+// still pending, for the clean-shutdown path (RunStdinReader) — a camera move within the
+// debounce window of process exit would otherwise be silently lost.
+func (p *viewpointPersister) flushPending() {
+	if p == nil {
+		return
+	}
+	p.stop()
+	p.flush()
+}
+
 // viewpointToPolar converts an FSM viewpoint to the persisted cameraPolar shape. It is the
 // exact inverse of loadSceneViewpoint's mapping, so a load→persist→load round-trips.
 func viewpointToPolar(v viewpoint) *scenePolarCamera {

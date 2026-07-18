@@ -92,6 +92,18 @@ func (c *debouncedPersister[T]) take() (v T, ok bool) {
 	return v, ok
 }
 
+// stop cancels a pending debounce timer; callers follow with flush() to write any pending
+// value synchronously on shutdown (there is no live TS "shutdown" message — this is called
+// from the clean-exit path in RunStdinReader). Locks/unlocks mu independently of flush()'s
+// own take()-based locking, so this never holds mu across a flush() call (no deadlock risk).
+func (c *debouncedPersister[T]) stop() {
+	c.mu.Lock()
+	if c.timer != nil {
+		c.timer.Stop()
+	}
+	c.mu.Unlock()
+}
+
 // recordWrite increments the completed-write counter (test observability).
 func (c *debouncedPersister[T]) recordWrite() {
 	c.mu.Lock()
