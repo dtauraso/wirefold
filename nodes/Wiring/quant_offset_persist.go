@@ -120,16 +120,14 @@ func writeQuantOffset(root, id string, off quantizedOffset, scene polar) error {
 	})
 }
 
-// WriteLocalPolarsAndPole sets the node's localPolars list (layout_holder.go
-// LocalPolar, one per domain-edge neighbor, measured with this node as center) plus
-// the node's rotating local pole (rotating_pole.go LayoutHolder.localPole) in
+// WriteLocalPolars sets the node's localPolars list (layout_holder.go LocalPolar, one
+// per domain-edge neighbor, measured with this node as center) in
 // <root>/nodes/<id>/meta.json, preserving every other field — the same
-// read-modify-write contract as writeQuantOffset — in the SAME read-modify-write
-// pass, so a requantize's polars and pole never observe a torn intermediate file.
-// hasPole false (no pole seeded yet — should not happen once a node has any
-// neighbors, but kept explicit rather than writing meaningless zeros) skips the
-// pole keys entirely.
-func WriteLocalPolarsAndPole(root, id string, lps []LocalPolar, pole dir, hasPole bool) error {
+// read-modify-write contract as writeQuantOffset. There is no pole to write: the
+// measurement pole is a pure function of live geometry
+// (docs/planning/visual-editor/deterministic-local-pole.md, rotating_pole.go localPole),
+// recomputed on demand and never persisted.
+func WriteLocalPolars(root, id string, lps []LocalPolar) error {
 	if !safeTreePathComponent(id) {
 		return fmt.Errorf("unsafe node id %q", id)
 	}
@@ -155,11 +153,5 @@ func WriteLocalPolarsAndPole(root, id string, lps []LocalPolar, pole dir, hasPol
 		}
 		b, _ := json.Marshal(out)
 		obj["localPolars"] = b
-		if hasPole {
-			tb, _ := json.Marshal(pole.Theta)
-			pb, _ := json.Marshal(pole.Phi)
-			obj["localPoleTheta"] = tb
-			obj["localPolePhi"] = pb
-		}
 	})
 }

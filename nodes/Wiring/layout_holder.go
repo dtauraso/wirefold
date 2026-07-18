@@ -90,10 +90,8 @@ func (lp LocalPolar) effectiveSteps() (t, p, r float64) {
 // and this node's own layout goroutine (currently idle, but the mutex makes
 // concurrent access safe by construction rather than by convention).
 type LayoutHolder struct {
-	mu           sync.Mutex
-	localPolars  []LocalPolar
-	localPole    dir  // this node's rotating local pole (rotating_pole.go); meaningless if !hasLocalPole
-	hasLocalPole bool // false until seeded (load-time init or a runtime kick), per rotating-pole-frame.md
+	mu          sync.Mutex
+	localPolars []LocalPolar
 }
 
 // UpdateLayout runs this node's layout-update loop until ctx is cancelled. It
@@ -160,21 +158,4 @@ func (lh *LayoutHolder) LocalPolarsSnapshot() []LocalPolar {
 	out := make([]LocalPolar, len(lh.localPolars))
 	copy(out, lh.localPolars)
 	return out
-}
-
-// LocalPole returns this node's current rotating local pole (rotating_pole.go) and
-// whether one has been seeded yet (false until an initial load or the first kick).
-func (lh *LayoutHolder) LocalPole() (dir, bool) {
-	lh.mu.Lock()
-	defer lh.mu.Unlock()
-	return lh.localPole, lh.hasLocalPole
-}
-
-// SetLocalPole sets this node's rotating local pole (both the initial load and every
-// runtime kick route through this single locked setter).
-func (lh *LayoutHolder) SetLocalPole(p dir) {
-	lh.mu.Lock()
-	defer lh.mu.Unlock()
-	lh.localPole = p
-	lh.hasLocalPole = true
 }

@@ -1,7 +1,7 @@
 package Wiring
 
-// rotating_pole_test.go — tests for the ROTATING PER-NODE LOCAL POLE
-// (docs/planning/visual-editor/rotating-pole-frame.md, rotating_pole.go).
+// rotating_pole_test.go — tests for the DETERMINISTIC LOCAL POLE
+// (docs/planning/visual-editor/deterministic-local-pole.md, rotating_pole.go).
 
 import (
 	"context"
@@ -9,38 +9,99 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
-// TestKickIncreasesAngularDistance pins the SIGN of kickPoleAwayFrom: it must move the
-// pole so the offending offset's angular distance to the pole INCREASES (toward π/2), not
-// decreases. Verified empirically — arcBetween(oDir,pole), not arcBetween(pole,oDir), is
-// the correct direction; the reversed call decreases the distance instead (would make the
-// kick worse than a no-op).
-func TestKickIncreasesAngularDistance(t *testing.T) {
-	pole := dir{Theta: 0.1, Phi: 0} // near world +y — deliberately close to an offset below
-	oDir := dir{Theta: 0.15, Phi: 0.4}
-	c := angularDistance(pole, oDir)
-	if c >= poleKickTheta {
-		t.Fatalf("test setup: c=%v not below poleKickTheta=%v", c, poleKickTheta)
+// TestLocalPoleDeterministic asserts localPole is a pure function: the same set of
+// neighbor directions always yields the same pole, regardless of how many times it is
+// evaluated.
+func TestLocalPoleDeterministic(t *testing.T) {
+	dirs := []dir{
+		{Theta: 0.15, Phi: 0.4},
+		{Theta: 1.2, Phi: -0.7},
+		{Theta: 0.6, Phi: 2.1},
 	}
-	newPole := kickPoleAwayFrom(pole, oDir, c)
-	newC := angularDistance(newPole, oDir)
-	if newC <= c {
-		t.Fatalf("kickPoleAwayFrom decreased (or did not change) angular distance: before=%v after=%v", c, newC)
-	}
-	if math.Abs(newC-math.Pi/2) > 1e-9 {
-		t.Fatalf("kickPoleAwayFrom should land oDir exactly at the equator (pi/2); got %v", newC)
+	first := localPole(dirs)
+	for i := 0; i < 5; i++ {
+		got := localPole(dirs)
+		if got != first {
+			t.Fatalf("localPole not deterministic: run %d got %+v, want %+v", i, got, first)
+		}
 	}
 }
 
-// TestRotatingPoleKicksAwayFromOffset drags a neighbor so its offset direction (from the
-// dragged-into node's perspective) sweeps to within poleKickTheta of that node's CURRENT
-// local pole — the exact scenario a FIXED world +y pole cannot represent (the fixed pole
-// has no way to move away from an offset passing near it; it would instead record a
-// bearing near the azimuth singularity, rotating-pole-frame.md). Asserts the per-node
-// pole itself moves (kicks) and the resulting offset colatitude is bounded (>= the
-// threshold, up to float slack).
-func TestRotatingPoleKicksAwayFromOffset(t *testing.T) {
+// TestLocalPoleHomeWhenClear asserts that when every offset's colatitude (about world +y)
+// is at or beyond poleKickTheta, the pole is exactly home (+y) — no dodge needed.
+func TestLocalPoleHomeWhenClear(t *testing.T) {
+	dirs := []dir{
+		{Theta: poleKickTheta, Phi: 0}, // exactly at the threshold — still "clear"
+		{Theta: math.Pi / 2, Phi: 1.0},
+	}
+	got := localPole(dirs)
+	want := dir{Theta: 0, Phi: 0}
+	if got != want {
+		t.Fatalf("localPole should be home when every offset is clear of poleKickTheta: got %+v want %+v", got, want)
+	}
+}
+
+// TestLocalPoleDodgesInsideZone asserts that when the closest offset's colatitude is
+// just inside poleKickTheta, the pole tilts so that offset lands at EXACTLY colatitude
+// poleKickTheta about the new pole — the closed-form dodge, not the old 90-degree kick.
+func TestLocalPoleDodgesInsideZone(t *testing.T) {
+	closest := dir{Theta: 0.05, Phi: 0.9} // well inside the 20-degree zone
+	dirs := []dir{closest, {Theta: 1.0, Phi: -2.0}}
+	pole := localPole(dirs)
+	if pole == (dir{Theta: 0, Phi: 0}) {
+		t.Fatalf("localPole should have dodged away from home for an offset inside poleKickTheta")
+	}
+	gotC := angularDistance(pole, closest)
+	if math.Abs(gotC-poleKickTheta) > 1e-9 {
+		t.Fatalf("localPole should place the closest offset at exactly poleKickTheta: got colatitude %v want %v", gotC, poleKickTheta)
+	}
+}
+
+// TestLocalPoleContinuousAcrossThreshold asserts the pole moves CONTINUOUSLY as the
+// closest offset's colatitude crosses poleKickTheta from below — no jump at the boundary
+// (the old kick-and-recheck loop had a discontinuity; the closed-form dodge does not).
+func TestLocalPoleContinuousAcrossThreshold(t *testing.T) {
+	phi := 0.7
+	const eps = 1e-6
+	below := dir{Theta: poleKickTheta - eps, Phi: phi}
+	above := dir{Theta: poleKickTheta + eps, Phi: phi}
+	poleBelow := localPole([]dir{below})
+	poleAbove := localPole([]dir{above})
+	d := angularDistance(poleBelow, poleAbove)
+	if d > 1e-3 {
+		t.Fatalf("localPole is discontinuous across poleKickTheta: poleBelow=%+v poleAbove=%+v angularDistance=%v", poleBelow, poleAbove, d)
+	}
+}
+
+// TestKickIncreasesAngularDistance pins the SIGN of the dodge rotation used inside
+// localPole: rotating home away from the closest offending offset (rotateDir with
+// arcBetween(closest,home).Axis) must move the pole so the offset's angular distance
+// INCREASES relative to no dodge at all — i.e. the offset ends up farther from the new
+// pole than it was from home. Verified empirically: arcBetween(oDir,pole), not
+// arcBetween(pole,oDir), is the correct direction for the rotation axis.
+func TestKickIncreasesAngularDistance(t *testing.T) {
+	home := dir{Theta: 0, Phi: 0}
+	oDir := dir{Theta: 0.05, Phi: 0.4} // inside poleKickTheta
+	cHome := angularDistance(home, oDir)
+	newPole := localPole([]dir{oDir})
+	newC := angularDistance(newPole, oDir)
+	if newC <= cHome {
+		t.Fatalf("localPole's dodge decreased (or did not change) angular distance: before=%v after=%v", cHome, newC)
+	}
+	if math.Abs(newC-poleKickTheta) > 1e-9 {
+		t.Fatalf("localPole should land oDir exactly at poleKickTheta; got %v", newC)
+	}
+}
+
+// TestRotatingPoleClearsSingularityOnDrag drags a neighbor so its offset direction (from
+// the dragged-into node's perspective) sweeps to within poleKickTheta of world +y — the
+// exact scenario a FIXED world +y pole cannot represent (rotating-pole-frame.md /
+// deterministic-local-pole.md). Asserts the resulting offset's colatitude about the
+// (freshly recomputed) pole is bounded clear of the threshold after the drag settles.
+func TestRotatingPoleClearsSingularityOnDrag(t *testing.T) {
 	root := writeTree(t)
 	md := loadTreeMD(t, root)
 	md.EnableEditPersist(root)
@@ -52,55 +113,69 @@ func TestRotatingPoleKicksAwayFromOffset(t *testing.T) {
 	if !ok {
 		t.Fatal("no LayoutHolder for src")
 	}
-	pole0, hasPole0 := lhSrc.LocalPole()
-	if !hasPole0 {
-		t.Fatal("src has no local pole after load — computeLocalPolars must seed one")
-	}
 	srcCenter, ok := md.centerOfNode("src")
 	if !ok {
 		t.Fatal("no center for src")
 	}
 
-	// Drag dst to a position 5 degrees off src's pole (well inside the 20-degree kick
+	// Drag dst to a position 5 degrees off world +y (well inside the 20-degree kick
 	// threshold).
-	near := fromAxisFrame(pole0, 5*math.Pi/180, 0)
+	home := dir{Theta: 0, Phi: 0}
+	near := fromAxisFrame(home, 5*math.Pi/180, 0)
 	target := srcCenter.add(polar2cart(polar{R: 50, Theta: near.Theta, Phi: near.Phi}))
 
 	if !md.RootMove("dst", target) {
 		t.Fatal("RootMove(dst) returned false")
 	}
 	pollDragConverged(t, md, "dst", target)
-	md.quantOffsetPersist.flush()
-
-	pole1, hasPole1 := lhSrc.LocalPole()
-	if !hasPole1 {
-		t.Fatal("src lost its local pole after the drag")
-	}
-	if pole1 == pole0 {
-		t.Fatalf("pole did not kick away from the near-pole offset (still %+v)", pole0)
-	}
 
 	dstCenter, ok := md.centerOfNode("dst")
 	if !ok {
 		t.Fatal("no center for dst after drag")
 	}
 	offDir, _ := dirFromOffset(dstCenter.sub(srcCenter))
-	c := angularDistance(pole1, offDir)
+	pole := localPole([]dir{offDir})
+	c := angularDistance(pole, offDir)
 	if c < poleKickTheta-1e-6 {
-		t.Fatalf("offset colatitude %v still below poleKickTheta %v after kick — pole1=%+v", c, poleKickTheta, pole1)
+		t.Fatalf("offset colatitude %v still below poleKickTheta %v after dodge — pole=%+v", c, poleKickTheta, pole)
 	}
 
-	// Sanity: this WOULD have failed under the retired fixed +y pole — cart2polar(offset)
-	// directly (no kick possible) leaves the offset's bearing arbitrarily close to the
-	// azimuth singularity whenever its Theta (colatitude from world +y) is small; nothing
-	// in that model can push the reference frame away from an approaching offset.
+	// src's own local polar to dst is requantized by src's OWN mover goroutine, reached
+	// asynchronously via a moveMsgKindRequantize message sent from dst's mover after dst's
+	// own position commits (node_move.go requantizeLocalPolars) — dst converging to target
+	// does not itself guarantee src has processed that message yet, so poll for it rather
+	// than asserting immediately (this exact race is why the old kick-based test was
+	// flaky; here it is a plain message-delivery race, not a fixed-point convergence one).
+	var got *LocalPolar
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		got = nil
+		for _, lp := range lhSrc.LocalPolarsSnapshot() {
+			if lp.To == "dst" {
+				cp := lp
+				got = &cp
+			}
+		}
+		if got != nil {
+			st, sp, _ := got.effectiveSteps()
+			gotDir := fromAxisFrame(pole, float64(got.QuantITheta)*st, float64(got.QuantIPhi)*sp)
+			if angularDistance(gotDir, offDir) <= st+sp {
+				break
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("src's local polar to dst never converged to the live offset direction: got=%+v want=%+v", got, offDir)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	md.quantOffsetPersist.flush()
 }
 
-// TestRotatingPolePersistReload drags src's neighbor to trigger a pole kick, flushes,
-// then RELOADS from disk into a fresh MoveDispatch and asserts: (1) the persisted pole
-// round-trips exactly, and (2) reloading (which re-quantizes nothing on its own — the
-// persisted pole is adopted as-is, hasPole=true) does not itself drift the pole further
-// (no reload-time oscillation).
+// TestRotatingPolePersistReload drags src's neighbor, flushes, then RELOADS from disk
+// into a fresh MoveDispatch and asserts a drag-then-reload lands the same bearings: since
+// the pole is a pure function of live geometry (never persisted), both the live runtime
+// and the reload evaluate localPole on the same (persisted, lossless scenePolar) geometry
+// and must agree exactly.
 func TestRotatingPolePersistReload(t *testing.T) {
 	root := writeTree(t)
 	md := loadTreeMD(t, root)
@@ -113,27 +188,50 @@ func TestRotatingPolePersistReload(t *testing.T) {
 	if !ok {
 		t.Fatal("no LayoutHolder for src")
 	}
-	pole0, _ := lhSrc.LocalPole()
 	srcCenter, _ := md.centerOfNode("src")
-	near := fromAxisFrame(pole0, 5*math.Pi/180, 0)
+	home := dir{Theta: 0, Phi: 0}
+	near := fromAxisFrame(home, 5*math.Pi/180, 0)
 	target := srcCenter.add(polar2cart(polar{R: 50, Theta: near.Theta, Phi: near.Phi}))
 	if !md.RootMove("dst", target) {
 		t.Fatal("RootMove(dst) returned false")
 	}
 	pollDragConverged(t, md, "dst", target)
-	md.quantOffsetPersist.flush()
 
-	poleAfterDrag, hasPole := lhSrc.LocalPole()
-	if !hasPole {
-		t.Fatal("src has no pole after drag")
+	dstCenter, _ := md.centerOfNode("dst")
+	wantDir, _ := dirFromOffset(dstCenter.sub(srcCenter))
+	// src's own local polar to dst is requantized asynchronously (a moveMsgKindRequantize
+	// message from dst's mover) — poll until it reflects the post-drag geometry before
+	// flushing, so the persisted bearing is not a stale pre-drag value.
+	var before *LocalPolar
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		before = nil
+		for _, lp := range lhSrc.LocalPolarsSnapshot() {
+			if lp.To == "dst" {
+				cp := lp
+				before = &cp
+			}
+		}
+		if before != nil {
+			st, sp, _ := before.effectiveSteps()
+			gotDir := fromAxisFrame(localPole([]dir{wantDir}), float64(before.QuantITheta)*st, float64(before.QuantIPhi)*sp)
+			if angularDistance(gotDir, wantDir) <= st+sp {
+				break
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("src's local polar to dst never converged to the live offset direction")
+		}
+		time.Sleep(time.Millisecond)
 	}
+	md.quantOffsetPersist.flush()
 
 	raw, err := os.ReadFile(filepath.Join(root, "nodes", "src", "meta.json"))
 	if err != nil {
 		t.Fatalf("read src meta: %v", err)
 	}
-	if !containsKey(raw, "localPoleTheta") || !containsKey(raw, "localPolePhi") {
-		t.Fatalf("src meta.json missing persisted local pole: %s", raw)
+	if containsKey(raw, "localPoleTheta") || containsKey(raw, "localPolePhi") {
+		t.Fatalf("src meta.json should NOT persist a local pole (pure function of geometry): %s", raw)
 	}
 
 	// Reload into a fresh MoveDispatch.
@@ -142,37 +240,28 @@ func TestRotatingPolePersistReload(t *testing.T) {
 	if !ok {
 		t.Fatal("no LayoutHolder for src on reload")
 	}
-	poleReloaded, hasPoleReloaded := lhSrc2.LocalPole()
-	if !hasPoleReloaded {
-		t.Fatal("reloaded src has no pole")
+	var after *LocalPolar
+	for _, lp := range lhSrc2.LocalPolarsSnapshot() {
+		if lp.To == "dst" {
+			cp := lp
+			after = &cp
+		}
 	}
-	const eps = 1e-9
-	if math.Abs(poleReloaded.Theta-poleAfterDrag.Theta) > eps || math.Abs(poleReloaded.Phi-poleAfterDrag.Phi) > eps {
-		t.Fatalf("pole did not round-trip: before-reload=%+v after-reload=%+v", poleAfterDrag, poleReloaded)
+	if after == nil {
+		t.Fatal("reloaded src has no local polar entry for dst")
 	}
-
-	// No oscillation: re-running the same requantize (same neighbor, same offset) against
-	// the reloaded holder must not move the pole further — it is already clear of every
-	// neighbor's offset.
-	dstCenter, ok := md2.centerOfNode("dst")
-	if !ok {
-		t.Fatal("no center for dst after reload")
-	}
-	requantizeLocalPolarsAboutPole(lhSrc2, map[string]vec3{"dst": dstCenter.sub(srcCenter)})
-	poleAfterRequantize, _ := lhSrc2.LocalPole()
-	if math.Abs(poleAfterRequantize.Theta-poleReloaded.Theta) > eps || math.Abs(poleAfterRequantize.Phi-poleReloaded.Phi) > eps {
-		t.Fatalf("pole oscillated on a redundant re-quantize: reloaded=%+v after=%+v", poleReloaded, poleAfterRequantize)
+	if before.QuantITheta != after.QuantITheta || before.QuantIPhi != after.QuantIPhi || before.QuantIR != after.QuantIR {
+		t.Fatalf("bearing did not round-trip identically on reload: before=%+v after=%+v", before, after)
 	}
 }
 
 // TestComputeLocalPolarsRequantizesStoredBearingAboutResolvedPole guards the load-time
 // bug where a STORED localPolars entry's bearing was copied verbatim even though the
 // node's pole is resolved from LIVE geometry — so a bearing quantized about a different
-// pole (e.g. pre-rotating-pole data quantized about world +y) would be inconsistent with
-// the resolved pole. Writes a tree whose src/meta.json carries a stored localPolars
-// entry with a bearing that is NOT consistent with the live dst offset (no persisted
-// pole, so computeLocalPolars must seed+resolve one from live geometry), and asserts
-// that after load, reconstructing the stored bearing under the resolved pole
+// pole (e.g. pre-deterministic-pole data quantized about a stale rotated pole) would be
+// inconsistent with the resolved pole. Writes a tree whose src/meta.json carries a stored
+// localPolars entry with a bearing that is NOT consistent with the live dst offset, and
+// asserts that after load, reconstructing the stored bearing under the resolved pole
 // (fromAxisFrame) lands within one step cell of the live offset direction, while Role
 // and QuantIR are preserved verbatim.
 func TestComputeLocalPolarsRequantizesStoredBearingAboutResolvedPole(t *testing.T) {
@@ -188,9 +277,9 @@ func TestComputeLocalPolarsRequantizesStoredBearingAboutResolvedPole(t *testing.
 	}
 	// src's stored localPolars entry for dst carries a bearing (quantITheta/quantIPhi)
 	// that is deliberately bogus/stale — NOT what src↔dst's live geometry implies about
-	// any pole — and no localPoleTheta/Phi, so computeLocalPolars must seed a fresh pole
-	// from live geometry and (per the fix) re-quantize this stored bearing about it
-	// rather than trusting the stale numbers. Role and quantIR must survive untouched.
+	// any pole — so computeLocalPolars must re-quantize this stored bearing about the
+	// freshly-resolved pole rather than trusting the stale numbers. Role and quantIR must
+	// survive untouched.
 	mk("nodes/src/meta.json", `{"id":"src","type":"FanInSrc","r":100,"scenePolarR":37.4165738677,"scenePolarTheta":1.00685368543,"scenePolarPhi":1.2490457724,"localPolars":[{"to":"dst","role":"source","quantITheta":9999,"quantIPhi":-9999,"quantIR":42}]}`)
 	mk("nodes/src/outputs/Out.json", `{"name":"Out"}`)
 	mk("nodes/dst/meta.json", `{"id":"dst","type":"FanInSink","r":100,"scenePolarR":87.7496438739,"scenePolarTheta":0.96453035788,"scenePolarPhi":-2.15879893034}`)
@@ -202,10 +291,6 @@ func TestComputeLocalPolarsRequantizesStoredBearingAboutResolvedPole(t *testing.
 	if !ok {
 		t.Fatal("no LayoutHolder for src")
 	}
-	pole, hasPole := lhSrc.LocalPole()
-	if !hasPole {
-		t.Fatal("src has no resolved local pole after load")
-	}
 	srcCenter, ok := md.centerOfNode("src")
 	if !ok {
 		t.Fatal("no center for src")
@@ -215,6 +300,7 @@ func TestComputeLocalPolarsRequantizesStoredBearingAboutResolvedPole(t *testing.
 		t.Fatal("no center for dst")
 	}
 	wantDir, _ := dirFromOffset(dstCenter.sub(srcCenter))
+	pole := localPole([]dir{wantDir})
 
 	var got *LocalPolar
 	for _, lp := range lhSrc.LocalPolarsSnapshot() {
