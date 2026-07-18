@@ -1308,45 +1308,15 @@ func (md *MoveDispatch) heldEdges() []sphereEdge {
 	return edges
 }
 
-// fanCenters pushes one "center" message per node (carrying its new world center and
-// reach radius) to that node's mover AND every incident edge's mover. Each owning
-// goroutine writes the center onto its own held geom and re-emits — the whole-graph
-// SOLVE is central; the per-mover APPLY stays decentralized.
-//
-// Aimed-port re-emit: when an aimed registry is installed, any nodeMover whose
-// port aims AT a moved node must also re-emit its geometry so the port direction
-// updates to the new target position. We send a no-center moveMsg to those nodes
-// so they re-emit with the fresh target center (which the target mover just wrote
-// to its geom; the aimer reads via centerOfNode at emit time).
-func (md *MoveDispatch) fanCenters(newCenters map[string]vec3, reach map[string]float64) {
-	// Per-node DIRECT position writes: route each moved node's own new center to its
-	// own nodeMover inbox as a moveMsgKindCenter message carrying Center — nodeMover's
-	// handle applies it via applyCenter, making that node's own mover goroutine the
-	// sole writer of its position. One per moved node.
-	//
-	// This self-send is the CENTRAL-design artifact: the calling goroutine (stdin
-	// reader) cannot write the moved node's snap itself, so it messages the node's
-	// own mover to do it. When the commit instead ORIGINATES on the moved node's own
-	// goroutine, this self-send must NOT be used — the
-	// message would sit unread in this node's own inbox until this very handler
-	// returns, so anything read immediately after (e.g. handleTrigger's snap.Load())
-	// would observe the STALE pre-move center. See commitNodeMoveLocal, which calls
-	// applyCenter directly instead and then calls fanEdgesAndPartners for the rest.
-	for id, c := range newCenters {
-		if ch, ok := md.dispatch[id]; ok {
-			cc := c
-			ch <- moveMsg{Kind: moveMsgKindCenter, NodeID: id, Center: &cc, ReachR: reach[id]}
-		}
-	}
-	md.fanEdgesAndPartners(newCenters)
-}
-
-// fanEdgesAndPartners is the cross-goroutine half of fanCenters: it messages every
-// incident edge's mover (batched per-edge Centers) and every aimed-port partner
-// (pure re-emit), for the given already-applied set of moved node centers. It never
-// writes the moved node's OWN snap — that responsibility belongs to whichever caller
-// applied the moved node's own center (either fanCenters' self-send above, for a
-// central caller, or applyCenter called directly, for an owner-goroutine caller).
+// fanEdgesAndPartners messages every incident edge's mover (batched per-edge Centers) and
+// every aimed-port partner (pure re-emit), for the given already-applied set of moved node
+// centers. It never writes the moved node's OWN snap — that responsibility belongs to
+// whichever caller applied the moved node's own center via applyCenter directly (every
+// live caller is now owner-goroutine; the old central "self-send into own inbox" path,
+// fanCenters, was removed — it deadlocked/staled when its only caller,
+// moveNodeAndSetEdgeCs, turned out to run on the moved node's own goroutine too. See
+// commitNodeMoveLocal and moveNodeAndSetEdgeCs for the applyCenter + fanEdgesAndPartners
+// pattern).
 func (md *MoveDispatch) fanEdgesAndPartners(newCenters map[string]vec3) {
 	// Per-edge: send ONE batched message carrying every moved endpoint of that edge,
 	// so an edge whose both endpoints moved this frame recomputes/emits exactly once.
@@ -1585,19 +1555,31 @@ func (md *MoveDispatch) placeAtDistanceFromBoth(nodeID string, a, b vec3, d floa
 // applies to any single dragged node, so it repositions on screen), then sets nodeID's two
 // edge-c records (to edgeA and edgeB) to c, preserving each record's own bearing/step
 // constants. Only nodeID's own LayoutHolder is written — the edge neighbors are never moved.
+//
+// This is an OWNER-GOROUTINE commit (its sole caller, gatePlaceNode, runs on the moved
+// gate node's own mover goroutine via moveMsgKindGatePlace), so it commits nodeID's own
+// center the same way commitNodeMoveLocal does: applyCenter directly (synchronous, no
+// self-send) followed by fanEdgesAndPartners for the incident-edge/partner fan-out. It
+// must NOT route through a self-send into nodeID's own inbox (the old fanCenters
+// path) — that message would sit unread until this handler returns (self-deadlock if the
+// inbox is full, stale-read hazard otherwise for any concurrent centerOfNode reader).
 func (md *MoveDispatch) moveNodeAndSetEdgeCs(nodeID string, newPos vec3, edgeA, edgeB string, c int) {
 	edges := md.heldEdges()
-	emit := map[string]vec3{nodeID: newPos}
 	polars := md.heldPolar()
 	polars[nodeID] = cart2polar(newPos.sub(md.sceneSphere.Center))
-	md.fanCenters(emit, reachRFromPolar(polars, edges))
-	if md.quantizedLayout {
-		if nm, ok := md.nodeMovers[nodeID]; ok {
-			off := measureScalar(newPos, md.sceneSphere.Center, nm.quantOffset)
-			nm.quantOffset = off
-			if md.quantOffsetPersist != nil {
-				md.quantOffsetPersist.schedule(nodeID, off, cart2polar(newPos.sub(md.sceneSphere.Center)))
-			}
+	reach := reachRFromPolar(polars, edges)
+
+	nm, hasMover := md.nodeMovers[nodeID]
+	if hasMover {
+		nm.applyCenter(newPos, reach[nodeID])
+	}
+	md.fanEdgesAndPartners(map[string]vec3{nodeID: newPos})
+
+	if md.quantizedLayout && hasMover {
+		off := measureScalar(newPos, md.sceneSphere.Center, nm.quantOffset)
+		nm.quantOffset = off
+		if md.quantOffsetPersist != nil {
+			md.quantOffsetPersist.schedule(nodeID, off, cart2polar(newPos.sub(md.sceneSphere.Center)))
 		}
 	}
 	lh, ok := md.layoutHolders[nodeID]
@@ -1657,6 +1639,12 @@ func (md *MoveDispatch) moveNodeAndSetEdgeCs(nodeID string, newPos vec3, edgeA, 
 		// sendMoveLossy (non-blocking): a full far inbox means far is already mid-cascade
 		// and will requantize itself on its own next commit, so the drop is safe — and
 		// blocking here risks deadlock against far's own symmetric send back to nodeID.
+		// Dropping this message is safe today because moveNodeAndSetEdgeCs's callers pass
+		// a gate's FAR neighbors as edgeA/edgeB, and those far neighbors are NON-GATE nodes
+		// that never read the stale QuantIR via equalizeEdgeCLocal (only a 2-neighbor gate
+		// calls equalizeEdgeCLocal on itself). This safety is TOPOLOGY-dependent: a graph
+		// where a gate's far neighbor is ITSELF a gate (two mutually-adjacent/anchored gate
+		// nodes) would make the drop observable via that recipient's own equalize path.
 		md.sendMoveLossy(far, moveMsg{Kind: moveMsgKindRequantizeSetC, NodeID: far, SenderID: nodeID, FromCenter: newPos, SnapC: c})
 	}
 	setEdgeC(edgeA)
