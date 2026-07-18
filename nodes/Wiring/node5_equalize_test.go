@@ -1163,3 +1163,83 @@ func TestNode6DragEmitsDecentralizedMessages(t *testing.T) {
 		t.Errorf("expected exactly %d messages, got %d: %+v", wantCount, len(trace), trace)
 	}
 }
+
+// TestMutuallyAdjacentCascadeNoDeadlock is the proof for
+// docs/planning/visual-editor/cascade-deadlock-fix.md: two mutually-adjacent nodes (A's
+// source/follower is B and vice versa) can each be mid-handleTrigger, concurrently,
+// while the OTHER's inbox is full — the exact precondition the fix's package doc
+// comment (node_move.go's outbox type) describes. This test drives that precondition
+// directly and DETERMINISTICALLY, without depending on real-time goroutine-scheduling
+// races: it fills both nodeMovers' real inboxes to capacity with nothing ever draining
+// them (md.Start is deliberately never called — no run() loop is active), then calls
+// handleTrigger DIRECTLY, concurrently, on both nodeMovers' own goroutines (bypassing
+// run()'s select/inbox-drain, isolating exactly the send-in-handle code path being
+// fixed). Before the fix, handleTrigger's sendMove(other,...) was a raw blocking
+// `ch <- msg`: A blocks forever trying to write into B's full, undrained inbox while B
+// simultaneously blocks forever trying to write into A's — the classic mutual-block
+// deadlock. After the fix, sendMove only enqueues onto the CALLER's own outbox (an
+// unbounded FIFO popped by a separate sender goroutine, started by md.Start — not
+// started here on purpose) so handleTrigger always returns promptly regardless of the
+// target inbox's fill level.
+//
+// Manually verified both ways while building this test (per the fix's verification
+// recipe): reverting nm.sendMove's binding back to md.sendMove (the raw blocking send)
+// makes this test hang and time out; restoring the enqueue-based binding
+// (md.enqueueFor(nm.outbox), the shipped code) makes it pass every time.
+func TestMutuallyAdjacentCascadeNoDeadlock(t *testing.T) {
+	geoms := map[string]nodeGeom{
+		"A": {Kind: "Input", HasPos: true, ScenePolar: cart2polar(vec3{10, 0, 0}),
+			Inputs: []portGeom{{Name: "in"}}, Outputs: []portGeom{{Name: "out"}}},
+		"B": {Kind: "Input", HasPos: true, ScenePolar: cart2polar(vec3{0, 10, 0}),
+			Inputs: []portGeom{{Name: "in"}}, Outputs: []portGeom{{Name: "out"}}},
+	}
+	edges := map[string]EdgeEndpoints{
+		"AToB": {Source: "A", Target: "B", SourceHandle: "out", TargetHandle: "in"},
+	}
+	md := newMoveDispatch(geoms, edges, nil, nil, nil)
+	md.layoutHolders = map[string]*LayoutHolder{"A": {}, "B": {}}
+	// Mutual source/follower: A's trigger equalizes+forwards to B, B's trigger
+	// equalizes+forwards to A — each node's own self-trigger sends to the OTHER,
+	// mirroring the reported bug's "two mutually-adjacent nodes" precondition exactly.
+	md.ApplyCascadeRoles(map[string]cascadeRoleSpec{
+		"A": {SourceID: "B", Followers: []string{"B"}},
+		"B": {SourceID: "A", Followers: []string{"A"}},
+	})
+
+	nmA := md.nodeMovers["A"]
+	nmB := md.nodeMovers["B"]
+
+	// Fill BOTH real inboxes to capacity with nothing draining them (md.Start is never
+	// called in this test) — simulating "receiver mid-handle, not draining, inbox full".
+	for i := 0; i < cap(nmA.inbox); i++ {
+		nmA.inbox <- moveMsg{}
+	}
+	for i := 0; i < cap(nmB.inbox); i++ {
+		nmB.inbox <- moveMsg{}
+	}
+
+	bothTriggersDone := make(chan struct{})
+	go func() {
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			nmA.handleTrigger(moveMsg{Kind: moveMsgKindTrigger, NodeID: "A", SenderID: ""})
+		}()
+		go func() {
+			defer wg.Done()
+			nmB.handleTrigger(moveMsg{Kind: moveMsgKindTrigger, NodeID: "B", SenderID: ""})
+		}()
+		wg.Wait()
+		close(bothTriggersDone)
+	}()
+
+	select {
+	case <-bothTriggersDone:
+		// Both concurrent handleTrigger calls returned without blocking on the peer's
+		// full inbox — the deadlock is structurally impossible now, not just avoided
+		// this run.
+	case <-time.After(5 * time.Second):
+		t.Fatal("mutually-adjacent concurrent cascade deadlocked: both handleTrigger calls blocked on a full peer inbox (see cascade-deadlock-fix.md)")
+	}
+}
