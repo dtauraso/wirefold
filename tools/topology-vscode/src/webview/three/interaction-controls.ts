@@ -49,11 +49,22 @@ export function useInteractionControls(
     e.currentTarget.releasePointerCapture(e.pointerId);
   }, [cameraRef, pickRequest]);
 
+  // A gesture can end via pointercancel (touch interrupted, OS gesture, focus
+  // steal) instead of pointerup, and the browser then fires NO pointerup — so
+  // without this the Go FSM stays stuck in its drag phase and later buttonless
+  // moves keep dragging. Synthesize a pointerup to end the gesture through the
+  // normal path. (Do NOT also wire onLostPointerCapture: it fires on a normal
+  // pointerup too, which would double-finalize.)
+  const onPointerCancel = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    const ev = buildPointerRaw(e, "pointerup", cameraRef, pickRequest);
+    if (ev) sendRawInput(ev);
+  }, [cameraRef, pickRequest]);
+
   const onWheelNative = useCallback((e: WheelEvent) => {
     e.preventDefault();
     const ev = buildWheelRaw(e, cameraRef, pickRequest);
     if (ev) sendRawInput(ev);
   }, [cameraRef, pickRequest]);
 
-  return { onPointerDown, onPointerMove, onPointerUp, onWheelNative };
+  return { onPointerDown, onPointerMove, onPointerUp, onPointerCancel, onWheelNative };
 }
