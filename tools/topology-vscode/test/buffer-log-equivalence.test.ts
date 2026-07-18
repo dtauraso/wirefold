@@ -71,12 +71,18 @@ describe("buffer-decoded .probe log equivalence", () => {
         for (const l of out.split("\n")) if (l) bufLines.push(l);
       }
     });
+    // Deterministically know when the fd3 pipe itself is fully drained (no more 'data'
+    // events will fire), independent of the 'close' event's own timing.
+    const fd3Ended = new Promise<void>((r) => fd3!.once("end", () => r()));
 
     // The clock is free-running (no play/pause gate), so flow events fire from startup.
-    // Wait for the clean self-terminating -duration exit so both streams (stdout drain +
-    // final buffer flush) are fully written before comparing.
-    await new Promise<void>((r) => proc.on("close", () => r()));
-    await new Promise((r) => setTimeout(r, 100));
+    // Wait for BOTH: (a) the clean self-terminating -duration process exit ('close' fires
+    // only after the process has ended AND all its stdio streams — incl. fd3 — have been
+    // closed, which is strictly after Go's deferred f.Close() on the -trace file completes,
+    // since the OS only reports process exit once every write the process made has been
+    // committed) and (b) the fd3 stream's own 'end' event, so the buffer tap is provably
+    // fully drained too. No arbitrary sleep: both awaits are tied to real completion signals.
+    await Promise.all([new Promise<void>((r) => proc.on("close", () => r())), fd3Ended]);
 
     // Reference path → canonical events from the -trace file (real trace kinds only).
     const traceText = fs.readFileSync(traceFile, "utf8");
@@ -122,9 +128,21 @@ describe("buffer-decoded .probe log equivalence", () => {
     // eslint-disable-next-line no-console
     if (missing.length) console.log("MISSING from buffer path:", missing.slice(0, 20));
 
+    // Symmetric: every buffer event must appear in the reference path with the same
+    // multiplicity too. Buffer > reference is structurally impossible for a complete run
+    // (both taps derive from the same single drain of the same run); a non-empty `extra`
+    // here is a genuine buffer-path duplication bug, not just a truncated-read race.
+    const extra: string[] = [];
+    for (const [k, n] of bMulti) {
+      if ((sMulti.get(k) ?? 0) < n) extra.push(`${n - (sMulti.get(k) ?? 0)}× ${k}`);
+    }
+    // eslint-disable-next-line no-console
+    if (extra.length) console.log("EXTRA in buffer path (not in reference):", extra.slice(0, 20));
+
     expect(stdoutEvents.length).toBeGreaterThan(0);
     // Flow events must have actually fired (proves the playing-sim drive worked).
     expect(stdoutEvents.some((e) => e.includes('"edge-bead"'))).toBe(true);
     expect(missing).toEqual([]);
+    expect(extra).toEqual([]);
   }, 30000);
 });
