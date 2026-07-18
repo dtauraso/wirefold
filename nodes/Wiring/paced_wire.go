@@ -122,23 +122,16 @@ type PacedWire struct {
 	// (Reset). Beads placed after a teardown get gen >= teardownGen.
 	teardownGen uint64
 	// clock is the one monotonic clock this wire reads to time its own delivery.
-	clock      Clock
-	pulseSpeed float64
-	// MaxIncomingSimLatencyMs is the per-port aggregate max(SimLatencyMs) over
-	// every edge feeding this destination port. Kept in step by SetIncomingLatency.
-	MaxIncomingSimLatencyMs float64
-	// incomingLatency tracks each feeding edge's own SimLatencyMs (edgeId → latency).
-	incomingLatency map[string]float64
-	Target          string   // destination node id — authoritative slot identity
-	TargetHandle    string   // destination input-port name — authoritative slot identity
-	Trace           *T.Trace // injected by loader; used for breadcrumb diagnostics only
+	clock        Clock
+	pulseSpeed   float64
+	Target       string   // destination node id — authoritative slot identity
+	TargetHandle string   // destination input-port name — authoritative slot identity
+	Trace        *T.Trace // injected by loader; used for breadcrumb diagnostics only
 }
 
 // NewPacedWire creates an empty PacedWire. arcLength is the straight-line
 // distance between source and target (world units); pulseSpeed is in world-units
-// per TICK (use PulseSpeedWuPerTick). MaxIncomingSimLatencyMs stays in ms (the
-// reporting unit) so it is derived from the fixed ms conversion, independent of
-// the clock's tick speed.
+// per TICK (use PulseSpeedWuPerTick).
 //
 // PULSE SPEED IS UNIFORM ACROSS ALL WIRES — per-wire speed is rejected doctrine, and the
 // TS layer cannot even express it (no speed prop in WireProps). The pulseSpeed PARAMETER
@@ -152,29 +145,10 @@ type PacedWire struct {
 // the tests express arc as ticks*PulseSpeedWuPerTick.
 func NewPacedWire(arcLength float64, pulseSpeed float64) *PacedWire {
 	pw := &PacedWire{
-		MaxIncomingSimLatencyMs: arcLength / PulseSpeedWuPerMs,
-		pulseSpeed:              pulseSpeed,
-		clock:                   NewRealClock(),
+		pulseSpeed: pulseSpeed,
+		clock:      NewRealClock(),
 	}
 	return pw
-}
-
-// SetIncomingLatency records one feeding edge's own travel-time (SimLatencyMs)
-// and recomputes MaxIncomingSimLatencyMs as the max over every feeding edge.
-func (pw *PacedWire) SetIncomingLatency(edgeID string, lat float64) {
-	pw.mu.Lock()
-	defer pw.mu.Unlock()
-	if pw.incomingLatency == nil {
-		pw.incomingLatency = map[string]float64{}
-	}
-	pw.incomingLatency[edgeID] = lat
-	var maxLat float64
-	for _, l := range pw.incomingLatency {
-		if l > maxLat {
-			maxLat = l
-		}
-	}
-	pw.MaxIncomingSimLatencyMs = maxLat
 }
 
 // SetClock injects the monotonic clock this wire reads to time delivery.

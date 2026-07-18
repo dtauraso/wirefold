@@ -18,13 +18,11 @@
 //     OWN segment + arc (segmentBetweenPorts/arcLengthBetweenPorts), writes them
 //     onto the source Out (next placement reads them), revises any in-flight bead's
 //     remaining travel on the dest wire (ReviseInFlightGeometry, fraction-preserving),
-//     emits its OWN edge geometry (tr.Geometry), and updates its contribution to the
-//     dest port's MaxIncomingSimLatencyMs aggregate (PacedWire.SetIncomingLatency,
-//     which recomputes the max over ALL feeding edges).
+//     and emits its OWN edge geometry (tr.Geometry).
 //
 // This reproduces, per-goroutine, exactly what the old central applyNodeMove did in
 // one stdin goroutine: same node-geometry emit, same per-edge segment/arc recompute,
-// same in-flight revision, same edge-geometry emit, same latency aggregate.
+// same in-flight revision, same edge-geometry emit.
 
 package Wiring
 
@@ -742,9 +740,6 @@ func (m *edgeMover) recomputeGeometry() {
 	// none in flight); the dest wire owns the bead under its own mutex.
 	if m.dest != nil {
 		m.dest.ReviseInFlightGeometry(arc, seg)
-		// Update this edge's contribution to the dest port window aggregate; the
-		// wire recomputes the max over ALL feeding edges (fan-in safe).
-		m.dest.SetIncomingLatency(m.edgeID, lat)
 	}
 	// Emit this edge's own segment so the renderer redraws the wire from Go's endpoints.
 	if m.tr != nil {
@@ -1099,9 +1094,8 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 }
 
 // Bind wires the per-edge source Outs (keyed "source.sourceHandle" in outSink) and
-// dest wires (slotReg, keyed "target.targetHandle") into each edgeMover, and seeds
-// each dest wire's per-edge latency so MaxIncomingSimLatencyMs starts as the max over
-// all feeding edges. Call once after node construction.
+// dest wires (slotReg, keyed "target.targetHandle") into each edgeMover. Call once
+// after node construction.
 func (md *MoveDispatch) Bind(outSink map[string]*Out, slotReg SlotRegistry) {
 	for edgeID, em := range md.edgeMovers {
 		if o, ok := outSink[em.srcID+"."+em.srcH]; ok {
@@ -1110,9 +1104,6 @@ func (md *MoveDispatch) Bind(outSink map[string]*Out, slotReg SlotRegistry) {
 		}
 		if pw, ok := slotReg[em.dstID+"."+em.dstH]; ok {
 			em.dest = pw
-			if em.out != nil {
-				pw.SetIncomingLatency(edgeID, em.out.Geom().SimLatencyMs)
-			}
 		}
 	}
 }
