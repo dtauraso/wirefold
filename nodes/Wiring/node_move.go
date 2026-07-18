@@ -1362,27 +1362,36 @@ func (md *MoveDispatch) equalizeEdgeCLocal(nodeID, aID, bID string, newPos vec3)
 	if !ok {
 		return false
 	}
-	// the node's local polar (own frame) to a fixed neighbor, as the drag implies it.
-	local := func(to string) (qt, qp, qr int, st, sp, sr float64, ok bool) {
-		c, okc := md.centerOfNode(to)
-		if !okc {
-			return 0, 0, 0, 0, 0, 0, false
-		}
-		st, sp, sr = lh.localPolarSteps(to)
-		pol := cart2polar(c.sub(newPos))
-		return int(math.Round(pol.Theta / st)), int(math.Round(pol.Phi / sp)), int(math.Round(pol.R / sr)), st, sp, sr, true
-	}
-	qtA, qpA, qrA, stA, spA, srA, okA := local(aID)
-	qtB, qpB, qrB, stB, spB, srB, okB := local(bID)
+	cA, okA := md.centerOfNode(aID)
+	cB, okB := md.centerOfNode(bID)
 	if !okA || !okB {
 		return false
 	}
+	// Re-quantize BOTH of this (2-neighbor gate) node's bearings about its rotating local
+	// pole (rotating_pole.go) in one pass, then override each entry's radius with the
+	// SHORTER of the two candidate quantIR — the equal-radii contract this function
+	// exists for — leaving the (pole-derived) bearing/step constants it just wrote alone.
+	requantizeLocalPolarsAboutPole(lh, map[string]vec3{aID: cA.sub(newPos), bID: cB.sub(newPos)})
+	lps := lh.LocalPolarsSnapshot()
+	qrA, qrB := 0, 0
+	for _, lp := range lps {
+		if lp.To == aID {
+			qrA = lp.QuantIR
+		} else if lp.To == bID {
+			qrB = lp.QuantIR
+		}
+	}
 	cNew := min(qrA, qrB)
-	lh.SetLocalPolar(aID, qtA, qpA, cNew, stA, spA, srA)
-	lh.SetLocalPolar(bID, qtB, qpB, cNew, stB, spB, srB)
+	for _, lp := range lps {
+		if lp.To == aID || lp.To == bID {
+			t, p, r := lp.effectiveSteps()
+			lh.SetLocalPolar(lp.To, lp.QuantITheta, lp.QuantIPhi, cNew, t, p, r)
+		}
+	}
 	if md.quantOffsetPersist != nil {
 		if root := md.quantOffsetPersist.root; root != "" {
-			if err := WriteLocalPolars(root, nodeID, lh.LocalPolarsSnapshot()); err != nil {
+			pole, hasPole := lh.LocalPole()
+			if err := WriteLocalPolarsAndPole(root, nodeID, lh.LocalPolarsSnapshot(), pole, hasPole); err != nil {
 				logPersistErr("local_polar_persist", nodeID, err)
 			}
 		}
@@ -1453,29 +1462,42 @@ func (md *MoveDispatch) moveNodeAndSetEdgeCs(nodeID string, newPos vec3, edgeA, 
 		if root == "" {
 			return
 		}
-		if err := WriteLocalPolars(root, id, holder.LocalPolarsSnapshot()); err != nil {
+		pole, hasPole := holder.LocalPole()
+		if err := WriteLocalPolarsAndPole(root, id, holder.LocalPolarsSnapshot(), pole, hasPole); err != nil {
 			logPersistErr("local_polar_persist", id, err)
 		}
 	}
 	// Set BOTH ends of each edge to c so the double-link agrees: nodeID's record to the
-	// neighbor AND the neighbor's back-reference to nodeID. Each end quantizes its own
-	// bearing on its own step grid but shares the propagated c. Persists both holders — the
-	// far neighbor does not MOVE, only its edge-length record to nodeID is refreshed.
+	// neighbor AND the neighbor's back-reference to nodeID. Each end re-quantizes its
+	// bearing about its own rotating local pole (rotating_pole.go) on its own step grid,
+	// then the shared c OVERRIDES the radius the requantize just wrote. Persists both
+	// holders — the far neighbor does not MOVE, only its edge-length record to nodeID is
+	// refreshed.
 	setBothEnds := func(far string) {
 		fc, ok := md.centerOfNode(far)
 		if !ok {
 			return
 		}
+		requantizeLocalPolarsAboutPole(lh, map[string]vec3{far: fc.sub(newPos)})
 		st, sp, sr := lh.localPolarSteps(far)
-		near := cart2polar(fc.sub(newPos))
-		lh.SetLocalPolar(far, int(math.Round(near.Theta/st)), int(math.Round(near.Phi/sp)), c, st, sp, sr)
+		for _, lp := range lh.LocalPolarsSnapshot() {
+			if lp.To == far {
+				lh.SetLocalPolar(far, lp.QuantITheta, lp.QuantIPhi, c, st, sp, sr)
+				break
+			}
+		}
 		flh, ok := md.layoutHolders[far]
 		if !ok {
 			return
 		}
+		requantizeLocalPolarsAboutPole(flh, map[string]vec3{nodeID: newPos.sub(fc)})
 		fst, fsp, fsr := flh.localPolarSteps(nodeID)
-		back := cart2polar(newPos.sub(fc))
-		flh.SetLocalPolar(nodeID, int(math.Round(back.Theta/fst)), int(math.Round(back.Phi/fsp)), c, fst, fsp, fsr)
+		for _, lp := range flh.LocalPolarsSnapshot() {
+			if lp.To == nodeID {
+				flh.SetLocalPolar(nodeID, lp.QuantITheta, lp.QuantIPhi, c, fst, fsp, fsr)
+				break
+			}
+		}
 		persist(far, flh)
 	}
 	setBothEnds(edgeA)
@@ -1671,7 +1693,26 @@ func (md *MoveDispatch) requantizeLocalPolars(nodeID string, newPos vec3) {
 	if md.quantOffsetPersist != nil {
 		root = md.quantOffsetPersist.root
 	}
-	xChanged := false
+	writePersist := func(id string, holder *LayoutHolder) {
+		if root == "" {
+			return
+		}
+		pole, hasPole := holder.LocalPole()
+		if err := WriteLocalPolarsAndPole(root, id, holder.LocalPolarsSnapshot(), pole, hasPole); err != nil {
+			logPersistErr("local_polar_persist", id, err)
+		}
+	}
+
+	// X's local polars TO every reachable neighbor, resolved about X's rotating local
+	// pole (rotating_pole.go) in ONE pass — the pole must see the WHOLE neighbor set, not
+	// just one at a time, so a kick from one offset is checked against every other.
+	updatesX := map[string]vec3{}
+	type mUpdate struct {
+		lh  *LayoutHolder
+		id  string
+		off vec3
+	}
+	var mUpdates []mUpdate
 	for m := range neighbors {
 		lhM, okM := md.layoutHolders[m]
 		if !okM {
@@ -1681,36 +1722,20 @@ func (md *MoveDispatch) requantizeLocalPolars(nodeID string, newPos vec3) {
 		if !ok {
 			continue
 		}
-		xChanged = true
-
-		// X's local polar TO M, on X's own effective step constants.
-		tX, pX, rX := lhX.localPolarSteps(m)
-		polXtoM := cart2polar(cM.sub(newPos))
-		lhX.SetLocalPolar(m,
-			int(math.Round(polXtoM.Theta/tX)),
-			int(math.Round(polXtoM.Phi/pX)),
-			int(math.Round(polXtoM.R/rX)),
-			tX, pX, rX)
-
-		// M's local polar TO X, on M's own effective step constants.
-		tM, pM, rM := lhM.localPolarSteps(nodeID)
-		polMtoX := cart2polar(newPos.sub(cM))
-		lhM.SetLocalPolar(nodeID,
-			int(math.Round(polMtoX.Theta/tM)),
-			int(math.Round(polMtoX.Phi/pM)),
-			int(math.Round(polMtoX.R/rM)),
-			tM, pM, rM)
-
-		if root != "" {
-			if err := WriteLocalPolars(root, m, lhM.LocalPolarsSnapshot()); err != nil {
-				logPersistErr("local_polar_persist", m, err)
-			}
-		}
+		updatesX[m] = cM.sub(newPos)
+		mUpdates = append(mUpdates, mUpdate{lh: lhM, id: m, off: newPos.sub(cM)})
 	}
-	if xChanged && root != "" {
-		if err := WriteLocalPolars(root, nodeID, lhX.LocalPolarsSnapshot()); err != nil {
-			logPersistErr("local_polar_persist", nodeID, err)
-		}
+	if len(updatesX) == 0 {
+		return
+	}
+	requantizeLocalPolarsAboutPole(lhX, updatesX)
+	writePersist(nodeID, lhX)
+
+	// M's local polar TO X, on M's own rotating local pole — each M is a SEPARATE node,
+	// so its pole only needs to see M's own (reconstructed + this fresh) neighbor set.
+	for _, u := range mUpdates {
+		requantizeLocalPolarsAboutPole(u.lh, map[string]vec3{nodeID: u.off})
+		writePersist(u.id, u.lh)
 	}
 }
 
