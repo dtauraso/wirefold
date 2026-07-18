@@ -431,9 +431,9 @@ func TestRootMoveContinuousPositionLocalPolarRequantize(t *testing.T) {
 		t.Fatal("centerOfNode(dst) missing")
 	}
 	wantPol := cart2polar(dstCenter.sub(target))
-	tStep, pStep, rStep := LocalPolar{}.effectiveSteps()
-	if tStep != localStepTheta || pStep != localStepPhi || rStep != localStepR {
-		t.Fatalf("local-polar default steps = (%v,%v,%v), want (%v,%v,%v)", tStep, pStep, rStep, localStepTheta, localStepPhi, localStepR)
+	rStep := LocalPolar{}.effectiveSteps()
+	if rStep != localStepR {
+		t.Fatalf("local-polar default radius step = %v, want %v", rStep, localStepR)
 	}
 	wantIR := math.Round(wantPol.R / rStep)
 
@@ -478,6 +478,130 @@ func TestRootMoveContinuousPositionLocalPolarRequantize(t *testing.T) {
 	wantIRBack := math.Round(wantPolBack.R / rStep)
 	if float64(foundBack.QuantIR) != wantIRBack {
 		t.Fatalf("dst.localPolar[src].QuantIR = %d, want round(%v/%v) = %v", foundBack.QuantIR, wantPolBack.R, rStep, wantIRBack)
+	}
+}
+
+// TestLocalPolarDirPoleStable proves the rebuilt local-polar direction
+// representation (layout_holder.go LocalPolar.Dir, an EXACT unit vector) does not
+// blow up near the +y pole, unlike the retired (quantITheta,quantIPhi) decomposition
+// it replaced. The retired representation quantized cart2polar(offset) about the
+// FIXED +y pole: near θ≈0 one φ-cell spans r·sinθ·stepφ → 0, so a tiny world nudge of
+// the neighbor could swing quantIPhi by many cells (in the worst case, an unbounded
+// jump) even though the true direction barely moved — that is the bug this rebuild
+// makes unrepresentable, since Dir is stored faithfully rather than re-quantized
+// through that pole-singular decomposition.
+func TestLocalPolarDirPoleStable(t *testing.T) {
+	const topo = `{
+	  "nodes": [
+	    {"id":"src","type":"FanInSrc","outputs":[{"name":"Out"}]},
+	    {"id":"dst","type":"FanInSink","inputs":[{"name":"In"}]}
+	  ],
+	  "edges": [
+	    {"label":"e0","kind":"data","source":"src","sourceHandle":"Out","target":"dst","targetHandle":"In"}
+	  ],
+	  "view": {"nodes": {
+	    "src": {"x": 0, "y": 0,   "z": 0},
+	    "dst": {"x": 0, "y": 100, "z": 0}
+	  }}
+	}`
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "topo.json")
+	if err := os.WriteFile(path, []byte(topo), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tr := T.New(4096)
+	defer tr.Close()
+	_, _, md, err := LoadTopology(ctx, path, tr, NewRealClock())
+	if err != nil {
+		t.Fatalf("LoadTopology: %v", err)
+	}
+	md.Start(ctx)
+
+	lookupDir := func(from, to string) (vec3, bool) {
+		lh, ok := md.layoutHolders[from]
+		if !ok {
+			return vec3{}, false
+		}
+		for _, lp := range lh.LocalPolarsSnapshot() {
+			if lp.To == to {
+				return lp.Dir, true
+			}
+		}
+		return vec3{}, false
+	}
+
+	waitFor := func(cond func() bool) {
+		deadline := time.Now().Add(2 * time.Second)
+		for !cond() {
+			if time.Now().After(deadline) {
+				t.Fatal("timed out waiting for condition")
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}
+
+	dstCenter, ok := md.centerOfNode("dst")
+	if !ok {
+		t.Fatal("centerOfNode(dst) missing")
+	}
+
+	// Drag src so its offset to dst points almost exactly along +y (within ~0.05°):
+	// place src directly below dst except for a tiny x/z jitter.
+	epsAngle := 0.05 * math.Pi / 180           // 0.05 degrees in radians
+	tinyOffset := 100 * math.Tan(epsAngle*0.3) // well within the 0.05deg budget
+	target1 := vec3{X: dstCenter.X + tinyOffset, Y: dstCenter.Y - 100, Z: dstCenter.Z}
+	if !md.RootMove("src", target1) {
+		t.Fatal("RootMove returned false for known node")
+	}
+	waitFor(func() bool {
+		c, ok := md.centerOfNode("src")
+		return ok && c == target1
+	})
+
+	dir1, ok := lookupDir("src", "dst")
+	if !ok {
+		t.Fatal("src has no local polar entry for dst")
+	}
+	if l := dir1.length(); math.Abs(l-1) > 1e-6 {
+		t.Fatalf("Dir is not a unit vector: length=%v", l)
+	}
+	for _, c := range []float64{dir1.X, dir1.Y, dir1.Z} {
+		if math.IsNaN(c) || math.IsInf(c, 0) {
+			t.Fatalf("Dir has non-finite component: %+v", dir1)
+		}
+	}
+	if dir1.Y < 0.999 {
+		t.Fatalf("Dir not near +y as expected: %+v", dir1)
+	}
+
+	// A tiny further world nudge (well inside the "near the pole" regime where the
+	// retired (theta,phi) quantization would swing phi by many grid cells) must
+	// produce a BOUNDED change in Dir — the whole point of storing an exact unit
+	// vector instead of re-deriving it through a pole-singular quantization.
+	target2 := vec3{X: target1.X + 0.01, Y: target1.Y, Z: target1.Z + 0.01}
+	if !md.RootMove("src", target2) {
+		t.Fatal("RootMove returned false for known node (nudge)")
+	}
+	waitFor(func() bool {
+		c, ok := md.centerOfNode("src")
+		return ok && c == target2
+	})
+	dir2, ok := lookupDir("src", "dst")
+	if !ok {
+		t.Fatal("src has no local polar entry for dst after nudge")
+	}
+
+	delta := dir2.sub(dir1).length()
+	// The world nudge itself is ~0.014 units against a ~100-unit offset, so the true
+	// direction change is on that same tiny order. Bound generously (still orders of
+	// magnitude below a "swung to a different cell" jump, which under the retired
+	// (theta,phi) representation could be a delta approaching 2 near the pole).
+	if delta > 0.01 {
+		t.Fatalf("Dir changed by %v for a tiny nudge near the pole — not bounded (retired theta/phi quantization would have been free to swing phi arbitrarily here)", delta)
 	}
 }
 

@@ -1363,23 +1363,23 @@ func (md *MoveDispatch) equalizeEdgeCLocal(nodeID, aID, bID string, newPos vec3)
 		return false
 	}
 	// the node's local polar (own frame) to a fixed neighbor, as the drag implies it.
-	local := func(to string) (qt, qp, qr int, st, sp, sr float64, ok bool) {
+	local := func(to string) (dir vec3, qr int, sr float64, ok bool) {
 		c, okc := md.centerOfNode(to)
 		if !okc {
-			return 0, 0, 0, 0, 0, 0, false
+			return vec3{}, 0, 0, false
 		}
-		st, sp, sr = lh.localPolarSteps(to)
-		pol := cart2polar(c.sub(newPos))
-		return int(math.Round(pol.Theta / st)), int(math.Round(pol.Phi / sp)), int(math.Round(pol.R / sr)), st, sp, sr, true
+		sr = lh.localPolarSteps(to)
+		offset := c.sub(newPos)
+		return offset.normalize(), int(math.Round(offset.length() / sr)), sr, true
 	}
-	qtA, qpA, qrA, stA, spA, srA, okA := local(aID)
-	qtB, qpB, qrB, stB, spB, srB, okB := local(bID)
+	dirA, qrA, srA, okA := local(aID)
+	dirB, qrB, srB, okB := local(bID)
 	if !okA || !okB {
 		return false
 	}
 	cNew := min(qrA, qrB)
-	lh.SetLocalPolar(aID, qtA, qpA, cNew, stA, spA, srA)
-	lh.SetLocalPolar(bID, qtB, qpB, cNew, stB, spB, srB)
+	lh.SetLocalPolar(aID, dirA, cNew, srA)
+	lh.SetLocalPolar(bID, dirB, cNew, srB)
 	if md.quantOffsetPersist != nil {
 		if root := md.quantOffsetPersist.root; root != "" {
 			if err := WriteLocalPolars(root, nodeID, lh.LocalPolarsSnapshot()); err != nil {
@@ -1466,16 +1466,16 @@ func (md *MoveDispatch) moveNodeAndSetEdgeCs(nodeID string, newPos vec3, edgeA, 
 		if !ok {
 			return
 		}
-		st, sp, sr := lh.localPolarSteps(far)
-		near := cart2polar(fc.sub(newPos))
-		lh.SetLocalPolar(far, int(math.Round(near.Theta/st)), int(math.Round(near.Phi/sp)), c, st, sp, sr)
+		sr := lh.localPolarSteps(far)
+		near := fc.sub(newPos)
+		lh.SetLocalPolar(far, near.normalize(), c, sr)
 		flh, ok := md.layoutHolders[far]
 		if !ok {
 			return
 		}
-		fst, fsp, fsr := flh.localPolarSteps(nodeID)
-		back := cart2polar(newPos.sub(fc))
-		flh.SetLocalPolar(nodeID, int(math.Round(back.Theta/fst)), int(math.Round(back.Phi/fsp)), c, fst, fsp, fsr)
+		fsr := flh.localPolarSteps(nodeID)
+		back := newPos.sub(fc)
+		flh.SetLocalPolar(nodeID, back.normalize(), c, fsr)
 		persist(far, flh)
 	}
 	setBothEnds(edgeA)
@@ -1683,23 +1683,21 @@ func (md *MoveDispatch) requantizeLocalPolars(nodeID string, newPos vec3) {
 		}
 		xChanged = true
 
-		// X's local polar TO M, on X's own effective step constants.
-		tX, pX, rX := lhX.localPolarSteps(m)
-		polXtoM := cart2polar(cM.sub(newPos))
+		// X's local polar TO M, on X's own effective radius step constant.
+		rX := lhX.localPolarSteps(m)
+		offXtoM := cM.sub(newPos)
 		lhX.SetLocalPolar(m,
-			int(math.Round(polXtoM.Theta/tX)),
-			int(math.Round(polXtoM.Phi/pX)),
-			int(math.Round(polXtoM.R/rX)),
-			tX, pX, rX)
+			offXtoM.normalize(),
+			int(math.Round(offXtoM.length()/rX)),
+			rX)
 
-		// M's local polar TO X, on M's own effective step constants.
-		tM, pM, rM := lhM.localPolarSteps(nodeID)
-		polMtoX := cart2polar(newPos.sub(cM))
+		// M's local polar TO X, on M's own effective radius step constant.
+		rM := lhM.localPolarSteps(nodeID)
+		offMtoX := newPos.sub(cM)
 		lhM.SetLocalPolar(nodeID,
-			int(math.Round(polMtoX.Theta/tM)),
-			int(math.Round(polMtoX.Phi/pM)),
-			int(math.Round(polMtoX.R/rM)),
-			tM, pM, rM)
+			offMtoX.normalize(),
+			int(math.Round(offMtoX.length()/rM)),
+			rM)
 
 		if root != "" {
 			if err := WriteLocalPolars(root, m, lhM.LocalPolarsSnapshot()); err != nil {
