@@ -2,18 +2,11 @@
 // layout-update goroutine that owns it.
 //
 // Every domain double-link (a bidirectional edge pair A↔B) gives each endpoint
-// its own LOCAL POLAR to the other, measured with ITSELF as center: an EXACT unit
-// DIRECTION vector (Dir) plus a quantized RADIUS (quantIR×stepR), the latter in the
-// same integer-scalar form used for the node's absolute scene-polar position
-// (quantized_layout.go). The direction is stored faithfully as a unit vec3 rather
-// than a quantized (θ,φ) pair about the fixed +y pole — that decomposition blew up
-// near the pole (one φ-cell spans r·sinθ·stepφ → 0 as θ→0), so a fixed world nudge
-// crossed unbounded φ-cells. Storing the exact direction makes that bug class
-// unrepresentable; there is no live consumer that reconstructs a world position
-// from this direction today (the lock cascade is purely distance/QuantIR-driven),
-// so there is nothing to "fix" about precision loss — only about the pole blow-up.
-// A node with N connections holds N local polars — one per neighbor, owned by that
-// node alone (A's entry for B and B's entry for A are separate values).
+// its own LOCAL POLAR to the other, measured with ITSELF as center, in the same
+// (quantITheta,quantIPhi,quantIR)×(stepTheta,stepPhi,stepR) integer-scalar form
+// used for the node's absolute scene-polar position (quantized_layout.go). A node
+// with N connections holds N local polars — one per neighbor, owned by that node
+// alone (A's entry for B and B's entry for A are separate values).
 //
 // LayoutHolder is embedded into every node kind's struct (directly, or via
 // gatecommon.GateNode for the two gate kinds) so loader.go can locate it by
@@ -31,25 +24,26 @@ package Wiring
 
 import (
 	"context"
+	"math"
 	"sync"
 )
 
-// Default local-polar quantization cell for the radius — SMALL and uniform across
-// every node, unlike the scene-center triple's stepR. The point of the
+// Default local-polar quantization cells — SMALL and uniform across every node,
+// unlike the scene-center triple's stepR=20/π-12 steps. The point of the
 // double-link local-polar model is that a moved node's distance to each
 // neighbor always lands on a WHOLE tick of that neighbor's own small grid;
 // coarse scene-sized cells would leave most drags at iR=0/1 with no
 // resolution. Used as the fallback whenever a LocalPolar has no stored
-// per-neighbor step constant (LocalPolar.StepR == 0). Direction has no step —
-// it is stored as an exact unit vector, not quantized.
+// per-neighbor step constants (LocalPolar.StepTheta/StepPhi/StepR == 0).
 const (
-	localStepR = 2.0 // world units
+	localStepTheta = math.Pi / 180 // 1 degree
+	localStepPhi   = math.Pi / 180 // 1 degree
+	localStepR     = 2.0           // world units
 )
 
 // LocalPolar is one node's local-polar offset to a neighbor it shares a domain
-// edge with, measured with the OWNING node as center: an EXACT unit direction
-// vector plus a quantized radius (same integer-scalar radius form as
-// quantizedOffset, quantized_layout.go).
+// edge with, measured with the OWNING node as center, in the same integer-scalar
+// form as quantizedOffset (quantized_layout.go).
 type LocalPolar struct {
 	To string // neighbor node id
 
@@ -60,26 +54,29 @@ type LocalPolar struct {
 	// authored in the spec (meta.json localPolars[].role), never computed.
 	Role string
 
-	// Dir is the EXACT unit direction of (neighbor − owner), stored faithfully
-	// rather than decomposed into a quantized (θ,φ) pair about the fixed +y pole
-	// (that decomposition is what blew up near the pole). Zero vector when
-	// unmeasurable (centerless neighbor at load time).
-	Dir vec3
+	QuantITheta int
+	QuantIPhi   int
+	QuantIR     int
 
-	QuantIR int
-
-	// Per-neighbor step constant for the radius only — same "own constant,
-	// default-fallback" contract as quantizedOffset.cR. Zero means unset (falls
-	// back to the package's local-polar default: localStepR).
-	StepR float64
+	// Per-neighbor step constants — same "own constants, default-fallback"
+	// contract as quantizedOffset.cTheta/cPhi/cR. Zero means unset (falls back
+	// to the package's local-polar defaults: localStepTheta/localStepPhi/localStepR).
+	StepTheta float64
+	StepPhi   float64
+	StepR     float64
 }
 
 // effectiveSteps mirrors quantizedOffset.effectiveSteps: this local polar's own
-// radius step constant, falling back to the SMALL local-polar default (NOT the
-// scene triple's coarser stepR) when unset. Direction has no step to report —
-// it is stored as an exact unit vector.
-func (lp LocalPolar) effectiveSteps() (r float64) {
-	r = lp.StepR
+// step constants, falling back to the SMALL local-polar defaults (NOT the scene
+// triple's coarser stepTheta/stepPhi/stepR) for any unset component.
+func (lp LocalPolar) effectiveSteps() (t, p, r float64) {
+	t, p, r = lp.StepTheta, lp.StepPhi, lp.StepR
+	if t == 0 {
+		t = localStepTheta
+	}
+	if p == 0 {
+		p = localStepPhi
+	}
 	if r == 0 {
 		r = localStepR
 	}
@@ -104,12 +101,12 @@ func (lh *LayoutHolder) UpdateLayout(ctx context.Context) {
 	<-ctx.Done()
 }
 
-// localPolarSteps returns the effective radius step constant of this node's
-// CURRENT stored local polar to the given neighbor (falling back to the
-// local-polar default if no entry exists yet), so a re-quantize preserves a
-// neighbor's own step constant across drags exactly like quantizedOffset does
-// for the scene triple. Direction has no step (stored as an exact unit vector).
-func (lh *LayoutHolder) localPolarSteps(to string) (r float64) {
+// localPolarSteps returns the effective step constants of this node's CURRENT
+// stored local polar to the given neighbor (falling back to the local-polar
+// defaults if no entry exists yet), so a re-quantize preserves a neighbor's
+// own step constants across drags exactly like quantizedOffset does for the
+// scene triple.
+func (lh *LayoutHolder) localPolarSteps(to string) (t, p, r float64) {
 	lh.mu.Lock()
 	defer lh.mu.Unlock()
 	for _, lp := range lh.localPolars {
@@ -132,21 +129,24 @@ func (lh *LayoutHolder) LoadLocalPolars(lps []LocalPolar) {
 
 // SetLocalPolar upserts this node's local-polar entry for the given neighbor
 // (updating in place if present, appending otherwise). The sole in-memory
-// writer of LocalPolars outside load-time construction. dir is the EXACT unit
-// direction to the neighbor (zero vector when unmeasurable).
-func (lh *LayoutHolder) SetLocalPolar(to string, dir vec3, quantIR int, stepR float64) {
+// writer of LocalPolars outside load-time construction.
+func (lh *LayoutHolder) SetLocalPolar(to string, quantITheta, quantIPhi, quantIR int, stepTheta, stepPhi, stepR float64) {
 	lh.mu.Lock()
 	defer lh.mu.Unlock()
 	for i := range lh.localPolars {
 		if lh.localPolars[i].To == to {
-			lh.localPolars[i].Dir = dir
+			lh.localPolars[i].QuantITheta = quantITheta
+			lh.localPolars[i].QuantIPhi = quantIPhi
 			lh.localPolars[i].QuantIR = quantIR
+			lh.localPolars[i].StepTheta = stepTheta
+			lh.localPolars[i].StepPhi = stepPhi
 			lh.localPolars[i].StepR = stepR
 			return
 		}
 	}
 	lh.localPolars = append(lh.localPolars, LocalPolar{
-		To: to, Dir: dir, QuantIR: quantIR, StepR: stepR,
+		To: to, QuantITheta: quantITheta, QuantIPhi: quantIPhi, QuantIR: quantIR,
+		StepTheta: stepTheta, StepPhi: stepPhi, StepR: stepR,
 	})
 }
 
