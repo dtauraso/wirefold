@@ -48,7 +48,7 @@ func TestLocalPoleHomeWhenClear(t *testing.T) {
 // just inside poleKickTheta, the pole tilts so that offset lands at EXACTLY colatitude
 // poleKickTheta about the new pole — the closed-form dodge, not the old 90-degree kick.
 func TestLocalPoleDodgesInsideZone(t *testing.T) {
-	closest := dir{Theta: 0.05, Phi: 0.9} // well inside the 20-degree zone
+	closest := dir{Theta: 0.005, Phi: 0.9} // well inside the 1-degree zone (~0.29°)
 	dirs := []dir{closest, {Theta: 1.0, Phi: -2.0}}
 	pole := localPole(dirs)
 	if pole == (dir{Theta: 0, Phi: 0}) {
@@ -84,7 +84,7 @@ func TestLocalPoleContinuousAcrossThreshold(t *testing.T) {
 // arcBetween(pole,oDir), is the correct direction for the rotation axis.
 func TestKickIncreasesAngularDistance(t *testing.T) {
 	home := dir{Theta: 0, Phi: 0}
-	oDir := dir{Theta: 0.05, Phi: 0.4} // inside poleKickTheta
+	oDir := dir{Theta: 0.005, Phi: 0.4} // inside poleKickTheta (~0.29°)
 	cHome := angularDistance(home, oDir)
 	newPole := localPole([]dir{oDir})
 	newC := angularDistance(newPole, oDir)
@@ -118,10 +118,10 @@ func TestRotatingPoleClearsSingularityOnDrag(t *testing.T) {
 		t.Fatal("no center for src")
 	}
 
-	// Drag dst to a position 5 degrees off world +y (well inside the 20-degree kick
+	// Drag dst to a position 0.5 degrees off world +y (well inside the 1-degree kick
 	// threshold).
 	home := dir{Theta: 0, Phi: 0}
-	near := fromAxisFrame(home, 5*math.Pi/180, 0)
+	near := fromAxisFrame(home, 0.5*math.Pi/180, 0)
 	target := srcCenter.add(polar2cart(polar{R: 50, Theta: near.Theta, Phi: near.Phi}))
 
 	if !md.RootMove("dst", target) {
