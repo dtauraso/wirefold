@@ -43,6 +43,10 @@ func TestHoldFiresAndHoldsOnReceiveLean(t *testing.T) {
 	clk := Wiring.NewRealClock()
 	pw.SetClock(clk)
 	stepWire(ctx, pw)
+	// inSrc is a test-only seeding source on pw: PlaceDriven places a bead
+	// (no walker) that the stepWire loop above then drives to delivery,
+	// reusing the production placement API to inject the test's input value.
+	inSrc := Wiring.NewPacedOutNoGeom(pw, ctx, "seed", "Out", tr, Wiring.RuleFireAndForget, 0, 0, "")
 
 	beadCh := make(chan int, 16)
 	fires := 0
@@ -65,8 +69,8 @@ func TestHoldFiresAndHoldsOnReceiveLean(t *testing.T) {
 		t.Fatal("timeout waiting for startup bead")
 	}
 
-	if !pw.PlaceDeliverOnly(7, 0) {
-		t.Fatal("PlaceDeliverOnly returned false")
+	if !inSrc.PlaceDriven(7).Live() {
+		t.Fatal("PlaceDriven returned false")
 	}
 
 	// After input arrives (7 != held -1) the changed held bead is emitted.

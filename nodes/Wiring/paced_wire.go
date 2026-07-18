@@ -158,15 +158,6 @@ func (pw *PacedWire) SetClock(c Clock) {
 	pw.mu.Unlock()
 }
 
-// PlaceDeliverOnly places a delivery-only bead (no position stream) WITHOUT
-// spawning a walker goroutine. Delivery is driven by the caller's subsequent
-// per-cycle StepOnce/StepOnceAt calls. Cross-package tests that only exercise
-// delivery timing use this (see gatetesthelper.Send).
-func (pw *PacedWire) PlaceDeliverOnly(value int, inFlightMs float64) bool {
-	_, ok := pw.placeBeadNoWalker(value, beadPlacement{InFlightMs: inFlightMs})
-	return ok
-}
-
 // msToArcWu names the ms→world-units conversion used to reconstruct a bead's
 // travelled arc from a reported InFlightMs latency (placeBeadNoWalker below).
 // It is PulseSpeedWuPerMs under a name that documents what the multiplication

@@ -41,6 +41,10 @@ func TestFireOnReceiveLean(t *testing.T) {
 	clk := Wiring.NewRealClock()
 	inPw.SetClock(clk)
 	stepWire(ctx, inPw)
+	// inSrc is a test-only seeding source on inPw: PlaceDriven places a bead
+	// (no walker) that the stepWire loop above then drives to delivery,
+	// reusing the production placement API to inject the test's input value.
+	inSrc := Wiring.NewPacedOutNoGeom(inPw, ctx, "seed", "Out", tr, Wiring.RuleFireAndForget, 0, 0, "")
 
 	outPw0 := Wiring.NewPacedWire(latMs*Wiring.PulseSpeedWuPerMs, Wiring.PulseSpeedWuPerMs)
 	outPw0.SetClock(clk)
@@ -64,8 +68,8 @@ func TestFireOnReceiveLean(t *testing.T) {
 	done := make(chan struct{})
 	go func() { node.Update(ctx); close(done) }()
 
-	if !inPw.PlaceDeliverOnly(7, 0) {
-		t.Fatal("PlaceDeliverOnly returned false")
+	if !inSrc.PlaceDriven(7).Live() {
+		t.Fatal("PlaceDriven returned false")
 	}
 
 	waitFor := func(obs *Wiring.In, want int) {

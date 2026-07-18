@@ -40,6 +40,10 @@ func TestFlipRoundTripLean(t *testing.T) {
 	clk := Wiring.NewRealClock()
 	inPw.SetClock(clk)
 	stepWire(ctx, inPw)
+	// inSrc is a test-only seeding source on inPw: PlaceDriven places a bead
+	// (no walker) that the stepWire loop above then drives to delivery,
+	// reusing the production placement API to inject the test's input value.
+	inSrc := Wiring.NewPacedOutNoGeom(inPw, ctx, "seed", "Out", tr, Wiring.RuleFireAndForget, 0, 0, "")
 
 	outPw := Wiring.NewPacedWire(latMs*Wiring.PulseSpeedWuPerMs, Wiring.PulseSpeedWuPerMs)
 	outPw.SetClock(clk)
@@ -67,13 +71,13 @@ func TestFlipRoundTripLean(t *testing.T) {
 		t.Fatalf("timeout waiting for flipped value %d", want)
 	}
 
-	if !inPw.PlaceDeliverOnly(0, 0) {
-		t.Fatal("PlaceDeliverOnly returned false")
+	if !inSrc.PlaceDriven(0).Live() {
+		t.Fatal("PlaceDriven returned false")
 	}
 	expectFlip(1) // 1-0 = 1
 
-	if !inPw.PlaceDeliverOnly(1, 0) {
-		t.Fatal("PlaceDeliverOnly returned false")
+	if !inSrc.PlaceDriven(1).Live() {
+		t.Fatal("PlaceDriven returned false")
 	}
 	expectFlip(0) // 1-1 = 0
 
