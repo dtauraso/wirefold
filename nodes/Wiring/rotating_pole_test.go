@@ -144,6 +144,12 @@ func TestRotatingPoleClearsSingularityOnDrag(t *testing.T) {
 	if !ok {
 		t.Fatal("no center for src")
 	}
+	var lpBefore LocalPolar
+	for _, lp := range lhSrc.LocalPolarsSnapshot() {
+		if lp.To == "dst" {
+			lpBefore = lp
+		}
+	}
 
 	// Drag dst to a position 0.5 degrees off world +y (well inside the 1-degree kick
 	// threshold).
@@ -172,34 +178,53 @@ func TestRotatingPoleClearsSingularityOnDrag(t *testing.T) {
 		t.Fatalf("offset colatitude about the new pole (%v) should not be less than about home (%v) — pole=%+v", cPole, cHome, pole)
 	}
 
-	// src's own local polar to dst is requantized by src's OWN mover goroutine, reached
-	// asynchronously via a moveMsgKindRequantize message sent from dst's mover after dst's
-	// own position commits (node_move.go requantizeLocalPolars) — dst converging to target
-	// does not itself guarantee src has processed that message yet, so poll for it rather
-	// than asserting immediately (this exact race is why the old kick-based test was
-	// flaky; here it is a plain message-delivery race, not a fixed-point convergence one).
-	var got *LocalPolar
+	// src is dst's plain (role-free) direct neighbor: under the current single-
+	// assignment set-c REQUANTIZE model (node_move.go moveMsgKindNeighborSetC /
+	// neighborSetCRequantize), src STAYS PUT — only dst moved — and re-quantizes its
+	// OWN stored (QuantITheta,QuantIPhi,QuantIR) to dst fresh from the live offset.
+	// Poll for src's own LocalPolar entry's QuantIR to pick up the new c (async
+	// message-delivery race, same shape as the retired moveMsgKindRequantize poll
+	// this replaces).
+	var got LocalPolar
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		got = nil
 		for _, lp := range lhSrc.LocalPolarsSnapshot() {
 			if lp.To == "dst" {
-				cp := lp
-				got = &cp
+				got = lp
 			}
 		}
-		if got != nil {
-			st, sp, _ := got.effectiveSteps()
-			gotDir := fromAxisFrame(pole, float64(got.QuantITheta)*st, float64(got.QuantIPhi)*sp)
-			if angularDistance(gotDir, offDir) <= st+sp {
-				break
-			}
+		if got.QuantIR != lpBefore.QuantIR {
+			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("src's local polar to dst never converged to the live offset direction: got=%+v want=%+v", got, offDir)
+			t.Fatalf("src's local polar to dst never picked up the new set-c: before=%+v after=%+v", lpBefore, got)
 		}
 		time.Sleep(time.Millisecond)
 	}
+
+	// src's world center must NOT have moved — only dst moved.
+	srcCenterAfter, ok := md.centerOfNode("src")
+	if !ok {
+		t.Fatal("no center for src after drag")
+	}
+	if d := srcCenterAfter.sub(srcCenter).length(); d > 1e-9 {
+		t.Fatalf("src must stay put on a dst drag: before=%+v after=%+v (moved by %g)", srcCenter, srcCenterAfter, d)
+	}
+
+	// src's requantized local polar to dst must match a fresh quantization of the live
+	// offset (dst_newcenter - src_center) about src's own pole.
+	offsetAfter := dstCenter.sub(srcCenterAfter)
+	dAfter, rAfter := dirFromOffset(offsetAfter)
+	cAfter, psiAfter := azimuthFrom(lhSrc.Pole(), dAfter)
+	st, sp, sr := got.effectiveSteps()
+	wantTheta := int(math.Round(cAfter / st))
+	wantPhi := int(math.Round(psiAfter / sp))
+	wantR := int(math.Round(rAfter / sr))
+	if got.QuantITheta != wantTheta || got.QuantIPhi != wantPhi || got.QuantIR != wantR {
+		t.Fatalf("src's requantized local polar to dst should match a fresh quantization of the live offset: got=(theta=%d,phi=%d,r=%d) want=(theta=%d,phi=%d,r=%d)",
+			got.QuantITheta, got.QuantIPhi, got.QuantIR, wantTheta, wantPhi, wantR)
+	}
+
 	md.quantOffsetPersist.flush()
 }
 
@@ -224,6 +249,12 @@ func TestRotatingPolePersistReload(t *testing.T) {
 		t.Fatal("no LayoutHolder for src")
 	}
 	srcCenter, _ := md.centerOfNode("src")
+	var preDrag LocalPolar
+	for _, lp := range lhSrc.LocalPolarsSnapshot() {
+		if lp.To == "dst" {
+			preDrag = lp
+		}
+	}
 	home := dir{Theta: 0, Phi: 0}
 	near := fromAxisFrame(home, 5*math.Pi/180, 0)
 	target := srcCenter.add(polar2cart(polar{R: 50, Theta: near.Theta, Phi: near.Phi}))
@@ -232,12 +263,12 @@ func TestRotatingPolePersistReload(t *testing.T) {
 	}
 	pollDragConverged(t, md, "dst", target)
 
-	dstCenter, _ := md.centerOfNode("dst")
-	wantOff := dstCenter.sub(srcCenter)
-	wantDir, _ := dirFromOffset(wantOff)
-	// src's own local polar to dst is requantized asynchronously (a moveMsgKindRequantize
-	// message from dst's mover) — poll until it reflects the post-drag geometry before
-	// flushing, so the persisted bearing is not a stale pre-drag value.
+	// src is dst's plain (role-free) direct neighbor: under the current single-
+	// assignment set-c REQUANTIZE model, src stays put and re-quantizes its own
+	// bearing AND distance to dst fresh from the live offset
+	// (moveMsgKindNeighborSetC / neighborSetCRequantize). Poll for src's own
+	// LocalPolar entry's QuantIR to pick up the new c (async message-delivery race)
+	// before flushing, so the persisted value is not a stale pre-drag one.
 	var before *LocalPolar
 	deadline := time.Now().Add(2 * time.Second)
 	for {
@@ -248,15 +279,11 @@ func TestRotatingPolePersistReload(t *testing.T) {
 				before = &cp
 			}
 		}
-		if before != nil {
-			st, sp, _ := before.effectiveSteps()
-			gotDir := fromAxisFrame(localPole([]vec3{wantOff}), float64(before.QuantITheta)*st, float64(before.QuantIPhi)*sp)
-			if angularDistance(gotDir, wantDir) <= st+sp {
-				break
-			}
+		if before != nil && before.QuantIR != preDrag.QuantIR {
+			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("src's local polar to dst never converged to the live offset direction")
+			t.Fatalf("src's local polar to dst never picked up the new set-c")
 		}
 		time.Sleep(time.Millisecond)
 	}

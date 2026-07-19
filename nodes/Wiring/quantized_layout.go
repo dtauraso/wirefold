@@ -97,7 +97,7 @@ func measureScalars(centers map[string]vec3, ids map[string]bool, sceneCenter ve
 // measureScalar is the single-node variant of measureScalars: given ONE node's current
 // world center, derive its integer scalar triple (iTheta, iPhi, iR) about sceneCenter,
 // preserving prior's stored step constants (cTheta/cPhi/cR) exactly as measureScalars
-// does. Used by the per-node commit paths (commitNodeMoveCommon, moveNodeAndSetEdgeCs) so
+// does. Used by the per-node commit path (commitNodeMoveLocal) so
 // each node's quantized offset lives on that node's OWN mover (nodeMover.quantOffset)
 // rather than a shared map read/written from multiple mover goroutines — see
 // node6-drag-decentralized.md / the quantizedOffsets data-race fix.

@@ -24,10 +24,10 @@
 // sin/cos(poleKickTheta) constants. The ONLY trig in this file is the cart↔polar
 // boundary conversion of the final tilted pole vector (reusing polar.go's cart2polar).
 //
-// No offset direction is ever reconstructed into a node POSITION here (the movement
-// cascade stays distance-driven, node_move.go's Equalize/placeEqualRadii/
-// placeAtDistanceFromBoth) — this only changes how a stored offset DIRECTION is
-// quantized, never where a node itself sits.
+// No offset direction is ever reconstructed into a node POSITION here (a drag is a
+// free move, and neighborSetCReposition keeps a neighbor's stored bearing exactly as
+// persisted) — this only changes how a stored offset DIRECTION is quantized, never
+// where a node itself sits.
 package Wiring
 
 import "math"

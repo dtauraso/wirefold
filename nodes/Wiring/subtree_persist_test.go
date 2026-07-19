@@ -46,13 +46,77 @@ func TestIndividualSnap_OnlyDraggedNodePersists(t *testing.T) {
 	defer cancel()
 	md.Start(ctx)
 
-	srcBefore, _ := os.ReadFile(filepath.Join(root, "nodes", "src", "meta.json"))
+	lhSrc, ok := md.layoutHolders["src"]
+	if !ok {
+		t.Fatal("no LayoutHolder for src")
+	}
+	var lpBefore LocalPolar
+	for _, lp := range lhSrc.LocalPolarsSnapshot() {
+		if lp.To == "dst" {
+			lpBefore = lp
+		}
+	}
+	srcCenterBefore, ok := md.centerOfNode("src")
+	if !ok {
+		t.Fatal("no center for src before drag")
+	}
 
 	dstTarget := vec3{X: 60, Y: 20, Z: -10}
 	if !md.RootMove("dst", dstTarget) {
 		t.Fatal("RootMove(dst) returned false")
 	}
 	pollDragConverged(t, md, "dst", dstTarget)
+
+	// src is dst's plain (role-free) direct neighbor: per the single-assignment set-c
+	// REQUANTIZE model (node_move.go moveMsgKindNeighborSetC / neighborSetCRequantize),
+	// src STAYS PUT — only dst moved — and re-quantizes its OWN stored local polar
+	// (QuantITheta/QuantIPhi/QuantIR) to dst fresh from the live offset. Poll for src's
+	// own LocalPolar entry's QuantIR to change (the async moveMsgKindNeighborSetC
+	// delivery race, same shape as rotating_pole_test.go's polls).
+	var lpAfter LocalPolar
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		for _, lp := range lhSrc.LocalPolarsSnapshot() {
+			if lp.To == "dst" {
+				lpAfter = lp
+			}
+		}
+		if lpAfter.QuantIR != lpBefore.QuantIR {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("src's local polar to dst never picked up the new set-c: before=%+v after=%+v", lpBefore, lpAfter)
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	// src's own world center must NOT have moved — only dst moved.
+	srcCenter, ok := md.centerOfNode("src")
+	if !ok {
+		t.Fatal("no center for src after drag")
+	}
+	if d := srcCenter.sub(srcCenterBefore).length(); d > 1e-9 {
+		t.Fatalf("src must stay put on a dst drag: before=%+v after=%+v (moved by %g)", srcCenterBefore, srcCenter, d)
+	}
+
+	// src's requantized local polar to dst must match a fresh quantization of the live
+	// offset (dst_newcenter - src_center) about src's own pole.
+	dstCenter, ok := md.centerOfNode("dst")
+	if !ok {
+		t.Fatal("no center for dst after drag")
+	}
+	offset := dstCenter.sub(srcCenter)
+	dd, rr := dirFromOffset(offset)
+	cc, psi := azimuthFrom(lhSrc.Pole(), dd)
+	st, sp, sr := lpAfter.effectiveSteps()
+	wantTheta := int(math.Round(cc / st))
+	wantPhi := int(math.Round(psi / sp))
+	wantR := int(math.Round(rr / sr))
+	if lpAfter.QuantITheta != wantTheta || lpAfter.QuantIPhi != wantPhi || lpAfter.QuantIR != wantR {
+		t.Fatalf("src's requantized local polar to dst should match a fresh quantization of the live offset: got=(theta=%d,phi=%d,r=%d) want=(theta=%d,phi=%d,r=%d)",
+			lpAfter.QuantITheta, lpAfter.QuantIPhi, lpAfter.QuantIR, wantTheta, wantPhi, wantR)
+	}
+
 	md.quantOffsetPersist.flush()
 
 	// dst's meta got its EXACT scene-polar position (the lossless source of truth loaded
@@ -76,33 +140,37 @@ func TestIndividualSnap_OnlyDraggedNodePersists(t *testing.T) {
 		t.Fatalf("dst quantIR cache not persisted: %s", dstRaw)
 	}
 
-	// src's SCALAR TRIPLE (scene-center position) must be individually-snap
-	// unaffected by a drag of dst — no reference/parent concept, every node is a
-	// root for its scene-center position. src's localPolars entry to dst IS
-	// expected to change (task/double-link-local-polar: each end of a double
-	// link re-quantizes its own local polar to the moved neighbor, about a
-	// measurement pole resolved by requantizePoleTraced and persisted, layout_holder.go
-	// LayoutHolder.Pole) — so compare everything EXCEPT localPolars and the persisted
-	// pole (localPoleTheta/localPolePhi).
+	// src's persisted meta.json must reflect its UNCHANGED scene-polar position: under
+	// the single-assignment set-c REQUANTIZE model, a dst drag never moves src — only
+	// src's local-polar edge to dst (its own requantized bearing/distance) changes, not
+	// its own scene position. Assert src's persisted scenePolar still matches its
+	// pre-drag world center.
 	srcAfter, err := os.ReadFile(filepath.Join(root, "nodes", "src", "meta.json"))
 	if err != nil {
 		t.Fatalf("read src meta: %v", err)
 	}
-	var srcB, srcA map[string]json.RawMessage
-	if err := json.Unmarshal(srcBefore, &srcB); err != nil {
-		t.Fatalf("unmarshal src before: %v", err)
-	}
+	var srcA map[string]json.RawMessage
 	if err := json.Unmarshal(srcAfter, &srcA); err != nil {
 		t.Fatalf("unmarshal src after: %v", err)
 	}
-	for _, k := range []string{"localPolars", "localPoleTheta", "localPolePhi"} {
-		delete(srcB, k)
-		delete(srcA, k)
+	for _, k := range []string{"scenePolarR", "scenePolarTheta", "scenePolarPhi"} {
+		if _, ok := srcA[k]; !ok {
+			t.Fatalf("src %s not persisted: %s", k, srcAfter)
+		}
 	}
-	bJSON, _ := json.Marshal(srcB)
-	aJSON, _ := json.Marshal(srcA)
-	if string(bJSON) != string(aJSON) {
-		t.Fatalf("src's scalar triple changed on a drag of dst (individual snap violated):\nbefore=%s\nafter=%s", bJSON, aJSON)
+	var gotP polar
+	if err := json.Unmarshal(srcA["scenePolarR"], &gotP.R); err != nil {
+		t.Fatalf("unmarshal src scenePolarR: %v", err)
+	}
+	if err := json.Unmarshal(srcA["scenePolarTheta"], &gotP.Theta); err != nil {
+		t.Fatalf("unmarshal src scenePolarTheta: %v", err)
+	}
+	if err := json.Unmarshal(srcA["scenePolarPhi"], &gotP.Phi); err != nil {
+		t.Fatalf("unmarshal src scenePolarPhi: %v", err)
+	}
+	gotCenter := md.sceneSphere.Center.add(polar2cart(gotP))
+	if d := gotCenter.sub(srcCenterBefore).length(); d > 1e-6 {
+		t.Fatalf("src's persisted scenePolar should still match its pre-drag (unmoved) world center: persisted=%+v pre-drag=%+v", gotCenter, srcCenterBefore)
 	}
 }
 

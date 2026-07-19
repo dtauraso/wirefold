@@ -45,53 +45,26 @@ const (
 	moveMsgKindAnchor  = "anchor"  // per-port anchor update (drag along the ring)
 	moveMsgKindCenter  = "center"  // polar-layout re-propagated world center for one node
 	moveMsgKindCenters = "centers" // batched centers for an edge: update both endpoints, recompute ONCE
-	// moveMsgKindEqualize and moveMsgKindTrigger implement the STEP 1 decentralized
-	// node-5 cascade: node-to-node messages routed via
-	// sendMove instead of a central recursive rootMove. See ruleFollowers/ruleSource
-	// below for the (currently hardcoded, 5-chain-scoped) per-node rule tables.
-	moveMsgKindEqualize = "equalize" // follower move: receiver moves ITSELF to length TargetC from FromCenter, then stops (no rule, no forward)
-	moveMsgKindTrigger  = "trigger"  // rule-node trigger: receiver's source edge changed; receiver re-derives L, equalizes its own followers, and (delta-gated) forwards to any further rule-neighbor
-	// moveMsgKindGatePlace is node 6's cascade, decentralized: node
-	// 6 sends its two gate neighbors (9, 10) the anchor center (node 6's own fresh center)
-	// and the shortest c-distance d (TargetC) it computed to them; the receiver (9 or 10,
-	// via gateNeighbors) runs placeAtDistanceFromBoth against ITS two fixed neighbors
-	// (the anchor + its OTHER neighbor) on its OWN goroutine, then moveNodeAndSetEdgeCs to
-	// land there and set both edge-c records to SnapC. SenderID names the anchor node
-	// (always "6").
-	moveMsgKindGatePlace = "gatePlace"
-	// moveMsgKindDrag is node 6's own-goroutine drag entry:
-	// the drag itself is routed to node 6's OWN inbox instead of the stdin reader
-	// committing on node 6's behalf. The receiver (node 6) commits its OWN new
-	// position via the owner-goroutine commit path (commitNodeMoveLocal, which
-	// publishes its snap SYNCHRONOUSLY via applyCenter) and then runs its own
-	// self-trigger (handleTrigger) — apply-then-fan as two sequential statements on
-	// one goroutine, so the fan reads the freshly-applied center, never a stale one.
-	// Scoped to node 6 only: node 6 is a FREE move (not in gateNeighbors), so there is
-	// no equal-radii solve to run before committing.
+	// moveMsgKindDrag is a node's own-goroutine drag entry: the drag itself is routed
+	// to the dragged node's OWN inbox instead of the stdin reader committing on its
+	// behalf. The receiver commits its OWN new position via the owner-goroutine commit
+	// path (commitNodeMoveLocal, which publishes its snap SYNCHRONOUSLY via
+	// applyCenter). A drag is always a FREE move -- no equal-radii solve, no
+	// self-trigger cascade.
 	moveMsgKindDrag = "drag"
-	// moveMsgKindRequantize: receiver requantizes ITS OWN local polar to SenderID about
-	// its own pole, then persists — decentralizes the former cross-goroutine
-	// neighbor-holder write in requantizeLocalPolars (the mover X used to reach directly
-	// into each domain neighbor M's LayoutHolder; now X sends M this message and M's own
-	// goroutine does the write).
-	moveMsgKindRequantize = "requantize"
-	// moveMsgKindRequantizeSetC: like moveMsgKindRequantize, but additionally overrides
-	// the receiver's own edge-c record TO SenderID with SnapC — decentralizes the former
-	// cross-goroutine far-neighbor-holder write in moveNodeAndSetEdgeCs's setEdgeC (node
-	// 6's gate cascade: the gate node used to reach directly into its far neighbor's
-	// LayoutHolder to set the shared edge-c; now it sends the far neighbor this message).
-	moveMsgKindRequantizeSetC = "requantizeSetC"
+	// moveMsgKindNeighborSetC: the plain-neighbor / general edge-length propagation
+	// (requantizeLocalPolars' per-neighbor fan). A dragged node X sends EVERY direct
+	// domain neighbor M this SINGLE ASSIGNMENT -- the new quantized edge length SnapC
+	// (X's own freshly-requantized c to M) and X's fresh FromCenter. M does NOT
+	// re-derive its stored bearing to X: it KEEPS its own persisted
+	// QuantITheta/QuantIPhi to SenderID exactly as stored, writes ONLY the new c onto
+	// that record, and repositions itself at
+	// FromCenter - dir(storedTheta,storedPhi about M's own pole)*newR -- sliding along
+	// its existing viewing direction to the new distance, X held fixed. One hop only: M
+	// never forwards this to its own neighbors, and this never runs any further cascade
+	// (see neighborSetCReposition).
+	moveMsgKindNeighborSetC = "neighborSetC"
 )
-
-// Per-node cascade rule data (sourceID, followers, forwardTargets, isGate,
-// gateA/gateB, anchoredGates, followerOwner — the nodeMover fields below) replaces
-// what used to be three package-level maps (ruleSource/ruleFollowers/gateNeighbors)
-// HARDCODED to the current 10-node topology. Each is now DERIVED once at load
-// (loader.go deriveCascadeRules) from the spec each node carries on its own
-// LocalPolars entries (layout_holder.go LocalPolar.Role: "source"/"follower"/"")
-// and its own Gate flag (loader.go specNode.Gate) — a graph without these markers
-// simply gets no cascade for that node, instead of silently missing an id from a
-// table that lived here.
 
 // centerSnap is an immutable snapshot of a node's position published by the nodeMover
 // via an atomic.Pointer so readers on other goroutines (stdin reader, etc.) can observe
@@ -140,31 +113,19 @@ type moveMsg struct {
 	// distance to a surface child under the new centers). The nodeMover writes it onto its
 	// held geom so the re-emitted node-geometry streams the correct sphereR during a drag.
 	ReachR float64
-	// FromCenter / TargetC (Kind == "equalize"): the follower's neighbor's new world
-	// center and the c-length to hold. The receiver moves ITSELF to
-	// FromCenter + unit(self_old - FromCenter) * TargetC — receiver-computes.
-	// Also used, overloaded, by Kind == "requantize"/"requantizeSetC": FromCenter is the
-	// SENDER's (SenderID's) fresh committed world center; the receiver computes its own
-	// offset to the sender as FromCenter - (receiver's own snap center) and requantizes
-	// its own local polar to SenderID from that — receiver-computes, mirroring equalize.
+	// FromCenter (Kind == "neighborSetC"): the SENDER's (SenderID's) fresh committed
+	// world center. The receiver repositions itself along its OWN stored bearing to
+	// SenderID at the new distance (see neighborSetCReposition) — receiver-computes.
 	FromCenter vec3
-	TargetC    float64
-	// SenderID (Kind == "trigger"): the id that sent this trigger, so the receiving
-	// rule-node does not forward the trigger back to whoever just triggered it.
-	// Also used, overloaded, by Kind == "gatePlace" to name the ANCHOR node (always "6")
-	// so the receiver (9 or 10) can find its OTHER fixed neighbor via gateNeighbors.
-	// Also used, overloaded, by Kind == "requantize"/"requantizeSetC" to name the mover
-	// whose fresh FromCenter the receiver requantizes its own local polar against.
+	// SenderID (Kind == "neighborSetC"): the id of the mover whose fresh FromCenter
+	// the receiver repositions itself relative to.
 	SenderID string
-	// SnapC (Kind == "gatePlace"): the propagated shortest c (whole ticks of localStepR)
-	// to write onto both of the receiver's edge-c records via moveNodeAndSetEdgeCs.
-	// Also used, overloaded, by Kind == "requantizeSetC": the shared edge-c to write onto
-	// the receiver's OWN edge-c record to SenderID (the far-neighbor half of a gate
-	// node's edge-c equalize, decentralized off moveNodeAndSetEdgeCs's setEdgeC).
+	// SnapC (Kind == "neighborSetC"): the new quantized edge length (whole ticks of
+	// the receiver's own step constant) to write onto the receiver's own LocalPolar
+	// record to SenderID.
 	SnapC int
 	// Target (Kind == "drag"): the raw drag target world position for NodeID's
-	// owner-goroutine commit. Node 6 is a free move,
-	// so this is committed as-is (no gate solve).
+	// owner-goroutine commit. Every node is a free move, so this is committed as-is.
 	Target vec3
 	// testDone: see the type comment. Test-only; production leaves it nil.
 	testDone chan struct{}
@@ -178,7 +139,7 @@ type outboxItem struct {
 }
 
 // outbox is a per-mover UNBOUNDED FIFO of outgoing messages, decoupling *enqueue* (done
-// by the mover's own inbox-drain goroutine, inside handle/handleTrigger — must never
+// by the mover's own inbox-drain goroutine, inside handle — must never
 // block) from *delivery* (done by a dedicated sender goroutine, which blocks on the
 // target's inbox exactly like the old synchronous send did). See
 // docs/planning/visual-editor/cascade-deadlock-fix.md: two mutually-adjacent movers,
@@ -290,34 +251,18 @@ type nodeMover struct {
 	sendMove func(id string, msg moveMsg)
 	edgeIDs  []string
 	// centerOf resolves another node's current world center, bound to
-	// md.centerOfNode. Used by the decentralized rule-node trigger handling
-	// (moveMsgKindTrigger) to read its source/rule-neighbor centers without a
-	// central coordinator computing them.
+	// md.centerOfNode. Unused by any live handler now that the rule/gate/anchor
+	// cascade (which used it to read rule-neighbor centers) is gone; kept wired for
+	// any future direct-neighbor lookup need.
 	centerOf func(id string) (vec3, bool)
 	// commitLocal is the OWNER-GOROUTINE commit path, bound to
-	// md.commitNodeMoveLocal (generalized to every
-	// node). It publishes this node's own snap SYNCHRONOUSLY via applyCenter instead
-	// of enqueuing an async self-send, so it is safe to call from THIS node's own
-	// handle() and immediately follow with handleTrigger (moveMsgKindDrag) or return
-	// (moveMsgKindEqualize) in the same call, with no cross-goroutine self-send and
-	// no shared mutable state (each node's quantized offset lives on its own mover —
-	// see nodeMover.quantOffset). nil in tests that build a bare nodeMover directly.
+	// md.commitNodeMoveLocal (generalized to every node). It publishes this node's
+	// own snap SYNCHRONOUSLY via applyCenter instead of enqueuing an async self-send,
+	// so it is safe to call from THIS node's own handle() for a moveMsgKindDrag, with
+	// no cross-goroutine self-send and no shared mutable state (each node's quantized
+	// offset lives on its own mover — see nodeMover.quantOffset). nil in tests that
+	// build a bare nodeMover directly.
 	commitLocal func(id string, newPos vec3)
-	// gateEqualize runs a two-neighbor GATE node's OWN edge-c equalize
-	// (equalizeEdgeCLocal) using its CURRENT committed center, bound to
-	// md.gateEqualizeNode. Dispatched from handleTrigger's gate branch so the
-	// c-equalize step runs on the gate node's OWN goroutine (self-trigger message)
-	// instead of synchronously on the drag call stack. nil in tests that build a bare
-	// nodeMover directly.
-	gateEqualize func(id string)
-	// gatePlace runs a gate node's (9 or 10) placeAtDistanceFromBoth + moveNodeAndSetEdgeCs
-	// re-solve against an anchor node's fresh center, bound to md.gatePlaceNode. Dispatched
-	// from handleTrigger's moveMsgKindGatePlace case so node 6's cascade repositions 9/10 on
-	// THEIR OWN goroutines instead of synchronously on node 6's
-	// drag call stack. Args: (this node's id, anchor node's id, anchor's fresh center,
-	// target distance d, propagated shortest-c integer). nil in tests that build a bare
-	// nodeMover directly.
-	gatePlace func(id, anchorID string, anchorCenter vec3, d float64, snapC int)
 	// partnerCenter resolves, per (port,isInput) on this node, the CURRENT world center of
 	// the single partner node connected via one edge (aimed-port model, port_geometry.go
 	// portWorldPosAimed / builders.go partnerCenterFn). Wired by newMoveDispatch from
@@ -331,65 +276,19 @@ type nodeMover struct {
 	// keys (fatal "concurrent map read and map write"). Seeded at load
 	// (buildMoveDispatch) from the computed/persisted offset, then mutated ONLY by
 	// this node's own commit path (commitNodeMoveCommon, called from this node's own
-	// goroutine via commitLocal/moveNodeAndSetEdgeCs) — single-writer, no map, no race.
+	// goroutine via commitLocal) — single-writer, no map, no race.
 	quantOffset quantizedOffset
-	// placeEqualRadii solves this node's landing point for a drag to target, subject
-	// to its two FIXED gate neighbors (gateNeighbors) having equal radii to it, bound
-	// (for gate nodes 1/9/10 only) to a closure over md.placeEqualRadii + this node's
-	// own neighbor ids. nil for every non-gate node. Called from THIS node's own
-	// moveMsgKindDrag handler (generalized to every
-	// node) so the equal-radii solve, like the commit, runs on the node's own
-	// goroutine rather than the stdin goroutine.
-	placeEqualRadii func(target vec3) vec3
-	// requantizeSelf runs THIS node's own local-polar requantize (about its own rotating
-	// pole) against SenderID's fresh center, then persists — bound to
-	// md.requantizeNeighborSelf. Dispatched from moveMsgKindRequantize so a domain
-	// neighbor's holder is written only by that neighbor's OWN goroutine, decentralizing
-	// requantizeLocalPolars' former cross-goroutine neighbor-holder write. nil in tests
-	// that build a bare nodeMover directly.
-	requantizeSelf func(selfID, fromID string, off vec3)
-	// requantizeSelfSetC is requantizeSelf plus overriding THIS node's own edge-c record
-	// to SenderID with the given shared c — bound to md.requantizeNeighborSelfSetC.
-	// Dispatched from moveMsgKindRequantizeSetC so a gate node's FAR neighbor writes its
-	// own holder itself, decentralizing moveNodeAndSetEdgeCs's former cross-goroutine
-	// far-neighbor-holder write. nil in tests that build a bare nodeMover directly.
-	requantizeSelfSetC func(selfID, fromID string, off vec3, c int)
-	// Cascade rule fields — DERIVED once at load (loader.go deriveCascadeRules) from
-	// this node's own LocalPolars roles and Gate flag; see the package doc comment
-	// above where the old ruleSource/ruleFollowers/gateNeighbors maps used to live.
-	//
-	// sourceID: the ONE neighbor this node measures its reference length L against
-	// ("" if this node has no source role — not a rule-node).
-	sourceID string
-	// followers: the neighbors this node repositions (Equalize to L) when triggered.
-	followers []string
-	// forwardTargets: every OTHER node Y whose OWN sourceID is this node's id — the
-	// inverse of sourceID, so this node's self-trigger can forward without knowing
-	// the whole graph's rule table.
-	forwardTargets []string
-	// isGate: this node is a two-neighbor GATE node (solves equal-radii against
-	// gateA/gateB on a direct drag, self-triggers its own edge-c equalize).
-	isGate bool
-	// gateA / gateB: this node's two FIXED neighbors (only meaningful when isGate),
-	// in the same order as its own LocalPolars list.
-	gateA, gateB string
-	// anchoredGates: every gate node g (isGate) whose gateA/gateB names THIS node —
-	// i.e. gate nodes anchored on this node's position. Used when this node moves
-	// independently (not via its own rule cascade) to re-solve each anchored gate's
-	// landing point (the decentralized replacement for the old node-6-shaped
-	// GatePlace fan-out, generalized off which node the gates are anchored to).
-	anchoredGates []string
-	// followerOwner: the rule-node R such that this node appears in R.followers (the
-	// inverse of followers), or "" if none. Used so a node with anchoredGates>0 can
-	// forward its own re-trigger to whichever rule-node treats it as a follower,
-	// without a hardcoded target id.
-	followerOwner string
+	// neighborSetC runs THIS node's own plain-neighbor set-c redraw (keep stored
+	// bearing, write only the new c, reposition self) — bound to
+	// md.neighborSetCReposition. Dispatched from moveMsgKindNeighborSetC so a domain
+	// neighbor's holder AND world position are written only by that neighbor's OWN
+	// goroutine. nil in tests that build a bare nodeMover directly.
+	neighborSetC func(selfID, fromID string, fromCenter vec3)
 	// outbox is this node's own outbound-message queue (see the outbox type doc
 	// comment). sendMove enqueues onto it (never blocks); a dedicated sender goroutine
 	// (spawned in MoveDispatch.Start) pops it in FIFO order and does the actual
-	// blocking delivery. This is what lets handle/handleTrigger's sends stay
-	// non-blocking while every OTHER send-in-handle property (order, no drops) is
-	// unchanged.
+	// blocking delivery. This is what lets handle's sends stay non-blocking while
+	// every OTHER send-in-handle property (order, no drops) is unchanged.
 	outbox *outbox
 }
 
@@ -439,226 +338,33 @@ func (m *nodeMover) handle(msg moveMsg) {
 		}
 		return
 	}
-	if msg.Kind == moveMsgKindEqualize {
-		// Follower move (receiver-computes): move
-		// SELF to FromCenter + unit(self_old - FromCenter) * TargetC, then commit
-		// through the existing single-node commit path and STOP — no rule, no
-		// forward.
-		if s := m.snap.Load(); s != nil && m.commitLocal != nil {
-			dir := s.c.sub(msg.FromCenter)
-			if dir.length() != 0 {
-				newPos := msg.FromCenter.add(dir.normalize().scale(msg.TargetC))
-				m.commitLocal(m.id, newPos)
-				m.tr.Breadcrumb("cascade.follower.move", m.id, "", fmt.Sprintf("targetC=%.4f", msg.TargetC))
-			}
-		}
-		return
-	}
-	if msg.Kind == moveMsgKindTrigger {
-		m.handleTrigger(msg)
-		return
-	}
 	if msg.Kind == moveMsgKindDrag {
-		// Owner-goroutine drag entry (generalized to
-		// EVERY node so no node's quantized offset is ever touched by a foreign
-		// mover goroutine): if this node is a two-neighbor GATE node, first solve its
-		// equal-radii landing point against its FIXED neighbors (still reading their
-		// centers via the goroutine-safe centerOfNode snapshot — no shared mutable
-		// state), then commit this node's OWN new position via the local
-		// (synchronous-snap-publish) commit path, then run this node's own
-		// self-trigger — solve-then-apply-then-fan as sequential statements on this
-		// one goroutine, so handleTrigger's snap.Load() below reads the
-		// freshly-committed center, never a stale one.
+		// Owner-goroutine drag entry (generalized to EVERY node so no node's quantized
+		// offset is ever touched by a foreign mover goroutine): commit this node's OWN
+		// new position via the local (synchronous-snap-publish) commit path. A drag is
+		// always a FREE move now -- there is no equal-radii solve and no self-trigger
+		// cascade to run.
 		newPos := msg.Target
-		if m.placeEqualRadii != nil {
-			newPos = m.placeEqualRadii(msg.Target)
-		}
 		if m.commitLocal != nil {
 			m.commitLocal(m.id, newPos)
 		}
 		if m.tr != nil {
 			m.tr.Breadcrumb("cascade.root", m.id, "", fmt.Sprintf("newPos=(%.4f,%.4f,%.4f)", newPos.X, newPos.Y, newPos.Z))
 		}
-		m.handleTrigger(moveMsg{Kind: moveMsgKindTrigger, NodeID: m.id, SenderID: ""})
 		return
 	}
-	if msg.Kind == moveMsgKindGatePlace {
-		// Node 6's cascade: run this gate node's OWN
-		// placeAtDistanceFromBoth + moveNodeAndSetEdgeCs on this node's OWN goroutine,
-		// against the anchor's fresh center (msg.FromCenter) and its OTHER fixed
-		// neighbor (via gateNeighbors).
-		if m.gatePlace != nil {
-			m.gatePlace(m.id, msg.SenderID, msg.FromCenter, msg.TargetC, msg.SnapC)
-			m.tr.Breadcrumb("cascade.gateplace", m.id, "", fmt.Sprintf("anchor=%q d=%.4f", msg.SenderID, msg.TargetC))
-		}
-		return
-	}
-	if msg.Kind == moveMsgKindRequantize {
-		// Decentralized neighbor-holder write: SenderID (the mover X) just committed a
-		// new center (FromCenter); THIS node requantizes its OWN local polar to X about
-		// its own pole and persists — receiver-computes, no cross-goroutine write.
-		if s := m.snap.Load(); s != nil && m.requantizeSelf != nil {
-			off := msg.FromCenter.sub(s.c)
-			m.requantizeSelf(m.id, msg.SenderID, off)
-		}
-		return
-	}
-	if msg.Kind == moveMsgKindRequantizeSetC {
-		// Decentralized far-neighbor-holder write (gate node edge-c equalize): same as
-		// moveMsgKindRequantize, plus overriding THIS node's own edge-c record to
-		// SenderID with the shared c (SnapC).
-		if s := m.snap.Load(); s != nil && m.requantizeSelfSetC != nil {
-			off := msg.FromCenter.sub(s.c)
-			m.requantizeSelfSetC(m.id, msg.SenderID, off, msg.SnapC)
+	if msg.Kind == moveMsgKindNeighborSetC {
+		// Neighbor edge re-quantize (receiver-computes, one hop, no forward): SenderID
+		// (the dragged node) moved to msg.FromCenter; THIS node stays put and re-quantizes
+		// its OWN edge to SenderID from the live offset — theta, phi AND r all fresh —
+		// so both the angle and the distance to SenderID change (neighborSetCRequantize).
+		if m.neighborSetC != nil {
+			m.neighborSetC(m.id, msg.SenderID, msg.FromCenter)
 		}
 		return
 	}
 	if m.tr != nil {
 		m.emitGeometry()
-	}
-}
-
-// handleTrigger runs this node's OWN cascade rule on receiving a moveMsgKindTrigger,
-// entirely from fields this node's own mover carries (sourceID/followers/
-// forwardTargets/isGate/gateA/gateB/anchoredGates/followerOwner — all DERIVED once at
-// load, loader.go deriveCascadeRules, from this node's own LocalPolars roles and Gate
-// flag; see the package doc comment above node_move.go's cascade-rule fields).
-//
-// Four shapes, tried in order — each keyed off this node's OWN derived fields, never
-// an id literal:
-//
-//  1. anchoredGates>0: this node is the FIXED ANCHOR one or more gate nodes solve
-//     their equal-radii landing against. It moved freely to its new committed
-//     position; re-solve each anchored gate's shortest c-distance and GatePlace it,
-//     then forward a Trigger (SenderID = this node) to whichever rule-node treats
-//     this node as a follower (followerOwner), if any.
-//  2. msg.SenderID is one of THIS node's own followers (it moved independently, not
-//     via this node's own Equalize): treat the sender as the effective source and
-//     this node's OWN sourceID as the effective follower for this one re-trigger,
-//     then STOP (no further forward) — the follower-owner reacting to its follower's
-//     own independent move, not a normal drag cascade.
-//  3. isGate && msg.SenderID == "": self-trigger only, run this node's OWN edge-c
-//     equalize. A FORWARDED trigger (SenderID != "") is not a direct drag of this
-//     node, so a node that is ALSO a rule-node (sourceID/followers set) falls
-//     through to shape 4 instead of gating here.
-//  4. Generic rule-node cascade: re-derive L = dist(self, source), Equalize every
-//     follower to L, and ALWAYS forward to every forwardTarget (no delta-gate — see
-//     the package doc comment: termination is by idempotence, not a change check).
-func (m *nodeMover) handleTrigger(msg moveMsg) {
-	if m.centerOf == nil || m.sendMove == nil {
-		return
-	}
-	s := m.snap.Load()
-	if s == nil {
-		return
-	}
-	selfCenter := s.c
-
-	// The anchor-fanout only applies to a node with NO rule role of its own (mirrors
-	// the historical node-6 special case: "neither a ruleSource/ruleFollowers
-	// rule-node nor a gateNeighbors gate node"). A node that IS a rule-node (e.g.
-	// node 2, itself adjacent to gate node 1) does NOT re-solve its adjacent gates
-	// on its own trigger — only a pure anchor does; a rule-node's own trigger goes
-	// through the swap/generic branches below instead.
-	isRuleNode := m.sourceID != "" || len(m.followers) > 0
-	if len(m.anchoredGates) > 0 && !isRuleNode {
-		step := localStepR
-		type cand struct {
-			id string
-			c  vec3
-			ok bool
-		}
-		cands := make([]cand, 0, len(m.anchoredGates))
-		anyOk := false
-		for _, g := range m.anchoredGates {
-			c, ok := m.centerOf(g)
-			cands = append(cands, cand{id: g, c: c, ok: ok})
-			anyOk = anyOk || ok
-		}
-		if !anyOk {
-			return
-		}
-		shortest := math.Inf(1)
-		for _, cd := range cands {
-			if !cd.ok {
-				continue
-			}
-			d := math.Round(cd.c.sub(selfCenter).length() / step)
-			if d < shortest {
-				shortest = d
-			}
-		}
-		d := shortest * step
-		m.tr.Breadcrumb("cascade.anchor.trigger", m.id, "", fmt.Sprintf("d=%.4f", d))
-		for _, cd := range cands {
-			if !cd.ok {
-				continue
-			}
-			m.sendMove(cd.id, moveMsg{Kind: moveMsgKindGatePlace, NodeID: cd.id, SenderID: m.id, FromCenter: selfCenter, TargetC: d, SnapC: int(shortest)})
-		}
-		if m.followerOwner != "" {
-			m.sendMove(m.followerOwner, moveMsg{Kind: moveMsgKindTrigger, NodeID: m.followerOwner, SenderID: m.id})
-		}
-		return
-	}
-
-	isMyFollower := false
-	for _, f := range m.followers {
-		if f == msg.SenderID {
-			isMyFollower = true
-			break
-		}
-	}
-	if isMyFollower {
-		// The sender is my own follower, but it moved on its OWN (it triggered ME,
-		// which only happens via anchoredGates' followerOwner forward above) — swap
-		// roles for this one re-trigger: re-equalize MY source-peer to the fresh
-		// distance to the sender, holding the sender fixed.
-		if m.sourceID == "" {
-			return
-		}
-		senderCenter, ok := m.centerOf(msg.SenderID)
-		if !ok {
-			return
-		}
-		L := senderCenter.sub(selfCenter).length()
-		m.sendMove(m.sourceID, moveMsg{Kind: moveMsgKindEqualize, NodeID: m.sourceID, FromCenter: selfCenter, TargetC: L})
-		m.tr.Breadcrumb("cascade.swap", m.sourceID, "", fmt.Sprintf("targetC=%.4f", L))
-		return
-	}
-
-	if m.isGate && msg.SenderID == "" {
-		if m.gateEqualize != nil {
-			m.gateEqualize(m.id)
-			m.tr.Breadcrumb("gate.equalize", m.id, "", fmt.Sprintf("senderID=%q", msg.SenderID))
-		}
-		return
-	}
-
-	if m.sourceID == "" {
-		return
-	}
-	sourceCenter, ok := m.centerOf(m.sourceID)
-	if !ok {
-		return
-	}
-	L := sourceCenter.sub(selfCenter).length()
-	m.tr.Breadcrumb("cascade.trigger", m.id, "", fmt.Sprintf("source=%s L=%.4f senderID=%q", m.sourceID, L, msg.SenderID))
-	for _, f := range m.followers {
-		m.sendMove(f, moveMsg{Kind: moveMsgKindEqualize, NodeID: f, FromCenter: selfCenter, TargetC: L})
-		m.tr.Breadcrumb("cascade.equalize", f, "", fmt.Sprintf("targetC=%.4f", L))
-	}
-	// Always forward — no delta-gate. Termination is by IDEMPOTENCE (the receiver
-	// recomputes its own source length and equalizes its followers to it; if
-	// nothing moved, the followers are already at that length, so the re-broadcast
-	// is a no-op), not a sender-side "did anything change?" check. See the
-	// project_lock_propagation_decentralized memory note this mirrors.
-	for _, y := range m.forwardTargets {
-		if y == msg.SenderID {
-			continue
-		}
-		m.sendMove(y, moveMsg{Kind: moveMsgKindTrigger, NodeID: y, SenderID: m.id})
-		m.tr.Breadcrumb("cascade.forward", m.id, "", fmt.Sprintf("target=%s", y))
 	}
 }
 
@@ -950,12 +656,11 @@ type MoveDispatch struct {
 	// msgTap is a TEST-ONLY observability seam: when non-nil, sendMove invokes it with
 	// every (destID, msg) it routes, BEFORE the send. nil in production — production code
 	// never calls SetMsgTap, so msgTap.Load() is always nil there (one atomic load, no
-	// lock, no allocation). This exists only so tests can assert the decentralized node-5
-	// cascade is actually exchanging moveMsgKindEqualize/
-	// moveMsgKindTrigger messages between movers, rather than being satisfiable by the old
-	// central rootMove recursion. It is pure observation — it never authors domain state
-	// or changes routing. Stored as an atomic.Pointer (not a plain field) because sendMove
-	// is the one chokepoint every mover goroutine calls concurrently.
+	// lock, no allocation). This exists only so tests can assert the message trace
+	// between movers (e.g. the neighborSetC single-hop propagation) is exactly what's
+	// expected. It is pure observation — it never authors domain state or changes
+	// routing. Stored as an atomic.Pointer (not a plain field) because sendMove is the
+	// one chokepoint every mover goroutine calls concurrently.
 	msgTap atomic.Pointer[func(destID string, msg moveMsg)]
 }
 
@@ -1135,10 +840,7 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 		nm.sendMove = md.enqueueFor(nm.outbox)
 		nm.centerOf = md.centerOfNode
 		nm.commitLocal = md.commitNodeMoveLocal
-		nm.gateEqualize = md.gateEqualizeNode
-		nm.gatePlace = md.gatePlaceNode
-		nm.requantizeSelf = md.requantizeNeighborSelf
-		nm.requantizeSelfSetC = md.requantizeNeighborSelfSetC
+		nm.neighborSetC = md.neighborSetCRequantize
 		md.nodeMovers[id] = nm
 		md.dispatch[id] = nm.inbox
 	}
@@ -1244,7 +946,7 @@ func (md *MoveDispatch) sendMove(id string, msg moveMsg) {
 // (cascade-deadlock-fix.md): it fires the msgTap (at enqueue time, so tap-based tests'
 // counts/ordering match today's synchronous-send behavior) and then appends to ob —
 // never blocking. Bound once per node at construction (nm.sendMove = md.enqueueFor(nm.outbox))
-// so every send a nodeMover's own handle/handleTrigger performs — including the ones
+// so every send a nodeMover's own handle performs — including the ones
 // fanEdgesAndPartners makes on that node's behalf — goes through this node's own
 // outbox, never a raw blocking channel write.
 func (md *MoveDispatch) enqueueFor(ob *outbox) func(id string, msg moveMsg) {
@@ -1279,20 +981,20 @@ func (md *MoveDispatch) deliverMove(id string, msg moveMsg) {
 	}
 }
 
-// sendMoveLossy is sendMove's non-blocking twin, reserved for the two decentralized
-// requantize-cascade kinds (moveMsgKindRequantize, moveMsgKindRequantizeSetC) ONLY.
-// Per MODEL.md there is no cross-goroutine delivery guarantee — a goroutine does its
-// own work and drives its own outputs, fire-and-forget. Every OTHER sendMove call
-// (drag, equalize, trigger, gatePlace, center, anchor) carries a node's actual
-// position and MUST stay blocking: dropping one of those leaves a node's committed
-// geometry stale with no self-heal. Requantize messages are different: they exist
-// only to keep a neighbor's cached bearing/offset fresh, and a full inbox means the
-// receiver is already mid-cascade and about to requantize itself from its own next
-// commit anyway (or self-heals on reload) — so a drop here is redundant, not just
-// tolerable. Blocking would instead risk deadlock: domain adjacency is symmetric, so
-// two mutually-adjacent nodes committing concurrently with full inboxes could each
-// block sending a requantize to the other while neither is draining (handle runs
-// synchronously inside commitLocal), hanging both nodeMover goroutines.
+// sendMoveLossy is sendMove's non-blocking twin, reserved for moveMsgKindNeighborSetC
+// (requantizeLocalPolars' per-neighbor fan) ONLY. Per MODEL.md there is no
+// cross-goroutine delivery guarantee — a goroutine does its own work and drives its
+// own outputs, fire-and-forget. Every OTHER sendMove call (drag, center, anchor)
+// carries a node's actual position and MUST stay blocking: dropping one of those
+// leaves a node's committed geometry stale with no self-heal. A NeighborSetC message
+// is different: it exists only to keep a neighbor's cached edge-length fresh, and a
+// full inbox means the receiver is already mid-cascade and about to pick up the fresh
+// c from its own next commit anyway (or self-heals on reload) — so a drop here is
+// redundant, not just tolerable. Blocking would instead risk deadlock: domain
+// adjacency is symmetric, so two mutually-adjacent nodes committing concurrently with
+// full inboxes could each block sending a set-c to the other while neither is
+// draining (handle runs synchronously inside commitLocal), hanging both nodeMover
+// goroutines.
 func (md *MoveDispatch) sendMoveLossy(id string, msg moveMsg) {
 	if tap := md.msgTap.Load(); tap != nil {
 		(*tap)(id, msg)
@@ -1305,88 +1007,6 @@ func (md *MoveDispatch) sendMoveLossy(id string, msg moveMsg) {
 			// next commit (or self-heals on reload) — dropping is safe, not just tolerated.
 			if md.tr != nil {
 				md.tr.Breadcrumb("requantize.drop", id, "", msg.Kind)
-			}
-		}
-	}
-}
-
-// cascadeRoleSpec is one node's authored cascade role — the per-node replacement for
-// what used to be entries in three hardcoded package-level tables
-// (ruleSource/ruleFollowers/gateNeighbors). loader.go's deriveCascadeRoles builds
-// these from each node's own LocalPolars entries (Role: "source"/"follower"/"") and
-// its own Gate flag; tests that build a MoveDispatch directly (bypassing the
-// loader) declare the same data explicitly via ApplyCascadeRoles.
-type cascadeRoleSpec struct {
-	SourceID  string   // the ONE neighbor this node measures its reference length against.
-	Followers []string // neighbors this node repositions (Equalize) when triggered.
-	Gate      bool     // this node is a two-neighbor GATE node.
-	GateA     string   // gate's first fixed neighbor (only meaningful when Gate).
-	GateB     string   // gate's second fixed neighbor (only meaningful when Gate).
-	// AnchoredGates: gate nodes that name THIS node as their "anchor" neighbor (a
-	// gate's LocalPolar entry to this node has Role=="anchor" — loader.go
-	// deriveCascadeRoles' second pass). EXPLICITLY authored per gate-neighbor pair,
-	// NOT derived from mere gate-adjacency: a node can be one of a gate's two fixed
-	// neighbors WITHOUT being its anchor (e.g. nodes 2 and 3 are gate 1's two fixed
-	// neighbors, but neither is marked anchor — gate 1 only re-solves on its OWN
-	// drag; only the historical node-6-shaped relationship to gates 9/10 is marked
-	// anchor). Getting this wrong by deriving it from adjacency alone was a real bug
-	// caught by the A/B drag proof (dragging node 3 wrongly re-solved gate 1).
-	AnchoredGates []string
-}
-
-// ApplyCascadeRoles sets every named node's own cascade-role fields (sourceID,
-// followers, isGate/gateA/gateB, anchoredGates) from roles, wires each gate node's
-// placeEqualRadii closure, then derives the one CROSS-node field that isn't already
-// explicit in roles: forwardTargets (the inverse of sourceID — every Y whose own
-// source is this node) and followerOwner (the inverse of followers — the one
-// rule-node, if any, that treats this node as a follower). anchoredGates is NOT
-// derived from gate-adjacency (a node can be one of a gate's two fixed neighbors
-// without being its anchor — see cascadeRoleSpec.AnchoredGates's doc) — it is taken
-// verbatim from roles. Call once, after every node's mover exists (newMoveDispatch)
-// and before Start. Unknown node ids in roles are ignored (a node absent from roles
-// keeps its zero-value fields — no rule, not a gate, anchors nothing).
-func (md *MoveDispatch) ApplyCascadeRoles(roles map[string]cascadeRoleSpec) {
-	ids := make([]string, 0, len(md.nodeMovers))
-	for id := range md.nodeMovers {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids) // deterministic derivation order
-
-	for _, id := range ids {
-		nm := md.nodeMovers[id]
-		r, ok := roles[id]
-		if !ok {
-			continue
-		}
-		nm.sourceID = r.SourceID
-		nm.followers = append([]string(nil), r.Followers...)
-		nm.isGate = r.Gate
-		nm.gateA, nm.gateB = r.GateA, r.GateB
-		nm.anchoredGates = append([]string(nil), r.AnchoredGates...)
-		if nm.isGate {
-			aID, bID := nm.gateA, nm.gateB
-			nm.placeEqualRadii = func(target vec3) vec3 {
-				return md.placeEqualRadii(target, aID, bID)
-			}
-		}
-	}
-	for _, id := range ids {
-		md.nodeMovers[id].forwardTargets = nil
-		md.nodeMovers[id].followerOwner = ""
-	}
-	for _, yID := range ids {
-		src := md.nodeMovers[yID].sourceID
-		if src == "" {
-			continue
-		}
-		if sm, ok := md.nodeMovers[src]; ok {
-			sm.forwardTargets = append(sm.forwardTargets, yID)
-		}
-	}
-	for _, rID := range ids {
-		for _, f := range md.nodeMovers[rID].followers {
-			if fol, ok := md.nodeMovers[f]; ok {
-				fol.followerOwner = rID
 			}
 		}
 	}
@@ -1430,20 +1050,19 @@ func (md *MoveDispatch) heldEdges() []sphereEdge {
 // every aimed-port partner (pure re-emit), for the given already-applied set of moved node
 // centers. It never writes the moved node's OWN snap — that responsibility belongs to
 // whichever caller applied the moved node's own center via applyCenter directly (every
-// live caller is now owner-goroutine; the old central "self-send into own inbox" path,
-// fanCenters, was removed — it deadlocked/staled when its only caller,
-// moveNodeAndSetEdgeCs, turned out to run on the moved node's own goroutine too. See
-// commitNodeMoveLocal and moveNodeAndSetEdgeCs for the applyCenter + fanEdgesAndPartners
-// pattern).
+// live caller is owner-goroutine; the old central "self-send into own inbox" path,
+// fanCenters, was removed — it deadlocked/staled when its only caller turned out to run
+// on the moved node's own goroutine too. See commitNodeMoveLocal for the applyCenter +
+// fanEdgesAndPartners pattern).
 func (md *MoveDispatch) fanEdgesAndPartners(newCenters map[string]vec3, enqueue func(id string, msg moveMsg)) {
 	// Per-edge: send ONE batched message carrying every moved endpoint of that edge,
 	// so an edge whose both endpoints moved this frame recomputes/emits exactly once.
 	// enqueue (the caller's own outbox — see enqueueFuncFor) defers the actual blocking
 	// delivery to that mover's dedicated sender goroutine (cascade-deadlock-fix.md), so
-	// this call — made from inside handle/handleTrigger via commitLocal/moveNodeAndSetEdgeCs
-	// — never blocks. The dispatch-existence check moved into deliverMove (the sender's
-	// eventual blocking write), matching enqueue's other call sites (m.sendMove), which
-	// already tap/enqueue unconditionally regardless of whether id resolves.
+	// this call — made from inside handle via commitLocal — never blocks. The
+	// dispatch-existence check moved into deliverMove (the sender's eventual blocking
+	// write), matching enqueue's other call sites (m.sendMove), which already
+	// tap/enqueue unconditionally regardless of whether id resolves.
 	for edgeID, em := range md.edgeMovers {
 		eps := map[string]vec3{}
 		if c, ok := newCenters[em.srcID]; ok {
@@ -1498,32 +1117,6 @@ func (md *MoveDispatch) fanEdgesAndPartners(newCenters map[string]vec3, enqueue 
 		// delivery is deferred through the outbox.
 		enqueue(partnerID, moveMsg{Kind: moveMsgKindCenter, NodeID: partnerID, Center: nil})
 	}
-}
-
-// placeEqualRadii returns a two-neighbor gate node's landing point for a drag to target,
-// constrained so its two radii — to the FIXED neighbors aID and bID — are EQUAL. The landing
-// is the NEAREST point to target on the perpendicular-bisector plane of a–b (the set of points
-// equidistant from a and b): p = target − ((target−mid)·n̂) n̂, with n̂ = normalize(b−a) and
-// mid = (a+b)/2. This orthogonal projection is finite and continuous for EVERY target — unlike
-// the earlier scene-center-ray solve, which ran to infinity / flipped sign when the bearing
-// grazed the plane (the node-9 far-mouse blow-up and the node-10 runaway under node 6's
-// cascade). Neither neighbor moves. Used by nodes 9 (neighbors 3,6) and 10 (6,8). Falls back to
-// the raw target only when a neighbor's center is unknown or a and b coincide (no plane).
-func (md *MoveDispatch) placeEqualRadii(target vec3, aID, bID string) vec3 {
-	a, oka := md.centerOfNode(aID)
-	b, okb := md.centerOfNode(bID)
-	if !oka || !okb {
-		return target
-	}
-	n := b.sub(a)
-	if n.length() == 0 {
-		return target
-	}
-	nhat := n.normalize()
-	mid := a.add(b).scale(0.5)
-	// Nearest point on the perpendicular-bisector plane of a–b to target: subtract target's
-	// component along the plane normal. Finite for every target — no ray, no singularity.
-	return target.sub(nhat.scale(target.sub(mid).dot(nhat)))
 }
 
 // requantizePoleTraced is the SINGLE site every LOCAL-polar write routes through once a
@@ -1607,18 +1200,30 @@ func (md *MoveDispatch) requantizePoleTraced(lh *LayoutHolder, updates map[strin
 	return newPole
 }
 
-// requantizeNeighborSelf requantizes selfID's OWN local polar to fromID (offset off, in
-// selfID's own frame) about selfID's own rotating pole, then persists. This is the
-// OWNER-GOROUTINE half of the decentralized requantize: it must be called only from
-// selfID's own nodeMover goroutine (dispatched via moveMsgKindRequantize), never
-// reached into from another node's mover — that cross-goroutine write is exactly what
-// this decentralizes. No-op for an unknown selfID.
-func (md *MoveDispatch) requantizeNeighborSelf(selfID, fromID string, off vec3) {
+// neighborSetCRequantize is the OWNER-GOROUTINE half of a neighbor's edge re-quantize
+// (moveMsgKindNeighborSetC): the dragged node fromID moved, so selfID's stored local
+// polar to fromID no longer matches the live geometry. selfID STAYS PUT — dragging fromID
+// moves only fromID — and re-quantizes its OWN edge to fromID from the live offset, with
+// theta, phi AND r all fresh (about selfID's rotating pole, via requantizePoleTraced with
+// fromID as the single fresh update); selfID's OTHER neighbors are carried forward as
+// index x step, not re-derived. There is NO reposition: only fromID moved, so the incident
+// fromID-selfID edge redraws from fromID's own commit (fanEdgesAndPartners on fromID's
+// side). Single hop — no forward past selfID, no cascade. No-op for an unknown selfID.
+func (md *MoveDispatch) neighborSetCRequantize(selfID, fromID string, fromCenter vec3) {
 	lh, ok := md.layoutHolders[selfID]
 	if !ok {
 		return
 	}
-	md.requantizePoleTraced(lh, map[string]vec3{fromID: off}, selfID)
+	selfCenter, ok := md.centerOfNode(selfID)
+	if !ok {
+		return
+	}
+	// Offset convention matches requantizeLocalPolars: neighbor(fromID) center - self
+	// center. fromID is the ONLY fresh update, so requantizePoleTraced re-derives selfID's
+	// edge to fromID (theta, phi AND r, about selfID's rotating pole) at the cart<->polar
+	// boundary, while every OTHER neighbor of selfID is carried forward as index x step.
+	md.requantizePoleTraced(lh, map[string]vec3{fromID: fromCenter.sub(selfCenter)}, selfID)
+
 	if md.quantOffsetPersist != nil {
 		if root := md.quantOffsetPersist.root; root != "" {
 			if err := WriteLocalPolars(root, selfID, lh.LocalPolarsSnapshot(), lh.Pole()); err != nil {
@@ -1626,223 +1231,12 @@ func (md *MoveDispatch) requantizeNeighborSelf(selfID, fromID string, off vec3) 
 			}
 		}
 	}
-}
-
-// requantizeNeighborSelfSetC is requantizeNeighborSelf plus overriding selfID's own
-// edge-c record to fromID with c, preserving that record's own bearing/step constants —
-// the OWNER-GOROUTINE half of a gate node's edge-c equalize on its FAR neighbor
-// (dispatched via moveMsgKindRequantizeSetC, decentralizing moveNodeAndSetEdgeCs's
-// former direct write into the far neighbor's LayoutHolder). No-op for an unknown
-// selfID.
-func (md *MoveDispatch) requantizeNeighborSelfSetC(selfID, fromID string, off vec3, c int) {
-	lh, ok := md.layoutHolders[selfID]
-	if !ok {
-		return
-	}
-	md.requantizePoleTraced(lh, map[string]vec3{fromID: off}, selfID)
-	st, sp, sr := lh.localPolarSteps(fromID)
-	for _, lp := range lh.LocalPolarsSnapshot() {
-		if lp.To == fromID {
-			lh.SetLocalPolar(fromID, lp.QuantITheta, lp.QuantIPhi, c, st, sp, sr)
-			break
-		}
-	}
-	if md.quantOffsetPersist != nil {
-		if root := md.quantOffsetPersist.root; root != "" {
-			if err := WriteLocalPolars(root, selfID, lh.LocalPolarsSnapshot(), lh.Pole()); err != nil {
-				logPersistErr("local_polar_persist", selfID, err)
-			}
-		}
-	}
-}
-
-// equalizeEdgeCLocal is a two-neighbor gate node's edge-c requantize step — the per-node
-// replacement for requantizeLocalPolars, called from rootMove AFTER the node has already
-// moved through the normal path (fan + scene c refresh, so it repositions on screen like any
-// dragged node). It mutates ONLY the node's own LayoutHolder: its local polar to aID and to
-// bID (each in the node's own frame). It computes the two candidate c's (quantIR) the node's
-// new position implies for those two edges, keeps the SHORTER as the new c, and writes it
-// onto BOTH records — leaving each edge's own bearing (quantITheta/quantIPhi) and step
-// constants untouched. The two neighbors are NEVER written (unlike the generic double-link
-// requantize, which updates both ends). Used by nodes 9 (3,6) and 10 (6,8). Returns false
-// only when the node has no LayoutHolder.
-func (md *MoveDispatch) equalizeEdgeCLocal(nodeID, aID, bID string, newPos vec3) bool {
-	lh, ok := md.layoutHolders[nodeID]
-	if !ok {
-		return false
-	}
-	cA, okA := md.centerOfNode(aID)
-	cB, okB := md.centerOfNode(bID)
-	if !okA || !okB {
-		return false
-	}
-	// Re-quantize BOTH of this (2-neighbor gate) node's bearings about its rotating local
-	// pole (rotating_pole.go) in one pass, then override each entry's radius with the
-	// SHORTER of the two candidate quantIR — the equal-radii contract this function
-	// exists for — leaving the (pole-derived) bearing/step constants it just wrote alone.
-	md.requantizePoleTraced(lh, map[string]vec3{aID: cA.sub(newPos), bID: cB.sub(newPos)}, nodeID)
-	lps := lh.LocalPolarsSnapshot()
-	qrA, qrB := 0, 0
-	for _, lp := range lps {
-		if lp.To == aID {
-			qrA = lp.QuantIR
-		} else if lp.To == bID {
-			qrB = lp.QuantIR
-		}
-	}
-	cNew := min(qrA, qrB)
-	for _, lp := range lps {
-		if lp.To == aID || lp.To == bID {
-			t, p, r := lp.effectiveSteps()
-			lh.SetLocalPolar(lp.To, lp.QuantITheta, lp.QuantIPhi, cNew, t, p, r)
-		}
-	}
-	if md.quantOffsetPersist != nil {
-		if root := md.quantOffsetPersist.root; root != "" {
-			if err := WriteLocalPolars(root, nodeID, lh.LocalPolarsSnapshot(), lh.Pole()); err != nil {
-				logPersistErr("local_polar_persist", nodeID, err)
-			}
-		}
-	}
-	return true
-}
-
-// placeAtDistanceFromBoth returns the point at distance d from BOTH fixed anchors a and b,
-// nearest to nodeID's current position — so the node's two radii (to a and to b) both equal d.
-// The equal-distance locus is the circle where the two spheres (radius d, centers a and b)
-// meet: it lies in the perpendicular-bisector plane of a–b, centered at the midpoint m, with
-// radius ρ = sqrt(d² − |a−b|²/4). The nearest circle point to the node's current spot is
-// m + ρ·normalize(proj(cur)−m), proj = orthogonal projection of cur onto that plane. d is
-// floored at |a−b|/2 (below it the spheres don't meet; the node lands at the midpoint).
-// Stable: once on the circle the nearest point is itself, so it is a fixed point (no drift).
-func (md *MoveDispatch) placeAtDistanceFromBoth(nodeID string, a, b vec3, d float64) (vec3, bool) {
-	cur, ok := md.centerOfNode(nodeID)
-	if !ok {
-		return vec3{}, false
-	}
-	ab := b.sub(a)
-	half := ab.length() / 2
-	if half == 0 {
-		return vec3{}, false
-	}
-	if d < half {
-		d = half
-	}
-	m := a.add(b).scale(0.5)
-	nhat := ab.scale(1 / (2 * half))
-	q := cur.sub(nhat.scale(cur.sub(m).dot(nhat))) // project current pos onto bisector plane
-	dir := q.sub(m)
-	rho := math.Sqrt(math.Max(0, d*d-half*half))
-	if dir.length() == 0 {
-		return m, true // current projects onto the axis; land at midpoint (equidistant)
-	}
-	return m.add(dir.normalize().scale(rho)), true
-}
-
-// moveNodeAndSetEdgeCs moves nodeID to newPos (the same fan + scalar-triple persist rootMove
-// applies to any single dragged node, so it repositions on screen), then sets nodeID's two
-// edge-c records (to edgeA and edgeB) to c, preserving each record's own bearing/step
-// constants. Only nodeID's own LayoutHolder is written — the edge neighbors are never moved.
-//
-// This is an OWNER-GOROUTINE commit (its sole caller, gatePlaceNode, runs on the moved
-// gate node's own mover goroutine via moveMsgKindGatePlace), so it commits nodeID's own
-// center the same way commitNodeMoveLocal does: applyCenter directly (synchronous, no
-// self-send) followed by fanEdgesAndPartners for the incident-edge/partner fan-out. It
-// must NOT route through a self-send into nodeID's own inbox (the old fanCenters
-// path) — that message would sit unread until this handler returns (self-deadlock if the
-// inbox is full, stale-read hazard otherwise for any concurrent centerOfNode reader).
-func (md *MoveDispatch) moveNodeAndSetEdgeCs(nodeID string, newPos vec3, edgeA, edgeB string, c int) {
-	edges := md.heldEdges()
-	polars := md.heldPolar()
-	polars[nodeID] = cart2polar(newPos.sub(md.sceneSphere.Center))
-	reach := reachRFromPolar(polars, edges)
-
-	nm, hasMover := md.nodeMovers[nodeID]
-	if hasMover {
-		nm.applyCenter(newPos, reach[nodeID])
-	}
-	md.fanEdgesAndPartners(map[string]vec3{nodeID: newPos}, md.enqueueFuncFor(nodeID))
-
-	if md.quantizedLayout && hasMover {
-		off := measureScalar(newPos, md.sceneSphere.Center, nm.quantOffset)
-		nm.quantOffset = off
-		if md.quantOffsetPersist != nil {
-			md.quantOffsetPersist.schedule(nodeID, off, cart2polar(newPos.sub(md.sceneSphere.Center)))
-		}
-	}
-	lh, ok := md.layoutHolders[nodeID]
-	if !ok {
-		return
-	}
-	root := ""
-	if md.quantOffsetPersist != nil {
-		root = md.quantOffsetPersist.root
-	}
-	persist := func(id string, holder *LayoutHolder) {
-		if root == "" {
-			return
-		}
-		if err := WriteLocalPolars(root, id, holder.LocalPolarsSnapshot(), holder.Pole()); err != nil {
-			logPersistErr("local_polar_persist", id, err)
-		}
-	}
-	// nodeID's own requantize+pole-resolve is a full-node operation (requantizePoleTraced
-	// re-checks EVERY neighbor's bearing against the whole live offset set on every call)
-	// — so batch both edges' fresh offsets into ONE call on lh rather than once per edge;
-	// only the two edges' fresh centers need measuring up front, everything else about
-	// lh's own polars is exactly as before.
-	fcs := map[string]vec3{}
-	updates := map[string]vec3{}
-	for _, far := range []string{edgeA, edgeB} {
-		if fc, ok := md.centerOfNode(far); ok {
-			fcs[far] = fc
-			updates[far] = fc.sub(newPos)
-		}
-	}
-	if len(updates) > 0 {
-		md.requantizePoleTraced(lh, updates, nodeID)
-	}
-	// Set BOTH ends of each edge to c so the double-link agrees: nodeID's record to the
-	// neighbor AND the neighbor's back-reference to nodeID — the shared c OVERRIDES the
-	// radius lh's batched requantize above just wrote. The FAR neighbor's back-reference
-	// still requantizes (and persists) per-edge: it does not MOVE, only its edge-length
-	// record to nodeID is refreshed, and each far node is independent.
-	setEdgeC := func(far string) {
-		if _, ok := fcs[far]; !ok {
-			return
-		}
-		st, sp, sr := lh.localPolarSteps(far)
-		for _, lp := range lh.LocalPolarsSnapshot() {
-			if lp.To == far {
-				lh.SetLocalPolar(far, lp.QuantITheta, lp.QuantIPhi, c, st, sp, sr)
-				break
-			}
-		}
-		// The FAR neighbor's own requantize + edge-c override is decentralized: route it
-		// as a message to far's OWN inbox (moveMsgKindRequantizeSetC) instead of reaching
-		// into far's LayoutHolder from nodeID's (this node's) goroutine. far's own
-		// goroutine computes its offset to nodeID from FromCenter (nodeID's fresh newPos)
-		// and its own published snap center, then requantizes+persists itself. Sent via
-		// sendMoveLossy (non-blocking): a full far inbox means far is already mid-cascade
-		// and will requantize itself on its own next commit, so the drop is safe — and
-		// blocking here risks deadlock against far's own symmetric send back to nodeID.
-		// Dropping this message is safe today because moveNodeAndSetEdgeCs's callers pass
-		// a gate's FAR neighbors as edgeA/edgeB, and those far neighbors are NON-GATE nodes
-		// that never read the stale QuantIR via equalizeEdgeCLocal (only a 2-neighbor gate
-		// calls equalizeEdgeCLocal on itself). This safety is TOPOLOGY-dependent: a graph
-		// where a gate's far neighbor is ITSELF a gate (two mutually-adjacent/anchored gate
-		// nodes) would make the drop observable via that recipient's own equalize path.
-		md.sendMoveLossy(far, moveMsg{Kind: moveMsgKindRequantizeSetC, NodeID: far, SenderID: nodeID, FromCenter: newPos, SnapC: c})
-	}
-	setEdgeC(edgeA)
-	setEdgeC(edgeB)
-	persist(nodeID, lh)
 }
 
 // commitNodeMoveLocal is the OWNER-GOROUTINE single-node commit path
 // (generalized to every node): used when the commit
 // originates on nodeID's OWN mover goroutine (its own inbox handler for a
-// moveMsgKindDrag or moveMsgKindEqualize). It publishes nodeID's OWN snap
+// moveMsgKindDrag). It publishes nodeID's OWN snap
 // SYNCHRONOUSLY via applyCenter — safe and correct here because applyCenter's doc
 // contract is "called only from this nodeMover's own inbox-drain goroutine", which
 // this is. Also fans centers to incident edges/partners, persists the per-node
@@ -1872,64 +1266,6 @@ func (md *MoveDispatch) commitNodeMoveLocal(nodeID string, newPos vec3) {
 	md.requantizeLocalPolars(nodeID, newPos)
 }
 
-// gateEqualizeNode runs a two-neighbor GATE node's own edge-c equalize
-// (equalizeEdgeCLocal) using its CURRENT committed center (read via centerOfNode —
-// safe from any goroutine, including this node's own, since it reads the atomically-
-// published snapshot rather than live geom). Called from the gate node's own mover
-// goroutine via handleTrigger's gate branch, decentralizing the c-equalize step that
-// the old central rootMove ran synchronously on the drag call stack
-// . No-op for an unknown gate id or unresolved center.
-func (md *MoveDispatch) gateEqualizeNode(nodeID string) {
-	nm, ok := md.nodeMovers[nodeID]
-	if !ok || !nm.isGate {
-		return
-	}
-	c, ok := md.centerOfNode(nodeID)
-	if !ok {
-		return
-	}
-	md.equalizeEdgeCLocal(nodeID, nm.gateA, nm.gateB, c)
-}
-
-// gatePlaceNode runs a gate node's (9 or 10) placeAtDistanceFromBoth + moveNodeAndSetEdgeCs
-// re-solve against anchorID's fresh center (node 6's cascade — the decentralized
-// replacement for the retired central propagateShortestCFrom6). anchorID identifies which of the
-// node's two gateNeighbors is the anchor (always "6" in practice); the OTHER neighbor is
-// resolved via gateNeighbors and read via its CURRENT published center. The two anchor
-// args to placeAtDistanceFromBoth are ordered to match propagateShortestCFrom6's original
-// central calls exactly (node 9: (otherNeighbor, anchor) == (3, 6); node 10: (anchor,
-// otherNeighbor) == (6, 8)) so behavior is bit-for-bit identical. No-op for an unknown
-// gate id, an anchorID that isn't one of its two gateNeighbors, or an unresolved center.
-func (md *MoveDispatch) gatePlaceNode(nodeID, anchorID string, anchorCenter vec3, d float64, snapC int) {
-	nm, ok := md.nodeMovers[nodeID]
-	if !ok || !nm.isGate {
-		return
-	}
-	gA, gB := nm.gateA, nm.gateB
-	var a, b vec3
-	switch anchorID {
-	case gA:
-		other, okc := md.centerOfNode(gB)
-		if !okc {
-			return
-		}
-		a, b = anchorCenter, other
-	case gB:
-		other, okc := md.centerOfNode(gA)
-		if !okc {
-			return
-		}
-		a, b = other, anchorCenter
-	default:
-		return
-	}
-	newPos, ok := md.placeAtDistanceFromBoth(nodeID, a, b, d)
-	if !ok {
-		return
-	}
-	md.moveNodeAndSetEdgeCs(nodeID, newPos, gA, gB, snapC)
-}
-
 // RootMove handles a node-drag under the flat absolute scene-polar layout: every node
 // is positioned independently about the scene sphere center — there is no reference/
 // parent concept, so dragging moves ONLY the dragged node (no cascade). The dragged
@@ -1942,49 +1278,31 @@ func (md *MoveDispatch) gatePlaceNode(nodeID, anchorID string, anchorCenter vec3
 // affected double-link's local polars are re-quantized on BOTH ends. Returns false for
 // an unknown node.
 func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
-	// EVERY node's drag runs on the decentralized goroutine-message path: gate nodes
-	// (1/9/10) solve equal-radii at entry then self-trigger their gate equalize; rule
-	// nodes (5/2) equalize followers + cascade over channels; node 6 fans its shortest c
-	// to 9/10 + node 2; plain leaves (3/7/8/…) are a free move + no-op self-trigger. There
-	// is no central cascade left — rootMove is gone.
+	// EVERY node's drag is a FREE move on the decentralized goroutine-message path —
+	// no equal-radii solve, no rule/gate/anchor cascade. The dragged node commits its
+	// own new position, then requantizeLocalPolars fans a single neighborSetC
+	// assignment to every direct domain neighbor.
 	return md.rootMoveViaMessages(nodeID, target)
 }
 
 // rootMoveViaMessages is the decentralized drag entry, widened to EVERY node (the
-// generalization that came with the quantizedOffsets data-race fix): dragging any node no
-// longer commits on the stdin reader's own
-// goroutine — it routes a single moveMsgKindDrag to the dragged node's OWN inbox and
-// returns. The dragged node's own moveMsgKindDrag handler (nodeMover.handle) does the rest,
-// entirely on its own goroutine: solve equal-radii against its FIXED neighbors first if it
-// is a gate node (nm.placeEqualRadii, nil for non-gate nodes), commit its own new position
-// (commitLocal — fan + persist + requantize, no cross-goroutine self-send), then run its
-// own self-trigger (moveMsgKindTrigger, SenderID=="") so the rest of its chain (its own
-// ruleFollowers, then any rule-neighbor whose ruleSource is this node, delta-gated so the
-// chain fans outward and terminates) runs as further node-to-node messages. handleTrigger
-// (generic, keyed off ruleSource/ruleFollowers by id, plus special-cased branches for node
-// 6 — the FIXED anchor of its own gate-place cascade — and node 2's SenderID=="6"
-// re-trigger) needs no further per-node change to support this: node 2's normal trigger
-// forwards to BOTH 5 and 1 (both have ruleSource == "2"); node 1 is a leaf (nothing has
-// ruleSource == "1") so it forwards to nobody; node 6 is neither a ruleSource/ruleFollowers
-// node nor a gateNeighbors node, so its self-trigger runs its own dedicated branch
-// (computes the shortest c to 9/10, sends each a GatePlace message, then forwards a Trigger
-// to node 2 with SenderID=="6"). Nodes 9 and 10 are GATE nodes, not
-// rule-nodes: each node's position is first solved to the equal-radii locus against its
-// FIXED neighbors (gateNeighbors) inside its own drag handler before committing, and its
-// self-trigger dispatches to handleTrigger's gate branch (its own edge-c equalize only —
-// no forward, no follower, no neighbor move) UNLESS the trigger is actually a GatePlace
-// message (node 6's cascade), which runs the gatePlace branch in `handle` instead of
-// handleTrigger. Node 6 itself is a FREE move (it is not in gateNeighbors, so its
-// nm.placeEqualRadii is nil), matching its old central behavior exactly (no equal-radii
-// re-solve).
+// generalization that came with the quantizedOffsets data-race fix): dragging any node
+// no longer commits on the stdin reader's own goroutine — it routes a single
+// moveMsgKindDrag to the dragged node's OWN inbox and returns. The dragged node's own
+// moveMsgKindDrag handler (nodeMover.handle) does the rest, entirely on its own
+// goroutine: commit its own new position (commitLocal — fan + persist + requantize,
+// no cross-goroutine self-send). commitLocal's requantizeLocalPolars then sends every
+// direct domain neighbor a single moveMsgKindNeighborSetC assignment (see that
+// function's doc comment) — there is no equal-radii solve, no rule-node cascade, no
+// gate-anchor fan-out; a drag never touches any node's position but its own.
 func (md *MoveDispatch) rootMoveViaMessages(nodeID string, target vec3) bool {
 	if _, ok := md.nodeMovers[nodeID]; !ok {
 		return false
 	}
 	// Route the drag itself to the dragged node's OWN inbox instead of committing on
-	// the stdin reader's goroutine — every node's moveMsgKindDrag handler solves
-	// (gate nodes only), commits (synchronous local snap publish), and self-triggers,
-	// all on its own goroutine. No central commit call here.
+	// the stdin reader's goroutine — every node's moveMsgKindDrag handler commits
+	// (synchronous local snap publish) on its own goroutine. No central commit call
+	// here.
 	md.sendMove(nodeID, moveMsg{Kind: moveMsgKindDrag, NodeID: nodeID, Target: target})
 	return true
 }
@@ -2002,10 +1320,11 @@ func (md *MoveDispatch) rootMoveViaMessages(nodeID string, target vec3) bool {
 // Decentralized (mirrors nodeMover.quantOffset): X requantizes+persists its OWN holder
 // synchronously here, on its own (the mover's) goroutine — the single-writer case. Each
 // domain neighbor M's own holder is written only by M's own goroutine: X sends M a
-// moveMsgKindRequantize message (X's fresh newPos as FromCenter) instead of reaching
-// into M's LayoutHolder directly, so a holder is mutated only by its own node's
-// goroutine, exactly like quantOffset. moveNodeAndSetEdgeCs's far-neighbor edge-c write
-// is decentralized the same way, via moveMsgKindRequantizeSetC.
+// single moveMsgKindNeighborSetC assignment (X's fresh newPos as FromCenter, X's newly
+// requantized c to M as SnapC) instead of reaching into M's LayoutHolder directly, so a
+// holder is mutated only by its own node's goroutine, exactly like quantOffset. M keeps
+// its own stored bearing to X and repositions itself at the new distance along it (see
+// neighborSetCReposition) — unconditional for every neighbor.
 func (md *MoveDispatch) requantizeLocalPolars(nodeID string, newPos vec3) {
 	lhX, okX := md.layoutHolders[nodeID]
 	if !okX {
@@ -2052,17 +1371,28 @@ func (md *MoveDispatch) requantizeLocalPolars(nodeID string, newPos vec3) {
 	md.requantizePoleTraced(lhX, updatesX, nodeID)
 	writePersist(nodeID, lhX)
 
-	// M's local polar TO X, on M's own rotating local pole: routed as a message to M's
-	// OWN inbox instead of reaching into M's LayoutHolder from X's (this) goroutine. M's
-	// own moveMsgKindRequantize handler computes its offset to X from FromCenter (X's
-	// fresh newPos) and its own published snap center, then requantizes+persists itself
-	// — each M is a SEPARATE node whose pole only needs to see M's own (reconstructed +
-	// this fresh) neighbor set. Sent via sendMoveLossy (non-blocking): a full M inbox
-	// means M is already mid-cascade and will requantize itself on its own next commit,
-	// so the drop is safe — and blocking here risks deadlock against M's own symmetric
-	// send back to X when both commit concurrently with full inboxes.
+	// X tells EVERY direct domain neighbor M its NEW c (the quantized edge radius X just
+	// requantized to M above) as a SINGLE ASSIGNMENT — moveMsgKindNeighborSetC. M keeps
+	// its OWN stored bearing (QuantITheta/QuantIPhi) to X and repositions itself at the
+	// new distance along that same stored direction, X held fixed; M does NOT
+	// re-derive its bearing from a live offset and does NOT forward beyond this one
+	// hop (neighborSetCReposition). Routed as a message to M's OWN inbox instead of
+	// reaching into M's LayoutHolder from X's (this) goroutine — each M's holder and
+	// center are written only by M's own goroutine. Sent via sendMoveLossy
+	// (non-blocking): a full M inbox means M is already mid-cascade and will pick up
+	// X's fresh c on its own next commit, so the drop is safe — and blocking here
+	// risks deadlock against M's own symmetric send back to X when both commit
+	// concurrently with full inboxes. Unconditional for every neighbor — there is no
+	// rule/gate/anchor cascade left to defer to.
+	lpByTo := map[string]LocalPolar{}
+	for _, lp := range lhX.LocalPolarsSnapshot() {
+		lpByTo[lp.To] = lp
+	}
 	for m := range updatesX {
-		md.sendMoveLossy(m, moveMsg{Kind: moveMsgKindRequantize, NodeID: m, SenderID: nodeID, FromCenter: newPos})
+		if _, ok := lpByTo[m]; !ok {
+			continue
+		}
+		md.sendMoveLossy(m, moveMsg{Kind: moveMsgKindNeighborSetC, NodeID: m, SenderID: nodeID, FromCenter: newPos})
 	}
 }
 

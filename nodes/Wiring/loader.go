@@ -598,59 +598,6 @@ func (b *buildCtx) computeLocalPolars() {
 	b.localPoles = poles
 }
 
-// deriveCascadeRoles builds the per-node cascadeRoleSpec map node_move.go's
-// ApplyCascadeRoles wants, from each node's own LocalPolars entries (Role:
-// "source"/"follower"/"anchor", authored in the spec) and its own Gate flag — the
-// decentralization of what used to be three hardcoded package-level tables
-// (ruleSource/ruleFollowers/gateNeighbors). A gate node's two fixed neighbors are
-// its LocalPolars list IN ORDER (computeLocalPolars sorts ids alphabetically),
-// reproducing the historical gateNeighbors table's (a,b) ordering for nodes 1/9/10
-// exactly. A SECOND pass reads Role=="anchor" off a GATE node's own LocalPolars
-// entries and appends that gate's id to the NAMED neighbor's AnchoredGates —
-// EXPLICIT per gate-neighbor-pair authoring, deliberately NOT "every neighbor of
-// every gate": a node can be one of a gate's two fixed neighbors without being its
-// anchor (nodes 2/3 are gate 1's neighbors but neither is its anchor; only node 6 is
-// marked anchor on gates 9 and 10 — the historical node-6-shaped relationship). Must
-// run AFTER computeLocalPolars (b.localPolars populated).
-func (b *buildCtx) deriveCascadeRoles() map[string]cascadeRoleSpec {
-	gateSet := map[string]bool{}
-	for _, n := range b.spec.Nodes {
-		if n.Gate {
-			gateSet[n.ID] = true
-		}
-	}
-	roles := map[string]cascadeRoleSpec{}
-	for id, lps := range b.localPolars {
-		spec := cascadeRoleSpec{}
-		for _, lp := range lps {
-			switch lp.Role {
-			case "source":
-				spec.SourceID = lp.To
-			case "follower":
-				spec.Followers = append(spec.Followers, lp.To)
-			}
-		}
-		if gateSet[id] {
-			spec.Gate = true
-			if len(lps) >= 2 {
-				spec.GateA, spec.GateB = lps[0].To, lps[1].To
-			}
-		}
-		roles[id] = spec
-	}
-	for gID := range gateSet {
-		for _, lp := range b.localPolars[gID] {
-			if lp.Role != "anchor" {
-				continue
-			}
-			anchor := roles[lp.To]
-			anchor.AnchoredGates = append(anchor.AnchoredGates, gID)
-			roles[lp.To] = anchor
-		}
-	}
-	return roles
-}
-
 // computeReachRadii computes each node's REACH radius (max distance from its
 // center to any node it outputs to) under the loaded centers — non-rooted layout
 // — streamed in NodeGeometry's sphereR field so the TS SphereRing reaches every
@@ -750,7 +697,6 @@ func (b *buildCtx) buildMoveDispatch() {
 		edgeOrder[i] = e.Label
 	}
 	md := newMoveDispatch(b.nodeGeoms, b.edgeEndpoints, b.tr, nodeOrder, edgeOrder)
-	md.ApplyCascadeRoles(b.deriveCascadeRoles())
 	if b.hasScene {
 		// Persisted scene sphere: install it now so md.sceneSphere is consistent straight out
 		// of LoadTopology (a fresh/legacy scene has none — main.go's LoadSceneSphere then
