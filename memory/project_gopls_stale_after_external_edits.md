@@ -29,10 +29,29 @@ check before acting on a diagnostic that appears after an edit sequence. Do not
 "fix" a phantom error; you will damage working code. This cost repeated
 verification round-trips in one session before being diagnosed.
 
-Not fixable from the agent side — it is the language server's cache. Editor-side
-fix is `Go: Restart Language Server` (cheaper) or `Developer: Reload Window`
-(see [[feedback_two_process_editor_reload]] for why reopening a file is not
-enough).
+**Confirmed root cause (researched 2026-07-19, investigation CLOSED — do not
+re-run it):** gopls does not poll the filesystem. It relies entirely on the LSP
+client sending `workspace/didChangeWatchedFiles`, and for files changed outside
+the editor it does not rebuild cached AST/type-check data unless notified. The
+documented symptom in golang/go#31553 is exactly ours: a `git checkout` — which
+adds, deletes and rewrites files — leaves gopls reporting results for file
+content that no longer exists. Agent edits via Bash/`perl`/`sed` plus branch
+checkouts are that case continuously.
+
+**There is NO setting that fixes this.**
+- golang/go#31553 — open since April 2019, `NeedsFix`. Root gap, unresolved.
+- golang/go#67995 — server-side file watching (gopls watching the FS itself,
+  via fsnotify) is an UNIMPLEMENTED proposal on the backlog. gopls filed it
+  because client file watching is "spotty and inconsistent" across editors.
+- golang/go#40812 — a work-around for a VS Code file-watching bug specifically.
+- VS Code uses parcel-watcher with event correlation deliberately DISABLED for
+  stability; `files.watcherExclude` can swallow events, but that is a separate
+  cause and is NOT set in this repo (checked — workspace and user settings both
+  clean), so it is not what bites here.
+
+Editor-side remedy is the only one: `Go: Restart Language Server` (cheap) or
+`Developer: Reload Window` (see [[feedback_two_process_editor_reload]] for why
+reopening a file is not enough). Expect to need it after any bulk external edit.
 
 Related: [[feedback_guards_hardcoding_single_file_break_on_split]] — file splits
 break things that hold a stale picture of where code lives; this is the same
