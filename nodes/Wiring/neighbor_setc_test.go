@@ -2,14 +2,15 @@ package Wiring
 
 // neighbor_setc_test.go — dedicated headless proof for the plain-neighbor single-
 // assignment set-c redraw model (node_move.go moveMsgKindNeighborSetC /
-// neighborSetCReposition): a dragged node X sends each direct, role-free domain
-// neighbor M a SINGLE set-c assignment; M keeps its stored bearing (QuantITheta/
-// QuantIPhi) to X exactly, writes only the new c, and repositions itself along that
-// unchanged direction to the new distance (X held fixed) — no equalize/trigger
-// cascade, no forwarding past M.
+// neighborSetCRequantize): a dragged node X sends each direct, role-free domain
+// neighbor M a SINGLE set-c assignment carrying X's fresh center; M STAYS PUT — X is
+// the only node whose position changes — and M re-quantizes its OWN stored local polar
+// to X from the live offset, with theta, phi AND r all fresh (about M's own rotating
+// pole) — no reposition, no equalize/trigger cascade, no forwarding past M.
 
 import (
 	"context"
+	"math"
 	"sync"
 	"testing"
 	"time"
@@ -23,10 +24,13 @@ type tappedMsg struct {
 	senderID string
 }
 
-// TestNeighborSetCRedrawKeepsBearingRepositionsOneHop drives the real move path
+// TestNeighborSetCRequantizesEdgeNeighborStaysPut drives the real move path
 // (writeTree's plain 2-node src/dst graph — no cascade role on either end) and
-// asserts the four properties the single-assignment set-c model requires.
-func TestNeighborSetCRedrawKeepsBearingRepositionsOneHop(t *testing.T) {
+// asserts the three properties the single-assignment set-c requantize model requires:
+// the neighbor (src) stays put, src's stored local polar to the dragged node (dst) is
+// re-quantized in theta, phi AND r from the live offset, and it happens as exactly one
+// hop with no cascade.
+func TestNeighborSetCRequantizesEdgeNeighborStaysPut(t *testing.T) {
 	root := writeTree(t)
 	md := loadTreeMD(t, root)
 	md.EnableEditPersist(root)
@@ -38,7 +42,7 @@ func TestNeighborSetCRedrawKeepsBearingRepositionsOneHop(t *testing.T) {
 	if !ok {
 		t.Fatal("no LayoutHolder for src")
 	}
-	srcCenter, ok := md.centerOfNode("src")
+	srcCenterBefore, ok := md.centerOfNode("src")
 	if !ok {
 		t.Fatal("no center for src")
 	}
@@ -53,9 +57,10 @@ func TestNeighborSetCRedrawKeepsBearingRepositionsOneHop(t *testing.T) {
 		t.Fatal("src has no pre-drag LocalPolar entry for dst")
 	}
 
-	// Tap every routed message so we can assert (4): no equalize/trigger cascade ever
-	// runs for this drag, and src receives exactly the new moveMsgKindNeighborSetC
-	// (never the old bearing-re-deriving moveMsgKindRequantize).
+	// Tap every routed message so we can assert (3): this drag is exactly one hop —
+	// src receives nothing but the new moveMsgKindNeighborSetC (senderID=dst) — with
+	// no equalize/trigger/gate-place/requantize cascade kind (those kinds no longer
+	// exist in the vocabulary at all).
 	var mu sync.Mutex
 	var recorded []tappedMsg
 	md.SetMsgTap(func(destID string, msg moveMsg) {
@@ -65,20 +70,23 @@ func TestNeighborSetCRedrawKeepsBearingRepositionsOneHop(t *testing.T) {
 	})
 	defer md.SetMsgTap(nil)
 
-	// Drag dst further away from src so the edge length (r) changes.
+	// Drag dst off its prior bearing from src AND farther away, so both the angle and
+	// the distance src re-quantizes to dst demonstrably change (a purely radial drag
+	// along the existing bearing would leave theta/phi unchanged and not exercise the
+	// "angle also changes" half of the new model).
 	dstBefore, ok := md.centerOfNode("dst")
 	if !ok {
 		t.Fatal("no center for dst")
 	}
-	dir := dstBefore.sub(srcCenter)
-	target := srcCenter.add(dir.normalize().scale(dir.length() + 40))
+	target := dstBefore.add(vec3{X: 60, Y: 25, Z: -15})
 	if !md.RootMove("dst", target) {
 		t.Fatal("RootMove(dst) returned false")
 	}
 	pollDragConverged(t, md, "dst", target)
 
-	// Poll for src's own LocalPolar entry to dst to pick up the new c (async
-	// message-delivery race — the same shape every other test in this package uses).
+	// Poll for src's own LocalPolar entry to dst to pick up the new quantized values
+	// (async message-delivery race — the same shape every other test in this package
+	// uses).
 	var lpAfter LocalPolar
 	deadline := time.Now().Add(2 * time.Second)
 	for {
@@ -91,54 +99,73 @@ func TestNeighborSetCRedrawKeepsBearingRepositionsOneHop(t *testing.T) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("src's local polar to dst never picked up the new set-c: before=%+v after=%+v", lpBefore, lpAfter)
+			t.Fatalf("src's local polar to dst never picked up the set-c requantize: before=%+v after=%+v", lpBefore, lpAfter)
 		}
 		time.Sleep(time.Millisecond)
 	}
 	time.Sleep(20 * time.Millisecond) // let any (unwanted) further cascade settle
 
-	// (1) src's stored QuantITheta/QuantIPhi are UNCHANGED — byte-equal to before.
-	if lpAfter.QuantITheta != lpBefore.QuantITheta || lpAfter.QuantIPhi != lpBefore.QuantIPhi {
-		t.Fatalf("(1) src's stored bearing to dst must be KEPT exactly: before=%+v after=%+v", lpBefore, lpAfter)
-	}
-
-	// (2) src's QuantIR changed to the new quantized length.
-	if lpAfter.QuantIR == lpBefore.QuantIR {
-		t.Fatalf("(2) src's QuantIR to dst should have changed: before=%+v after=%+v", lpBefore, lpAfter)
-	}
-
-	// (3) src's new world center equals X_newcenter - dir(storedθ,storedφ about src's
-	// own pole) * (newIR * stepR), within one step.
-	dstCenter, ok := md.centerOfNode("dst")
-	if !ok {
-		t.Fatal("no center for dst after drag")
-	}
+	// (1) src's world center is UNCHANGED — the neighbor stays put; only dst moved.
 	srcCenterAfter, ok := md.centerOfNode("src")
 	if !ok {
 		t.Fatal("no center for src after drag")
 	}
-	st, sp, sr := lpAfter.effectiveSteps()
-	wantDir := fromAxisFrame(lhSrc.Pole(), float64(lpAfter.QuantITheta)*st, float64(lpAfter.QuantIPhi)*sp)
-	wantCenter := dstCenter.sub(dirToVec3(wantDir).scale(float64(lpAfter.QuantIR) * sr))
-	if d := srcCenterAfter.sub(wantCenter).length(); d > sr {
-		t.Fatalf("(3) src's new world center should equal dst_newcenter - dir(kept bearing)*newR: got=%+v want=%+v (off by %g, step=%v)", srcCenterAfter, wantCenter, d, sr)
+	const eps = 1e-9
+	if d := srcCenterAfter.sub(srcCenterBefore).length(); d > eps {
+		t.Fatalf("(1) src must stay put on a dst drag: before=%+v after=%+v (moved by %g)", srcCenterBefore, srcCenterAfter, d)
 	}
 
-	// (4) src never received anything but a set-c assignment — only the drag itself
-	// (on dst) and a set-c assignment (on src), one hop, no forwarding past src. There
-	// is no cascade machinery left to accidentally run, so this only checks src's own
-	// trace is exactly the expected NeighborSetC message.
+	// (2) src's stored local polar to dst matches a FRESH quantization of the live
+	// offset (dst_newcenter - src_center) about src's own pole — theta, phi AND r all
+	// re-derived, not carried forward from the old bearing. Computed via the same
+	// primitives requantizePoleTraced uses at the cart<->polar boundary.
+	dstCenterAfter, ok := md.centerOfNode("dst")
+	if !ok {
+		t.Fatal("no center for dst after drag")
+	}
+	pole := lhSrc.Pole()
+	offset := dstCenterAfter.sub(srcCenterAfter)
+	d, r := dirFromOffset(offset)
+	c, psi := azimuthFrom(pole, d)
+	st, sp, sr := lhSrc.localPolarSteps("dst")
+	wantTheta := int(math.Round(c / st))
+	wantPhi := int(math.Round(psi / sp))
+	wantR := int(math.Round(r / sr))
+	if lpAfter.QuantITheta != wantTheta || lpAfter.QuantIPhi != wantPhi || lpAfter.QuantIR != wantR {
+		t.Fatalf("(2) src's requantized local polar to dst should match a fresh quantization of the live offset: got=(theta=%d,phi=%d,r=%d) want=(theta=%d,phi=%d,r=%d)",
+			lpAfter.QuantITheta, lpAfter.QuantIPhi, lpAfter.QuantIR, wantTheta, wantPhi, wantR)
+	}
+	if lpAfter.QuantITheta == lpBefore.QuantITheta && lpAfter.QuantIPhi == lpBefore.QuantIPhi {
+		t.Fatalf("(2) the drag was chosen to move dst off src's prior bearing, so theta or phi should have changed: before=%+v after=%+v", lpBefore, lpAfter)
+	}
+
+	// (3) src receives exactly one moveMsgKindNeighborSetC (senderID=dst), and none of
+	// the old cascade kinds — those kinds don't even exist in the vocabulary anymore,
+	// so this is a belt-and-suspenders check against reintroducing one. A plain
+	// moveMsgKindCenter re-emit to src (dst's own commit fanning its incident edge's
+	// geometry to partners) is expected and is NOT a cascade — it carries no position
+	// write (nodeMover.handle's nil-Center branch is a pure re-emit).
 	mu.Lock()
 	trace := append([]tappedMsg(nil), recorded...)
 	mu.Unlock()
-	sawSetC := false
+	setCCount := 0
+	forbidden := map[string]bool{"equalize": true, "trigger": true, "gatePlace": true, "requantize": true}
 	for _, m := range trace {
-		if m.destID == "src" && m.kind == moveMsgKindNeighborSetC && m.senderID == "dst" {
-			sawSetC = true
+		if m.destID != "src" {
+			continue
+		}
+		if forbidden[m.kind] {
+			t.Fatalf("(3) src should never receive a %q cascade message; got %+v in trace %+v", m.kind, m, trace)
+		}
+		if m.kind == moveMsgKindNeighborSetC {
+			if m.senderID != "dst" {
+				t.Fatalf("(3) src's neighborSetC should be sent by dst; got %+v", m)
+			}
+			setCCount++
 		}
 	}
-	if !sawSetC {
-		t.Fatalf("(4) expected a moveMsgKindNeighborSetC (senderID=dst) routed to src; got %+v", trace)
+	if setCCount != 1 {
+		t.Fatalf("(3) expected exactly one moveMsgKindNeighborSetC (senderID=dst) routed to src; got %d in trace %+v", setCCount, trace)
 	}
 
 	md.quantOffsetPersist.flush()

@@ -283,7 +283,7 @@ type nodeMover struct {
 	// md.neighborSetCReposition. Dispatched from moveMsgKindNeighborSetC so a domain
 	// neighbor's holder AND world position are written only by that neighbor's OWN
 	// goroutine. nil in tests that build a bare nodeMover directly.
-	neighborSetC func(selfID, fromID string, fromCenter vec3, c int)
+	neighborSetC func(selfID, fromID string, fromCenter vec3)
 	// outbox is this node's own outbound-message queue (see the outbox type doc
 	// comment). sendMove enqueues onto it (never blocks); a dedicated sender goroutine
 	// (spawned in MoveDispatch.Start) pops it in FIFO order and does the actual
@@ -354,13 +354,12 @@ func (m *nodeMover) handle(msg moveMsg) {
 		return
 	}
 	if msg.Kind == moveMsgKindNeighborSetC {
-		// Plain-neighbor set-c redraw (receiver-computes, one hop, no forward): THIS
-		// node keeps its own stored bearing to SenderID, writes the new c, and
-		// repositions itself relative to SenderID's fresh committed center
-		// (msg.FromCenter). The bearing is NOT re-derived from a live offset;
-		// neighborSetCReposition reads the stored bearing itself.
+		// Neighbor edge re-quantize (receiver-computes, one hop, no forward): SenderID
+		// (the dragged node) moved to msg.FromCenter; THIS node stays put and re-quantizes
+		// its OWN edge to SenderID from the live offset — theta, phi AND r all fresh —
+		// so both the angle and the distance to SenderID change (neighborSetCRequantize).
 		if m.neighborSetC != nil {
-			m.neighborSetC(m.id, msg.SenderID, msg.FromCenter, msg.SnapC)
+			m.neighborSetC(m.id, msg.SenderID, msg.FromCenter)
 		}
 		return
 	}
@@ -841,7 +840,7 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 		nm.sendMove = md.enqueueFor(nm.outbox)
 		nm.centerOf = md.centerOfNode
 		nm.commitLocal = md.commitNodeMoveLocal
-		nm.neighborSetC = md.neighborSetCReposition
+		nm.neighborSetC = md.neighborSetCRequantize
 		md.nodeMovers[id] = nm
 		md.dispatch[id] = nm.inbox
 	}
@@ -1201,60 +1200,29 @@ func (md *MoveDispatch) requantizePoleTraced(lh *LayoutHolder, updates map[strin
 	return newPole
 }
 
-// neighborSetCReposition is the OWNER-GOROUTINE half of a plain neighbor's set-c
-// redraw (moveMsgKindNeighborSetC): selfID keeps its OWN stored bearing
-// (QuantITheta/QuantIPhi) to fromID exactly as persisted — no requantizePoleTraced
-// call, no re-derivation from a live offset — writes ONLY the new edge length c onto
-// that one LocalPolar record, and repositions itself at
-// fromCenter - dirToVec3(fromAxisFrame(pole, storedTheta, storedPhi)) * newR
-// (fromID held fixed; selfID slides along its existing viewing direction to the new
-// distance). This is a single hop: it commits selfID's own center/geometry the same
-// way commitNodeMoveLocal does (applyCenter + fanEdgesAndPartners, so the edge
-// redraws from both endpoints) but deliberately does NOT call requantizeLocalPolars
-// (no forward past selfID, no equalize/trigger cascade) and does NOT touch any OTHER
-// neighbor's LocalPolar entry. No-op for an unknown selfID or an fromID selfID has no
-// recorded LocalPolar for.
-func (md *MoveDispatch) neighborSetCReposition(selfID, fromID string, fromCenter vec3, c int) {
+// neighborSetCRequantize is the OWNER-GOROUTINE half of a neighbor's edge re-quantize
+// (moveMsgKindNeighborSetC): the dragged node fromID moved, so selfID's stored local
+// polar to fromID no longer matches the live geometry. selfID STAYS PUT — dragging fromID
+// moves only fromID — and re-quantizes its OWN edge to fromID from the live offset, with
+// theta, phi AND r all fresh (about selfID's rotating pole, via requantizePoleTraced with
+// fromID as the single fresh update); selfID's OTHER neighbors are carried forward as
+// index x step, not re-derived. There is NO reposition: only fromID moved, so the incident
+// fromID-selfID edge redraws from fromID's own commit (fanEdgesAndPartners on fromID's
+// side). Single hop — no forward past selfID, no cascade. No-op for an unknown selfID.
+func (md *MoveDispatch) neighborSetCRequantize(selfID, fromID string, fromCenter vec3) {
 	lh, ok := md.layoutHolders[selfID]
 	if !ok {
 		return
 	}
-	var lp LocalPolar
-	found := false
-	for _, e := range lh.LocalPolarsSnapshot() {
-		if e.To == fromID {
-			lp, found = e, true
-			break
-		}
-	}
-	if !found {
+	selfCenter, ok := md.centerOfNode(selfID)
+	if !ok {
 		return
 	}
-	t, p, rStep := lp.effectiveSteps()
-	lh.SetLocalPolar(fromID, lp.QuantITheta, lp.QuantIPhi, c, t, p, rStep)
-
-	d := fromAxisFrame(lh.Pole(), float64(lp.QuantITheta)*t, float64(lp.QuantIPhi)*p)
-	newR := float64(c) * rStep
-	newPos := fromCenter.sub(dirToVec3(d).scale(newR))
-
-	edges := md.heldEdges()
-	polars := md.heldPolar()
-	polars[selfID] = cart2polar(newPos.sub(md.sceneSphere.Center))
-	reach := reachRFromPolar(polars, edges)
-
-	nm, hasMover := md.nodeMovers[selfID]
-	if hasMover {
-		nm.applyCenter(newPos, reach[selfID])
-	}
-	md.fanEdgesAndPartners(map[string]vec3{selfID: newPos}, md.enqueueFuncFor(selfID))
-
-	if md.quantizedLayout && hasMover {
-		off := measureScalar(newPos, md.sceneSphere.Center, nm.quantOffset)
-		nm.quantOffset = off
-		if md.quantOffsetPersist != nil {
-			md.quantOffsetPersist.schedule(selfID, off, cart2polar(newPos.sub(md.sceneSphere.Center)))
-		}
-	}
+	// Offset convention matches requantizeLocalPolars: neighbor(fromID) center - self
+	// center. fromID is the ONLY fresh update, so requantizePoleTraced re-derives selfID's
+	// edge to fromID (theta, phi AND r, about selfID's rotating pole) at the cart<->polar
+	// boundary, while every OTHER neighbor of selfID is carried forward as index x step.
+	md.requantizePoleTraced(lh, map[string]vec3{fromID: fromCenter.sub(selfCenter)}, selfID)
 
 	if md.quantOffsetPersist != nil {
 		if root := md.quantOffsetPersist.root; root != "" {
@@ -1421,11 +1389,10 @@ func (md *MoveDispatch) requantizeLocalPolars(nodeID string, newPos vec3) {
 		lpByTo[lp.To] = lp
 	}
 	for m := range updatesX {
-		lp, ok := lpByTo[m]
-		if !ok {
+		if _, ok := lpByTo[m]; !ok {
 			continue
 		}
-		md.sendMoveLossy(m, moveMsg{Kind: moveMsgKindNeighborSetC, NodeID: m, SenderID: nodeID, FromCenter: newPos, SnapC: lp.QuantIR})
+		md.sendMoveLossy(m, moveMsg{Kind: moveMsgKindNeighborSetC, NodeID: m, SenderID: nodeID, FromCenter: newPos})
 	}
 }
 
