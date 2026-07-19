@@ -633,10 +633,29 @@ func (md *MoveDispatch) sendMoveLossy(id string, msg moveMsg) {
 
 // NodeKind returns the kind string for the given node id, or "" if unknown.
 // Used by applyEdit to resolve the node's kind when snapping a port-anchor
-// world-space direction to the nearest ring-anchor index.
+// world-space direction to the nearest ring-anchor index. Called from the
+// gesture/stdin-reader goroutine (gesture.go:164, :653), which is NOT the
+// nodeMover's own goroutine — this is the ONE genuine cross-goroutine read of
+// nm.geom, so it takes nm.geomMu.
+//
+// It copies the WHOLE struct under the lock rather than plucking .Kind out, and
+// that is deliberate. A bare `return nm.geom.Kind` cannot race today — Kind is
+// write-once (loader.go, at load) and Go's race detector is byte-range precise,
+// so a .Kind read never overlaps applyCenter's writes to ScenePolar/HasPos/ReachR.
+// That made the lock unfalsifiable: the guard could be deleted and NOTHING —
+// no test, not even -race — would notice, which is how a mutex comment drifts
+// into being wrong (this one already was, twice).
+//
+// Reading the full struct, exactly as emitGeometry does, makes the guard
+// load-bearing: remove the lock and -race reports a real conflict against
+// applyCenter. TestNodeKindConcurrentWithApplyCenterUnderRace is that check.
+// The cost is copying one nodeGeom (two slice headers, no element copy).
 func (md *MoveDispatch) NodeKind(nodeID string) string {
 	if nm, ok := md.nodeMovers[nodeID]; ok {
-		return nm.geom.Kind
+		nm.geomMu.Lock()
+		geom := nm.geom
+		nm.geomMu.Unlock()
+		return geom.Kind
 	}
 	return ""
 }
