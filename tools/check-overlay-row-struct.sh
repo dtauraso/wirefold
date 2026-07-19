@@ -27,7 +27,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 GEN_FILE="$REPO_ROOT/Buffer/buffer_layout_gen.go"
-GENERATOR="$REPO_ROOT/tools/gen-node-defs/main.go"
+GENERATOR="$REPO_ROOT/tools/gen-node-defs/buffer_layout.go"
 
 for f in "$GEN_FILE" "$GENERATOR"; do
   if [[ ! -f "$f" ]]; then

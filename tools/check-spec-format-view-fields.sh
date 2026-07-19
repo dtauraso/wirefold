@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # check-spec-format-view-fields.sh — nodes/SPEC-FORMAT.md's `## View` field table must name
-# exactly the view.* fields tools/gen-node-defs/main.go's parseSpecMD actually reads (via
-# vmap["<field>"]) — no more, no less.
+# exactly the view.* fields tools/gen-node-defs's parseSpecMD (now in ast_parse.go) actually
+# reads (via vmap["<field>"]) — no more, no less.
 #
 # WHY THIS EXISTS
 # ---------------
@@ -38,26 +38,31 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
-GEN_SRC="tools/gen-node-defs/main.go"
+GEN_DIR="tools/gen-node-defs"
 DOC="nodes/SPEC-FORMAT.md"
 
-for f in "$GEN_SRC" "$DOC"; do
-  if [[ ! -f "$f" ]]; then
-    echo "check-spec-format-view-fields: MISSING $f — cannot verify parity, refusing vacuous pass" >&2
-    exit 1
-  fi
-done
+if [[ ! -d "$GEN_DIR" ]]; then
+  echo "check-spec-format-view-fields: MISSING $GEN_DIR — cannot verify parity, refusing vacuous pass" >&2
+  exit 1
+fi
+if [[ ! -f "$DOC" ]]; then
+  echo "check-spec-format-view-fields: MISSING $DOC — cannot verify parity, refusing vacuous pass" >&2
+  exit 1
+fi
 
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
 # ---- fields the generator actually reads (vmap["field"] inside parseSpecMD) ----------------
-grep -oE 'vmap\["[A-Za-z0-9_]+"\]' "$GEN_SRC" \
+# Scan every non-test *.go file in $GEN_DIR, not just main.go — parseSpecMD (and its
+# vmap[...] reads) may live in any file within this package after a split, and a
+# single-file-path grep here would silently stop tracking new/moved reads.
+grep -hoE 'vmap\["[A-Za-z0-9_]+"\]' "$GEN_DIR"/*.go \
   | sed -E 's/vmap\["([A-Za-z0-9_]+)"\]/\1/' \
   | sort -u > "$TMP/code_fields.txt"
 
 if [[ ! -s "$TMP/code_fields.txt" ]]; then
-  echo "check-spec-format-view-fields: EMPTY vmap[...] extraction from $GEN_SRC — extractor broken, refusing vacuous pass" >&2
+  echo "check-spec-format-view-fields: EMPTY vmap[...] extraction from $GEN_DIR/*.go — extractor broken, refusing vacuous pass" >&2
   exit 1
 fi
 
@@ -95,7 +100,7 @@ if [[ -z "$DOC_ONLY" && -z "$CODE_ONLY" ]]; then
 fi
 
 echo "check-spec-format-view-fields: $DOC's ## View field table is out of parity with"
-echo "$GEN_SRC's parseSpecMD vmap[...] reads:"
+echo "$GEN_DIR's parseSpecMD vmap[...] reads:"
 echo ""
 if [[ -n "$DOC_ONLY" ]]; then
   echo "  documented in $DOC but NOT read by the generator (dead/ghost field — remove from the doc, or if it should do something, wire it into main.go):"
