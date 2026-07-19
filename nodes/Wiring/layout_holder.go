@@ -52,6 +52,11 @@ type LocalPolar struct {
 	// reference length L against; "follower" is a neighbor this node
 	// repositions (via an Equalize message) to L. "" (absent) is neither —
 	// authored in the spec (meta.json localPolars[].role), never computed.
+	//
+	// UNCONSUMED since the rule/gate/anchor cascade was deleted (2026-07-18):
+	// still copied through the persist round-trip (loader.go, quant_offset_persist.go)
+	// for meta.json shape only — no code path branches on its value. Do not assume
+	// it drives behavior; grep call sites before relying on it again.
 	Role string
 
 	QuantITheta int

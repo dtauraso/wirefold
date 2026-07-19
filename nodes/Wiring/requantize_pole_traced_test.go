@@ -29,7 +29,7 @@ func TestRequantizePoleTracedNoOpWhenPoleUnchanged(t *testing.T) {
 	offA := offsetFromDir(dir{Theta: 1.0, Phi: 0.3}).scale(30)
 	offB := offsetFromDir(dir{Theta: 1.4, Phi: -1.9}).scale(50)
 
-	md.requantizePoleTraced(lh, map[string]vec3{"a": offA, "b": offB}, "self")
+	md.requantizePoleTraced(lh, map[string]vec3{"a": offA, "b": offB})
 	before := lh.LocalPolarsSnapshot()
 	if len(before) != 2 {
 		t.Fatalf("expected 2 local polars after initial quantize, got %d", len(before))
@@ -38,7 +38,7 @@ func TestRequantizePoleTracedNoOpWhenPoleUnchanged(t *testing.T) {
 	// Second call: neither neighbor is fresh (empty updates) — both must be carried
 	// forward unchanged since the pole (home, +y — neither offset is near it) does not
 	// move.
-	md.requantizePoleTraced(lh, map[string]vec3{}, "self")
+	md.requantizePoleTraced(lh, map[string]vec3{})
 	after := lh.LocalPolarsSnapshot()
 
 	if !reflect.DeepEqual(before, after) {
@@ -64,7 +64,7 @@ func TestRequantizePoleTracedPreservesWorldDirectionOnPoleTilt(t *testing.T) {
 	offA := offsetFromDir(dirA).scale(40)
 	offB := offsetFromDir(dirB).scale(60)
 
-	md.requantizePoleTraced(lh, map[string]vec3{"a": offA, "b": offB}, "self")
+	md.requantizePoleTraced(lh, map[string]vec3{"a": offA, "b": offB})
 	if lh.Pole() != (dir{Theta: 0, Phi: 0}) {
 		t.Fatalf("pole should still be home before any offender enters: got %+v", lh.Pole())
 	}
@@ -74,7 +74,7 @@ func TestRequantizePoleTracedPreservesWorldDirectionOnPoleTilt(t *testing.T) {
 	dirC := dir{Theta: poleKickTheta / 2, Phi: 0}
 	offC := offsetFromDir(dirC).scale(20)
 
-	newPole := md.requantizePoleTraced(lh, map[string]vec3{"c": offC}, "self")
+	newPole := md.requantizePoleTraced(lh, map[string]vec3{"c": offC})
 	if newPole == (dir{Theta: 0, Phi: 0}) {
 		t.Fatalf("expected the pole to tilt off home once a neighbor entered the singular zone")
 	}
