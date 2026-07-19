@@ -60,7 +60,7 @@ func TestMoveDispatchFlushPendingPersistsFlushesQuantOffset(t *testing.T) {
 	md.EnableEditPersist(root)
 
 	newScene := polar{R: 61.0, Theta: 0.2, Phi: 0.9}
-	md.quantOffsetPersist.schedule("src", quantizedOffset{iTheta: 1, iPhi: 2, iR: 3}, newScene)
+	md.persist.quantOffset.schedule("src", quantizedOffset{iTheta: 1, iPhi: 2, iR: 3}, newScene)
 
 	// Simulate a clean shutdown BEFORE the debounce timer would have fired.
 	md.flushPendingPersists()

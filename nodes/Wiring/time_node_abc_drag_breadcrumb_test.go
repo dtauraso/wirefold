@@ -204,5 +204,5 @@ func TestEveryDragRecipientLogsAbcDragBreadcrumb(t *testing.T) {
 	// kind gate is gone; every drag-message recipient is logged.
 	checkOne("n", nLines, lpNAfter)
 
-	md.quantOffsetPersist.flush()
+	md.persist.quantOffset.flush()
 }

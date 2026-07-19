@@ -49,7 +49,7 @@ const atomicWriteTmpSuffix = ".tmp"
 
 // debouncedPersister is the generic debounce/coalesce/write machinery every domain
 // persister below embeds ANONYMOUSLY (not as a named field): that lets the `writes` test
-// counter promote through to e.g. `md.vpPersist.writes`. Each domain type keeps its own
+// counter promote through to e.g. `md.persist.vp.writes`. Each domain type keeps its own
 // `path`/`root` and `debounce` fields at its OWN top level (not inside this generic type),
 // because call sites construct persisters with keyed struct literals like
 // `&overlaysPersister{path: ..., debounce: ...}`, and Go's keyed-literal syntax cannot address a

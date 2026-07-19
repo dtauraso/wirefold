@@ -93,35 +93,35 @@ func TestAllPersistersConsistentBothForms(t *testing.T) {
 		want := wantSceneJSON(expectedRoot)
 
 		// 1. viewpoint persister (camera)
-		if md.vpPersist == nil {
+		if md.persist.vp == nil {
 			t.Fatalf("[%s] vpPersist nil", label)
 		}
-		if md.vpPersist.path != want {
-			t.Fatalf("[%s] vpPersist.path=%q want %q", label, md.vpPersist.path, want)
+		if md.persist.vp.path != want {
+			t.Fatalf("[%s] vpPersist.path=%q want %q", label, md.persist.vp.path, want)
 		}
 
 		// 2. overlays persister
-		if md.overlaysPersist == nil {
+		if md.persist.overlays == nil {
 			t.Fatalf("[%s] overlaysPersist nil", label)
 		}
-		if md.overlaysPersist.path != want {
-			t.Fatalf("[%s] overlaysPersist.path=%q want %q", label, md.overlaysPersist.path, want)
+		if md.persist.overlays.path != want {
+			t.Fatalf("[%s] overlaysPersist.path=%q want %q", label, md.persist.overlays.path, want)
 		}
 
 		// 3. node-pos persister (root, not path)
-		if md.posPersist == nil {
+		if md.persist.pos == nil {
 			t.Fatalf("[%s] posPersist nil", label)
 		}
-		if md.posPersist.root != expectedRoot {
-			t.Fatalf("[%s] posPersist.root=%q want %q", label, md.posPersist.root, expectedRoot)
+		if md.persist.pos.root != expectedRoot {
+			t.Fatalf("[%s] posPersist.root=%q want %q", label, md.persist.pos.root, expectedRoot)
 		}
 
 		// 4. anchor persister (root, not path)
-		if md.anchorPersist == nil {
+		if md.persist.anchor == nil {
 			t.Fatalf("[%s] anchorPersist nil", label)
 		}
-		if md.anchorPersist.root != expectedRoot {
-			t.Fatalf("[%s] anchorPersist.root=%q want %q", label, md.anchorPersist.root, expectedRoot)
+		if md.persist.anchor.root != expectedRoot {
+			t.Fatalf("[%s] anchorPersist.root=%q want %q", label, md.persist.anchor.root, expectedRoot)
 		}
 	}
 
@@ -139,17 +139,17 @@ func TestAllPersistersConsistentBothForms(t *testing.T) {
 		mdFile.EnableViewpointPersist(topoFile)
 		mdFile.EnableEditPersist(topoFile)
 
-		if mdDir.vpPersist.path != mdFile.vpPersist.path {
-			t.Fatalf("vpPersist.path diverges: dir=%q file=%q", mdDir.vpPersist.path, mdFile.vpPersist.path)
+		if mdDir.persist.vp.path != mdFile.persist.vp.path {
+			t.Fatalf("vpPersist.path diverges: dir=%q file=%q", mdDir.persist.vp.path, mdFile.persist.vp.path)
 		}
-		if mdDir.overlaysPersist.path != mdFile.overlaysPersist.path {
-			t.Fatalf("overlaysPersist.path diverges: dir=%q file=%q", mdDir.overlaysPersist.path, mdFile.overlaysPersist.path)
+		if mdDir.persist.overlays.path != mdFile.persist.overlays.path {
+			t.Fatalf("overlaysPersist.path diverges: dir=%q file=%q", mdDir.persist.overlays.path, mdFile.persist.overlays.path)
 		}
-		if mdDir.posPersist.root != mdFile.posPersist.root {
-			t.Fatalf("posPersist.root diverges: dir=%q file=%q", mdDir.posPersist.root, mdFile.posPersist.root)
+		if mdDir.persist.pos.root != mdFile.persist.pos.root {
+			t.Fatalf("posPersist.root diverges: dir=%q file=%q", mdDir.persist.pos.root, mdFile.persist.pos.root)
 		}
-		if mdDir.anchorPersist.root != mdFile.anchorPersist.root {
-			t.Fatalf("anchorPersist.root diverges: dir=%q file=%q", mdDir.anchorPersist.root, mdFile.anchorPersist.root)
+		if mdDir.persist.anchor.root != mdFile.persist.anchor.root {
+			t.Fatalf("anchorPersist.root diverges: dir=%q file=%q", mdDir.persist.anchor.root, mdFile.persist.anchor.root)
 		}
 	}
 }

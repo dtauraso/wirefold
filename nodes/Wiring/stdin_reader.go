@@ -269,11 +269,11 @@ func handleSaveMsg(md *MoveDispatch) {
 	if md == nil {
 		return
 	}
-	md.overlaysPersist.schedule(md.ov)
+	md.persist.overlays.schedule(md.ov)
 	// Persist the scene sphere immediately (not debounced) so save reliably activates
 	// the polar-load path (scene_sphere_persist.go LoadSceneSphere) — until the sphere
 	// is in scene.json, reload stays on cartesian x/y/z.
-	md.spherePersist.flushNow(md.sceneSphere)
+	md.persist.sphere.flushNow(md.sceneSphere)
 }
 
 // overlayToggles (the FLAG name → MoveDispatch flip-method table) is GENERATED into
@@ -335,7 +335,7 @@ func applyUpdate(msg stdinMsg, md *MoveDispatch, tr *T.Trace, clk Clock) {
 		// Persist ON CHANGE (mirrors camera): schedule a debounced write of the new
 		// overlay snapshot so toggles survive a reload without an explicit save. No-op until
 		// EnableEditPersist arms the writer (nil-receiver / empty-treeRoot guard in schedule).
-		md.overlaysPersist.schedule(md.ov)
+		md.persist.overlays.schedule(md.ov)
 	}
 	// EDIT_UPDATE_KINDS_END
 }
