@@ -48,59 +48,64 @@ under the premise, and it created a worse problem than it solved (retroactive co
 sends a clock backward over ticks it already acted on, which the monotonicity test
 forbids). Do not reintroduce it.
 
-### The residual, sized
+### The residual, sized — and why it is not a floor
 
-Banking at local `now` means clocks acquire a permanent offset per speed change:
+Banking at local `now` means copies acquire a permanent offset per speed change:
 
     offset = (delivery skew) x (new speed - old speed)   ~= 1 tick per change
 
-Sized against this topology: edges are 57-268 wu, so a crossing is tens of ticks. One tick
-of offset is **1-2% of a wire per speed change**. Offsets are signed by direction, so
-1->2 and 2->1 partly cancel rather than accumulating monotonically.
+Against this topology (edges 57-268 wu, a crossing is tens of ticks) that is **1-2% of a
+wire per speed change**, and offsets are signed by direction so speeding up and slowing
+down partly cancel.
 
-This matters in exactly one place, which is verified, not theoretical:
-`ReviseInFlightGeometry` (paced_wire.go) runs on the EDGE MOVER's goroutine and computes
+There is exactly one place two copies are subtracted from each other —
+`ReviseInFlightGeometry` (paced_wire.go), which runs on the edge mover's goroutine and
+computes
 
     t = (nowTick - b.placementTick) / (b.arc / pulseSpeed)
 
-where `placementTick` was written by the SOURCE node's goroutine. Two clocks, subtracted.
+where `placementTick` was stamped from the source node's clock.
 
-**Resolution: a wire keeps ONE clock.** `pw.clock` stays a single object shared by the
-three goroutines that touch that wire (source placing/stepping, destination polling, edge
-mover revising). Then the subtraction above is within one clock and the offset cannot
-appear. Per-goroutine is the wrong granularity; **per-wire** is the boundary that matters,
-because a wire is the only place two goroutines' ticks are compared.
+An earlier draft called this a FLOOR: it argued a wire must keep one shared clock, which
+made the smallest shareable group a node plus its drive goroutines plus the edge movers of
+its out-wires — 3-5 goroutines, still shared, still a mutex, and the whole point lost.
 
-Everything else — node loop pacing, drive placement cadence, sleep — is self-contained
-within one goroutine and needs no agreement with anyone.
+**That was wrong.** The error at that subtraction IS the same offset: delta of ~1 tick over
+a crossing of tens of ticks, i.e. the same 1-2%. Having accepted that magnitude everywhere
+else, there is no basis for rejecting it here. The floor was exactness re-imported after it
+had already been dropped.
 
-## Delivery — the real open question
+So: **every clock user holds its own copy. Nothing is shared. `RealClock.mu` is deleted,
+not reduced.**
 
-This, not timing, is the hard part.
+## Delivery
 
-A speed change must reach every clock. It must NOT be droppable: a dropped transition
-means that goroutine runs at the wrong rate indefinitely, with no event to correct it.
-That is not the same class as a stale value that self-heals. `sendMoveLossy` discarded
-9345 of 9600 neighbour messages this session under a comment claiming drops were safe —
-do not reuse a lossy path here and do not add one.
+A speed change is now just a value each copy applies when it hears it. A copy that hears
+late is off by the amount already accepted above, so late delivery needs no special
+handling and no timestamp.
 
-Two unresolved shape questions:
+Still to settle, and it is plumbing rather than semantics:
 
-1. **`DriveHeld` goroutines have no inbox.** They are spawned per driven output and hold
-   only an `Out`. Reaching them needs a new channel per drive goroutine, or the clock
-   being a small value they re-read from somewhere they already touch.
-2. **Every paced loop grows a poll.** Look at `input/node.go`'s loop: it polls exactly one
-   channel (`FeedbackIn`) today. Each loop like it needs a second thing to check. That is
-   a change to the shape of every node kind, and it is the real cost of this work —
-   independent of whether the timing story is easy.
+- `DriveHeld` goroutines have no inbox — spawned per driven output, holding only an `Out`.
+- Every paced loop grows a second thing to check. `input/node.go` polls exactly one channel
+  (`FeedbackIn`) today.
 
-Settle both before writing code.
+A dropped change is still worse than a late one — that copy runs at the wrong rate with no
+event to correct it — so the path must not be lossy. But this is no longer a correctness
+cliff needing its own mechanism.
+
+## Trace.mu is NOT affected
+
+`Trace` cannot be copied. It is an accumulator: every event from every goroutine has to
+land in one place to become one buffer for the editor. Copies would produce N partial
+event streams and no whole picture. That mutex stays, and this plan does not touch it.
 
 ## What must be proven
 
-1. **Per-wire agreement holds.** A bead placed by the source goroutine and measured by the
-   edge mover during a geometry rebase must land at the same `t` as today. This is the one
-   place the split could bite, so it is the one test that must exist.
+1. **The rebase stays within tolerance.** A bead placed by the source goroutine and
+   measured by the edge mover during a geometry rebase must land within the accepted
+   1-2%-per-speed-change band — not identical to today, but visibly indistinguishable.
+   Assert the bound explicitly so the accepted magnitude is written down in code.
 2. **Delivery is not lossy.** A goroutine that is asleep when a transition is sent must
    still apply it on waking. Prove by sending during a sleep window and asserting the rate
    changes.
@@ -113,7 +118,8 @@ Settle both before writing code.
 
 ## What this buys
 
-- Deletes the widest-fan-in mutex in the system.
+- Deletes RealClock.mu outright — the widest-fan-in lock in the system, hit by ~16
+  goroutines on every cycle. Not reduced: removed.
 - The clock stops being an exception to the rule that nodes own their own state.
 
 ## What it costs
