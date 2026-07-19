@@ -947,7 +947,7 @@ func (md *MoveDispatch) sendMove(id string, msg moveMsg) {
 // (cascade-deadlock-fix.md): it fires the msgTap (at enqueue time, so tap-based tests'
 // counts/ordering match today's synchronous-send behavior) and then appends to ob —
 // never blocking. Bound once per node at construction (nm.sendMove = md.enqueueFor(nm.outbox))
-// so every send a nodeMover's own handle/handleTrigger performs — including the ones
+// so every send a nodeMover's own handle performs — including the ones
 // fanEdgesAndPartners makes on that node's behalf — goes through this node's own
 // outbox, never a raw blocking channel write.
 func (md *MoveDispatch) enqueueFor(ob *outbox) func(id string, msg moveMsg) {
