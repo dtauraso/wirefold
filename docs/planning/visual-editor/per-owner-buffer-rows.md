@@ -57,18 +57,28 @@ Rows will be from slightly different instants. That is the accepted premise.
 
 ## What this deletes
 
-- `Trace.mu` as a **state** path (see below — the event log is separate).
+- `Trace.mu` outright — state AND events. No shared accumulator remains.
 - `SnapshotState`'s accumulate-then-pack role. `Buffer/pack.go` survives; the ingest half
   in `snapshot.go` largely does not.
 - The `on*` event handlers that exist solely to write state the owner already had.
 
-## The Event block is NOT this
+## The Event block too — NO EXCEPTIONS
 
-`Event` is a real log — per-tick causal events, consumed only by the `.probe`
-buffer-decoded logger, never by the render path (CLAUDE.md says so explicitly). It is a
-genuine fan-in and it stays one, but its consumer is a human reading a debug file, so
-ordering is best-effort and contention does not matter. Keep it on its own path; do not
-let it hold the state design hostage.
+An earlier draft kept `Event` as a genuine fan-in on the grounds that a log is inherently
+an accumulation. It is not, and the exception is not needed.
+
+Each owner publishes its own recent events as an immutable slice alongside its row, and
+the packer concatenates them in row order — the same shape as beads. No accumulator
+anywhere, and `Trace.mu` is deleted outright rather than partially.
+
+What is given up is a global total order across different owners' events. **That ordering
+is already a fiction.** Today's log is in ARRIVAL ORDER AT THE DRAIN — channel delivery
+order, decided by the scheduler — not causal order. Two goroutines' events appear in
+whatever sequence they happened to be received. So per-owner streams lose no truth; they
+stop asserting a global sequence that was never real.
+
+Each owner's own events stay in that owner's order, which is the only ordering that was
+ever meaningful, and the only one a reader can act on.
 
 ## Open questions — settle before writing code
 
@@ -102,7 +112,7 @@ let it hold the state design hostage.
 3. **Frames stay complete.** Every node, edge and port has a row in every frame, even if
    its owner has published nothing since the last one. A missing row is not a small error;
    it is a node vanishing.
-4. `-race` clean at `-count=5`, plus the drag and persistence suites.
+
 
 ## What it costs
 
@@ -113,7 +123,8 @@ let it hold the state design hostage.
 
 ## What it buys
 
-- Deletes the last structural excuse for shared mutable state in the render path.
+- Deletes the last shared mutable state in the render path. No exceptions, no residual
+  accumulator.
 - The buffer becomes what the model already claims: each thing reports itself, nothing
   coordinates.
 - Removes a reassembly step for something that was never in pieces.
