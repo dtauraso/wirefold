@@ -24,7 +24,7 @@
 package Buffer
 
 // BufLayoutVersion is the schema version. Bump when any column changes.
-const BufLayoutVersion = 31
+const BufLayoutVersion = 32
 
 // BufInteriorSlotsPerNode is the fixed number of interior grid slots reserved per
 // node in the Interior block (a 2x2 held/interior-bead grid: slot = row*2 + col).
@@ -116,6 +116,16 @@ type bufLayoutNode struct {
 	// the AbcDragLabel overlay lists by name — it replaces the old single-recipient
 	// Overlay.LastAbcDragNodeRow column.
 	GotDragMsg uint8 `buf:"u8"` // 1 = this node has received at least one time.abc-drag message
+	// DragDeltaA/B/C carry the DRAGGED node's OWN quantized-triple change (newTriple -
+	// oldTriple, integer indices) that THIS node received on the CURRENT drag's
+	// neighborSetC message (see Trace.Event.DeltaA/B/C, nodes/Wiring/node_move.go
+	// requantizeLocalPolars). DRAG-SCOPED like GotDragMsg: set from KindAbcDrag's
+	// Event.DeltaA/B/C, cleared to 0 on KindAbcDragReset. Zero for a node that has not
+	// (yet, this drag) received a message, and legitimately zero for a node whose
+	// delta happened to be (0,0,0) — GotDragMsg is what distinguishes the two.
+	DragDeltaA int32 `buf:"i32"` // dragged node's own theta-index delta, this drag
+	DragDeltaB int32 `buf:"i32"` // dragged node's own phi-index delta, this drag
+	DragDeltaC int32 `buf:"i32"` // dragged node's own r-index delta, this drag
 }
 
 // bufLayoutInterior defines one row of the interior-bead column block.

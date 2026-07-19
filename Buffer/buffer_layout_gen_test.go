@@ -81,9 +81,10 @@ func TestSetNodeRow(t *testing.T) {
 		1,    // selected
 		3,    // kindID (Input = index 3 in NODE_DEFS_ARRAY)
 		7, 4, // labelOff, labelLen
-		1, // hovered
-		1, // latchedSel
-		1, // gotDragMsg
+		1,          // hovered
+		1,          // latchedSel
+		1,          // gotDragMsg
+		12, -34, 5, // dragDeltaA, dragDeltaB, dragDeltaC
 	)
 
 	assertF32At(t, buf, BufNodeColCX, 1.0, "CX")
@@ -104,6 +105,9 @@ func TestSetNodeRow(t *testing.T) {
 	assertU8At(t, buf, BufNodeColHovered, 1, "Hovered")
 	assertU8At(t, buf, BufNodeColLatchedSel, 1, "LatchedSel")
 	assertU8At(t, buf, BufNodeColGotDragMsg, 1, "GotDragMsg")
+	assertI32At(t, buf, BufNodeColDragDeltaA, 12, "DragDeltaA")
+	assertI32At(t, buf, BufNodeColDragDeltaB, -34, "DragDeltaB")
+	assertI32At(t, buf, BufNodeColDragDeltaC, 5, "DragDeltaC")
 }
 
 func TestSetEdgeRow(t *testing.T) {
@@ -164,9 +168,9 @@ func TestBeadStrideIsPackedSize(t *testing.T) {
 }
 
 func TestNodeStrideIsPackedSize(t *testing.T) {
-	// Node block: 5×f32 + 6×f32 (vr/fr normals) + 1×u8 (selected) + 1×u8 (kindID) + 2×u32 (label off/len) + 1×u8 (hovered) + 1×u8 (latchedSel) + 1×u8 (gotDragMsg)
-	//           = (5+6)×4 + 1 + 1 + 8 + 1 + 1 + 1 = 57
-	want := 5*4 + 6*4 + 1*1 + 1*1 + 2*4 + 1*1 + 1*1 + 1*1
+	// Node block: 5×f32 + 6×f32 (vr/fr normals) + 1×u8 (selected) + 1×u8 (kindID) + 2×u32 (label off/len) + 1×u8 (hovered) + 1×u8 (latchedSel) + 1×u8 (gotDragMsg) + 3×i32 (dragDelta A/B/C)
+	//           = (5+6)×4 + 1 + 1 + 8 + 1 + 1 + 1 + 12 = 69
+	want := 5*4 + 6*4 + 1*1 + 1*1 + 2*4 + 1*1 + 1*1 + 1*1 + 3*4
 	if BufNodeStride != want {
 		t.Errorf("BufNodeStride = %d, want %d (packed size)", BufNodeStride, want)
 	}

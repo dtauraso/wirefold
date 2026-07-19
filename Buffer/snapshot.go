@@ -229,6 +229,11 @@ type nodeSnapState struct {
 	// recipient SET the AbcDragLabel overlay lists by name, not an accumulating session
 	// total.
 	gotDragMsg uint8
+	// dragDeltaA/B/C mirror the DRAGGED node's own quantized-triple change (Event.
+	// DeltaA/B/C) that THIS node received on the CURRENT drag's KindAbcDrag event.
+	// DRAG-SCOPED like gotDragMsg: set alongside it from KindAbcDrag, cleared to 0
+	// alongside it on KindAbcDragReset.
+	dragDeltaA, dragDeltaB, dragDeltaC int32
 	// kindID is the node's kind as its index into NODE_DEFS_ARRAY (from NodeKindID).
 	// Set once on first KindNodeGeometry; subsequent re-emits don't change kind.
 	kindID uint8
@@ -406,6 +411,9 @@ func (s *SnapshotState) Update(ev T.Event) {
 		s.abcDragged = map[string]bool{}
 		for i := range s.nodes {
 			s.nodes[i].gotDragMsg = 0
+			s.nodes[i].dragDeltaA = 0
+			s.nodes[i].dragDeltaB = 0
+			s.nodes[i].dragDeltaC = 0
 		}
 		// Emit the CLEARED state. A drag that produces no AbcDrag marks at all is a real
 		// path (isolated node, unresolved neighbor center, lossy-dropped fan) — without
@@ -424,6 +432,9 @@ func (s *SnapshotState) Update(ev T.Event) {
 		s.abcDragged[ev.Node] = true
 		if idx, ok := s.nodeIndex[ev.Node]; ok {
 			s.nodes[idx].gotDragMsg = 1
+			s.nodes[idx].dragDeltaA = int32(ev.DeltaA)
+			s.nodes[idx].dragDeltaB = int32(ev.DeltaB)
+			s.nodes[idx].dragDeltaC = int32(ev.DeltaC)
 		}
 		s.emitSnapshot()
 
@@ -1024,7 +1035,8 @@ func (s *SnapshotState) writeNodeBlock(buf []byte, off int, b *snapshotBuild) in
 			float32(n.vrx), float32(n.vry), float32(n.vrz),
 			float32(n.frx), float32(n.fry), float32(n.frz),
 			n.selected, n.kindID,
-			b.labelOffs[i], b.labelLens[i], n.hovered, n.latchedSel, n.gotDragMsg)
+			b.labelOffs[i], b.labelLens[i], n.hovered, n.latchedSel, n.gotDragMsg,
+			n.dragDeltaA, n.dragDeltaB, n.dragDeltaC)
 	}
 	return off + int(b.nodeCount)*BufNodeStride
 }

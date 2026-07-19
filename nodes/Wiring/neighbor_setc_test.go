@@ -170,3 +170,85 @@ func TestNeighborSetCRequantizesEdgeNeighborStaysPut(t *testing.T) {
 
 	md.quantOffsetPersist.flush()
 }
+
+// TestNeighborSetCDeltaIsDraggedNodesOwnTripleChange proves the DRAGGED node's own
+// quantized-triple delta (moveMsg.DeltaA/B/C on the neighborSetC message) equals dst's
+// OWN new triple to src minus dst's OWN triple to src BEFORE the drag — computed once,
+// on dst's own goroutine — and that exact delta is what src (the recipient) receives.
+func TestNeighborSetCDeltaIsDraggedNodesOwnTripleChange(t *testing.T) {
+	root := writeTree(t)
+	md := loadTreeMD(t, root)
+	md.EnableEditPersist(root)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	md.Start(ctx)
+
+	lhDst, ok := md.layoutHolders["dst"]
+	if !ok {
+		t.Fatal("no LayoutHolder for dst")
+	}
+	var dstToSrcBefore LocalPolar
+	for _, lp := range lhDst.LocalPolarsSnapshot() {
+		if lp.To == "src" {
+			dstToSrcBefore = lp
+		}
+	}
+	if dstToSrcBefore.To != "src" {
+		t.Fatal("dst has no pre-drag LocalPolar entry for src")
+	}
+
+	var mu sync.Mutex
+	var recorded []moveMsg
+	md.SetMsgTap(func(destID string, msg moveMsg) {
+		if destID == "src" && msg.Kind == moveMsgKindNeighborSetC {
+			mu.Lock()
+			recorded = append(recorded, msg)
+			mu.Unlock()
+		}
+	})
+	defer md.SetMsgTap(nil)
+
+	dstBefore, ok := md.centerOfNode("dst")
+	if !ok {
+		t.Fatal("no center for dst")
+	}
+	target := dstBefore.add(vec3{X: 60, Y: 25, Z: -15})
+	if !md.RootMove("dst", target) {
+		t.Fatal("RootMove(dst) returned false")
+	}
+	pollDragConverged(t, md, "dst", target)
+
+	deadline := time.Now().Add(2 * time.Second)
+	var got moveMsg
+	for {
+		mu.Lock()
+		n := len(recorded)
+		if n > 0 {
+			got = recorded[n-1]
+		}
+		mu.Unlock()
+		if n > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("src never received a moveMsgKindNeighborSetC from dst")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	var dstToSrcAfter LocalPolar
+	for _, lp := range lhDst.LocalPolarsSnapshot() {
+		if lp.To == "src" {
+			dstToSrcAfter = lp
+		}
+	}
+	wantA := dstToSrcAfter.QuantITheta - dstToSrcBefore.QuantITheta
+	wantB := dstToSrcAfter.QuantIPhi - dstToSrcBefore.QuantIPhi
+	wantC := dstToSrcAfter.QuantIR - dstToSrcBefore.QuantIR
+	if got.DeltaA != wantA || got.DeltaB != wantB || got.DeltaC != wantC {
+		t.Fatalf("neighborSetC delta should be dst's own triple change (new-old): got=(%d,%d,%d) want=(%d,%d,%d) (before=%+v after=%+v)",
+			got.DeltaA, got.DeltaB, got.DeltaC, wantA, wantB, wantC, dstToSrcBefore, dstToSrcAfter)
+	}
+
+	md.quantOffsetPersist.flush()
+}

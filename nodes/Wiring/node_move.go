@@ -124,6 +124,14 @@ type moveMsg struct {
 	// the receiver's own step constant) to write onto the receiver's own LocalPolar
 	// record to SenderID.
 	SnapC int
+	// DeltaA/DeltaB/DeltaC (Kind == "neighborSetC"): the DRAGGED node's (SenderID's)
+	// own quantized-triple change (newTriple - oldTriple, integer indices) for ITS edge
+	// to this receiver, computed ONCE on SenderID's own goroutine in
+	// requantizeLocalPolars. Pure observability payload — the receiver reports it on the
+	// in-editor drag-log; it never applies it or recomputes its own position from it
+	// (that stays exactly the receiver-computes reposition already in place). Zero if
+	// SenderID had no prior stored triple to this receiver to subtract from.
+	DeltaA, DeltaB, DeltaC int
 	// Target (Kind == "drag"): the raw drag target world position for NodeID's
 	// owner-goroutine commit. Every node is a free move, so this is committed as-is.
 	Target vec3
@@ -283,7 +291,7 @@ type nodeMover struct {
 	// md.neighborSetCReposition. Dispatched from moveMsgKindNeighborSetC so a domain
 	// neighbor's holder AND world position are written only by that neighbor's OWN
 	// goroutine. nil in tests that build a bare nodeMover directly.
-	neighborSetC func(selfID, fromID string, fromCenter vec3)
+	neighborSetC func(selfID, fromID string, fromCenter vec3, deltaA, deltaB, deltaC int)
 	// outbox is this node's own outbound-message queue (see the outbox type doc
 	// comment). sendMove enqueues onto it (never blocks); a dedicated sender goroutine
 	// (spawned in MoveDispatch.Start) pops it in FIFO order and does the actual
@@ -359,7 +367,7 @@ func (m *nodeMover) handle(msg moveMsg) {
 		// its OWN edge to SenderID from the live offset — theta, phi AND r all fresh —
 		// so both the angle and the distance to SenderID change (neighborSetCRequantize).
 		if m.neighborSetC != nil {
-			m.neighborSetC(m.id, msg.SenderID, msg.FromCenter)
+			m.neighborSetC(m.id, msg.SenderID, msg.FromCenter, msg.DeltaA, msg.DeltaB, msg.DeltaC)
 		}
 		return
 	}
@@ -1253,7 +1261,11 @@ func (md *MoveDispatch) requantizePoleTraced(lh *LayoutHolder, updates map[strin
 // index x step, not re-derived. There is NO reposition: only fromID moved, so the incident
 // fromID-selfID edge redraws from fromID's own commit (fanEdgesAndPartners on fromID's
 // side). Single hop — no forward past selfID, no cascade. No-op for an unknown selfID.
-func (md *MoveDispatch) neighborSetCRequantize(selfID, fromID string, fromCenter vec3) {
+// deltaA/deltaB/deltaC are the DRAGGED node fromID's OWN quantized-triple change for its
+// edge to selfID (computed once on fromID's goroutine, see requantizeLocalPolars) —
+// pure observability payload carried through to the AbcDrag trace event, never applied
+// to selfID's own position/quantize math.
+func (md *MoveDispatch) neighborSetCRequantize(selfID, fromID string, fromCenter vec3, deltaA, deltaB, deltaC int) {
 	lh, ok := md.layoutHolders[selfID]
 	if !ok {
 		return
@@ -1284,11 +1296,13 @@ func (md *MoveDispatch) neighborSetCRequantize(selfID, fromID string, fromCenter
 			}
 		}
 		md.tr.Breadcrumb("abc-drag", selfID, fromID,
-			fmt.Sprintf("peer=%s peerCenter=(%.3f,%.3f,%.3f) abc=(%d,%d,%d)",
-				fromID, fromCenter.X, fromCenter.Y, fromCenter.Z, it, ip, ir))
+			fmt.Sprintf("peer=%s peerCenter=(%.3f,%.3f,%.3f) abc=(%d,%d,%d) delta=(%d,%d,%d)",
+				fromID, fromCenter.X, fromCenter.Y, fromCenter.Z, it, ip, ir, deltaA, deltaB, deltaC))
 		// Routed counterpart of the breadcrumb above: marks selfID in the buffer so the
 		// in-editor overlay log lists it (the breadcrumb alone never reaches the buffer).
-		md.tr.AbcDrag(selfID)
+		// deltaA/deltaB/deltaC ride along so the in-editor drag-log can show what selfID
+		// received.
+		md.tr.AbcDrag(selfID, deltaA, deltaB, deltaC)
 	}
 
 	if md.quantOffsetPersist != nil {
@@ -1439,6 +1453,15 @@ func (md *MoveDispatch) requantizeLocalPolars(nodeID string, newPos vec3) {
 	if len(updatesX) == 0 {
 		return
 	}
+	// Snapshot X's OWN triple to each neighbor BEFORE requantizePoleTraced mutates lhX,
+	// so the delta below is X's new triple minus X's CURRENT (pre-drag) triple — computed
+	// once, on X's own goroutine — per CLAUDE.md's model (each goroutine reports what it
+	// itself picked up). Pure observability: it does not gate or alter the requantize
+	// below in any way.
+	oldByTo := map[string]LocalPolar{}
+	for _, lp := range lhX.LocalPolarsSnapshot() {
+		oldByTo[lp.To] = lp
+	}
 	md.requantizePoleTraced(lhX, updatesX)
 	writePersist(nodeID, lhX)
 
@@ -1460,10 +1483,22 @@ func (md *MoveDispatch) requantizeLocalPolars(nodeID string, newPos vec3) {
 		lpByTo[lp.To] = lp
 	}
 	for m := range updatesX {
-		if _, ok := lpByTo[m]; !ok {
+		newLP, ok := lpByTo[m]
+		if !ok {
 			continue
 		}
-		md.sendMoveLossy(m, moveMsg{Kind: moveMsgKindNeighborSetC, NodeID: m, SenderID: nodeID, FromCenter: newPos})
+		// X's own triple-change for its edge to m: new - old, or (0,0,0) if X had no
+		// prior stored triple to m (nothing to subtract from — see requantizeLocalPolars
+		// doc). Computed once here, on X's own goroutine, and carried unmodified to
+		// EVERY recipient — not recomputed per-recipient.
+		var deltaA, deltaB, deltaC int
+		if oldLP, hadOld := oldByTo[m]; hadOld {
+			deltaA = newLP.QuantITheta - oldLP.QuantITheta
+			deltaB = newLP.QuantIPhi - oldLP.QuantIPhi
+			deltaC = newLP.QuantIR - oldLP.QuantIR
+		}
+		md.sendMoveLossy(m, moveMsg{Kind: moveMsgKindNeighborSetC, NodeID: m, SenderID: nodeID, FromCenter: newPos,
+			DeltaA: deltaA, DeltaB: deltaB, DeltaC: deltaC})
 	}
 }
 
