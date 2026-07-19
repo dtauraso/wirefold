@@ -2047,6 +2047,8 @@ func writeBufferLayoutGo(outPath string, schema bufLayoutSchema) error {
 	fmt.Fprintln(w, `import (`)
 	fmt.Fprintln(w, `	"encoding/binary"`)
 	fmt.Fprintln(w, `	"math"`)
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, `	T "github.com/dtauraso/wirefold/Trace"`)
 	fmt.Fprintln(w, `)`)
 	fmt.Fprintln(w)
 	fmt.Fprintf(w, "// BufLayoutVersionGenerated must equal BufLayoutVersion in layout.go.\n")
@@ -2073,8 +2075,80 @@ func writeBufferLayoutGo(outPath string, schema bufLayoutSchema) error {
 
 		// Writer function.
 		var params []string
-		if blk.name == "Camera" || blk.name == "Overlay" || blk.name == "RuleBuilder" || blk.name == "Scene" {
-			// Camera and Overlay always have exactly 1 row; omit row param.
+		if blk.name == "Overlay" {
+			// The Overlay block is a single row with several same-typed (uint8) boolean
+			// flag columns — a positional writer call here is exactly the "transposed
+			// adjacent same-typed args compiles silently" hazard. Emit a named-field
+			// struct (OverlayRow) instead: the writer takes ONE value, so there is no
+			// per-field positional list at the call site to transpose at all.
+			fmt.Fprintln(w, `// OverlayRow is the named-field snapshot of the Overlay block (single row).`)
+			fmt.Fprintln(w, `// Passed BY VALUE to SetOverlayRow so the write call never enumerates fields`)
+			fmt.Fprintln(w, `// positionally — closes the swapped-adjacent-uint8-args hazard a positional`)
+			fmt.Fprintln(w, `// writer call would otherwise compile silently.`)
+			fmt.Fprintln(w, `type OverlayRow struct {`)
+			for _, c := range blk.columns {
+				fmt.Fprintf(w, "\t%s %s\n", c.name, goParamType(c.bufType))
+			}
+			fmt.Fprintln(w, `}`)
+			fmt.Fprintln(w)
+			fmt.Fprintf(w, "// %s writes the %s row into buf (always 1 row; no row param).\n", writerFnGoName(blk.name), blk.name)
+			fmt.Fprintf(w, "func %s(buf []byte, row OverlayRow) {\n", writerFnGoName(blk.name))
+			for _, c := range blk.columns {
+				fname := "row." + c.name
+				off := fmt.Sprintf("%d", c.offset)
+				switch c.bufType {
+				case "f32":
+					fmt.Fprintf(w, "\tbinary.LittleEndian.PutUint32(buf[%s:], math.Float32bits(%s))\n", off, fname)
+				case "i32":
+					fmt.Fprintf(w, "\tbinary.LittleEndian.PutUint32(buf[%s:], uint32(%s))\n", off, fname)
+				case "u32":
+					fmt.Fprintf(w, "\tbinary.LittleEndian.PutUint32(buf[%s:], %s)\n", off, fname)
+				case "u8":
+					fmt.Fprintf(w, "\tbuf[%s] = %s\n", off, fname)
+				}
+			}
+			fmt.Fprintln(w, `}`)
+			fmt.Fprintln(w)
+
+			// overlayFlagFieldsOf / IsOverlayFlagKind: mechanically generated from the
+			// block's u8 columns (the boolean toggle flags — AbcDragCount is u32 and is
+			// excluded by type, not by a hand-maintained exclusion list). Each u8 column
+			// name X is matched to Trace's T.KindX by the same naming convention
+			// overlay_gen.go already relies on (method name == Trace Kind suffix).
+			var flagCols []bufCol
+			for _, c := range blk.columns {
+				if c.bufType == "u8" {
+					flagCols = append(flagCols, c)
+				}
+			}
+			fmt.Fprintln(w, `// overlayFlagFieldsOf returns the Trace-Kind -> field-pointer map used to apply an`)
+			fmt.Fprintln(w, `// incoming overlay-flag event to row. Mechanically generated from the Overlay`)
+			fmt.Fprintln(w, `// block's u8 columns in Buffer/layout.go — adding a flag column here requires no`)
+			fmt.Fprintln(w, `// separate hand-edit anywhere else.`)
+			fmt.Fprintln(w, `func overlayFlagFieldsOf(row *OverlayRow) map[string]*uint8 {`)
+			fmt.Fprintln(w, `	return map[string]*uint8{`)
+			for _, c := range flagCols {
+				fmt.Fprintf(w, "\t\tT.Kind%s: &row.%s,\n", c.name, c.name)
+			}
+			fmt.Fprintln(w, `	}`)
+			fmt.Fprintln(w, `}`)
+			fmt.Fprintln(w)
+			fmt.Fprintln(w, `// IsOverlayFlagKind reports whether kind is one of the Overlay block's u8`)
+			fmt.Fprintln(w, `// boolean-flag Trace Kinds (the keys overlayFlagFieldsOf returns) — used instead`)
+			fmt.Fprintln(w, `// of a hand-listed switch case in SnapshotState.Update.`)
+			fmt.Fprintln(w, `func IsOverlayFlagKind(kind string) bool {`)
+			fmt.Fprintln(w, `	switch kind {`)
+			var kindNames []string
+			for _, c := range flagCols {
+				kindNames = append(kindNames, "T.Kind"+c.name)
+			}
+			fmt.Fprintf(w, "\tcase %s:\n", strings.Join(kindNames, ", "))
+			fmt.Fprintln(w, `		return true`)
+			fmt.Fprintln(w, `	}`)
+			fmt.Fprintln(w, `	return false`)
+			fmt.Fprintln(w, `}`)
+		} else if blk.name == "Camera" || blk.name == "RuleBuilder" || blk.name == "Scene" {
+			// Camera/RuleBuilder/Scene always have exactly 1 row; omit row param.
 			for _, c := range blk.columns {
 				pname := strings.ToLower(c.name[:1]) + c.name[1:]
 				params = append(params, fmt.Sprintf("%s %s", pname, goParamType(c.bufType)))

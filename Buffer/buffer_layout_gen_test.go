@@ -146,7 +146,17 @@ func TestSetCameraRow(t *testing.T) {
 
 func TestSetOverlayRow(t *testing.T) {
 	buf := make([]byte, BufOverlayStride)
-	SetOverlayRow(buf, 1, 0, 1, 0, 1, 0, 0, 1, 42)
+	SetOverlayRow(buf, OverlayRow{
+		SceneTori:      1,
+		ScenePoles:     0,
+		NodePoles:      1,
+		SelSpherePoles: 0,
+		Handholds:      1,
+		LabelsGlobal:   0,
+		OverlaysVis:    0,
+		DoubleLinks:    1,
+		AbcDragCount:   42,
+	})
 
 	assertU8At(t, buf, BufOverlayColSceneTori, 1, "SceneTori")
 	assertU8At(t, buf, BufOverlayColScenePoles, 0, "ScenePoles")
