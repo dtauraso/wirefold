@@ -146,26 +146,13 @@ func defaultOverlayState() overlayState {
 // Overlay-visibility API — thin delegators to the owned overlayState. The public
 // signatures are unchanged (overlayToggles binds these method expressions).
 func (md *MoveDispatch) ToggleSceneTori(tr *T.Trace)      { md.ov.ToggleSceneTori(tr) }
-func (md *MoveDispatch) EmitSceneTori(tr *T.Trace)        { md.ov.EmitSceneTori(tr) }
 func (md *MoveDispatch) ToggleScenePoles(tr *T.Trace)     { md.ov.ToggleScenePoles(tr) }
-func (md *MoveDispatch) EmitScenePoles(tr *T.Trace)       { md.ov.EmitScenePoles(tr) }
 func (md *MoveDispatch) ToggleNodePoles(tr *T.Trace)      { md.ov.ToggleNodePoles(tr) }
-func (md *MoveDispatch) EmitNodePoles(tr *T.Trace)        { md.ov.EmitNodePoles(tr) }
 func (md *MoveDispatch) ToggleSelSpherePoles(tr *T.Trace) { md.ov.ToggleSelSpherePoles(tr) }
-func (md *MoveDispatch) EmitSelSpherePoles(tr *T.Trace)   { md.ov.EmitSelSpherePoles(tr) }
 func (md *MoveDispatch) ToggleHandholds(tr *T.Trace)      { md.ov.ToggleHandholds(tr) }
-func (md *MoveDispatch) EmitHandholds(tr *T.Trace)        { md.ov.EmitHandholds(tr) }
 func (md *MoveDispatch) ToggleLabelsGlobal(tr *T.Trace)   { md.ov.ToggleLabelsGlobal(tr) }
-func (md *MoveDispatch) EmitLabelsGlobal(tr *T.Trace)     { md.ov.EmitLabelsGlobal(tr) }
 func (md *MoveDispatch) ToggleOverlaysVis(tr *T.Trace)    { md.ov.ToggleOverlaysVis(tr) }
-func (md *MoveDispatch) EmitOverlaysVis(tr *T.Trace)      { md.ov.EmitOverlaysVis(tr) }
 func (md *MoveDispatch) ToggleDoubleLinks(tr *T.Trace)    { md.ov.ToggleDoubleLinks(tr) }
-func (md *MoveDispatch) EmitDoubleLinks(tr *T.Trace)      { md.ov.EmitDoubleLinks(tr) }
-
-// SetGuideVisibility delegates the wholesale explicit-visibility push.
-func (md *MoveDispatch) SetGuideVisibility(ov overlayState, tr *T.Trace) {
-	md.ov.SetGuideVisibility(ov, tr)
-}
 
 // overlayToggles maps an overlay FLAG name (the attr="toggle" wire name) to the
 // MoveDispatch method that flips it.

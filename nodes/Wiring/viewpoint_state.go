@@ -76,3 +76,25 @@ func (v *viewpointState) PanViewpoint(delta vec3, tr *T.Trace) {
 	v.pan(delta)
 	v.EmitViewpoint(tr)
 }
+
+// Camera viewpoint API — thin delegators to the owned viewpointState above.
+// The public signatures are unchanged; the state and behavior live on md.vp.
+
+func (md *MoveDispatch) SetViewpoint(pivot vec3, r float64, pos, up dir) {
+	md.vp.SetViewpoint(pivot, r, pos, up)
+}
+func (md *MoveDispatch) EmitViewpoint(tr *T.Trace)                { md.vp.EmitViewpoint(tr) }
+func (md *MoveDispatch) OrbitViewpoint(from, to dir, tr *T.Trace) { md.vp.OrbitViewpoint(from, to, tr) }
+func (md *MoveDispatch) OrbitLockedViewpoint(from, to dir, tr *T.Trace) {
+	md.vp.OrbitLockedViewpoint(from, to, tr)
+}
+func (md *MoveDispatch) ZoomViewpoint(factor float64, tr *T.Trace) { md.vp.ZoomViewpoint(factor, tr) }
+func (md *MoveDispatch) PanViewpoint(delta vec3, tr *T.Trace) {
+	// A dolly is a pure CAMERA move (the eye translates toward the cursor). It must NOT move the
+	// scene sphere: coupling them left md.sceneSphere.Center diverged from the movers' held
+	// center until a later broadcast reconciled it with a jump (the "zoom got canceled"
+	// symptom). Nothing moves the sphere — MODEL.md: "It is established once and never moves."
+	// Pan-moves-the-sphere is REJECTED doctrine, not a gap to fill; if it is ever revisited it
+	// must be its own gesture, never a side effect of a camera move.
+	md.vp.PanViewpoint(delta, tr)
+}

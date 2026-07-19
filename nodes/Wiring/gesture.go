@@ -479,35 +479,8 @@ func (md *MoveDispatch) gestPointerUp(ev rawInputMsg, slotReg SlotRegistry, tr *
 	g.reset(&md.vp.viewpoint)
 }
 
-// SetHoverPortByRow resolves nodeRow → node id and sets the SAME hover state updateHover
-// writes for a port hit (dedup + KindHover emit), so a keyboard-authoring preview highlights
-// the target port in the streamed buffer exactly like pointer hover does.
-func (md *MoveDispatch) SetHoverPortByRow(nodeRow int, portName string, isInput bool, tr *T.Trace) {
-	if md.nodeRows == nil {
-		return
-	}
-	node, ok := md.nodeRows.LookupNodeRow(nodeRow)
-	if !ok {
-		return
-	}
-	md.setHover(node, portName, isInput, tr)
-}
-
-// SetHoverNodeByRow resolves nodeRow → node id and sets the SAME hover state updateHover
-// writes for a torus/node hit (node hover, no port).
-func (md *MoveDispatch) SetHoverNodeByRow(nodeRow int, tr *T.Trace) {
-	if md.nodeRows == nil {
-		return
-	}
-	node, ok := md.nodeRows.LookupNodeRow(nodeRow)
-	if !ok {
-		return
-	}
-	md.setHover(node, "", false, tr)
-}
-
-// setHover is the shared dedupe+emit hover write used by both updateHover (pointer path) and
-// SetHoverPortByRow/SetHoverNodeByRow (keyboard-authoring preview path).
+// setHover is the shared dedupe+emit hover write; updateHover (pointer path) is its
+// one caller.
 func (md *MoveDispatch) setHover(node, port string, isInput bool, tr *T.Trace) {
 	if node == md.hoverNode && port == md.hoverPort && isInput == md.hoverInput {
 		return // no change → no re-emit (dedupe)

@@ -116,9 +116,8 @@ type moveMsg struct {
 	AnchorId int
 	// Center (Kind == "center"): the re-propagated world center for NodeID under the
 	// polar layout. Each owning node/edge goroutine writes it onto its held geom
-	// and re-emits its own geometry. (RootMove is now a thin wrapper over
-	// rootMoveViaMessages — the decentralized node-to-node message cascade; there is
-	// no central fan-out step.)
+	// and re-emits its own geometry. (RootMove is the decentralized node-to-node
+	// message cascade entry; there is no central fan-out step.)
 	Center *vec3
 	// Centers (Kind == "centers"): batched per-edge re-propagation. Maps node id → new
 	// world center for every moved endpoint of THIS edge in a single frame, so an edge
@@ -1023,8 +1022,8 @@ func (md *MoveDispatch) sendMove(id string, msg moveMsg) {
 		return
 	}
 	// Blocking send with a ctx-cancel escape hatch: this is the bare directory
-	// send used by external entry points (RootMove -> rootMoveViaMessages) that
-	// have no owning mover goroutine to thread a ctx from. Without the
+	// send used by external entry points (RootMove) that have no owning mover
+	// goroutine to thread a ctx from. Without the
 	// ctx.Done() arm, a send into a torn-down/full inbox on shutdown parks this
 	// goroutine forever (the target's inbox-drain goroutine has already
 	// returned on the same ctx cancel, so nothing will ever drain it). md.ctx is
@@ -1414,34 +1413,25 @@ func (md *MoveDispatch) commitNodeMoveLocal(nodeID string, newPos vec3) {
 // node's new world position is the drag target itself — CONTINUOUS, not snapped to any
 // grid (double-link local-polar model: the node's position is free; only each
 // neighbor's DISTANCE to it is quantized, each on that neighbor's own small grid — see
-// requantizeLocalPolars). The node's center is fanned out (re-emitting its own +
-// incident edges' geometry, with the fresh reach radius), its scene-center scalar
-// triple is remeasured + persisted (still the reload/render position source), and every
-// affected double-link's local polars are re-quantized on BOTH ends. Returns false for
-// an unknown node.
+// requantizeLocalPolars).
+//
+// RootMove is the decentralized drag entry, widened to EVERY node (the generalization
+// that came with the quantizedOffsets data-race fix): dragging any node does not commit
+// on the stdin reader's own goroutine — it routes a single moveMsgKindDrag to the
+// dragged node's OWN inbox and returns. The dragged node's own moveMsgKindDrag handler
+// (nodeMover.handle) does the rest, entirely on its own goroutine: commit its own new
+// position (commitLocal — fan + persist + requantize, no cross-goroutine self-send).
+// commitLocal's requantizeLocalPolars then sends every direct domain neighbor a single
+// moveMsgKindNeighborSetC assignment (see that function's doc comment) — there is no
+// equal-radii solve, no rule-node cascade, no gate-anchor fan-out; a drag never touches
+// any node's position but its own. Returns false for an unknown node.
+//
+// NOTE: RootMove runs ONCE PER POINTER-MOVE EVENT, not once per drag (two bugs — commits
+// 338f05da, 154a05bd — came from assuming otherwise; see
+// memory/project_rootmove_is_per_pointer_move.md). The drag-log reset is NOT emitted
+// here for that reason: the reset belongs at the real drag-start edge (the
+// pending→dragging transition in gesture.go), not on every move tick RootMove sees.
 func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
-	// NOTE: the drag-log reset is NOT emitted here. RootMove runs once per pointer-move
-	// event, not once per drag; the reset belongs at the real drag-start edge (the
-	// pending→dragging transition in gesture.go).
-	//
-	// EVERY node's drag is a FREE move on the decentralized goroutine-message path —
-	// no equal-radii solve, no rule/gate/anchor cascade. The dragged node commits its
-	// own new position, then requantizeLocalPolars fans a single neighborSetC
-	// assignment to every direct domain neighbor.
-	return md.rootMoveViaMessages(nodeID, target)
-}
-
-// rootMoveViaMessages is the decentralized drag entry, widened to EVERY node (the
-// generalization that came with the quantizedOffsets data-race fix): dragging any node
-// no longer commits on the stdin reader's own goroutine — it routes a single
-// moveMsgKindDrag to the dragged node's OWN inbox and returns. The dragged node's own
-// moveMsgKindDrag handler (nodeMover.handle) does the rest, entirely on its own
-// goroutine: commit its own new position (commitLocal — fan + persist + requantize,
-// no cross-goroutine self-send). commitLocal's requantizeLocalPolars then sends every
-// direct domain neighbor a single moveMsgKindNeighborSetC assignment (see that
-// function's doc comment) — there is no equal-radii solve, no rule-node cascade, no
-// gate-anchor fan-out; a drag never touches any node's position but its own.
-func (md *MoveDispatch) rootMoveViaMessages(nodeID string, target vec3) bool {
 	if _, ok := md.nodeMovers[nodeID]; !ok {
 		return false
 	}
@@ -1605,82 +1595,6 @@ func (md *MoveDispatch) NodeKind(nodeID string) string {
 		return nm.geom.Kind
 	}
 	return ""
-}
-
-// Camera viewpoint API — thin delegators to the owned viewpointState (viewpoint_state.go).
-// The public signatures are unchanged; the state and behavior live on md.vp.
-
-func (md *MoveDispatch) SetViewpoint(pivot vec3, r float64, pos, up dir) {
-	md.vp.SetViewpoint(pivot, r, pos, up)
-}
-func (md *MoveDispatch) EmitViewpoint(tr *T.Trace)                { md.vp.EmitViewpoint(tr) }
-func (md *MoveDispatch) OrbitViewpoint(from, to dir, tr *T.Trace) { md.vp.OrbitViewpoint(from, to, tr) }
-func (md *MoveDispatch) OrbitLockedViewpoint(from, to dir, tr *T.Trace) {
-	md.vp.OrbitLockedViewpoint(from, to, tr)
-}
-func (md *MoveDispatch) ZoomViewpoint(factor float64, tr *T.Trace) { md.vp.ZoomViewpoint(factor, tr) }
-func (md *MoveDispatch) PanViewpoint(delta vec3, tr *T.Trace) {
-	// A dolly is a pure CAMERA move (the eye translates toward the cursor). It must NOT move the
-	// scene sphere: coupling them left md.sceneSphere.Center diverged from the movers' held
-	// center until a later broadcast reconciled it with a jump (the "zoom got canceled"
-	// symptom). Nothing moves the sphere — MODEL.md: "It is established once and never moves."
-	// Pan-moves-the-sphere is REJECTED doctrine, not a gap to fill; if it is ever revisited it
-	// must be its own gesture, never a side effect of a camera move.
-	md.vp.PanViewpoint(delta, tr)
-}
-
-// flushPendingPersists synchronously flushes every debounced persister's pending value on
-// clean process shutdown (RunStdinReader's stdin-EOF/channel-close return paths). Without
-// this, a drag/gesture that lands within the 250ms debounce window of exit is silently
-// abandoned — the write never happens and the edit reverts on the next load. Each persister
-// is nil-guarded (some may be unarmed in tests/headless runs); posPersist is an inert stub
-// (writes nothing) and is intentionally skipped.
-func (md *MoveDispatch) flushPendingPersists() {
-	if md == nil {
-		return
-	}
-	md.quantOffsetPersist.flushPending()
-	md.anchorPersist.flushPending()
-	md.vpPersist.flushPending()
-	md.overlaysPersist.flushPending()
-	// The scene sphere is established once at load and never moves again (MODEL.md), so its
-	// debounce is rarely pending, but flushing it here too is cheap and matches the "save"
-	// command's behavior (handleSaveMsg) for completeness.
-	if md.spherePersist != nil {
-		md.spherePersist.flushNow(md.sceneSphere)
-	}
-}
-
-// EnableViewpointPersist arms gesture-driven camera persistence: every subsequent
-// EmitViewpoint (orbit/zoom/pan/home) debounces a write of the current viewpoint to
-// `<topologyPath>/view/scene.json`'s cameraPolar (scene_camera_persist.go). Call AFTER
-// SeedInitialViewpoint so the seed's own emit does not write the loaded/default pose back.
-// Go owns this write (MODEL.md); the old path persists the camera via its own TS scene-save.
-func (md *MoveDispatch) EnableViewpointPersist(topologyPath string) {
-	p := &viewpointPersister{path: sceneCameraPath(topologyPath), debounce: viewpointPersistDebounce}
-	md.vpPersist = p
-	md.vp.persist = p.schedule
-}
-
-// EnableEditPersist arms disk persistence for the FSM-applied topology edits:
-//   - node-drag (RootMove) → the moved node's x/y/z in <root>/nodes/<id>/meta.json
-//   - ring-move (applyRingAnchor) → the port's anchorId in the port json file
-//   - overlays (applyUpdate toggle/set) → overlay-visibility keys in view/scene.json
-//
-// Node-position + anchor persistence needs the per-node/per-port files of the directory-tree
-// form; for a monolithic topology.json (no per-node files) their root is "" and those two
-// persisters no-op. Call AFTER SeedInitialViewpoint so the seed emits do not write the
-// loaded state back.
-func (md *MoveDispatch) EnableEditPersist(topologyPath string) {
-	// sceneTreeRoot handles both the directory form and the file-inside-tree form (and
-	// returns "" for a true monolithic topology with no tree), making the two-form bug
-	// class unrepresentable here. Do not hand-roll os.Stat/IsDir — use sceneTreeRoot.
-	root := sceneTreeRoot(topologyPath)
-	md.posPersist = &nodePosPersister{root: root, debounce: viewpointPersistDebounce}
-	md.anchorPersist = &anchorPersister{root: root, debounce: viewpointPersistDebounce}
-	md.overlaysPersist = &overlaysPersister{path: sceneCameraPath(topologyPath), debounce: viewpointPersistDebounce}
-	md.spherePersist = &sceneSpherePersister{path: sceneCameraPath(topologyPath), debounce: viewpointPersistDebounce}
-	md.quantOffsetPersist = &quantOffsetPersister{root: root, debounce: viewpointPersistDebounce}
 }
 
 // Overlay-visibility API (MoveDispatch delegators), the overlayState methods, the

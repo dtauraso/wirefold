@@ -1722,21 +1722,17 @@ func writeOverlayGen(outPath string, flags []overlayFlag) error {
 	fmt.Fprintln(w, `}`)
 	fmt.Fprintln(w)
 
-	// MoveDispatch delegators.
+	// MoveDispatch delegators. Only Toggle* (and accessors) are delegated: callers
+	// that need Emit*/SetGuideVisibility reach md.ov directly (no MoveDispatch-level
+	// Emit tier — see scene_overlays_persist.go).
 	fmt.Fprintln(w, `// Overlay-visibility API — thin delegators to the owned overlayState. The public`)
 	fmt.Fprintln(w, `// signatures are unchanged (overlayToggles binds these method expressions).`)
 	for _, f := range flags {
 		fmt.Fprintf(w, "func (md *MoveDispatch) Toggle%s(tr *T.Trace) { md.ov.Toggle%s(tr) }\n", f.method, f.method)
-		fmt.Fprintf(w, "func (md *MoveDispatch) Emit%s(tr *T.Trace) { md.ov.Emit%s(tr) }\n", f.method, f.method)
 		if f.accessor {
 			fmt.Fprintf(w, "func (md *MoveDispatch) %s() bool { return md.ov.%s() }\n", f.method, f.method)
 		}
 	}
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, `// SetGuideVisibility delegates the wholesale explicit-visibility push.`)
-	fmt.Fprintln(w, `func (md *MoveDispatch) SetGuideVisibility(ov overlayState, tr *T.Trace) {`)
-	fmt.Fprintln(w, "\tmd.ov.SetGuideVisibility(ov, tr)")
-	fmt.Fprintln(w, `}`)
 	fmt.Fprintln(w)
 
 	// overlayToggles map (sentinel-bounded for check-edit-op-parity.sh axis 3).

@@ -325,8 +325,8 @@ func TestRotatingPolePersistReload(t *testing.T) {
 // inconsistent with the resolved pole. Writes a tree whose src/meta.json carries a stored
 // localPolars entry with a bearing that is NOT consistent with the live dst offset, and
 // asserts that after load, reconstructing the stored bearing under the resolved pole
-// (fromAxisFrame) lands within one step cell of the live offset direction, while Role
-// and QuantIR are preserved verbatim.
+// (fromAxisFrame) lands within one step cell of the live offset direction, while
+// QuantIR is preserved verbatim.
 func TestComputeLocalPolarsRequantizesStoredBearingAboutResolvedPole(t *testing.T) {
 	root := t.TempDir()
 	mk := func(rel, body string) {
@@ -341,8 +341,10 @@ func TestComputeLocalPolarsRequantizesStoredBearingAboutResolvedPole(t *testing.
 	// src's stored localPolars entry for dst carries a bearing (quantITheta/quantIPhi)
 	// that is deliberately bogus/stale — NOT what src↔dst's live geometry implies about
 	// any pole — so computeLocalPolars must re-quantize this stored bearing about the
-	// freshly-resolved pole rather than trusting the stale numbers. Role and quantIR must
-	// survive untouched.
+	// freshly-resolved pole rather than trusting the stale numbers. quantIR must
+	// survive untouched. The stored "role" key is retained ONLY for on-disk
+	// compatibility with old meta.json files (unconsumed field, JSON decode
+	// silently ignores it — LocalPolar has no Role field).
 	mk("nodes/src/meta.json", `{"id":"src","type":"FanInSrc","r":100,"scenePolarR":37.4165738677,"scenePolarTheta":1.00685368543,"scenePolarPhi":1.2490457724,"localPolars":[{"to":"dst","role":"source","quantITheta":9999,"quantIPhi":-9999,"quantIR":42}]}`)
 	mk("nodes/src/outputs/Out.json", `{"name":"Out"}`)
 	mk("nodes/dst/meta.json", `{"id":"dst","type":"FanInSink","r":100,"scenePolarR":87.7496438739,"scenePolarTheta":0.96453035788,"scenePolarPhi":-2.15879893034}`)
@@ -375,9 +377,6 @@ func TestComputeLocalPolarsRequantizesStoredBearingAboutResolvedPole(t *testing.
 	}
 	if got == nil {
 		t.Fatal("src has no local polar entry for dst after load")
-	}
-	if got.Role != "source" {
-		t.Fatalf("Role not preserved: got %q want %q", got.Role, "source")
 	}
 	if got.QuantIR != 42 {
 		t.Fatalf("QuantIR not preserved: got %d want 42", got.QuantIR)
