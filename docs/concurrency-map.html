@@ -559,10 +559,10 @@
           <text class="d-t" x="724" y="172">dest node</text>
           <text class="d-ts" x="724" y="189">own goroutine</text>
 
-          <rect class="d-box-sig" x="230" y="140" width="400" height="68" rx="6"/>
-          <text class="d-t" x="248" y="164">PacedWire</text>
-          <text class="d-ts" x="248" y="182">inflight · delivered · nextGen</text>
-          <text class="d-ts" x="248" y="198">all mutation under mu</text>
+          <rect class="d-box-passive" x="230" y="140" width="400" height="68" rx="6"/>
+          <text class="d-t" x="248" y="162">PacedWire</text>
+          <text class="d-ts" x="248" y="178">passive — never runs; stepped by the source</text>
+          <text class="d-ts" x="248" y="194">inflight · delivered · nextGen, all under mu</text>
 
           <line class="d-arrow-sig" x1="152" y1="174" x2="226" y2="174"/>
           <path class="d-arrow-sig" d="M218 170 L228 174 L218 178"/>
