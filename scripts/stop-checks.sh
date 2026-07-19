@@ -57,10 +57,18 @@ if [ -n "$go_changed" ]; then
     out+="go build failed:\n$go_out\n\n"
     fail=1
   fi
-  # go test — fast/cached here (~0.2s), so run it on the same gate as go build
+  # go test -race — fast/cached here, so run it on the same gate as go build
   # (Go changed / branch ahead of origin/main). This was the one verify step
   # living outside the suite.
-  if ! gotest_out=$(go test ./... 2>&1); then
+  #
+  # -race is NOT optional here. This model is per-node mover goroutines, per-edge
+  # edgeMover goroutines, PacedWire goroutines, atomic center snapshots, and a
+  # Trace drain goroutine — the exact shape the race detector exists for, and the
+  # exact shape nothing else in this suite can check. The persistence tests, which
+  # spin up the real network and drive drags, are the ideal race workload; running
+  # them WITHOUT -race was leaving the best detector we have switched off.
+  # Measured cost on this repo: 4.9s -> 6.3s uncached. Cheap for what it covers.
+  if ! gotest_out=$(go test -race ./... 2>&1); then
     out+="go test failed:\n$gotest_out\n\n"
     fail=1
   fi

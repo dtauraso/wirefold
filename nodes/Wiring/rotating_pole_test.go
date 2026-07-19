@@ -329,15 +329,7 @@ func TestRotatingPolePersistReload(t *testing.T) {
 // QuantIR is preserved verbatim.
 func TestComputeLocalPolarsRequantizesStoredBearingAboutResolvedPole(t *testing.T) {
 	root := t.TempDir()
-	mk := func(rel, body string) {
-		p := filepath.Join(root, rel)
-		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-			t.Fatalf("mkdir %s: %v", p, err)
-		}
-		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
-			t.Fatalf("write %s: %v", p, err)
-		}
-	}
+	mk := func(rel, body string) { writeTreeFile(t, root, rel, body) }
 	// src's stored localPolars entry for dst carries a bearing (quantITheta/quantIPhi)
 	// that is deliberately bogus/stale — NOT what src↔dst's live geometry implies about
 	// any pole — so computeLocalPolars must re-quantize this stored bearing about the

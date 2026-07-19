@@ -188,8 +188,9 @@ func TestSnapshotRoundTrip(t *testing.T) {
 
 	// ── Size check ───────────────────────────────────────────────────────────
 	// Trailing self-sizing sections (header counts at offsets 24/28/32): the EVENT block,
-	// port-name bytes, edge-label bytes. The fixture feeds events + an edge label, so these
-	// are non-zero — read their counts from the header rather than hard-coding.
+	// port-name bytes, edge-label bytes. The fixture feeds events but no ports and no edge
+	// label, so only eventCount is non-zero here — read all three counts from the header
+	// rather than hard-coding, since a zero count still needs to size correctly.
 	eventCount := readU32(snap, 24)
 	portNameBytesCount := readU32(snap, 28)
 	edgeLabelBytesCount := readU32(snap, 32)
