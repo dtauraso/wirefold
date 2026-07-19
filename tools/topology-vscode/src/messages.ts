@@ -140,9 +140,10 @@ export type WebviewToHostMsg =
   | EditMsg;
 
 export type HostToWebviewMsg =
-  // Phase 3: binary snapshot from Go's fd3 side channel.
+  // Binary snapshot from Go's fd3 side channel — the ONLY render path (see
+  // webview/snapshot-buffer.ts + handle-message.ts); there is no separate JSON-trace
+  // render path and no pending phase to flip to.
   // The ArrayBuffer is transferred zero-copy (postMessage transferable).
-  // Phase 5 will render from it; for now the webview stubs the handler.
   // Go → TS is the binary content buffer ONLY (no id/label sidecar): each node's human label
   // rides the buffer node block (LabelOff/LabelLen into the trailing label section) and is
   // decoded row-keyed via buffer-decode nodeLabel.

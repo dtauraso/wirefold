@@ -27,9 +27,9 @@ import (
 func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath string, topologyPath string, clk W.Clock) {
 	// Open the binary snapshot output channel (default fd 3; set WIREFOLD_BUF_OUT_FD=0
 	// to disable). Writes are fire-and-forget: if fd 3 is not connected nothing reads
-	// it and write errors are silently ignored (on-but-harmless until rollout flip).
-	// At rollout flip (a later phase) this becomes the sole framed stdout once JSON
-	// trace is removed; for now it runs in parallel on a side file descriptor.
+	// it and write errors are silently ignored. This is the SOLE framed output channel
+	// today — the JSON trace on stdout was already removed (see the sink=nil comment
+	// below); there is no pending migration.
 	var snapOut *os.File
 	{
 		fdNum := 3

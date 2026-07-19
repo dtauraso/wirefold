@@ -7,6 +7,8 @@ package Buffer
 import (
 	"encoding/binary"
 	"math"
+
+	T "github.com/dtauraso/wirefold/Trace"
 )
 
 // BufLayoutVersionGenerated must equal BufLayoutVersion in layout.go.
@@ -226,17 +228,61 @@ const (
 	BufOverlayStride            = 12
 )
 
+// OverlayRow is the named-field snapshot of the Overlay block (single row).
+// Passed BY VALUE to SetOverlayRow so the write call never enumerates fields
+// positionally — closes the swapped-adjacent-uint8-args hazard a positional
+// writer call would otherwise compile silently.
+type OverlayRow struct {
+	SceneTori      uint8
+	ScenePoles     uint8
+	NodePoles      uint8
+	SelSpherePoles uint8
+	Handholds      uint8
+	LabelsGlobal   uint8
+	OverlaysVis    uint8
+	DoubleLinks    uint8
+	AbcDragCount   uint32
+}
+
 // SetOverlayRow writes the Overlay row into buf (always 1 row; no row param).
-func SetOverlayRow(buf []byte, sceneTori uint8, scenePoles uint8, nodePoles uint8, selSpherePoles uint8, handholds uint8, labelsGlobal uint8, overlaysVis uint8, doubleLinks uint8, abcDragCount uint32) {
-	buf[0] = sceneTori
-	buf[1] = scenePoles
-	buf[2] = nodePoles
-	buf[3] = selSpherePoles
-	buf[4] = handholds
-	buf[5] = labelsGlobal
-	buf[6] = overlaysVis
-	buf[7] = doubleLinks
-	binary.LittleEndian.PutUint32(buf[8:], abcDragCount)
+func SetOverlayRow(buf []byte, row OverlayRow) {
+	buf[0] = row.SceneTori
+	buf[1] = row.ScenePoles
+	buf[2] = row.NodePoles
+	buf[3] = row.SelSpherePoles
+	buf[4] = row.Handholds
+	buf[5] = row.LabelsGlobal
+	buf[6] = row.OverlaysVis
+	buf[7] = row.DoubleLinks
+	binary.LittleEndian.PutUint32(buf[8:], row.AbcDragCount)
+}
+
+// overlayFlagFieldsOf returns the Trace-Kind -> field-pointer map used to apply an
+// incoming overlay-flag event to row. Mechanically generated from the Overlay
+// block's u8 columns in Buffer/layout.go — adding a flag column here requires no
+// separate hand-edit anywhere else.
+func overlayFlagFieldsOf(row *OverlayRow) map[string]*uint8 {
+	return map[string]*uint8{
+		T.KindSceneTori:      &row.SceneTori,
+		T.KindScenePoles:     &row.ScenePoles,
+		T.KindNodePoles:      &row.NodePoles,
+		T.KindSelSpherePoles: &row.SelSpherePoles,
+		T.KindHandholds:      &row.Handholds,
+		T.KindLabelsGlobal:   &row.LabelsGlobal,
+		T.KindOverlaysVis:    &row.OverlaysVis,
+		T.KindDoubleLinks:    &row.DoubleLinks,
+	}
+}
+
+// IsOverlayFlagKind reports whether kind is one of the Overlay block's u8
+// boolean-flag Trace Kinds (the keys overlayFlagFieldsOf returns) — used instead
+// of a hand-listed switch case in SnapshotState.Update.
+func IsOverlayFlagKind(kind string) bool {
+	switch kind {
+	case T.KindSceneTori, T.KindScenePoles, T.KindNodePoles, T.KindSelSpherePoles, T.KindHandholds, T.KindLabelsGlobal, T.KindOverlaysVis, T.KindDoubleLinks:
+		return true
+	}
+	return false
 }
 
 // ── Scene block ──────────────────────────────────────────────

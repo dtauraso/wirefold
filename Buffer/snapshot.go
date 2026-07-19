@@ -5,7 +5,9 @@
 //
 // Output channel: binary frames are written to a dedicated file descriptor
 // (default fd 3, overridable via WIREFOLD_BUF_OUT_FD env var; set to "0" to
-// disable). The JSON trace on stdout (fd 1) is completely untouched.
+// disable). This is the SOLE framed channel: the JSON trace on stdout was
+// already removed end-to-end (see main.go, Trace/Trace.go); there is no
+// separate JSON stream and no pending migration.
 //
 // Frame format: [len:u32-LE][snapshot bytes]
 //
@@ -27,8 +29,8 @@
 //	PortName portNameBytesCount bytes          (port names' UTF-8 bytes, flattened port-row order)
 //	EdgeLabel edgeLabelBytesCount bytes        (edge labels' UTF-8 bytes, edge-row order)
 //
-// At the rollout flip (a later phase), this becomes the sole framed stdout once
-// the JSON trace is removed. For now it runs alongside JSON on a side channel.
+// This buffer is the sole framed channel Go emits (no pending rollout flip):
+// the JSON trace was already removed, not deferred to a later phase.
 //
 // All SnapshotState methods must be called from a single goroutine (the Trace
 // drain goroutine). No internal synchronisation.
@@ -88,8 +90,13 @@ type SnapshotState struct {
 	abcDragged map[string]bool
 
 	// Camera, overlay, and scene-sphere singletons (always one row each in the snapshot).
-	camera  cameraSnapState
-	overlay overlaySnapState
+	camera cameraSnapState
+	// overlay IS the generated OverlayRow (buffer_layout_gen.go) — the same struct type
+	// that writeOverlayBlock passes to SetOverlayRow BY VALUE. There is no separate
+	// hand-authored mirror struct to keep in sync with the Overlay block's columns: the
+	// row we mutate on incoming events is exactly the row we write, named field by
+	// named field, with no positional arg list anywhere in between.
+	overlay OverlayRow
 	scene   sceneSnapState
 
 	// tick is the monotonic snapshot sequence counter.
@@ -132,10 +139,12 @@ type SnapshotState struct {
 	kindID map[string]uint8
 
 	// overlayFlagFields maps a bare-visibility-toggle trace Kind to the *uint8 field on
-	// s.overlay it sets. Collapses the nine identical
+	// s.overlay it sets. Collapses the eight identical
 	// "s.overlay.X = boolU8(ev.Visible); s.emitSnapshot()" Update cases into one lookup+set.
-	// Built once in NewSnapshotState (pointers into s.overlay, valid for the state's
-	// lifetime since overlay is a fixed-offset struct field, not reallocated).
+	// Built once in NewSnapshotState via the GENERATED overlayFlagFieldsOf (buffer_layout_gen.go,
+	// mechanically derived from the Overlay block's u8 columns in Buffer/layout.go — pointers
+	// into s.overlay, valid for the state's lifetime since overlay is a fixed-offset struct
+	// field, not reallocated).
 	overlayFlagFields map[string]*uint8
 
 	// tickSource, when non-nil, is the network's one human-speed clock (Wiring.Clock.Tick),
@@ -314,19 +323,6 @@ type sceneSnapState struct {
 	radius     float64
 }
 
-// overlaySnapState mirrors the overlay block (single row).
-type overlaySnapState struct {
-	sceneTori      uint8
-	scenePoles     uint8
-	nodePoles      uint8
-	selSpherePoles uint8
-	handholds      uint8
-	labelsGlobal   uint8
-	overlaysVis    uint8
-	doubleLinks    uint8
-	abcDragCount   uint32
-}
-
 // NewSnapshotState creates an empty SnapshotState that writes framed snapshots
 // to out. Pass nil for out to build snapshots without emitting them (useful in
 // tests that only inspect state).
@@ -341,16 +337,7 @@ func NewSnapshotState(out io.Writer) *SnapshotState {
 		kindID:          buildKindIDMap(),
 		lastPosEmitTick: -1,
 	}
-	s.overlayFlagFields = map[string]*uint8{
-		T.KindSceneTori:      &s.overlay.sceneTori,
-		T.KindScenePoles:     &s.overlay.scenePoles,
-		T.KindNodePoles:      &s.overlay.nodePoles,
-		T.KindSelSpherePoles: &s.overlay.selSpherePoles,
-		T.KindHandholds:      &s.overlay.handholds,
-		T.KindLabelsGlobal:   &s.overlay.labelsGlobal,
-		T.KindOverlaysVis:    &s.overlay.overlaysVis,
-		T.KindDoubleLinks:    &s.overlay.doubleLinks,
-	}
+	s.overlayFlagFields = overlayFlagFieldsOf(&s.overlay)
 	return s
 }
 
@@ -371,6 +358,17 @@ func (s *SnapshotState) Update(ev T.Event) {
 	// Record the causal event for the buffer-decoded .probe log BEFORE mutating state, so the
 	// EVENT block flushed by the next emitSnapshot mirrors exactly the events seen this window.
 	s.recordEvent(ev)
+	// Overlay boolean-flag events (scene-tori, scene-poles, …) are dispatched via the
+	// GENERATED IsOverlayFlagKind/overlayFlagFieldsOf (buffer_layout_gen.go, mechanically
+	// derived from the Overlay block's u8 columns in Buffer/layout.go) rather than a
+	// hand-listed switch case — adding a flag column requires no edit here.
+	if IsOverlayFlagKind(ev.Kind) {
+		if field, ok := s.overlayFlagFields[ev.Kind]; ok {
+			*field = boolU8(ev.Visible)
+		}
+		s.emitSnapshot()
+		return
+	}
 	switch ev.Kind {
 	case T.KindNodeGeometry:
 		s.onNodeGeometry(ev)
@@ -395,14 +393,6 @@ func (s *SnapshotState) Update(ev T.Event) {
 		s.scene = sceneSnapState{cx: ev.PX, cy: ev.PY, cz: ev.PZ, radius: ev.R}
 		s.emitSnapshot()
 
-	case T.KindSceneTori, T.KindScenePoles, T.KindNodePoles,
-		T.KindSelSpherePoles, T.KindHandholds, T.KindLabelsGlobal,
-		T.KindOverlaysVis, T.KindDoubleLinks:
-		if field, ok := s.overlayFlagFields[ev.Kind]; ok {
-			*field = boolU8(ev.Visible)
-		}
-		s.emitSnapshot()
-
 	case T.KindAbcDragReset:
 		// Re-scope the recipient SET to the drag that is about to start: clear the
 		// drag-scoped set AND every node row's mirrored bit. Count (abcDragCount) is a
@@ -424,7 +414,7 @@ func (s *SnapshotState) Update(ev T.Event) {
 	case T.KindAbcDrag:
 		// Read-only affirmation counter for the in-editor overlay label; never
 		// decrements, no gating semantics (unlike the bool overlay flags above).
-		s.overlay.abcDragCount++
+		s.overlay.AbcDragCount++
 		// Add the firing time node (ev.Node) to the current-drag recipient SET and mirror it
 		// into that row's gotDragMsg bit, so the label can list every recipient by name.
 		// Leave state in place if the node hasn't registered geometry yet (should not
@@ -793,8 +783,10 @@ func (s *SnapshotState) clearTransients() {
 }
 
 // emitSnapshot builds one snapshot, writes a framed frame to s.out, then
-// clears transient event flags. Ignores write errors (nothing reads this fd
-// yet — on-but-harmless until the rollout flip phase).
+// clears transient event flags. Ignores write errors: the ext host normally
+// reads fd 3, but a disconnected/closed fd (e.g. headless tests, or the pipe
+// closing on process exit) is harmless — there is no delivery guarantee on
+// this channel (fire-and-forget, per MODEL.md).
 func (s *SnapshotState) emitSnapshot() {
 	// Defer any event whose identity references a node/edge not yet registered (e.g. an
 	// Input node's startup send fires before its target's geometry is emitted). Such an event
@@ -1168,14 +1160,11 @@ func (s *SnapshotState) writeCameraBlock(buf []byte, off int) int {
 	return off + BufCameraStride
 }
 
-// writeOverlayBlock writes the Overlay block (always 1 row).
+// writeOverlayBlock writes the Overlay block (always 1 row). s.overlay IS the
+// OverlayRow value SetOverlayRow writes — no per-field positional arg list at this
+// call site, so there is nothing here to transpose.
 func (s *SnapshotState) writeOverlayBlock(buf []byte, off int) int {
-	ov := s.overlay
-	SetOverlayRow(buf[off:],
-		ov.sceneTori, ov.scenePoles, ov.nodePoles,
-		ov.selSpherePoles, ov.handholds,
-		ov.labelsGlobal,
-		ov.overlaysVis, ov.doubleLinks, ov.abcDragCount)
+	SetOverlayRow(buf[off:], s.overlay)
 	return off + BufOverlayStride
 }
 

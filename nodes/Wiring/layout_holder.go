@@ -90,10 +90,21 @@ func (lp LocalPolar) effectiveSteps() (t, p, r float64) {
 
 // LayoutHolder is embedded into every node kind's struct. It owns this node's
 // LocalPolars list (one per domain-edge neighbor) and runs the pause-independent
-// layout-update goroutine. mu guards LocalPolars against concurrent access from
-// a drag's requantizeLocalPolars (node_move.go, on the stdin-reader goroutine)
-// and this node's own layout goroutine (currently idle, but the mutex makes
-// concurrent access safe by construction rather than by convention).
+// layout-update goroutine (UpdateLayout below is currently a no-op that only
+// waits on ctx.Done()).
+//
+// mu does NOT guard against the stdin-reader goroutine: rootMoveViaMessages
+// (node_move.go) routes a drag's moveMsgKindDrag to the DRAGGED NODE'S OWN
+// inbox, so commitLocal -> requantizeLocalPolars runs on that node's own
+// goroutine (nodeMover.handle), never on the stdin reader. What mu actually
+// guards is genuinely concurrent cross-goroutine access within
+// requantizeLocalPolars' neighbor fan: node X's own goroutine calls
+// SetLocalPolar/LocalPolarsSnapshot/Pole on a NEIGHBOR node M's LayoutHolder
+// (to persist M's updated local polars) while M's own goroutine may
+// concurrently mutate the same LocalPolars via its own fanned-out
+// SetLocalPolar. That access pattern is real, so mu is still earning its
+// keep — it is just guarding a different pair of goroutines than this
+// comment used to claim.
 type LayoutHolder struct {
 	mu          sync.Mutex
 	localPolars []LocalPolar
