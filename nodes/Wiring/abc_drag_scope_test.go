@@ -1,16 +1,20 @@
 package Wiring
 
-// abc_drag_scope_test.go — proves the abc-drag drag-log (Buffer.SnapshotState's sticky
-// recipient set + per-node gotDragMsg buffer bit) is SCOPED TO THE CURRENT DRAG, not
-// accumulated across the whole session. Regression test for the bug where dragging node
-// A logged its real recipients, then dragging a DIFFERENT node B kept A's stale
-// recipients in the set alongside B's — the fix is RootMove emitting KindAbcDragReset
-// (Trace/Trace.go) before the neighborSetC fan, which Buffer.SnapshotState.Update clears
-// the sticky set and every node's gotDragMsg bit on.
+// abc_drag_scope_test.go — proves the abc-drag drag-log (Buffer.SnapshotState's
+// current-drag-scoped recipient set + per-node gotDragMsg buffer bit) is SCOPED TO THE
+// CURRENT DRAG, not accumulated across the whole session. Regression test for the bug
+// where dragging node A logged its real recipients, then dragging a DIFFERENT node B
+// kept A's stale recipients in the set alongside B's — the fix is a KindAbcDragReset
+// (Trace/Trace.go) emitted once at the real drag-start edge (the gesture FSM's
+// pending→dragging transition, nodes/Wiring/gesture.go) before the neighborSetC fan,
+// which Buffer.SnapshotState.Update clears the recipient set and every node's
+// gotDragMsg bit on. This test drives md.RootMove directly (not the gesture FSM), so it
+// calls tr.AbcDragReset() itself before each RootMove to stand in for that drag-start
+// edge.
 //
 // Two disjoint node pairs (x→t,x→n and y→z) let us drag x (recipients {t,n}) then drag y
 // (recipient {z}) and assert the FINAL buffer state's gotDragMsg set is exactly {z} — if
-// the reset were missing (old sticky behavior), {t,n} would still show gotDragMsg=1.
+// the reset were missing (old accumulating behavior), {t,n} would still show gotDragMsg=1.
 //
 // SnapshotState methods (BuildSnapshot, LookupNodeRow, ...) must all be called from the
 // single Trace-drain goroutine (see Buffer/snapshot.go's doc comment) — calling them from
@@ -51,6 +55,8 @@ func writeXTNY(t *testing.T) string {
 	mk("nodes/z/meta.json", `{"id":"z","type":"FanInSink","r":100,"scenePolarR":70,"scenePolarTheta":1.4,"scenePolarPhi":-0.6}`)
 	mk("nodes/z/inputs/In.json", `{"name":"In"}`)
 	mk("edges/eYZ.json", `{"label":"eYZ","kind":"data","source":"y","sourceHandle":"Out","target":"z","targetHandle":"In"}`)
+	mk("nodes/iso/meta.json", `{"id":"iso","type":"FanInSrc","r":100,"scenePolarR":50,"scenePolarTheta":2.5,"scenePolarPhi":1.0}`)
+	mk("nodes/iso/outputs/Out.json", `{"name":"Out"}`)
 	return root
 }
 
@@ -121,8 +127,8 @@ func setEq(a map[string]bool, want ...string) bool {
 // TestAbcDragLogIsScopedToCurrentDrag drags x (recipients t,n), then drags the disjoint
 // y (recipient z), and asserts the buffer's FINAL gotDragMsg set is {z} only — proving
 // the previous drag's recipients (t,n) were cleared, not accumulated. Under the old
-// sticky behavior (no KindAbcDragReset), the set after dragging y would still contain
-// t and n alongside z, and this assertion would fail.
+// accumulating behavior (no KindAbcDragReset), the set after dragging y would still
+// contain t and n alongside z, and this assertion would fail.
 func TestAbcDragLogIsScopedToCurrentDrag(t *testing.T) {
 	root := writeXTNY(t)
 
@@ -145,6 +151,9 @@ func TestAbcDragLogIsScopedToCurrentDrag(t *testing.T) {
 		t.Fatal("no center for x")
 	}
 	xTarget := xBefore.add(vec3{X: 55, Y: -20, Z: 30})
+	// Stand in for the gesture FSM's pending→dragging transition, which is the real
+	// drag-start edge that emits this reset (RootMove itself no longer does).
+	tr.AbcDragReset()
 	if !md.RootMove("x", xTarget) {
 		t.Fatal("RootMove(x) returned false")
 	}
@@ -172,6 +181,7 @@ func TestAbcDragLogIsScopedToCurrentDrag(t *testing.T) {
 		t.Fatal("no center for y")
 	}
 	yTarget := yBefore.add(vec3{X: -25, Y: 40, Z: -10})
+	tr.AbcDragReset()
 	if !md.RootMove("y", yTarget) {
 		t.Fatal("RootMove(y) returned false")
 	}
@@ -197,5 +207,58 @@ func TestAbcDragLogIsScopedToCurrentDrag(t *testing.T) {
 			t.Fatal("no snapshot frame captured after dragging y")
 		}
 		time.Sleep(time.Millisecond)
+	}
+}
+
+// TestAbcDragResetAloneClearsGotDragMsgAndEmits drives B.SnapshotState.Update DIRECTLY,
+// from this test's own goroutine, in isolation — no LoadTopology, no gesture FSM, no
+// drain goroutine, no node whose OWN geometry re-emit could incidentally publish the
+// cleared state. This is legitimate single-goroutine use of SnapshotState (its doc
+// requires all methods run from one goroutine; this test's goroutine IS that goroutine
+// here, since nothing else ever touches snap).
+//
+// It registers two node rows via synthetic KindNodeGeometry events, marks one with
+// KindAbcDrag (so gotDragMsg=1 lands in a frame — the PRIOR non-empty state to prove
+// gets cleared), records the frame count at that point, then sends ONE bare
+// KindAbcDragReset event and NOTHING ELSE. Because no other event follows the reset,
+// the ONLY thing that can produce a new frame or change the gotDragMsg set is the
+// reset's own emit (Buffer/snapshot.go's KindAbcDragReset case) — unlike the previous
+// version of this test, which dragged a real isolated node whose incidental geometry
+// re-emit republished the already-cleared state regardless of whether the reset itself
+// emitted anything (proven by commenting out that emit and observing the old test still
+// passed).
+func TestAbcDragResetAloneClearsGotDragMsgAndEmits(t *testing.T) {
+	var frames syncBuffer
+	snap := B.NewSnapshotState(&frames)
+
+	snap.Update(T.Event{Kind: T.KindNodeGeometry, Node: "a", NodeKind: "FanInSrc", Label: "a"})
+	snap.Update(T.Event{Kind: T.KindNodeGeometry, Node: "b", NodeKind: "FanInSink", Label: "b"})
+	snap.Update(T.Event{Kind: T.KindAbcDrag, Node: "a"})
+
+	before := lastFrame([]byte(frames.String()))
+	if before == nil {
+		t.Fatal("no frame captured after registering nodes + one abc-drag mark")
+	}
+	gotBefore := gotDragMsgSet(before)
+	if !setEq(gotBefore, "a") {
+		t.Fatalf("gotDragMsg set before reset must be {a}, got %v", gotBefore)
+	}
+	framesBefore := frames.String()
+
+	// The ONLY event from here on: the reset itself. Nothing else can produce a new
+	// frame or clear the set.
+	snap.Update(T.Event{Kind: T.KindAbcDragReset})
+
+	framesAfter := frames.String()
+	if framesAfter == framesBefore {
+		t.Fatal("KindAbcDragReset produced no new frame — the reset's emit is missing")
+	}
+	after := lastFrame([]byte(framesAfter))
+	if after == nil {
+		t.Fatal("no frame captured after reset")
+	}
+	gotAfter := gotDragMsgSet(after)
+	if len(gotAfter) != 0 {
+		t.Fatalf("gotDragMsg set after a bare KindAbcDragReset must be empty, got %v", gotAfter)
 	}
 }

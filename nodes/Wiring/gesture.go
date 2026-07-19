@@ -271,6 +271,15 @@ func (md *MoveDispatch) gestPointerMove(ev rawInputMsg, tr *T.Trace) {
 			g.phase = gestPortMove
 		case g.dragNode != "":
 			g.phase = gestDragging
+			// Re-scope the in-editor drag-log to THIS drag. This is the ONE place a drag
+			// begins (the slop-crossing pending→dragging transition), so it fires exactly
+			// once per drag. It must NOT live in RootMove: that runs on every pointer-move
+			// event of the drag, so resetting there interleaves with the neighborSetC fan's
+			// AbcDrag marks (which land asynchronously on each recipient's own goroutine)
+			// and drops recipients whose mark lands after the next move's reset.
+			if tr != nil {
+				tr.AbcDragReset()
+			}
 		case g.handholdDown:
 			// Handhold-constrained orbit: seed prevX/prevY from the GRAB point (downX/downY),
 			// not the slop-crossing point, so the first locked arc is grab→first-move (mirrors
