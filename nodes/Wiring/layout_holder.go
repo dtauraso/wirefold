@@ -92,6 +92,13 @@ func (lp LocalPolar) effectiveSteps() (t, p, r float64) {
 type LayoutHolder struct {
 	mu          sync.Mutex
 	localPolars []LocalPolar
+	// pole is the measurement pole (rotating_pole.go localPole result) that
+	// localPolars' current QuantITheta/QuantIPhi entries were last quantized about.
+	// Persisted (WriteLocalPolars) so a reload reconstructs identical world directions
+	// without re-deriving from live cartesian — see requantizePoleTraced's doc comment
+	// in node_move.go for why this must be carried rather than recomputed from scratch
+	// against an assumed home pole.
+	pole dir
 }
 
 // UpdateLayout runs this node's layout-update loop until ctx is cancelled. It
@@ -158,4 +165,21 @@ func (lh *LayoutHolder) LocalPolarsSnapshot() []LocalPolar {
 	out := make([]LocalPolar, len(lh.localPolars))
 	copy(out, lh.localPolars)
 	return out
+}
+
+// Pole returns the measurement pole this node's current LocalPolars entries were last
+// quantized about (world +y, dir{0,0}, if never set — the home pole default).
+func (lh *LayoutHolder) Pole() dir {
+	lh.mu.Lock()
+	defer lh.mu.Unlock()
+	return lh.pole
+}
+
+// SetPole records the measurement pole the CURRENT LocalPolars entries were quantized
+// about, so a later requantize (or a reload) can reconstruct an unchanged neighbor's
+// direction from its stored indices without re-measuring live cartesian geometry.
+func (lh *LayoutHolder) SetPole(p dir) {
+	lh.mu.Lock()
+	defer lh.mu.Unlock()
+	lh.pole = p
 }

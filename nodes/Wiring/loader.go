@@ -69,10 +69,14 @@ type specNode struct {
 	// LocalPolar) — one per domain double-link this node is an endpoint of, measured
 	// with ITSELF as center. Absent (nil) → computed fresh at load (computeLocalPolars).
 	LocalPolars []specLocalPolar `json:"localPolars,omitempty"`
-	// There is no persisted pole field: the measurement pole every LocalPolars entry is
-	// quantized about is a pure function of live geometry
-	// (docs/planning/visual-editor/deterministic-local-pole.md, rotating_pole.go
-	// localPole), recomputed on load from the composed world centers.
+	// LocalPoleTheta/LocalPolePhi is the measurement pole (rotating_pole.go localPole
+	// result) that LocalPolars' stored indices were last quantized about
+	// (memory/feedback_abc_times_constant_not_rederive.md: carry the stored pole forward
+	// rather than re-deriving it). Both absent → no stored pole; computeLocalPolars falls
+	// back to recomputing the pole fresh from live composed centers (the load-time
+	// cart↔polar boundary, unchanged by this).
+	LocalPoleTheta *float64 `json:"localPoleTheta,omitempty"`
+	LocalPolePhi   *float64 `json:"localPolePhi,omitempty"`
 	// Gate marks this node as a two-neighbor GATE node (node_move.go): on a direct
 	// drag it solves its own equal-radii landing position against its two domain
 	// neighbors (derived from LocalPolars, in the same order), commits, and
@@ -284,6 +288,14 @@ type buildCtx struct {
 	// does not feed back into position (quantizedOffsets stays authoritative).
 	localPolars map[string][]LocalPolar
 
+	// localPoles is the per-node measurement pole (rotating_pole.go localPole result)
+	// that localPolars[id]'s entries were quantized about — either the stored
+	// (specNode.LocalPoleTheta/Phi) value carried forward, or freshly computed from live
+	// composed centers when no stored pole exists. Attached to each node's LayoutHolder
+	// (buildNodes, via LayoutHolder.SetPole) so a later drag's requantizePoleTraced
+	// reconstructs unchanged neighbors against the SAME pole this load quantized about.
+	localPoles map[string]dir
+
 	// Phase 4: per-destination-port wire allocation + per-edge geometry.
 	destWire      map[string]*PacedWire
 	edgeWire      WireRegistry
@@ -483,18 +495,22 @@ func (b *buildCtx) computeLocalPolars() {
 	}
 
 	stored := map[string]map[string]specLocalPolar{}
+	storedPole := map[string]dir{}
 	for _, n := range b.spec.Nodes {
-		if len(n.LocalPolars) == 0 {
-			continue
+		if len(n.LocalPolars) != 0 {
+			m := make(map[string]specLocalPolar, len(n.LocalPolars))
+			for _, lp := range n.LocalPolars {
+				m[lp.To] = lp
+			}
+			stored[n.ID] = m
 		}
-		m := make(map[string]specLocalPolar, len(n.LocalPolars))
-		for _, lp := range n.LocalPolars {
-			m[lp.To] = lp
+		if n.LocalPoleTheta != nil && n.LocalPolePhi != nil {
+			storedPole[n.ID] = dir{Theta: *n.LocalPoleTheta, Phi: *n.LocalPolePhi}
 		}
-		stored[n.ID] = m
 	}
 
 	result := map[string][]LocalPolar{}
+	poles := map[string]dir{}
 	for _, n := range b.spec.Nodes {
 		nbrs := neighbors[n.ID]
 		if len(nbrs) == 0 {
@@ -515,18 +531,27 @@ func (b *buildCtx) computeLocalPolars() {
 
 		// The measurement pole is a pure function of live geometry
 		// (docs/planning/visual-editor/deterministic-local-pole.md, rotating_pole.go
-		// localPole) — resolved from EVERY neighbor's CURRENT world offset, never a
-		// stored/persisted value.
-		dirs := make([]dir, 0, len(ids))
-		if hasOwn {
-			for _, mid := range ids {
-				if mCenter, ok := b.centers[mid]; ok {
-					d, _ := dirFromOffset(mCenter.sub(ownCenter))
-					dirs = append(dirs, d)
+		// localPole) — resolved from EVERY neighbor's CURRENT world offset. A STORED pole
+		// (persisted by a prior runtime requantize, WriteLocalPolars) is honored verbatim
+		// when present, so a reload reconstructs the exact same pole a live drag last
+		// resolved rather than depending on recomputing an identical result from geometry;
+		// with no stored value (first load / migrated spec) it falls back to the same
+		// live-geometry computation as before.
+		var finalPole dir
+		if sp, ok := storedPole[n.ID]; ok {
+			finalPole = sp
+		} else {
+			offsetVecs := make([]vec3, 0, len(ids))
+			if hasOwn {
+				for _, mid := range ids {
+					if mCenter, ok := b.centers[mid]; ok {
+						offsetVecs = append(offsetVecs, mCenter.sub(ownCenter))
+					}
 				}
 			}
+			finalPole = localPole(offsetVecs)
 		}
-		finalPole := localPole(dirs)
+		poles[n.ID] = finalPole
 
 		list := make([]LocalPolar, 0, len(ids))
 		for _, mid := range ids {
@@ -570,6 +595,7 @@ func (b *buildCtx) computeLocalPolars() {
 		result[n.ID] = list
 	}
 	b.localPolars = result
+	b.localPoles = poles
 }
 
 // deriveCascadeRoles builds the per-node cascadeRoleSpec map node_move.go's
@@ -896,10 +922,14 @@ func (b *buildCtx) buildNodes() error {
 					if lps, ok := b.localPolars[n.ID]; ok {
 						lh.LoadLocalPolars(lps)
 					}
-					// No pole to attach: the measurement pole is a pure function of live
-					// geometry (docs/planning/visual-editor/deterministic-local-pole.md,
-					// rotating_pole.go localPole), recomputed on demand — never stored on
-					// the holder.
+					// Attach the measurement pole this load quantized LocalPolars about
+					// (computeLocalPolars: stored pole honored verbatim, else resolved
+					// fresh from live geometry) so a LATER drag's requantizePoleTraced
+					// reconstructs unchanged neighbors against the SAME pole, not an
+					// assumed home pole.
+					if pole, ok := b.localPoles[n.ID]; ok {
+						lh.SetPole(pole)
+					}
 					// Register this node's embedded *Wiring.LayoutHolder with the move
 					// dispatcher so a later drag (RootMove) can route a local-polar
 					// re-quantize to the OWNING node's own holder — MoveDispatch never
