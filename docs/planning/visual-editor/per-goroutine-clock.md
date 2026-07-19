@@ -58,6 +58,44 @@ Now it does not matter when a goroutine hears about the change. Applying it late
 exactly the same state as applying it on time. Ordering and latency stop mattering, which
 is what makes this safe to do without coordination.
 
+## OPEN FLAW — effectiveAt conflicts with monotonicity
+
+Found by asking what a PAUSE looks like. The plan above is not yet sound.
+
+Today `SetSpeed(0)` is one write to one object, so the tick stops advancing instantly and
+every goroutine's next read — whenever it wakes — sees it frozen. Pause is atomic in
+tick-space even though goroutines wake staggered.
+
+Per-goroutine it is not. A goroutine that has not yet received the transition keeps
+computing at the old speed and keeps stepping beads. Then applying `{speed, effectiveAt}`
+retroactively banks the segment as of T — and its tick goes BACKWARD:
+
+    pause at T=100, goroutine hears at 110
+    at t=105 it computed tick 105 and advanced a bead on it
+    at t=110 it banks accScaled=100, speed=0  ->  tick now reads 100
+
+It already acted on ticks the corrected clock says never happened.
+`TestRealClockConcurrentMonotonic` asserts exactly that this never occurs.
+
+So the two properties cannot both hold:
+
+  - CLAMP (never go backward): the overshoot is permanent and clocks disagree by exactly
+    the quantity effectiveAt was introduced to eliminate.
+  - CORRECT (apply as of T): clocks agree, but ticks run backward and work has already
+    been done on un-issued ticks.
+
+The claim above that late delivery is "indistinguishable from applying it on time" is
+true of the arithmetic and FALSE of the observable behaviour of a goroutine that already
+acted during the window. Do not build on it until this is resolved.
+
+Directions worth considering, none verified:
+  - Make a speed change take effect at a FUTURE tick rather than a past instant, chosen
+    far enough ahead that every loop will have woken — turns a retroactive correction
+    into a scheduled one, at the cost of pause not being immediate.
+  - Accept bounded overshoot and drop the exact-agreement requirement, if beads being up
+    to one cycle out of step is acceptable visually.
+  - Keep one shared clock. The mutex is cheap; this problem is not.
+
 ## Delivery
 
 Whatever carries the transition MUST NOT DROP IT. A dropped transition is permanent
