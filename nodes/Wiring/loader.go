@@ -93,11 +93,7 @@ type specNode struct {
 // specLocalPolar mirrors one entry of a node's persisted localPolars list
 // (loader_tree.go jsonMeta.LocalPolars carries the same shape).
 type specLocalPolar struct {
-	To string `json:"to"`
-	// Role names this neighbor's part in the decentralized cascade rule
-	// (node_move.go) — "source" / "follower" / "" (neither). See
-	// layout_holder.go LocalPolar.Role's doc.
-	Role        string  `json:"role,omitempty"`
+	To          string  `json:"to"`
 	QuantITheta int     `json:"quantITheta"`
 	QuantIPhi   int     `json:"quantIPhi"`
 	QuantIR     int     `json:"quantIR"`
@@ -563,13 +559,13 @@ func (b *buildCtx) computeLocalPolars() {
 			if sm, ok := stored[n.ID]; ok {
 				if lp, ok2 := sm[mid]; ok2 {
 					entry := LocalPolar{
-						To: mid, Role: lp.Role, QuantITheta: lp.QuantITheta, QuantIPhi: lp.QuantIPhi, QuantIR: lp.QuantIR,
+						To: mid, QuantITheta: lp.QuantITheta, QuantIPhi: lp.QuantIPhi, QuantIR: lp.QuantIR,
 						StepTheta: lp.StepTheta, StepPhi: lp.StepPhi, StepR: lp.StepR,
 					}
 					// The stored bearing may have been quantized about a DIFFERENT pole
 					// (pre-feature data quantized about world +y, or a kick since moved
 					// the pole) — re-quantize the bearing about finalPole from the live
-					// offset when one is available, preserving Role/QuantIR/step
+					// offset when one is available, preserving QuantIR/step
 					// constants exactly (QuantIR carries the equal-radii shared-c
 					// contract and must not be recomputed).
 					if mCenter, ok3 := b.centers[mid]; hasOwn && ok3 {

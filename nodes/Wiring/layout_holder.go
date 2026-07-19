@@ -47,18 +47,6 @@ const (
 type LocalPolar struct {
 	To string // neighbor node id
 
-	// Role names this neighbor's part in the decentralized cascade rule
-	// (node_move.go): "source" is the ONE neighbor this node measures its
-	// reference length L against; "follower" is a neighbor this node
-	// repositions (via an Equalize message) to L. "" (absent) is neither —
-	// authored in the spec (meta.json localPolars[].role), never computed.
-	//
-	// UNCONSUMED since the rule/gate/anchor cascade was deleted (2026-07-18):
-	// still copied through the persist round-trip (loader.go, quant_offset_persist.go)
-	// for meta.json shape only — no code path branches on its value. Do not assume
-	// it drives behavior; grep call sites before relying on it again.
-	Role string
-
 	QuantITheta int
 	QuantIPhi   int
 	QuantIR     int
@@ -93,8 +81,8 @@ func (lp LocalPolar) effectiveSteps() (t, p, r float64) {
 // layout-update goroutine (UpdateLayout below is currently a no-op that only
 // waits on ctx.Done()).
 //
-// mu does NOT guard against the stdin-reader goroutine: rootMoveViaMessages
-// (node_move.go) routes a drag's moveMsgKindDrag to the DRAGGED NODE'S OWN
+// mu does NOT guard against the stdin-reader goroutine: RootMove (node_move.go)
+// routes a drag's moveMsgKindDrag to the DRAGGED NODE'S OWN
 // inbox, so commitLocal -> requantizeLocalPolars runs on that node's own
 // goroutine (nodeMover.handle), never on the stdin reader. What mu actually
 // guards is genuinely concurrent cross-goroutine access within

@@ -162,7 +162,7 @@ func TestRequantizeIndexTimesStepIsAuthoritative(t *testing.T) {
 // freshly-recomputed one.
 //
 // loader.go computeLocalPolars ALWAYS re-derives a stored neighbor's bearing from its
-// LIVE cartesian offset when that neighbor's center is resolvable (preserving Role/
+// LIVE cartesian offset when that neighbor's center is resolvable (preserving
 // QuantIR/step constants) — so the reconstructed indices are internally consistent with
 // whichever pole the loader actually used, correct or not. That means the world
 // direction recovered by reconstructing under lhSelf.Pole() ALONE can never expose a
