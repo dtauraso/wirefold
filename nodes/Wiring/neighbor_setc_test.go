@@ -15,6 +15,14 @@ import (
 	"time"
 )
 
+// tappedMsg is a minimal recorded (destID, kind, senderID) tuple from md.SetMsgTap,
+// used by this file's message-trace assertion.
+type tappedMsg struct {
+	destID   string
+	kind     string
+	senderID string
+}
+
 // TestNeighborSetCRedrawKeepsBearingRepositionsOneHop drives the real move path
 // (writeTree's plain 2-node src/dst graph — no cascade role on either end) and
 // asserts the four properties the single-assignment set-c model requires.
@@ -116,19 +124,13 @@ func TestNeighborSetCRedrawKeepsBearingRepositionsOneHop(t *testing.T) {
 		t.Fatalf("(3) src's new world center should equal dst_newcenter - dir(kept bearing)*newR: got=%+v want=%+v (off by %g, step=%v)", srcCenterAfter, wantCenter, d, sr)
 	}
 
-	// (4) src never received an equalize/trigger cascade — only the drag itself (on
-	// dst) and a set-c assignment (on src), one hop, no forwarding past src.
+	// (4) src never received anything but a set-c assignment — only the drag itself
+	// (on dst) and a set-c assignment (on src), one hop, no forwarding past src. There
+	// is no cascade machinery left to accidentally run, so this only checks src's own
+	// trace is exactly the expected NeighborSetC message.
 	mu.Lock()
 	trace := append([]tappedMsg(nil), recorded...)
 	mu.Unlock()
-	for _, m := range trace {
-		if m.kind == moveMsgKindEqualize || m.kind == moveMsgKindTrigger || m.kind == moveMsgKindGatePlace {
-			t.Fatalf("(4) plain-neighbor set-c redraw must never run an equalize/trigger/gate cascade: got %+v in trace %+v", m, trace)
-		}
-		if m.destID == "src" && m.kind == moveMsgKindRequantize {
-			t.Fatalf("(4) src should receive the NEW moveMsgKindNeighborSetC, not the old bearing-re-deriving moveMsgKindRequantize: %+v", m)
-		}
-	}
 	sawSetC := false
 	for _, m := range trace {
 		if m.destID == "src" && m.kind == moveMsgKindNeighborSetC && m.senderID == "dst" {
