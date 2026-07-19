@@ -1,0 +1,1400 @@
+BOOT 5:36:31 PM
+BOOT 5:36:35 PM
+BOOT 5:36:35 PM
+BOOT 5:36:52 PM
+DOWN mode=orbit click=(234,68) N@(402,60) dist=167 R=9.0
+DOWN mode=orbit click=(284,126) N@(400,110) dist=117 R=9.0
+DOWN mode=node click=(407,143) N@(400,144) dist=7 R=9.0
+drag raw θ=47.5° φ=36.0° → cell b=8 c=6
+drag raw θ=47.5° φ=36.0° → cell b=8 c=6
+drag raw θ=47.4° φ=36.0° → cell b=8 c=6
+drag raw θ=47.2° φ=36.0° → cell b=8 c=6
+drag raw θ=46.7° φ=35.8° → cell b=8 c=6
+drag raw θ=45.9° φ=35.5° → cell b=8 c=6
+drag raw θ=45.1° φ=35.2° → cell b=8 c=6
+drag raw θ=44.2° φ=34.9° → cell b=7 c=6
+drag raw θ=43.4° φ=34.6° → cell b=7 c=6
+drag raw θ=42.7° φ=34.4° → cell b=7 c=6
+drag raw θ=42.2° φ=34.3° → cell b=7 c=6
+drag raw θ=41.9° φ=34.2° → cell b=7 c=6
+drag raw θ=41.6° φ=34.1° → cell b=7 c=6
+drag raw θ=41.5° φ=34.0° → cell b=7 c=6
+drag raw θ=41.3° φ=34.0° → cell b=7 c=6
+drag raw θ=41.2° φ=34.0° → cell b=7 c=6
+drag raw θ=41.1° φ=34.0° → cell b=7 c=6
+drag raw θ=41.0° φ=34.0° → cell b=7 c=6
+drag raw θ=40.7° φ=33.9° → cell b=7 c=6
+drag raw θ=40.4° φ=33.9° → cell b=7 c=6
+drag raw θ=40.1° φ=33.9° → cell b=7 c=6
+drag raw θ=39.7° φ=33.8° → cell b=7 c=6
+drag raw θ=39.3° φ=33.8° → cell b=7 c=6
+drag raw θ=38.9° φ=33.7° → cell b=6 c=6
+drag raw θ=38.3° φ=33.6° → cell b=6 c=6
+drag raw θ=37.7° φ=33.5° → cell b=6 c=6
+drag raw θ=36.9° φ=33.2° → cell b=6 c=6
+drag raw θ=36.1° φ=33.0° → cell b=6 c=5
+drag raw θ=35.2° φ=32.7° → cell b=6 c=5
+drag raw θ=34.2° φ=32.4° → cell b=6 c=5
+drag raw θ=33.4° φ=32.1° → cell b=6 c=5
+drag raw θ=32.5° φ=31.8° → cell b=5 c=5
+drag raw θ=31.5° φ=31.4° → cell b=5 c=5
+drag raw θ=30.5° φ=31.0° → cell b=5 c=5
+drag raw θ=29.5° φ=30.5° → cell b=5 c=5
+drag raw θ=28.7° φ=30.1° → cell b=5 c=5
+drag raw θ=27.9° φ=29.7° → cell b=5 c=5
+drag raw θ=27.1° φ=29.3° → cell b=5 c=5
+drag raw θ=26.5° φ=29.0° → cell b=4 c=5
+drag raw θ=25.9° φ=28.7° → cell b=4 c=5
+drag raw θ=25.3° φ=28.5° → cell b=4 c=5
+drag raw θ=24.8° φ=28.2° → cell b=4 c=5
+drag raw θ=24.2° φ=27.8° → cell b=4 c=5
+drag raw θ=23.5° φ=27.5° → cell b=4 c=5
+drag raw θ=22.9° φ=27.2° → cell b=4 c=5
+drag raw θ=22.2° φ=26.7° → cell b=4 c=4
+drag raw θ=21.6° φ=26.2° → cell b=4 c=4
+drag raw θ=21.0° φ=25.9° → cell b=3 c=4
+drag raw θ=20.4° φ=25.5° → cell b=3 c=4
+drag raw θ=19.9° φ=25.2° → cell b=3 c=4
+drag raw θ=19.3° φ=24.8° → cell b=3 c=4
+drag raw θ=18.8° φ=24.5° → cell b=3 c=4
+drag raw θ=18.3° φ=24.0° → cell b=3 c=4
+drag raw θ=17.7° φ=23.6° → cell b=3 c=4
+drag raw θ=17.2° φ=23.2° → cell b=3 c=4
+drag raw θ=16.7° φ=22.7° → cell b=3 c=4
+drag raw θ=16.2° φ=22.2° → cell b=3 c=4
+drag raw θ=15.7° φ=21.6° → cell b=3 c=4
+drag raw θ=15.1° φ=21.0° → cell b=3 c=3
+drag raw θ=14.4° φ=20.2° → cell b=2 c=3
+drag raw θ=13.8° φ=19.5° → cell b=2 c=3
+drag raw θ=13.2° φ=19.0° → cell b=2 c=3
+drag raw θ=12.7° φ=18.6° → cell b=2 c=3
+drag raw θ=12.2° φ=18.1° → cell b=2 c=3
+drag raw θ=11.7° φ=17.6° → cell b=2 c=3
+drag raw θ=11.2° φ=17.1° → cell b=2 c=3
+drag raw θ=10.7° φ=16.3° → cell b=2 c=3
+drag raw θ=10.2° φ=15.3° → cell b=2 c=3
+drag raw θ=9.9° φ=14.4° → cell b=2 c=2
+drag raw θ=9.5° φ=13.4° → cell b=2 c=2
+drag raw θ=9.1° φ=12.4° → cell b=2 c=2
+drag raw θ=8.8° φ=11.8° → cell b=1 c=2
+drag raw θ=8.5° φ=11.0° → cell b=1 c=2
+drag raw θ=8.2° φ=10.0° → cell b=1 c=2
+drag raw θ=8.0° φ=9.0° → cell b=1 c=1
+drag raw θ=7.7° φ=7.8° → cell b=1 c=1
+drag raw θ=7.4° φ=6.7° → cell b=1 c=1
+drag raw θ=7.2° φ=5.5° → cell b=1 c=1
+drag raw θ=7.0° φ=4.5° → cell b=1 c=1
+drag raw θ=6.8° φ=3.6° → cell b=1 c=1
+drag raw θ=6.7° φ=2.7° → cell b=1 c=0
+drag raw θ=6.5° φ=1.7° → cell b=1 c=0
+drag raw θ=6.3° φ=0.5° → cell b=1 c=0
+drag raw θ=6.2° φ=-0.6° → cell b=1 c=0
+drag raw θ=6.0° φ=-1.7° → cell b=1 c=0
+drag raw θ=11.8° φ=-3.1° → cell b=2 c=-1
+drag raw θ=11.7° φ=-4.7° → cell b=2 c=-1
+drag raw θ=11.5° φ=-6.4° → cell b=2 c=-1
+drag raw θ=11.3° φ=-8.2° → cell b=2 c=-1
+drag raw θ=11.1° φ=-10.3° → cell b=2 c=-2
+drag raw θ=11.0° φ=-12.6° → cell b=2 c=-2
+drag raw θ=10.8° φ=-14.7° → cell b=2 c=-2
+drag raw θ=10.7° φ=-16.9° → cell b=2 c=-3
+drag raw θ=10.5° φ=-19.3° → cell b=2 c=-3
+drag raw θ=10.4° φ=-21.3° → cell b=2 c=-4
+drag raw θ=10.4° φ=-23.0° → cell b=2 c=-4
+drag raw θ=10.3° φ=-24.7° → cell b=2 c=-4
+drag raw θ=10.2° φ=-26.5° → cell b=2 c=-4
+drag raw θ=10.2° φ=-28.3° → cell b=2 c=-5
+drag raw θ=10.1° φ=-29.9° → cell b=2 c=-5
+drag raw θ=10.1° φ=-31.3° → cell b=2 c=-5
+drag raw θ=10.0° φ=-32.8° → cell b=2 c=-5
+drag raw θ=9.9° φ=-34.1° → cell b=2 c=-6
+drag raw θ=9.9° φ=-35.5° → cell b=2 c=-6
+drag raw θ=9.8° φ=-37.2° → cell b=2 c=-6
+drag raw θ=9.7° φ=-38.7° → cell b=2 c=-6
+drag raw θ=9.6° φ=-40.3° → cell b=2 c=-7
+drag raw θ=9.5° φ=-42.5° → cell b=2 c=-7
+drag raw θ=9.5° φ=-44.8° → cell b=2 c=-7
+drag raw θ=9.4° φ=-47.1° → cell b=2 c=-8
+drag raw θ=9.4° φ=-49.5° → cell b=2 c=-8
+drag raw θ=9.3° φ=-52.0° → cell b=2 c=-9
+drag raw θ=9.3° φ=-54.6° → cell b=2 c=-9
+drag raw θ=9.3° φ=-57.2° → cell b=2 c=-10
+drag raw θ=9.2° φ=-59.9° → cell b=2 c=-10
+drag raw θ=9.2° φ=-62.6° → cell b=2 c=-10
+drag raw θ=9.2° φ=-65.5° → cell b=2 c=-11
+drag raw θ=9.1° φ=-68.3° → cell b=2 c=-11
+drag raw θ=9.1° φ=-71.1° → cell b=2 c=-12
+drag raw θ=9.2° φ=-73.8° → cell b=2 c=-12
+drag raw θ=9.2° φ=-76.9° → cell b=2 c=-13
+drag raw θ=9.2° φ=-80.6° → cell b=2 c=-13
+drag raw θ=9.2° φ=-84.6° → cell b=2 c=-14
+drag raw θ=9.3° φ=-88.5° → cell b=2 c=-15
+drag raw θ=9.4° φ=-92.4° → cell b=2 c=-15
+drag raw θ=9.5° φ=-95.7° → cell b=2 c=-16
+drag raw θ=9.6° φ=-98.5° → cell b=2 c=-16
+drag raw θ=9.7° φ=-101.1° → cell b=2 c=-17
+drag raw θ=9.8° φ=-103.8° → cell b=2 c=-17
+drag raw θ=9.9° φ=-106.3° → cell b=2 c=-18
+drag raw θ=10.0° φ=-108.4° → cell b=2 c=-18
+drag raw θ=10.1° φ=-110.3° → cell b=2 c=-18
+drag raw θ=10.1° φ=-111.9° → cell b=2 c=-19
+drag raw θ=10.2° φ=-113.5° → cell b=2 c=-19
+drag raw θ=10.3° φ=-115.0° → cell b=2 c=-19
+drag raw θ=10.3° φ=-116.1° → cell b=2 c=-19
+drag raw θ=10.5° φ=-117.3° → cell b=2 c=-20
+drag raw θ=10.6° φ=-118.8° → cell b=2 c=-20
+drag raw θ=10.7° φ=-120.0° → cell b=2 c=-20
+drag raw θ=10.8° φ=-121.1° → cell b=2 c=-20
+drag raw θ=10.9° φ=-122.4° → cell b=2 c=-20
+drag raw θ=11.0° φ=-123.5° → cell b=2 c=-21
+drag raw θ=11.2° φ=-124.7° → cell b=2 c=-21
+drag raw θ=11.3° φ=-125.9° → cell b=2 c=-21
+drag raw θ=11.5° φ=-127.1° → cell b=2 c=-21
+drag raw θ=11.6° φ=-128.2° → cell b=2 c=-21
+drag raw θ=11.8° φ=-129.7° → cell b=2 c=-22
+drag raw θ=6.0° φ=-131.1° → cell b=1 c=-22
+drag raw θ=6.2° φ=-132.1° → cell b=1 c=-22
+drag raw θ=6.4° φ=-133.4° → cell b=1 c=-22
+drag raw θ=6.7° φ=-135.0° → cell b=1 c=-23
+drag raw θ=6.9° φ=-136.2° → cell b=1 c=-23
+drag raw θ=7.2° φ=-137.3° → cell b=1 c=-23
+drag raw θ=7.4° φ=-138.6° → cell b=1 c=-23
+drag raw θ=7.7° φ=-139.9° → cell b=1 c=-23
+drag raw θ=8.0° φ=-140.8° → cell b=1 c=-23
+drag raw θ=8.3° φ=-141.6° → cell b=1 c=-24
+drag raw θ=8.6° φ=-142.5° → cell b=1 c=-24
+drag raw θ=8.9° φ=-143.1° → cell b=1 c=-24
+drag raw θ=9.2° φ=-143.7° → cell b=2 c=-24
+drag raw θ=9.4° φ=-144.1° → cell b=2 c=-24
+drag raw θ=9.7° φ=-144.5° → cell b=2 c=-24
+drag raw θ=9.9° φ=-145.0° → cell b=2 c=-24
+drag raw θ=10.2° φ=-145.3° → cell b=2 c=-24
+drag raw θ=10.4° φ=-145.7° → cell b=2 c=-24
+drag raw θ=10.6° φ=-146.1° → cell b=2 c=-24
+drag raw θ=10.7° φ=-146.4° → cell b=2 c=-24
+drag raw θ=10.9° φ=-146.6° → cell b=2 c=-24
+drag raw θ=11.1° φ=-146.9° → cell b=2 c=-24
+drag raw θ=11.3° φ=-147.2° → cell b=2 c=-25
+drag raw θ=11.4° φ=-147.5° → cell b=2 c=-25
+drag raw θ=11.6° φ=-147.7° → cell b=2 c=-25
+drag raw θ=11.7° φ=-148.1° → cell b=2 c=-25
+drag raw θ=11.9° φ=-148.3° → cell b=2 c=-25
+drag raw θ=12.1° φ=-148.6° → cell b=2 c=-25
+drag raw θ=12.2° φ=-148.8° → cell b=2 c=-25
+drag raw θ=12.4° φ=-148.9° → cell b=2 c=-25
+drag raw θ=12.5° φ=-149.2° → cell b=2 c=-25
+drag raw θ=12.6° φ=-149.4° → cell b=2 c=-25
+drag raw θ=12.7° φ=-149.6° → cell b=2 c=-25
+drag raw θ=12.8° φ=-149.7° → cell b=2 c=-25
+drag raw θ=12.8° φ=-149.7° → cell b=2 c=-25
+drag raw θ=12.6° φ=-149.4° → cell b=2 c=-25
+drag raw θ=12.3° φ=-148.8° → cell b=2 c=-25
+drag raw θ=11.9° φ=-147.9° → cell b=2 c=-25
+drag raw θ=11.4° φ=-146.8° → cell b=2 c=-24
+drag raw θ=11.0° φ=-145.7° → cell b=2 c=-24
+drag raw θ=10.6° φ=-144.6° → cell b=2 c=-24
+drag raw θ=10.2° φ=-143.6° → cell b=2 c=-24
+drag raw θ=9.8° φ=-142.9° → cell b=2 c=-24
+drag raw θ=9.5° φ=-142.4° → cell b=2 c=-24
+drag raw θ=9.1° φ=-141.7° → cell b=2 c=-24
+drag raw θ=8.7° φ=-141.2° → cell b=1 c=-24
+drag raw θ=8.5° φ=-140.9° → cell b=1 c=-23
+drag raw θ=8.2° φ=-140.6° → cell b=1 c=-23
+drag raw θ=8.0° φ=-140.3° → cell b=1 c=-23
+drag raw θ=7.7° φ=-139.9° → cell b=1 c=-23
+drag raw θ=7.4° φ=-139.5° → cell b=1 c=-23
+drag raw θ=7.2° φ=-139.2° → cell b=1 c=-23
+drag raw θ=6.9° φ=-138.7° → cell b=1 c=-23
+drag raw θ=6.6° φ=-138.3° → cell b=1 c=-23
+drag raw θ=6.4° φ=-137.8° → cell b=1 c=-23
+drag raw θ=6.2° φ=-137.3° → cell b=1 c=-23
+drag raw θ=12.0° φ=-137.0° → cell b=2 c=-23
+drag raw θ=11.8° φ=-136.5° → cell b=2 c=-23
+drag raw θ=11.6° φ=-136.1° → cell b=2 c=-23
+drag raw θ=11.4° φ=-135.8° → cell b=2 c=-23
+drag raw θ=11.2° φ=-135.6° → cell b=2 c=-23
+drag raw θ=11.0° φ=-135.0° → cell b=2 c=-22
+drag raw θ=10.8° φ=-134.3° → cell b=2 c=-22
+drag raw θ=10.7° φ=-133.9° → cell b=2 c=-22
+drag raw θ=10.4° φ=-133.0° → cell b=2 c=-22
+drag raw θ=10.2° φ=-131.9° → cell b=2 c=-22
+drag raw θ=10.0° φ=-131.3° → cell b=2 c=-22
+drag raw θ=9.8° φ=-130.5° → cell b=2 c=-22
+drag raw θ=9.6° φ=-129.3° → cell b=2 c=-22
+drag raw θ=9.4° φ=-128.3° → cell b=2 c=-21
+drag raw θ=9.2° φ=-127.5° → cell b=2 c=-21
+drag raw θ=9.1° φ=-126.6° → cell b=2 c=-21
+drag raw θ=8.9° φ=-125.8° → cell b=1 c=-21
+drag raw θ=8.8° φ=-125.0° → cell b=1 c=-21
+drag raw θ=8.7° φ=-124.1° → cell b=1 c=-21
+drag raw θ=8.6° φ=-123.3° → cell b=1 c=-21
+drag raw θ=8.5° φ=-122.7° → cell b=1 c=-20
+drag raw θ=8.4° φ=-121.9° → cell b=1 c=-20
+drag raw θ=8.3° φ=-121.0° → cell b=1 c=-20
+drag raw θ=8.2° φ=-120.2° → cell b=1 c=-20
+drag raw θ=8.1° φ=-119.3° → cell b=1 c=-20
+drag raw θ=8.0° φ=-118.1° → cell b=1 c=-20
+drag raw θ=8.0° φ=-116.9° → cell b=1 c=-19
+drag raw θ=7.9° φ=-115.9° → cell b=1 c=-19
+drag raw θ=7.8° φ=-114.4° → cell b=1 c=-19
+drag raw θ=7.7° φ=-112.7° → cell b=1 c=-19
+drag raw θ=7.6° φ=-111.0° → cell b=1 c=-18
+drag raw θ=7.5° φ=-108.8° → cell b=1 c=-18
+drag raw θ=7.5° φ=-107.1° → cell b=1 c=-18
+drag raw θ=7.4° φ=-104.7° → cell b=1 c=-17
+drag raw θ=7.3° φ=-102.5° → cell b=1 c=-17
+drag raw θ=7.3° φ=-100.8° → cell b=1 c=-17
+drag raw θ=7.2° φ=-96.9° → cell b=1 c=-16
+drag raw θ=7.2° φ=-92.5° → cell b=1 c=-15
+drag raw θ=7.1° φ=-89.6° → cell b=1 c=-15
+drag raw θ=7.1° φ=-85.8° → cell b=1 c=-14
+drag raw θ=7.0° φ=-80.9° → cell b=1 c=-13
+drag raw θ=7.0° φ=-75.8° → cell b=1 c=-13
+drag raw θ=7.0° φ=-71.3° → cell b=1 c=-12
+drag raw θ=7.0° φ=-65.6° → cell b=1 c=-11
+drag raw θ=7.0° φ=-59.7° → cell b=1 c=-10
+drag raw θ=7.0° φ=-53.1° → cell b=1 c=-9
+drag raw θ=7.0° φ=-46.8° → cell b=1 c=-8
+drag raw θ=7.0° φ=-41.2° → cell b=1 c=-7
+drag raw θ=7.0° φ=-35.3° → cell b=1 c=-6
+drag raw θ=7.1° φ=-29.9° → cell b=1 c=-5
+drag raw θ=7.1° φ=-24.8° → cell b=1 c=-4
+drag raw θ=7.2° φ=-21.2° → cell b=1 c=-4
+drag raw θ=7.2° φ=-18.2° → cell b=1 c=-3
+drag raw θ=7.3° φ=-14.7° → cell b=1 c=-2
+drag raw θ=7.3° φ=-11.9° → cell b=1 c=-2
+drag raw θ=7.4° φ=-9.2° → cell b=1 c=-2
+drag raw θ=7.4° φ=-6.3° → cell b=1 c=-1
+drag raw θ=7.5° φ=-4.4° → cell b=1 c=-1
+drag raw θ=7.6° φ=-1.8° → cell b=1 c=0
+drag raw θ=7.6° φ=0.6° → cell b=1 c=0
+drag raw θ=7.7° φ=2.6° → cell b=1 c=0
+drag raw θ=7.8° φ=4.8° → cell b=1 c=1
+drag raw θ=7.9° φ=6.6° → cell b=1 c=1
+drag raw θ=7.9° φ=7.9° → cell b=1 c=1
+drag raw θ=7.9° φ=9.0° → cell b=1 c=2
+drag raw θ=7.9° φ=10.3° → cell b=1 c=2
+drag raw θ=7.9° φ=11.7° → cell b=1 c=2
+drag raw θ=7.9° φ=13.4° → cell b=1 c=2
+drag raw θ=7.9° φ=15.3° → cell b=1 c=3
+drag raw θ=7.9° φ=18.1° → cell b=1 c=3
+drag raw θ=7.8° φ=21.5° → cell b=1 c=4
+drag raw θ=7.5° φ=24.7° → cell b=1 c=4
+drag raw θ=7.2° φ=30.0° → cell b=1 c=5
+drag raw θ=6.8° φ=39.5° → cell b=1 c=7
+drag raw θ=6.5° φ=59.4° → cell b=1 c=10
+drag raw θ=6.4° φ=97.8° → cell b=1 c=16
+drag raw θ=6.4° φ=131.5° → cell b=1 c=22
+drag raw θ=6.5° φ=146.9° → cell b=1 c=24
+drag raw θ=6.7° φ=155.1° → cell b=1 c=26
+drag raw θ=6.8° φ=159.1° → cell b=1 c=27
+drag raw θ=6.9° φ=160.2° → cell b=1 c=27
+drag raw θ=7.0° φ=161.5° → cell b=1 c=27
+drag raw θ=7.1° φ=161.7° → cell b=1 c=27
+drag raw θ=7.3° φ=164.2° → cell b=1 c=27
+drag raw θ=7.4° φ=167.1° → cell b=1 c=28
+drag raw θ=7.5° φ=169.6° → cell b=1 c=28
+drag raw θ=7.5° φ=172.6° → cell b=1 c=29
+drag raw θ=7.6° φ=174.6° → cell b=1 c=29
+drag raw θ=7.6° φ=176.5° → cell b=1 c=29
+drag raw θ=7.7° φ=178.1° → cell b=1 c=30
+drag raw θ=7.8° φ=-179.8° → cell b=1 c=-30
+drag raw θ=7.9° φ=-177.9° → cell b=1 c=-30
+drag raw θ=7.9° φ=-176.6° → cell b=1 c=-29
+drag raw θ=8.0° φ=-175.6° → cell b=1 c=-29
+drag raw θ=8.0° φ=-174.7° → cell b=1 c=-29
+drag raw θ=8.1° φ=-173.5° → cell b=1 c=-29
+drag raw θ=8.1° φ=-172.0° → cell b=1 c=-29
+drag raw θ=8.0° φ=-169.4° → cell b=1 c=-28
+drag raw θ=7.8° φ=-166.3° → cell b=1 c=-28
+drag raw θ=7.6° φ=-162.5° → cell b=1 c=-27
+drag raw θ=7.5° φ=-157.3° → cell b=1 c=-26
+drag raw θ=7.4° φ=-151.9° → cell b=1 c=-25
+drag raw θ=7.3° φ=-146.7° → cell b=1 c=-24
+drag raw θ=7.3° φ=-140.8° → cell b=1 c=-23
+drag raw θ=7.3° φ=-134.8° → cell b=1 c=-22
+drag raw θ=7.3° φ=-130.5° → cell b=1 c=-22
+drag raw θ=7.3° φ=-126.9° → cell b=1 c=-21
+drag raw θ=7.4° φ=-123.0° → cell b=1 c=-20
+drag raw θ=7.4° φ=-119.3° → cell b=1 c=-20
+drag raw θ=7.4° φ=-116.6° → cell b=1 c=-19
+drag raw θ=7.5° φ=-115.7° → cell b=1 c=-19
+drag raw θ=7.5° φ=-115.4° → cell b=1 c=-19
+drag raw θ=7.6° φ=-115.3° → cell b=1 c=-19
+drag raw θ=7.6° φ=-115.2° → cell b=1 c=-19
+drag raw θ=7.6° φ=-114.1° → cell b=1 c=-19
+drag raw θ=7.5° φ=-112.6° → cell b=1 c=-19
+drag raw θ=7.4° φ=-110.3° → cell b=1 c=-18
+drag raw θ=7.3° φ=-107.0° → cell b=1 c=-18
+drag raw θ=7.3° φ=-101.5° → cell b=1 c=-17
+drag raw θ=7.3° φ=-94.1° → cell b=1 c=-16
+drag raw θ=7.2° φ=-86.0° → cell b=1 c=-14
+drag raw θ=7.3° φ=-78.7° → cell b=1 c=-13
+drag raw θ=7.3° φ=-72.7° → cell b=1 c=-12
+drag raw θ=7.4° φ=-66.1° → cell b=1 c=-11
+drag raw θ=7.4° φ=-61.1° → cell b=1 c=-10
+drag raw θ=7.5° φ=-57.9° → cell b=1 c=-10
+drag raw θ=7.6° φ=-54.1° → cell b=1 c=-9
+drag raw θ=7.6° φ=-51.3° → cell b=1 c=-9
+drag raw θ=7.7° φ=-49.2° → cell b=1 c=-8
+drag raw θ=7.7° φ=-46.6° → cell b=1 c=-8
+drag raw θ=7.8° φ=-43.9° → cell b=1 c=-7
+drag raw θ=7.8° φ=-41.4° → cell b=1 c=-7
+drag raw θ=7.8° φ=-38.5° → cell b=1 c=-6
+drag raw θ=7.9° φ=-36.1° → cell b=1 c=-6
+drag raw θ=7.9° φ=-34.2° → cell b=1 c=-6
+drag raw θ=7.9° φ=-32.2° → cell b=1 c=-5
+drag raw θ=7.9° φ=-30.2° → cell b=1 c=-5
+drag raw θ=8.0° φ=-27.4° → cell b=1 c=-5
+drag raw θ=8.0° φ=-24.7° → cell b=1 c=-4
+drag raw θ=8.1° φ=-22.1° → cell b=1 c=-4
+drag raw θ=8.1° φ=-18.7° → cell b=1 c=-3
+drag raw θ=8.2° φ=-15.6° → cell b=1 c=-3
+drag raw θ=8.3° φ=-12.7° → cell b=1 c=-2
+drag raw θ=8.4° φ=-10.0° → cell b=1 c=-2
+drag raw θ=8.5° φ=-7.6° → cell b=1 c=-1
+drag raw θ=8.6° φ=-5.3° → cell b=1 c=-1
+drag raw θ=8.8° φ=-2.7° → cell b=1 c=0
+drag raw θ=8.9° φ=0.3° → cell b=1 c=0
+drag raw θ=9.0° φ=3.2° → cell b=1 c=1
+drag raw θ=9.1° φ=5.7° → cell b=2 c=1
+drag raw θ=9.1° φ=8.1° → cell b=2 c=1
+drag raw θ=9.2° φ=10.1° → cell b=2 c=2
+drag raw θ=9.2° φ=12.1° → cell b=2 c=2
+drag raw θ=9.3° φ=14.0° → cell b=2 c=2
+drag raw θ=9.3° φ=15.4° → cell b=2 c=3
+drag raw θ=9.3° φ=17.0° → cell b=2 c=3
+drag raw θ=9.3° φ=18.7° → cell b=2 c=3
+drag raw θ=9.4° φ=20.3° → cell b=2 c=3
+drag raw θ=9.3° φ=21.9° → cell b=2 c=4
+drag raw θ=9.3° φ=23.3° → cell b=2 c=4
+drag raw θ=9.3° φ=24.9° → cell b=2 c=4
+drag raw θ=9.3° φ=26.6° → cell b=2 c=4
+drag raw θ=9.3° φ=28.4° → cell b=2 c=5
+drag raw θ=9.2° φ=30.6° → cell b=2 c=5
+drag raw θ=9.2° φ=32.3° → cell b=2 c=5
+drag raw θ=9.2° φ=34.2° → cell b=2 c=6
+drag raw θ=9.2° φ=36.5° → cell b=2 c=6
+drag raw θ=9.2° φ=38.9° → cell b=2 c=6
+drag raw θ=9.3° φ=41.6° → cell b=2 c=7
+drag raw θ=9.3° φ=44.7° → cell b=2 c=7
+drag raw θ=9.3° φ=47.3° → cell b=2 c=8
+drag raw θ=9.3° φ=50.1° → cell b=2 c=8
+drag raw θ=9.3° φ=53.2° → cell b=2 c=9
+drag raw θ=9.3° φ=55.8° → cell b=2 c=9
+drag raw θ=9.3° φ=58.1° → cell b=2 c=10
+drag raw θ=9.4° φ=60.5° → cell b=2 c=10
+drag raw θ=9.4° φ=62.8° → cell b=2 c=10
+drag raw θ=9.4° φ=64.8° → cell b=2 c=11
+drag raw θ=9.5° φ=67.0° → cell b=2 c=11
+drag raw θ=9.5° φ=69.2° → cell b=2 c=12
+drag raw θ=9.6° φ=71.0° → cell b=2 c=12
+drag raw θ=9.6° φ=73.0° → cell b=2 c=12
+drag raw θ=9.7° φ=74.5° → cell b=2 c=12
+drag raw θ=9.7° φ=76.1° → cell b=2 c=13
+drag raw θ=9.7° φ=77.9° → cell b=2 c=13
+drag raw θ=9.8° φ=79.5° → cell b=2 c=13
+drag raw θ=9.8° φ=81.0° → cell b=2 c=13
+drag raw θ=9.8° φ=82.4° → cell b=2 c=14
+drag raw θ=9.9° φ=84.3° → cell b=2 c=14
+drag raw θ=9.9° φ=86.5° → cell b=2 c=14
+drag raw θ=9.9° φ=88.5° → cell b=2 c=15
+drag raw θ=9.9° φ=90.7° → cell b=2 c=15
+drag raw θ=9.9° φ=92.7° → cell b=2 c=15
+drag raw θ=9.9° φ=94.6° → cell b=2 c=16
+drag raw θ=9.8° φ=97.0° → cell b=2 c=16
+drag raw θ=9.8° φ=99.1° → cell b=2 c=17
+drag raw θ=9.8° φ=101.3° → cell b=2 c=17
+drag raw θ=9.8° φ=103.8° → cell b=2 c=17
+drag raw θ=9.8° φ=105.9° → cell b=2 c=18
+drag raw θ=9.7° φ=107.6° → cell b=2 c=18
+drag raw θ=9.7° φ=109.5° → cell b=2 c=18
+drag raw θ=9.7° φ=111.7° → cell b=2 c=19
+drag raw θ=9.7° φ=113.4° → cell b=2 c=19
+drag raw θ=9.7° φ=114.7° → cell b=2 c=19
+drag raw θ=9.7° φ=116.4° → cell b=2 c=19
+drag raw θ=9.7° φ=118.2° → cell b=2 c=20
+drag raw θ=9.7° φ=119.6° → cell b=2 c=20
+drag raw θ=9.7° φ=120.9° → cell b=2 c=20
+drag raw θ=9.7° φ=122.2° → cell b=2 c=20
+drag raw θ=9.7° φ=123.7° → cell b=2 c=21
+drag raw θ=9.7° φ=124.9° → cell b=2 c=21
+drag raw θ=9.7° φ=126.1° → cell b=2 c=21
+drag raw θ=9.7° φ=127.8° → cell b=2 c=21
+drag raw θ=9.7° φ=129.4° → cell b=2 c=22
+drag raw θ=9.8° φ=131.1° → cell b=2 c=22
+drag raw θ=9.9° φ=132.6° → cell b=2 c=22
+drag raw θ=9.9° φ=134.2° → cell b=2 c=22
+drag raw θ=10.0° φ=136.6° → cell b=2 c=23
+drag raw θ=10.0° φ=139.1° → cell b=2 c=23
+drag raw θ=10.1° φ=141.3° → cell b=2 c=24
+drag raw θ=10.2° φ=143.6° → cell b=2 c=24
+drag raw θ=10.4° φ=146.7° → cell b=2 c=24
+drag raw θ=10.5° φ=149.7° → cell b=2 c=25
+drag raw θ=10.7° φ=152.1° → cell b=2 c=25
+drag raw θ=10.8° φ=154.4° → cell b=2 c=26
+drag raw θ=11.0° φ=157.1° → cell b=2 c=26
+drag raw θ=11.2° φ=159.6° → cell b=2 c=27
+drag raw θ=11.3° φ=162.1° → cell b=2 c=27
+drag raw θ=11.5° φ=164.5° → cell b=2 c=27
+drag raw θ=11.7° φ=166.8° → cell b=2 c=28
+drag raw θ=11.8° φ=168.6° → cell b=2 c=28
+drag raw θ=11.9° φ=170.0° → cell b=2 c=28
+drag raw θ=6.1° φ=171.5° → cell b=1 c=29
+drag raw θ=6.2° φ=172.7° → cell b=1 c=29
+drag raw θ=6.3° φ=173.7° → cell b=1 c=29
+drag raw θ=6.4° φ=174.6° → cell b=1 c=29
+drag raw θ=6.6° φ=175.7° → cell b=1 c=29
+drag raw θ=6.7° φ=176.8° → cell b=1 c=29
+drag raw θ=6.8° φ=177.4° → cell b=1 c=30
+drag raw θ=6.9° φ=178.0° → cell b=1 c=30
+drag raw θ=7.0° φ=178.6° → cell b=1 c=30
+drag raw θ=7.1° φ=179.1° → cell b=1 c=30
+drag raw θ=7.2° φ=179.8° → cell b=1 c=30
+drag raw θ=7.3° φ=-179.5° → cell b=1 c=-30
+drag raw θ=7.4° φ=-179.0° → cell b=1 c=-30
+drag raw θ=7.5° φ=-178.7° → cell b=1 c=-30
+drag raw θ=7.6° φ=-178.2° → cell b=1 c=-30
+drag raw θ=7.7° φ=-177.6° → cell b=1 c=-30
+drag raw θ=7.8° φ=-177.1° → cell b=1 c=-30
+drag raw θ=7.9° φ=-176.8° → cell b=1 c=-29
+drag raw θ=8.0° φ=-176.5° → cell b=1 c=-29
+drag raw θ=8.0° φ=-176.2° → cell b=1 c=-29
+drag raw θ=8.1° φ=-175.9° → cell b=1 c=-29
+drag raw θ=8.1° φ=-175.7° → cell b=1 c=-29
+drag raw θ=8.2° φ=-175.3° → cell b=1 c=-29
+drag raw θ=8.2° φ=-174.9° → cell b=1 c=-29
+drag raw θ=8.3° φ=-174.0° → cell b=1 c=-29
+drag raw θ=8.3° φ=-172.9° → cell b=1 c=-29
+drag raw θ=8.2° φ=-171.9° → cell b=1 c=-29
+drag raw θ=8.2° φ=-171.0° → cell b=1 c=-28
+drag raw θ=8.1° φ=-169.8° → cell b=1 c=-28
+drag raw θ=8.1° φ=-168.8° → cell b=1 c=-28
+drag raw θ=8.0° φ=-168.1° → cell b=1 c=-28
+drag raw θ=8.0° φ=-167.1° → cell b=1 c=-28
+drag raw θ=8.0° φ=-166.0° → cell b=1 c=-28
+drag raw θ=7.9° φ=-164.9° → cell b=1 c=-27
+drag raw θ=7.8° φ=-163.8° → cell b=1 c=-27
+drag raw θ=7.8° φ=-162.7° → cell b=1 c=-27
+drag raw θ=7.7° φ=-161.5° → cell b=1 c=-27
+drag raw θ=7.6° φ=-160.1° → cell b=1 c=-27
+drag raw θ=7.5° φ=-158.6° → cell b=1 c=-26
+drag raw θ=7.5° φ=-157.0° → cell b=1 c=-26
+drag raw θ=7.4° φ=-155.4° → cell b=1 c=-26
+drag raw θ=7.4° φ=-153.8° → cell b=1 c=-26
+drag raw θ=7.3° φ=-152.1° → cell b=1 c=-25
+drag raw θ=7.2° φ=-150.8° → cell b=1 c=-25
+drag raw θ=7.2° φ=-149.8° → cell b=1 c=-25
+drag raw θ=7.1° φ=-148.8° → cell b=1 c=-25
+drag raw θ=7.0° φ=-148.0° → cell b=1 c=-25
+drag raw θ=7.0° φ=-147.4° → cell b=1 c=-25
+drag raw θ=7.0° φ=-146.9° → cell b=1 c=-24
+drag raw θ=6.9° φ=-146.4° → cell b=1 c=-24
+drag raw θ=6.8° φ=-145.8° → cell b=1 c=-24
+drag raw θ=6.7° φ=-144.9° → cell b=1 c=-24
+drag raw θ=6.6° φ=-144.2° → cell b=1 c=-24
+drag raw θ=6.4° φ=-143.4° → cell b=1 c=-24
+drag raw θ=6.3° φ=-142.5° → cell b=1 c=-24
+drag raw θ=6.2° φ=-141.7° → cell b=1 c=-24
+drag raw θ=6.0° φ=-140.7° → cell b=1 c=-23
+drag raw θ=11.9° φ=-139.7° → cell b=2 c=-23
+drag raw θ=11.8° φ=-138.7° → cell b=2 c=-23
+drag raw θ=11.7° φ=-137.3° → cell b=2 c=-23
+drag raw θ=11.6° φ=-136.1° → cell b=2 c=-23
+drag raw θ=11.5° φ=-134.9° → cell b=2 c=-22
+drag raw θ=11.3° φ=-133.6° → cell b=2 c=-22
+drag raw θ=11.2° φ=-132.3° → cell b=2 c=-22
+drag raw θ=11.2° φ=-131.0° → cell b=2 c=-22
+drag raw θ=11.0° φ=-129.6° → cell b=2 c=-22
+drag raw θ=10.9° φ=-128.1° → cell b=2 c=-21
+drag raw θ=10.8° φ=-126.9° → cell b=2 c=-21
+drag raw θ=10.7° φ=-125.6° → cell b=2 c=-21
+drag raw θ=10.6° φ=-124.2° → cell b=2 c=-21
+drag raw θ=10.5° φ=-122.8° → cell b=2 c=-20
+drag raw θ=10.4° φ=-121.6° → cell b=2 c=-20
+drag raw θ=10.2° φ=-120.4° → cell b=2 c=-20
+drag raw θ=10.1° φ=-118.8° → cell b=2 c=-20
+drag raw θ=10.0° φ=-117.1° → cell b=2 c=-20
+drag raw θ=9.9° φ=-116.0° → cell b=2 c=-19
+drag raw θ=9.9° φ=-114.8° → cell b=2 c=-19
+drag raw θ=9.8° φ=-113.4° → cell b=2 c=-19
+drag raw θ=9.6° φ=-111.9° → cell b=2 c=-19
+drag raw θ=9.4° φ=-109.6° → cell b=2 c=-18
+drag raw θ=9.1° φ=-106.9° → cell b=2 c=-18
+drag raw θ=9.0° φ=-104.2° → cell b=1 c=-17
+drag raw θ=8.8° φ=-101.5° → cell b=1 c=-17
+drag raw θ=8.6° φ=-98.2° → cell b=1 c=-16
+drag raw θ=8.4° φ=-94.5° → cell b=1 c=-16
+drag raw θ=8.1° φ=-91.0° → cell b=1 c=-15
+drag raw θ=7.9° φ=-87.4° → cell b=1 c=-15
+drag raw θ=7.7° φ=-84.5° → cell b=1 c=-14
+drag raw θ=7.5° φ=-82.8° → cell b=1 c=-14
+drag raw θ=7.3° φ=-82.2° → cell b=1 c=-14
+drag raw θ=7.0° φ=-84.3° → cell b=1 c=-14
+drag raw θ=6.8° φ=-91.4° → cell b=1 c=-15
+drag raw θ=6.6° φ=-105.6° → cell b=1 c=-18
+drag raw θ=6.5° φ=-128.4° → cell b=1 c=-21
+drag raw θ=6.5° φ=-151.7° → cell b=1 c=-25
+drag raw θ=6.6° φ=-169.4° → cell b=1 c=-28
+drag raw θ=6.7° φ=177.3° → cell b=1 c=30
+drag raw θ=6.8° φ=167.4° → cell b=1 c=28
+drag raw θ=6.9° φ=158.8° → cell b=1 c=26
+drag raw θ=6.9° φ=151.4° → cell b=1 c=25
+drag raw θ=7.0° φ=143.0° → cell b=1 c=24
+drag raw θ=7.0° φ=133.8° → cell b=1 c=22
+drag raw θ=7.1° φ=127.7° → cell b=1 c=21
+drag raw θ=7.3° φ=122.7° → cell b=1 c=20
+drag raw θ=7.4° φ=118.5° → cell b=1 c=20
+drag raw θ=7.5° φ=116.2° → cell b=1 c=19
+drag raw θ=7.6° φ=114.3° → cell b=1 c=19
+drag raw θ=7.7° φ=112.5° → cell b=1 c=19
+drag raw θ=7.8° φ=110.6° → cell b=1 c=18
+drag raw θ=7.8° φ=108.2° → cell b=1 c=18
+drag raw θ=7.9° φ=105.9° → cell b=1 c=18
+drag raw θ=7.9° φ=103.4° → cell b=1 c=17
+drag raw θ=7.9° φ=100.7° → cell b=1 c=17
+drag raw θ=8.0° φ=97.9° → cell b=1 c=16
+drag raw θ=8.0° φ=95.3° → cell b=1 c=16
+drag raw θ=8.1° φ=92.5° → cell b=1 c=15
+drag raw θ=8.2° φ=89.6° → cell b=1 c=15
+drag raw θ=8.2° φ=86.4° → cell b=1 c=14
+drag raw θ=8.2° φ=83.1° → cell b=1 c=14
+drag raw θ=8.2° φ=79.7° → cell b=1 c=13
+drag raw θ=8.3° φ=76.6° → cell b=1 c=13
+drag raw θ=8.3° φ=74.1° → cell b=1 c=12
+drag raw θ=8.3° φ=72.2° → cell b=1 c=12
+drag raw θ=8.3° φ=70.4° → cell b=1 c=12
+drag raw θ=8.3° φ=67.8° → cell b=1 c=11
+drag raw θ=8.3° φ=65.5° → cell b=1 c=11
+drag raw θ=8.3° φ=64.0° → cell b=1 c=11
+drag raw θ=8.3° φ=62.7° → cell b=1 c=10
+drag raw θ=8.4° φ=61.1° → cell b=1 c=10
+drag raw θ=8.4° φ=59.8° → cell b=1 c=10
+drag raw θ=8.5° φ=58.0° → cell b=1 c=10
+drag raw θ=8.5° φ=55.8° → cell b=1 c=9
+drag raw θ=8.6° φ=53.8° → cell b=1 c=9
+drag raw θ=8.7° φ=51.6° → cell b=1 c=9
+drag raw θ=8.9° φ=49.6° → cell b=1 c=8
+drag raw θ=9.0° φ=48.2° → cell b=2 c=8
+drag raw θ=9.1° φ=47.0° → cell b=2 c=8
+drag raw θ=9.4° φ=45.2° → cell b=2 c=8
+drag raw θ=9.6° φ=43.4° → cell b=2 c=7
+drag raw θ=9.9° φ=41.9° → cell b=2 c=7
+drag raw θ=10.3° φ=41.0° → cell b=2 c=7
+drag raw θ=10.6° φ=40.3° → cell b=2 c=7
+drag raw θ=11.0° φ=39.6° → cell b=2 c=7
+drag raw θ=11.4° φ=39.3° → cell b=2 c=7
+drag raw θ=11.7° φ=38.8° → cell b=2 c=6
+drag raw θ=6.0° φ=38.2° → cell b=1 c=6
+drag raw θ=6.3° φ=37.6° → cell b=1 c=6
+drag raw θ=6.6° φ=37.3° → cell b=1 c=6
+drag raw θ=7.0° φ=36.9° → cell b=1 c=6
+drag raw θ=7.4° φ=36.3° → cell b=1 c=6
+drag raw θ=7.8° φ=35.9° → cell b=1 c=6
+drag raw θ=8.2° φ=35.4° → cell b=1 c=6
+drag raw θ=8.5° φ=35.0° → cell b=1 c=6
+drag raw θ=8.9° φ=34.6° → cell b=1 c=6
+drag raw θ=9.3° φ=34.2° → cell b=2 c=6
+drag raw θ=9.6° φ=33.8° → cell b=2 c=6
+drag raw θ=9.8° φ=33.5° → cell b=2 c=6
+drag raw θ=10.2° φ=33.5° → cell b=2 c=6
+drag raw θ=10.5° φ=33.4° → cell b=2 c=6
+drag raw θ=10.8° φ=33.3° → cell b=2 c=6
+drag raw θ=11.0° φ=33.3° → cell b=2 c=6
+drag raw θ=11.2° φ=33.2° → cell b=2 c=6
+drag raw θ=11.5° φ=33.0° → cell b=2 c=6
+drag raw θ=11.8° φ=32.8° → cell b=2 c=5
+drag raw θ=12.0° φ=32.8° → cell b=2 c=5
+drag raw θ=12.4° φ=32.6° → cell b=2 c=5
+drag raw θ=12.8° φ=32.6° → cell b=2 c=5
+drag raw θ=13.1° φ=32.7° → cell b=2 c=5
+drag raw θ=13.5° φ=32.9° → cell b=2 c=5
+drag raw θ=13.8° φ=33.0° → cell b=2 c=5
+drag raw θ=14.2° φ=33.1° → cell b=2 c=6
+drag raw θ=14.5° φ=33.2° → cell b=2 c=6
+drag raw θ=14.9° φ=33.3° → cell b=2 c=6
+drag raw θ=15.3° φ=33.4° → cell b=3 c=6
+drag raw θ=15.6° φ=33.5° → cell b=3 c=6
+drag raw θ=16.0° φ=33.6° → cell b=3 c=6
+drag raw θ=16.4° φ=33.7° → cell b=3 c=6
+drag raw θ=16.8° φ=33.8° → cell b=3 c=6
+drag raw θ=17.1° φ=33.8° → cell b=3 c=6
+drag raw θ=17.4° φ=33.9° → cell b=3 c=6
+drag raw θ=17.7° φ=34.0° → cell b=3 c=6
+drag raw θ=18.1° φ=34.0° → cell b=3 c=6
+drag raw θ=18.4° φ=34.1° → cell b=3 c=6
+drag raw θ=18.9° φ=34.2° → cell b=3 c=6
+drag raw θ=19.3° φ=34.3° → cell b=3 c=6
+drag raw θ=19.8° φ=34.3° → cell b=3 c=6
+drag raw θ=20.4° φ=34.4° → cell b=3 c=6
+drag raw θ=20.9° φ=34.4° → cell b=3 c=6
+drag raw θ=21.4° φ=34.4° → cell b=4 c=6
+drag raw θ=21.9° φ=34.4° → cell b=4 c=6
+drag raw θ=22.4° φ=34.5° → cell b=4 c=6
+drag raw θ=22.9° φ=34.4° → cell b=4 c=6
+drag raw θ=23.3° φ=34.4° → cell b=4 c=6
+drag raw θ=23.7° φ=34.4° → cell b=4 c=6
+drag raw θ=24.1° φ=34.4° → cell b=4 c=6
+drag raw θ=24.4° φ=34.4° → cell b=4 c=6
+drag raw θ=24.8° φ=34.5° → cell b=4 c=6
+drag raw θ=25.2° φ=34.5° → cell b=4 c=6
+drag raw θ=25.4° φ=34.5° → cell b=4 c=6
+drag raw θ=25.7° φ=34.6° → cell b=4 c=6
+drag raw θ=25.8° φ=34.6° → cell b=4 c=6
+drag raw θ=26.0° φ=34.6° → cell b=4 c=6
+drag raw θ=26.0° φ=34.6° → cell b=4 c=6
+drag raw θ=25.7° φ=34.6° → cell b=4 c=6
+drag raw θ=25.2° φ=34.5° → cell b=4 c=6
+drag raw θ=24.6° φ=34.4° → cell b=4 c=6
+drag raw θ=24.0° φ=34.3° → cell b=4 c=6
+drag raw θ=23.4° φ=34.3° → cell b=4 c=6
+drag raw θ=22.6° φ=34.1° → cell b=4 c=6
+drag raw θ=21.4° φ=33.9° → cell b=4 c=6
+drag raw θ=20.0° φ=33.7° → cell b=3 c=6
+drag raw θ=18.3° φ=33.3° → cell b=3 c=6
+drag raw θ=16.7° φ=32.9° → cell b=3 c=5
+drag raw θ=14.9° φ=32.3° → cell b=2 c=5
+drag raw θ=13.1° φ=31.6° → cell b=2 c=5
+drag raw θ=11.5° φ=30.8° → cell b=2 c=5
+drag raw θ=9.8° φ=29.7° → cell b=2 c=5
+drag raw θ=8.2° φ=28.1° → cell b=1 c=5
+drag raw θ=6.4° φ=25.5° → cell b=1 c=4
+drag raw θ=10.7° φ=21.8° → cell b=2 c=4
+drag raw θ=9.3° φ=16.2° → cell b=2 c=3
+drag raw θ=8.0° φ=3.7° → cell b=1 c=1
+drag raw θ=7.1° φ=-28.4° → cell b=1 c=-5
+drag raw θ=7.1° φ=-77.1° → cell b=1 c=-13
+drag raw θ=7.5° φ=-103.7° → cell b=1 c=-17
+drag raw θ=7.9° φ=-114.5° → cell b=1 c=-19
+drag raw θ=8.3° φ=-119.6° → cell b=1 c=-20
+drag raw θ=8.7° φ=-123.1° → cell b=1 c=-21
+drag raw θ=9.1° φ=-125.4° → cell b=2 c=-21
+drag raw θ=9.5° φ=-127.2° → cell b=2 c=-21
+drag raw θ=9.8° φ=-128.7° → cell b=2 c=-21
+drag raw θ=10.1° φ=-129.7° → cell b=2 c=-22
+drag raw θ=10.4° φ=-130.6° → cell b=2 c=-22
+drag raw θ=10.7° φ=-131.5° → cell b=2 c=-22
+drag raw θ=11.0° φ=-132.2° → cell b=2 c=-22
+drag raw θ=11.3° φ=-132.8° → cell b=2 c=-22
+drag raw θ=11.6° φ=-133.3° → cell b=2 c=-22
+drag raw θ=11.9° φ=-133.7° → cell b=2 c=-22
+drag raw θ=6.1° φ=-134.1° → cell b=1 c=-22
+drag raw θ=6.4° φ=-134.5° → cell b=1 c=-22
+drag raw θ=6.6° φ=-134.8° → cell b=1 c=-22
+drag raw θ=6.9° φ=-135.0° → cell b=1 c=-23
+drag raw θ=7.0° φ=-135.2° → cell b=1 c=-23
+drag raw θ=7.2° φ=-135.4° → cell b=1 c=-23
+drag raw θ=7.4° φ=-135.6° → cell b=1 c=-23
+drag raw θ=7.6° φ=-135.8° → cell b=1 c=-23
+drag raw θ=7.8° φ=-136.2° → cell b=1 c=-23
+drag raw θ=8.0° φ=-136.6° → cell b=1 c=-23
+drag raw θ=8.1° φ=-136.7° → cell b=1 c=-23
+drag raw θ=8.3° φ=-137.0° → cell b=1 c=-23
+drag raw θ=8.4° φ=-137.4° → cell b=1 c=-23
+drag raw θ=8.6° φ=-137.7° → cell b=1 c=-23
+drag raw θ=8.8° φ=-138.0° → cell b=1 c=-23
+drag raw θ=8.8° φ=-138.0° → cell b=1 c=-23
+drag raw θ=8.9° φ=-138.3° → cell b=1 c=-23
+drag raw θ=8.9° φ=-138.5° → cell b=1 c=-23
+drag raw θ=8.8° φ=-138.4° → cell b=1 c=-23
+drag raw θ=8.5° φ=-138.3° → cell b=1 c=-23
+drag raw θ=8.1° φ=-138.0° → cell b=1 c=-23
+drag raw θ=7.5° φ=-137.7° → cell b=1 c=-23
+drag raw θ=6.8° φ=-137.2° → cell b=1 c=-23
+drag raw θ=11.9° φ=-136.3° → cell b=2 c=-23
+drag raw θ=10.8° φ=-134.8° → cell b=2 c=-22
+drag raw θ=9.7° φ=-132.3° → cell b=2 c=-22
+drag raw θ=8.4° φ=-126.9° → cell b=1 c=-21
+drag raw θ=7.2° φ=-111.5° → cell b=1 c=-19
+drag raw θ=6.5° φ=-39.6° → cell b=1 c=-7
+drag raw θ=7.0° φ=12.4° → cell b=1 c=2
+drag raw θ=7.6° φ=23.1° → cell b=1 c=4
+drag raw θ=8.1° φ=26.3° → cell b=1 c=4
+drag raw θ=8.4° φ=27.7° → cell b=1 c=5
+drag raw θ=8.6° φ=28.5° → cell b=1 c=5
+drag raw θ=8.7° φ=29.0° → cell b=1 c=5
+drag raw θ=8.9° φ=29.5° → cell b=1 c=5
+drag raw θ=9.0° φ=29.8° → cell b=2 c=5
+drag raw θ=9.2° φ=30.2° → cell b=2 c=5
+drag raw θ=9.4° φ=30.7° → cell b=2 c=5
+drag raw θ=9.7° φ=31.1° → cell b=2 c=5
+drag raw θ=9.9° φ=31.6° → cell b=2 c=5
+drag raw θ=10.3° φ=32.0° → cell b=2 c=5
+drag raw θ=10.6° φ=32.4° → cell b=2 c=5
+drag raw θ=11.0° φ=32.7° → cell b=2 c=5
+drag raw θ=11.4° φ=33.1° → cell b=2 c=6
+drag raw θ=11.8° φ=33.4° → cell b=2 c=6
+drag raw θ=6.3° φ=33.7° → cell b=1 c=6
+drag raw θ=6.7° φ=33.9° → cell b=1 c=6
+drag raw θ=7.1° φ=34.1° → cell b=1 c=6
+drag raw θ=7.5° φ=34.3° → cell b=1 c=6
+drag raw θ=7.9° φ=34.5° → cell b=1 c=6
+drag raw θ=8.3° φ=34.6° → cell b=1 c=6
+drag raw θ=8.6° φ=34.7° → cell b=1 c=6
+drag raw θ=8.9° φ=35.0° → cell b=1 c=6
+drag raw θ=9.1° φ=35.2° → cell b=2 c=6
+drag raw θ=9.2° φ=35.3° → cell b=2 c=6
+drag raw θ=9.3° φ=35.6° → cell b=2 c=6
+drag raw θ=9.3° φ=36.1° → cell b=2 c=6
+drag raw θ=9.3° φ=36.4° → cell b=2 c=6
+drag raw θ=8.9° φ=36.7° → cell b=1 c=6
+drag raw θ=8.2° φ=37.0° → cell b=1 c=6
+drag raw θ=7.5° φ=37.3° → cell b=1 c=6
+drag raw θ=6.8° φ=37.6° → cell b=1 c=6
+drag raw θ=6.1° φ=37.6° → cell b=1 c=6
+drag raw θ=11.5° φ=37.7° → cell b=2 c=6
+drag raw θ=11.0° φ=38.1° → cell b=2 c=6
+drag raw θ=10.4° φ=39.6° → cell b=2 c=7
+drag raw θ=9.8° φ=41.6° → cell b=2 c=7
+drag raw θ=9.1° φ=45.0° → cell b=2 c=8
+drag raw θ=8.4° φ=51.8° → cell b=1 c=9
+drag raw θ=7.7° φ=64.1° → cell b=1 c=11
+drag raw θ=7.2° φ=88.9° → cell b=1 c=15
+drag raw θ=7.1° φ=125.4° → cell b=1 c=21
+drag raw θ=7.3° φ=152.1° → cell b=1 c=25
+drag raw θ=7.7° φ=166.5° → cell b=1 c=28
+drag raw θ=8.1° φ=175.2° → cell b=1 c=29
+drag raw θ=8.5° φ=179.3° → cell b=1 c=30
+drag raw θ=8.8° φ=-178.4° → cell b=1 c=-30
+drag raw θ=9.0° φ=-176.0° → cell b=2 c=-29
+drag raw θ=9.2° φ=-174.2° → cell b=2 c=-29
+drag raw θ=9.4° φ=-172.7° → cell b=2 c=-29
+drag raw θ=9.7° φ=-171.3° → cell b=2 c=-29
+drag raw θ=9.9° φ=-170.6° → cell b=2 c=-28
+drag raw θ=10.1° φ=-169.8° → cell b=2 c=-28
+drag raw θ=10.4° φ=-169.1° → cell b=2 c=-28
+drag raw θ=10.6° φ=-168.4° → cell b=2 c=-28
+drag raw θ=10.9° φ=-167.5° → cell b=2 c=-28
+drag raw θ=11.2° φ=-166.6° → cell b=2 c=-28
+drag raw θ=11.5° φ=-165.9° → cell b=2 c=-28
+drag raw θ=11.8° φ=-165.0° → cell b=2 c=-27
+drag raw θ=6.1° φ=-164.2° → cell b=1 c=-27
+drag raw θ=6.5° φ=-163.7° → cell b=1 c=-27
+drag raw θ=6.7° φ=-163.2° → cell b=1 c=-27
+drag raw θ=7.0° φ=-162.8° → cell b=1 c=-27
+drag raw θ=7.3° φ=-162.6° → cell b=1 c=-27
+drag raw θ=7.5° φ=-162.4° → cell b=1 c=-27
+drag raw θ=7.7° φ=-162.2° → cell b=1 c=-27
+drag raw θ=8.0° φ=-161.9° → cell b=1 c=-27
+drag raw θ=8.2° φ=-161.6° → cell b=1 c=-27
+drag raw θ=8.4° φ=-161.3° → cell b=1 c=-27
+drag raw θ=8.7° φ=-160.8° → cell b=1 c=-27
+drag raw θ=8.9° φ=-160.3° → cell b=1 c=-27
+drag raw θ=9.1° φ=-160.1° → cell b=2 c=-27
+drag raw θ=9.4° φ=-159.8° → cell b=2 c=-27
+drag raw θ=9.5° φ=-159.5° → cell b=2 c=-27
+drag raw θ=9.7° φ=-159.3° → cell b=2 c=-27
+drag raw θ=9.6° φ=-159.0° → cell b=2 c=-26
+drag raw θ=9.4° φ=-158.6° → cell b=2 c=-26
+drag raw θ=9.1° φ=-158.4° → cell b=2 c=-26
+drag raw θ=8.5° φ=-158.0° → cell b=1 c=-26
+drag raw θ=8.0° φ=-157.5° → cell b=1 c=-26
+drag raw θ=7.6° φ=-157.0° → cell b=1 c=-26
+drag raw θ=7.1° φ=-156.3° → cell b=1 c=-26
+drag raw θ=6.7° φ=-155.7° → cell b=1 c=-26
+drag raw θ=6.3° φ=-155.4° → cell b=1 c=-26
+drag raw θ=11.9° φ=-155.1° → cell b=2 c=-26
+drag raw θ=11.4° φ=-154.1° → cell b=2 c=-26
+drag raw θ=10.9° φ=-153.0° → cell b=2 c=-25
+drag raw θ=10.3° φ=-151.0° → cell b=2 c=-25
+drag raw θ=9.6° φ=-147.9° → cell b=2 c=-25
+drag raw θ=8.8° φ=-142.9° → cell b=1 c=-24
+drag raw θ=8.1° φ=-134.7° → cell b=1 c=-22
+drag raw θ=7.6° φ=-123.0° → cell b=1 c=-20
+drag raw θ=7.2° φ=-107.4° → cell b=1 c=-18
+drag raw θ=7.1° φ=-87.9° → cell b=1 c=-15
+drag raw θ=7.1° φ=-71.0° → cell b=1 c=-12
+drag raw θ=7.2° φ=-57.5° → cell b=1 c=-10
+drag raw θ=7.4° φ=-45.2° → cell b=1 c=-8
+drag raw θ=7.6° φ=-36.2° → cell b=1 c=-6
+drag raw θ=7.7° φ=-30.6° → cell b=1 c=-5
+drag raw θ=7.9° φ=-25.9° → cell b=1 c=-4
+drag raw θ=8.1° φ=-21.5° → cell b=1 c=-4
+drag raw θ=8.4° φ=-17.7° → cell b=1 c=-3
+drag raw θ=8.7° φ=-14.0° → cell b=1 c=-2
+drag raw θ=9.0° φ=-10.4° → cell b=1 c=-2
+drag raw θ=9.3° φ=-7.5° → cell b=2 c=-1
+drag raw θ=9.6° φ=-4.6° → cell b=2 c=-1
+drag raw θ=10.0° φ=-2.1° → cell b=2 c=0
+drag raw θ=10.3° φ=0.3° → cell b=2 c=0
+drag raw θ=10.7° φ=3.0° → cell b=2 c=0
+drag raw θ=11.0° φ=5.5° → cell b=2 c=1
+drag raw θ=11.3° φ=7.6° → cell b=2 c=1
+drag raw θ=11.7° φ=9.6° → cell b=2 c=2
+drag raw θ=6.1° φ=11.6° → cell b=1 c=2
+drag raw θ=6.5° φ=13.2° → cell b=1 c=2
+drag raw θ=6.8° φ=14.5° → cell b=1 c=2
+drag raw θ=7.1° φ=15.3° → cell b=1 c=3
+drag raw θ=7.2° φ=15.9° → cell b=1 c=3
+drag raw θ=7.3° φ=16.3° → cell b=1 c=3
+drag raw θ=7.3° φ=16.6° → cell b=1 c=3
+drag raw θ=7.2° φ=17.0° → cell b=1 c=3
+drag raw θ=7.0° φ=17.3° → cell b=1 c=3
+drag raw θ=6.4° φ=16.4° → cell b=1 c=3
+drag raw θ=11.5° φ=14.1° → cell b=2 c=2
+drag raw θ=10.7° φ=10.1° → cell b=2 c=2
+drag raw θ=10.0° φ=4.7° → cell b=2 c=1
+drag raw θ=9.4° φ=-2.5° → cell b=2 c=0
+drag raw θ=8.8° φ=-13.5° → cell b=1 c=-2
+drag raw θ=8.3° φ=-29.8° → cell b=1 c=-5
+drag raw θ=7.9° φ=-52.7° → cell b=1 c=-9
+drag raw θ=7.9° φ=-79.4° → cell b=1 c=-13
+drag raw θ=8.2° φ=-102.1° → cell b=1 c=-17
+drag raw θ=8.6° φ=-118.5° → cell b=1 c=-20
+drag raw θ=9.0° φ=-129.5° → cell b=2 c=-22
+drag raw θ=9.4° φ=-137.3° → cell b=2 c=-23
+drag raw θ=9.7° φ=-143.8° → cell b=2 c=-24
+drag raw θ=10.0° φ=-149.9° → cell b=2 c=-25
+drag raw θ=10.3° φ=-156.0° → cell b=2 c=-26
+drag raw θ=10.7° φ=-161.3° → cell b=2 c=-27
+drag raw θ=11.0° φ=-166.0° → cell b=2 c=-28
+drag raw θ=11.4° φ=-170.2° → cell b=2 c=-28
+drag raw θ=11.7° φ=-173.5° → cell b=2 c=-29
+drag raw θ=12.0° φ=-176.2° → cell b=2 c=-29
+drag raw θ=6.1° φ=-178.6° → cell b=1 c=-30
+drag raw θ=6.3° φ=179.9° → cell b=1 c=30
+drag raw θ=6.4° φ=178.9° → cell b=1 c=30
+drag raw θ=6.3° φ=178.3° → cell b=1 c=30
+drag raw θ=6.2° φ=177.1° → cell b=1 c=30
+drag raw θ=11.9° φ=174.9° → cell b=2 c=29
+drag raw θ=11.6° φ=172.0° → cell b=2 c=29
+drag raw θ=11.3° φ=169.4° → cell b=2 c=28
+drag raw θ=11.1° φ=167.2° → cell b=2 c=28
+drag raw θ=10.8° φ=164.3° → cell b=2 c=27
+drag raw θ=10.5° φ=160.5° → cell b=2 c=27
+drag raw θ=10.1° φ=154.8° → cell b=2 c=26
+drag raw θ=9.8° φ=145.6° → cell b=2 c=24
+drag raw θ=9.5° φ=132.9° → cell b=2 c=22
+drag raw θ=9.5° φ=118.0° → cell b=2 c=20
+drag raw θ=9.7° φ=105.0° → cell b=2 c=18
+drag raw θ=10.0° φ=94.6° → cell b=2 c=16
+drag raw θ=10.4° φ=86.4° → cell b=2 c=14
+drag raw θ=10.8° φ=80.5° → cell b=2 c=13
+drag raw θ=11.0° φ=77.6° → cell b=2 c=13
+drag raw θ=11.3° φ=75.2° → cell b=2 c=13
+drag raw θ=11.7° φ=71.1° → cell b=2 c=12
+drag raw θ=6.1° φ=68.0° → cell b=1 c=11
+drag raw θ=6.4° φ=66.0° → cell b=1 c=11
+drag raw θ=6.6° φ=64.0° → cell b=1 c=11
+drag raw θ=6.9° φ=62.4° → cell b=1 c=10
+drag raw θ=7.3° φ=60.7° → cell b=1 c=10
+drag raw θ=7.7° φ=59.1° → cell b=1 c=10
+drag raw θ=8.1° φ=57.6° → cell b=1 c=10
+drag raw θ=8.6° φ=56.1° → cell b=1 c=9
+drag raw θ=9.1° φ=54.6° → cell b=2 c=9
+drag raw θ=9.7° φ=53.0° → cell b=2 c=9
+drag raw θ=10.4° φ=51.6° → cell b=2 c=9
+drag raw θ=11.1° φ=50.5° → cell b=2 c=8
+drag raw θ=11.8° φ=49.3° → cell b=2 c=8
+drag raw θ=12.6° φ=48.4° → cell b=2 c=8
+drag raw θ=13.4° φ=47.5° → cell b=2 c=8
+drag raw θ=14.2° φ=46.5° → cell b=2 c=8
+drag raw θ=14.9° φ=45.7° → cell b=2 c=8
+drag raw θ=15.6° φ=45.0° → cell b=3 c=7
+drag raw θ=16.2° φ=44.3° → cell b=3 c=7
+drag raw θ=16.7° φ=43.8° → cell b=3 c=7
+drag raw θ=17.2° φ=43.5° → cell b=3 c=7
+drag raw θ=17.7° φ=43.1° → cell b=3 c=7
+drag raw θ=18.1° φ=42.9° → cell b=3 c=7
+drag raw θ=18.6° φ=42.6° → cell b=3 c=7
+drag raw θ=19.0° φ=42.3° → cell b=3 c=7
+drag raw θ=19.3° φ=42.1° → cell b=3 c=7
+drag raw θ=19.7° φ=42.0° → cell b=3 c=7
+drag raw θ=20.1° φ=41.8° → cell b=3 c=7
+drag raw θ=20.4° φ=41.6° → cell b=3 c=7
+drag raw θ=20.8° φ=41.5° → cell b=3 c=7
+drag raw θ=21.1° φ=41.4° → cell b=4 c=7
+drag raw θ=21.5° φ=41.3° → cell b=4 c=7
+drag raw θ=21.9° φ=41.3° → cell b=4 c=7
+drag raw θ=22.2° φ=41.2° → cell b=4 c=7
+drag raw θ=22.5° φ=41.1° → cell b=4 c=7
+drag raw θ=22.8° φ=41.0° → cell b=4 c=7
+drag raw θ=23.2° φ=40.8° → cell b=4 c=7
+drag raw θ=23.5° φ=40.8° → cell b=4 c=7
+drag raw θ=23.9° φ=40.7° → cell b=4 c=7
+drag raw θ=24.2° φ=40.6° → cell b=4 c=7
+drag raw θ=24.4° φ=40.6° → cell b=4 c=7
+drag raw θ=24.7° φ=40.6° → cell b=4 c=7
+drag raw θ=25.0° φ=40.5° → cell b=4 c=7
+drag raw θ=25.2° φ=40.5° → cell b=4 c=7
+drag raw θ=25.5° φ=40.5° → cell b=4 c=7
+drag raw θ=25.7° φ=40.4° → cell b=4 c=7
+drag raw θ=26.1° φ=40.4° → cell b=4 c=7
+drag raw θ=26.4° φ=40.3° → cell b=4 c=7
+drag raw θ=26.7° φ=40.3° → cell b=4 c=7
+drag raw θ=27.1° φ=40.2° → cell b=5 c=7
+drag raw θ=27.5° φ=40.2° → cell b=5 c=7
+drag raw θ=28.0° φ=40.2° → cell b=5 c=7
+drag raw θ=28.5° φ=40.3° → cell b=5 c=7
+drag raw θ=28.9° φ=40.3° → cell b=5 c=7
+drag raw θ=29.4° φ=40.4° → cell b=5 c=7
+drag raw θ=29.8° φ=40.6° → cell b=5 c=7
+drag raw θ=30.2° φ=40.7° → cell b=5 c=7
+drag raw θ=30.6° φ=40.8° → cell b=5 c=7
+drag raw θ=31.0° φ=40.9° → cell b=5 c=7
+drag raw θ=31.3° φ=41.0° → cell b=5 c=7
+drag raw θ=31.7° φ=41.1° → cell b=5 c=7
+drag raw θ=32.0° φ=41.2° → cell b=5 c=7
+drag raw θ=32.4° φ=41.3° → cell b=5 c=7
+drag raw θ=32.8° φ=41.5° → cell b=5 c=7
+drag raw θ=33.2° φ=41.6° → cell b=6 c=7
+drag raw θ=33.8° φ=41.8° → cell b=6 c=7
+drag raw θ=34.3° φ=42.0° → cell b=6 c=7
+drag raw θ=34.9° φ=42.1° → cell b=6 c=7
+drag raw θ=35.5° φ=42.3° → cell b=6 c=7
+drag raw θ=36.1° φ=42.5° → cell b=6 c=7
+drag raw θ=36.6° φ=42.7° → cell b=6 c=7
+drag raw θ=37.0° φ=43.0° → cell b=6 c=7
+drag raw θ=37.4° φ=43.2° → cell b=6 c=7
+drag raw θ=37.6° φ=43.4° → cell b=6 c=7
+drag raw θ=37.9° φ=43.6° → cell b=6 c=7
+drag raw θ=38.2° φ=43.8° → cell b=6 c=7
+drag raw θ=38.4° φ=44.0° → cell b=6 c=7
+drag raw θ=38.6° φ=44.2° → cell b=6 c=7
+drag raw θ=38.7° φ=44.3° → cell b=6 c=7
+drag raw θ=38.9° φ=44.5° → cell b=6 c=7
+drag raw θ=39.2° φ=44.6° → cell b=7 c=7
+drag raw θ=39.4° φ=44.8° → cell b=7 c=7
+drag raw θ=39.6° φ=45.0° → cell b=7 c=7
+drag raw θ=39.8° φ=45.2° → cell b=7 c=8
+drag raw θ=40.0° φ=45.4° → cell b=7 c=8
+drag raw θ=40.2° φ=45.6° → cell b=7 c=8
+drag raw θ=40.4° φ=45.8° → cell b=7 c=8
+drag raw θ=40.6° φ=45.9° → cell b=7 c=8
+drag raw θ=40.7° φ=46.0° → cell b=7 c=8
+drag raw θ=40.8° φ=46.1° → cell b=7 c=8
+drag raw θ=40.8° φ=46.2° → cell b=7 c=8
+drag raw θ=40.7° φ=46.2° → cell b=7 c=8
+drag raw θ=40.7° φ=46.2° → cell b=7 c=8
+drag raw θ=40.6° φ=46.2° → cell b=7 c=8
+drag raw θ=40.4° φ=46.2° → cell b=7 c=8
+drag raw θ=40.1° φ=46.2° → cell b=7 c=8
+drag raw θ=39.6° φ=46.1° → cell b=7 c=8
+drag raw θ=38.8° φ=45.8° → cell b=6 c=8
+drag raw θ=37.9° φ=45.5° → cell b=6 c=8
+drag raw θ=36.8° φ=45.2° → cell b=6 c=8
+drag raw θ=35.5° φ=44.9° → cell b=6 c=7
+drag raw θ=34.0° φ=44.5° → cell b=6 c=7
+drag raw θ=32.7° φ=44.4° → cell b=5 c=7
+drag raw θ=31.5° φ=44.2° → cell b=5 c=7
+drag raw θ=30.6° φ=44.0° → cell b=5 c=7
+drag raw θ=29.8° φ=44.0° → cell b=5 c=7
+drag raw θ=29.1° φ=43.9° → cell b=5 c=7
+drag raw θ=28.2° φ=43.9° → cell b=5 c=7
+drag raw θ=27.0° φ=44.0° → cell b=4 c=7
+drag raw θ=25.4° φ=44.1° → cell b=4 c=7
+drag raw θ=23.5° φ=44.1° → cell b=4 c=7
+drag raw θ=21.5° φ=44.4° → cell b=4 c=7
+drag raw θ=19.4° φ=44.6° → cell b=3 c=7
+drag raw θ=17.1° φ=44.8° → cell b=3 c=7
+drag raw θ=14.4° φ=45.2° → cell b=2 c=8
+drag raw θ=11.2° φ=46.3° → cell b=2 c=8
+drag raw θ=7.6° φ=48.4° → cell b=1 c=8
+drag raw θ=10.1° φ=53.7° → cell b=2 c=9
+drag raw θ=7.3° φ=78.9° → cell b=1 c=13
+drag raw θ=7.3° φ=-171.6° → cell b=1 c=-29
+drag raw θ=8.9° φ=-152.2° → cell b=1 c=-25
+drag raw θ=10.0° φ=-147.9° → cell b=2 c=-25
+drag raw θ=10.8° φ=-145.9° → cell b=2 c=-24
+drag raw θ=11.4° φ=-144.6° → cell b=2 c=-24
+drag raw θ=11.8° φ=-143.7° → cell b=2 c=-24
+drag raw θ=6.1° φ=-142.9° → cell b=1 c=-24
+drag raw θ=6.4° φ=-142.3° → cell b=1 c=-24
+drag raw θ=6.5° φ=-142.0° → cell b=1 c=-24
+drag raw θ=6.6° φ=-141.8° → cell b=1 c=-24
+drag raw θ=6.7° φ=-141.6° → cell b=1 c=-24
+drag raw θ=6.8° φ=-141.6° → cell b=1 c=-24
+drag raw θ=6.7° φ=-141.5° → cell b=1 c=-24
+drag raw θ=6.4° φ=-141.4° → cell b=1 c=-24
+drag raw θ=11.9° φ=-141.3° → cell b=2 c=-24
+drag raw θ=11.3° φ=-141.2° → cell b=2 c=-24
+drag raw θ=10.9° φ=-141.1° → cell b=2 c=-24
+drag raw θ=10.6° φ=-140.9° → cell b=2 c=-23
+drag raw θ=10.4° φ=-140.8° → cell b=2 c=-23
+drag raw θ=10.2° φ=-140.8° → cell b=2 c=-23
+drag raw θ=10.0° φ=-140.7° → cell b=2 c=-23
+drag raw θ=9.9° φ=-140.6° → cell b=2 c=-23
+drag raw θ=9.8° φ=-140.6° → cell b=2 c=-23
+drag raw θ=9.8° φ=-140.5° → cell b=2 c=-23
+drag raw θ=9.7° φ=-140.5° → cell b=2 c=-23
+drag raw θ=9.5° φ=-140.4° → cell b=2 c=-23
+drag raw θ=9.4° φ=-140.3° → cell b=2 c=-23
+drag raw θ=9.3° φ=-140.2° → cell b=2 c=-23
+drag raw θ=9.1° φ=-140.1° → cell b=2 c=-23
+drag raw θ=9.0° φ=-140.0° → cell b=1 c=-23
+drag raw θ=8.7° φ=-140.4° → cell b=1 c=-23
+drag raw θ=8.5° φ=-141.7° → cell b=1 c=-24
+drag raw θ=8.3° φ=-143.4° → cell b=1 c=-24
+drag raw θ=8.1° φ=-145.3° → cell b=1 c=-24
+drag raw θ=7.9° φ=-147.5° → cell b=1 c=-25
+drag raw θ=7.8° φ=-149.1° → cell b=1 c=-25
+drag raw θ=7.7° φ=-150.3° → cell b=1 c=-25
+drag raw θ=7.6° φ=-151.4° → cell b=1 c=-25
+drag raw θ=7.6° φ=-153.3° → cell b=1 c=-26
+drag raw θ=7.5° φ=-155.3° → cell b=1 c=-26
+drag raw θ=7.4° φ=-156.9° → cell b=1 c=-26
+drag raw θ=7.3° φ=-158.4° → cell b=1 c=-26
+drag raw θ=7.2° φ=-160.0° → cell b=1 c=-27
+drag raw θ=7.1° φ=-162.4° → cell b=1 c=-27
+drag raw θ=7.0° φ=-167.1° → cell b=1 c=-28
+drag raw θ=6.9° φ=-172.9° → cell b=1 c=-29
+drag raw θ=6.8° φ=179.7° → cell b=1 c=30
+drag raw θ=6.7° φ=168.8° → cell b=1 c=28
+drag raw θ=6.7° φ=160.2° → cell b=1 c=27
+drag raw θ=6.6° φ=154.2° → cell b=1 c=26
+drag raw θ=6.6° φ=147.3° → cell b=1 c=25
+drag raw θ=6.7° φ=138.2° → cell b=1 c=23
+drag raw θ=6.6° φ=125.3° → cell b=1 c=21
+drag raw θ=6.7° φ=115.4° → cell b=1 c=19
+drag raw θ=6.7° φ=106.5° → cell b=1 c=18
+drag raw θ=6.8° φ=97.3° → cell b=1 c=16
+drag raw θ=6.9° φ=90.2° → cell b=1 c=15
+drag raw θ=7.0° φ=83.3° → cell b=1 c=14
+drag raw θ=7.1° φ=77.4° → cell b=1 c=13
+drag raw θ=7.4° φ=71.1° → cell b=1 c=12
+drag raw θ=7.6° φ=66.9° → cell b=1 c=11
+drag raw θ=7.9° φ=65.1° → cell b=1 c=11
+drag raw θ=8.1° φ=63.5° → cell b=1 c=11
+drag raw θ=8.2° φ=61.8° → cell b=1 c=10
+drag raw θ=8.3° φ=60.4° → cell b=1 c=10
+drag raw θ=8.4° φ=59.9° → cell b=1 c=10
+drag raw θ=8.5° φ=59.6° → cell b=1 c=10
+drag raw θ=8.7° φ=59.3° → cell b=1 c=10
+drag raw θ=8.8° φ=59.2° → cell b=1 c=10
+drag raw θ=8.8° φ=59.4° → cell b=1 c=10
+drag raw θ=8.8° φ=60.4° → cell b=1 c=10
+drag raw θ=8.6° φ=62.5° → cell b=1 c=10
+drag raw θ=8.2° φ=66.5° → cell b=1 c=11
+drag raw θ=7.9° φ=74.7° → cell b=1 c=12
+drag raw θ=7.5° φ=86.5° → cell b=1 c=14
+drag raw θ=7.4° φ=97.0° → cell b=1 c=16
+drag raw θ=7.3° φ=104.4° → cell b=1 c=17
+drag raw θ=7.2° φ=107.3° → cell b=1 c=18
+drag raw θ=7.3° φ=103.4° → cell b=1 c=17
+drag raw θ=7.4° φ=97.2° → cell b=1 c=16
+drag raw θ=7.5° φ=92.5° → cell b=1 c=15
+drag raw θ=7.6° φ=89.5° → cell b=1 c=15
+drag raw θ=7.6° φ=90.0° → cell b=1 c=15
+drag raw θ=7.5° φ=96.3° → cell b=1 c=16
+drag raw θ=7.4° φ=105.9° → cell b=1 c=18
+drag raw θ=7.3° φ=115.3° → cell b=1 c=19
+drag raw θ=7.3° φ=123.5° → cell b=1 c=21
+drag raw θ=7.3° φ=129.7° → cell b=1 c=22
+drag raw θ=7.3° φ=134.5° → cell b=1 c=22
+drag raw θ=7.3° φ=138.0° → cell b=1 c=23
+drag raw θ=7.3° φ=141.3° → cell b=1 c=24
+drag raw θ=7.4° φ=144.3° → cell b=1 c=24
+drag raw θ=7.4° φ=147.1° → cell b=1 c=25
+drag raw θ=7.4° φ=149.8° → cell b=1 c=25
+drag raw θ=7.4° φ=152.5° → cell b=1 c=25
+drag raw θ=7.5° φ=155.0° → cell b=1 c=26
+drag raw θ=7.5° φ=156.8° → cell b=1 c=26
+drag raw θ=7.5° φ=159.2° → cell b=1 c=27
+drag raw θ=7.6° φ=161.9° → cell b=1 c=27
+drag raw θ=7.6° φ=163.6° → cell b=1 c=27
+drag raw θ=7.6° φ=165.4° → cell b=1 c=28
+drag raw θ=7.7° φ=167.4° → cell b=1 c=28
+drag raw θ=7.7° φ=168.7° → cell b=1 c=28
+drag raw θ=7.8° φ=170.0° → cell b=1 c=28
+drag raw θ=7.8° φ=171.5° → cell b=1 c=29
+drag raw θ=7.9° φ=173.2° → cell b=1 c=29
+drag raw θ=7.9° φ=174.5° → cell b=1 c=29
+drag raw θ=7.9° φ=175.5° → cell b=1 c=29
+drag raw θ=8.0° φ=176.7° → cell b=1 c=29
+drag raw θ=8.0° φ=178.0° → cell b=1 c=30
+drag raw θ=8.1° φ=179.2° → cell b=1 c=30
+drag raw θ=8.2° φ=-179.3° → cell b=1 c=-30
+drag raw θ=8.3° φ=-177.7° → cell b=1 c=-30
+drag raw θ=8.3° φ=-176.6° → cell b=1 c=-29
+drag raw θ=8.4° φ=-175.3° → cell b=1 c=-29
+drag raw θ=8.5° φ=-174.0° → cell b=1 c=-29
+drag raw θ=8.6° φ=-173.0° → cell b=1 c=-29
+drag raw θ=8.6° φ=-172.2° → cell b=1 c=-29
+drag raw θ=8.7° φ=-171.4° → cell b=1 c=-29
+drag raw θ=8.7° φ=-170.9° → cell b=1 c=-28
+drag raw θ=8.8° φ=-169.6° → cell b=1 c=-28
+drag raw θ=8.9° φ=-168.3° → cell b=1 c=-28
+drag raw θ=8.9° φ=-168.3° → cell b=1 c=-28
+drag raw θ=8.8° φ=-169.1° → cell b=1 c=-28
+drag raw θ=8.6° φ=-170.5° → cell b=1 c=-28
+drag raw θ=8.5° φ=-172.0° → cell b=1 c=-29
+drag raw θ=8.4° φ=-173.7° → cell b=1 c=-29
+drag raw θ=8.3° φ=-175.6° → cell b=1 c=-29
+drag raw θ=8.1° φ=-177.7° → cell b=1 c=-30
+drag raw θ=8.0° φ=179.9° → cell b=1 c=30
+drag raw θ=7.9° φ=177.9° → cell b=1 c=30
+drag raw θ=7.9° φ=176.5° → cell b=1 c=29
+drag raw θ=7.8° φ=175.3° → cell b=1 c=29
+drag raw θ=7.8° φ=173.6° → cell b=1 c=29
+drag raw θ=7.7° φ=171.4° → cell b=1 c=29
+drag raw θ=7.7° φ=169.9° → cell b=1 c=28
+drag raw θ=7.6° φ=168.2° → cell b=1 c=28
+drag raw θ=7.6° φ=166.7° → cell b=1 c=28
+drag raw θ=7.6° φ=165.0° → cell b=1 c=28
+drag raw θ=7.5° φ=163.4° → cell b=1 c=27
+drag raw θ=7.5° φ=161.3° → cell b=1 c=27
+drag raw θ=7.4° φ=158.8° → cell b=1 c=26
+drag raw θ=7.4° φ=156.8° → cell b=1 c=26
+drag raw θ=7.4° φ=154.1° → cell b=1 c=26
+drag raw θ=7.4° φ=151.8° → cell b=1 c=25
+drag raw θ=7.3° φ=149.6° → cell b=1 c=25
+drag raw θ=7.3° φ=146.6° → cell b=1 c=24
+drag raw θ=7.3° φ=144.2° → cell b=1 c=24
+drag raw θ=7.3° φ=141.4° → cell b=1 c=24
+drag raw θ=7.3° φ=138.1° → cell b=1 c=23
+drag raw θ=7.2° φ=134.9° → cell b=1 c=22
+drag raw θ=7.2° φ=130.7° → cell b=1 c=22
+drag raw θ=7.2° φ=127.0° → cell b=1 c=21
+drag raw θ=7.2° φ=122.2° → cell b=1 c=20
+drag raw θ=7.3° φ=112.1° → cell b=1 c=19
+drag raw θ=7.5° φ=91.9° → cell b=1 c=15
+drag raw θ=8.2° φ=71.3° → cell b=1 c=12
+drag raw θ=9.4° φ=58.5° → cell b=2 c=10
+drag raw θ=11.0° φ=51.4° → cell b=2 c=9
+drag raw θ=6.9° φ=47.6° → cell b=1 c=8
+drag raw θ=8.7° φ=45.4° → cell b=1 c=8
+drag raw θ=10.3° φ=43.6° → cell b=2 c=7
+drag raw θ=11.8° φ=42.3° → cell b=2 c=7
+drag raw θ=13.3° φ=41.8° → cell b=2 c=7
+drag raw θ=14.5° φ=41.4° → cell b=2 c=7
+drag raw θ=15.6° φ=41.1° → cell b=3 c=7
+drag raw θ=16.6° φ=40.8° → cell b=3 c=7
+drag raw θ=17.6° φ=40.6° → cell b=3 c=7
+drag raw θ=18.6° φ=40.4° → cell b=3 c=7
+drag raw θ=19.4° φ=40.2° → cell b=3 c=7
+drag raw θ=20.1° φ=39.9° → cell b=3 c=7
+drag raw θ=20.8° φ=39.6° → cell b=3 c=7
+drag raw θ=21.5° φ=39.3° → cell b=4 c=7
+drag raw θ=22.2° φ=39.1° → cell b=4 c=7
+drag raw θ=22.8° φ=38.8° → cell b=4 c=6
+drag raw θ=23.4° φ=38.5° → cell b=4 c=6
+drag raw θ=24.1° φ=38.2° → cell b=4 c=6
+drag raw θ=24.7° φ=37.9° → cell b=4 c=6
+drag raw θ=25.3° φ=37.7° → cell b=4 c=6
+drag raw θ=25.8° φ=37.5° → cell b=4 c=6
+drag raw θ=26.3° φ=37.3° → cell b=4 c=6
+drag raw θ=26.8° φ=37.1° → cell b=4 c=6
+drag raw θ=27.3° φ=37.0° → cell b=5 c=6
+drag raw θ=27.7° φ=36.9° → cell b=5 c=6
+drag raw θ=28.2° φ=36.8° → cell b=5 c=6
+drag raw θ=28.6° φ=36.7° → cell b=5 c=6
+drag raw θ=29.0° φ=36.7° → cell b=5 c=6
+drag raw θ=29.4° φ=36.7° → cell b=5 c=6
+drag raw θ=29.7° φ=36.7° → cell b=5 c=6
+drag raw θ=30.1° φ=36.7° → cell b=5 c=6
+drag raw θ=30.5° φ=36.8° → cell b=5 c=6
+drag raw θ=30.8° φ=36.8° → cell b=5 c=6
+drag raw θ=31.1° φ=36.8° → cell b=5 c=6
+drag raw θ=31.3° φ=36.8° → cell b=5 c=6
+drag raw θ=31.4° φ=36.8° → cell b=5 c=6
+drag raw θ=31.5° φ=36.8° → cell b=5 c=6
+drag raw θ=31.5° φ=36.7° → cell b=5 c=6
+drag raw θ=31.5° φ=36.6° → cell b=5 c=6
+UP (end node drag)
+BOOT 5:39:18 PM
+BOOT 5:39:22 PM
+BOOT 5:39:22 PM
+BOOT 5:43:12 PM
+BOOT 5:43:23 PM
+BOOT 5:43:30 PM
+BOOT 5:43:34 PM
+BOOT 5:43:34 PM
+BOOT 5:44:25 PM
+BOOT 5:44:33 PM
+BOOT 5:46:47 PM
+BOOT 5:48:09 PM
+BOOT 5:48:13 PM
+BOOT 5:48:14 PM
+BOOT 5:50:45 PM
+BOOT 5:50:49 PM
+BOOT 5:51:11 PM
+BOOT 5:52:24 PM
+BOOT 5:52:29 PM
+BOOT 5:52:43 PM
+BOOT 5:52:48 PM
+BOOT 5:52:48 PM
+BOOT 5:52:51 PM
+BOOT 5:52:51 PM
+BOOT 5:52:54 PM
+BOOT 5:52:58 PM
+BOOT 5:52:59 PM
+BOOT 5:53:03 PM
+BOOT 5:53:20 PM
+BOOT 5:53:23 PM
+BOOT 5:53:25 PM
+BOOT 5:53:47 PM
+BOOT 5:54:00 PM
+BOOT 5:54:01 PM
+BOOT 5:54:02 PM
+BOOT 5:54:02 PM
+BOOT 5:54:07 PM
+BOOT 5:54:07 PM
+BOOT 5:54:47 PM
+BOOT 5:54:48 PM
+BOOT 5:54:52 PM
+BOOT 5:54:53 PM
+BOOT 5:55:57 PM
+BOOT 5:55:58 PM
+BOOT 5:55:58 PM
+BOOT 5:56:02 PM
+BOOT 5:56:03 PM
+BOOT 5:56:33 PM
+BOOT 5:56:33 PM
+BOOT 5:56:34 PM
+BOOT 5:56:38 PM
+BOOT 5:56:38 PM
+BOOT 5:57:17 PM
+BOOT 5:57:17 PM
+BOOT 5:57:18 PM
+BOOT 5:57:22 PM
+BOOT 5:57:22 PM
+BOOT 5:57:49 PM
+BOOT 5:57:50 PM
+BOOT 5:57:51 PM
+BOOT 5:57:55 PM
+BOOT 5:57:55 PM
+BOOT 5:58:17 PM
+BOOT 5:58:17 PM
+BOOT 5:58:18 PM
+BOOT 5:58:22 PM
+BOOT 5:58:22 PM
+BOOT 6:02:49 PM
+BOOT 6:02:57 PM
+BOOT 6:03:03 PM
+BOOT 6:03:25 PM
+BOOT 6:03:39 PM
+BOOT 6:03:43 PM
+BOOT 6:03:59 PM
+BOOT 6:04:06 PM
+BOOT 6:04:27 PM
+BOOT 6:04:38 PM
+BOOT 6:04:48 PM
+BOOT 6:04:54 PM
+BOOT 6:05:06 PM
+BOOT 6:05:10 PM
+BOOT 6:05:20 PM
+BOOT 6:05:41 PM
+BOOT 6:05:44 PM
+BOOT 6:05:53 PM
+BOOT 6:05:56 PM
+BOOT 6:06:53 PM
+BOOT 6:07:00 PM
+BOOT 6:07:00 PM
+BOOT 6:07:01 PM
+BOOT 6:07:05 PM
+BOOT 6:07:09 PM
+BOOT 6:07:10 PM
+BOOT 6:07:13 PM
+BOOT 6:07:17 PM
+BOOT 6:07:17 PM
+BOOT 6:07:28 PM
+BOOT 6:07:28 PM
+BOOT 6:07:33 PM
+BOOT 6:07:55 PM
+BOOT 6:08:02 PM
+BOOT 6:08:02 PM
+BOOT 6:08:03 PM
+BOOT 6:08:07 PM
+BOOT 6:08:07 PM
+BOOT 6:08:21 PM
+BOOT 6:08:21 PM
+BOOT 6:08:22 PM
+BOOT 6:08:22 PM
+BOOT 6:08:23 PM
+BOOT 6:08:23 PM
+BOOT 6:08:27 PM
+BOOT 6:08:28 PM
+BOOT 6:09:23 PM
+BOOT 6:09:23 PM
+BOOT 6:09:24 PM
+BOOT 6:09:28 PM
+BOOT 6:09:28 PM
+BOOT 6:09:51 PM
+BOOT 6:09:51 PM
+BOOT 6:09:52 PM
+BOOT 6:09:56 PM
+BOOT 6:09:57 PM
+BOOT 6:17:15 PM
+BOOT 6:17:35 PM
+BOOT 6:17:36 PM
+BOOT 6:18:43 PM
+BOOT 6:18:51 PM
+BOOT 6:18:59 PM
+BOOT 6:19:02 PM
+BOOT 6:19:14 PM
+BOOT 6:19:23 PM
+BOOT 6:19:27 PM
+BOOT 6:19:37 PM
+BOOT 6:19:40 PM
+BOOT 6:19:45 PM
+BOOT 6:19:46 PM
+BOOT 6:19:50 PM
+BOOT 6:19:51 PM
+BOOT 6:19:54 PM
+BOOT 6:19:54 PM
+BOOT 6:19:55 PM
+BOOT 6:19:59 PM
+BOOT 6:19:59 PM
+BOOT 6:20:03 PM
+BOOT 6:20:19 PM
+BOOT 6:20:23 PM
+BOOT 6:20:23 PM
+BOOT 6:20:28 PM
+BOOT 6:20:28 PM
+BOOT 6:20:28 PM
+BOOT 6:20:29 PM
+BOOT 6:20:33 PM
+BOOT 6:20:33 PM
+BOOT 6:21:05 PM
+BOOT 6:21:05 PM
+BOOT 6:21:06 PM
+BOOT 6:21:10 PM
+BOOT 6:21:11 PM
+BOOT 6:35:03 PM
+BOOT 6:35:03 PM
+BOOT 6:35:04 PM
+BOOT 6:35:08 PM
+BOOT 6:35:09 PM
+BOOT 6:36:58 PM
+BOOT 6:36:59 PM
+BOOT 6:37:00 PM
+BOOT 6:37:04 PM
+BOOT 6:37:04 PM
+BOOT 6:37:55 PM
+BOOT 6:37:55 PM
+BOOT 6:37:57 PM
+BOOT 6:37:57 PM
+BOOT 6:37:58 PM
+BOOT 6:37:58 PM
+BOOT 6:37:59 PM
+BOOT 6:37:59 PM
+BOOT 6:38:00 PM
+BOOT 6:38:01 PM
+BOOT 6:38:01 PM
+BOOT 6:38:02 PM
+BOOT 6:38:02 PM
+BOOT 6:38:03 PM
+BOOT 6:38:04 PM
+BOOT 6:38:04 PM
+BOOT 6:38:05 PM
+BOOT 6:38:05 PM
+BOOT 6:38:06 PM
+BOOT 6:38:07 PM
+BOOT 6:38:07 PM
+BOOT 6:38:08 PM
+BOOT 6:38:08 PM
+BOOT 6:38:09 PM
+BOOT 6:38:09 PM
+BOOT 6:38:10 PM
+BOOT 6:38:10 PM
+BOOT 6:38:11 PM
+BOOT 6:38:12 PM
+BOOT 6:38:12 PM
+BOOT 6:39:26 PM
+BOOT 6:39:27 PM
+BOOT 6:39:28 PM
+BOOT 6:39:34 PM
+BOOT 6:39:35 PM
+BOOT 6:40:00 PM
+BOOT 6:40:01 PM
+BOOT 6:42:45 PM

@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Polar drag — rotation abc, fixed-increment pole nudge (3D)</title>
+<style>
+  :root{--bg:#0e1116;--panel:#161b22;--line:#30363d;--ink:#e6edf3;--muted:#9aa4b2;
+        --center:#f0b429;--node:#58a6ff;--pole:#ff7b72;--arc:#3fb950;}
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
+    font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  .wrap{display:flex;gap:14px;padding:14px;min-height:100%;flex-wrap:wrap;align-items:stretch}
+  .stage{flex:1 1 520px;min-width:320px;height:80vh;min-height:460px;
+    background:var(--panel);border:1px solid var(--line);border-radius:12px;position:relative;overflow:hidden;
+    display:flex;flex-direction:column}
+  .toolbar{display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--line);
+    color:var(--muted);font-size:12px}
+  .toolbar input[type=range]{flex:1}
+  canvas{display:block;width:100%;flex:1;min-height:0;touch-action:none;cursor:grab}
+  .side{flex:0 0 310px;display:flex;flex-direction:column;gap:12px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
+  h1{font-size:16px;margin:0 0 4px}
+  h2{font-size:12px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin:0 0 8px}
+  .row{display:flex;justify-content:space-between;font-variant-numeric:tabular-nums;padding:2px 0}
+  .abc{font-size:20px;font-weight:800;font-variant-numeric:tabular-nums}
+  .k{color:var(--muted)} .r{color:var(--node)} .t{color:var(--arc)} .p{color:var(--pole)}
+  button{background:#21262d;color:var(--ink);border:1px solid var(--line);border-radius:8px;
+    padding:8px 12px;cursor:pointer;font-weight:600;margin:2px 0}
+  button:hover{border-color:#8b949e}
+  label{display:flex;align-items:center;gap:8px;color:var(--muted);padding:3px 0;cursor:pointer}
+  .hint{color:var(--muted);font-size:12px}
+  .swatch{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:middle}
+  .flag{font-weight:700;min-height:1.3em;color:var(--pole)}
+  code{background:#21262d;padding:1px 5px;border-radius:4px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="stage">
+    <div class="toolbar"><span>zoom (radius)</span>
+      <input type="range" id="zoom" min="2" max="16" step="0.1" value="9">
+      <span id="zoomval">9.0</span></div>
+    <canvas id="cv"></canvas>
+  </div>
+  <div class="side">
+    <div class="card">
+      <h1>Rotation abc · fixed-increment pole nudge</h1>
+      <div class="hint">abc is a <b>rotation</b> (in the pole frame), not additive angles. A pole nudge is a
+      <b>fixed</b> rotation increment <code>ΔR</code>; every node's abc updates by the SAME fixed
+      left-multiply <code>q ← ΔR⁻¹·q</code> — no rebuild, only rotation→cartesian for drawing. The node
+      does not move in the world; only its coordinates re-express.</div>
+    </div>
+    <div class="card">
+      <h2>abc — rotation, read out as scalars</h2>
+      <div class="row"><span class="k">a &nbsp;radius idx (× <span id="sR"></span>)</span><span class="abc r" id="aR">0</span></div>
+      <div class="row"><span class="k">b &nbsp;colatitude idx (× <span id="sT"></span>°)</span><span class="abc t" id="aT">0</span></div>
+      <div class="row"><span class="k">c &nbsp;bearing idx (× <span id="sP"></span>°)</span><span class="abc p" id="aP">0</span></div>
+      <hr style="border:none;border-top:1px solid var(--line);margin:10px 0">
+      <div class="row"><span class="k">colatitude (pole→node)</span><b id="cT">0°</b></div>
+      <div class="row"><span class="k">bearing about pole</span><b id="cP">0°</b></div>
+      <div class="row"><span class="k">pole tilt from +y</span><b class="p" id="poleT">0°</b></div>
+      <div class="row"><span class="k">world dir of node (check)</span><b id="chk">—</b></div>
+      <div class="flag" id="flag"></div>
+    </div>
+    <div class="card">
+      <h2>controls</h2>
+      <label><input type="checkbox" id="snap" checked> snap abc to grid (quantize)</label>
+      <label><input type="checkbox" id="dodge" checked> auto-nudge pole away near singularity</label>
+      <label><input type="checkbox" id="showGrid" checked> draw abc cell grid (about the pole)</label>
+      <label><input type="checkbox" id="showArc" checked> show colatitude ring &amp; θ arc</label>
+      <label><input type="checkbox" id="showPole" checked> show pole axis (+ home +y)</label>
+      <button id="nudge">Nudge pole (fixed ΔR, animate)</button>
+      <button id="home">Return pole to +y</button>
+      <button id="reset">Reset node</button>
+      <div class="hint" style="margin-top:6px">
+        Drag N = move it around the sphere (any direction). Mouse wheel = radius.<br>
+        <span class="swatch" style="background:var(--center)"></span>center
+        <span class="swatch" style="background:var(--node)"></span>node
+        <span class="swatch" style="background:var(--pole)"></span>pole
+        <span class="swatch" style="background:var(--arc)"></span>colatitude<br>
+        Dodge zone exaggerated to 14° (real model: 1°). Watch the abc numbers shift by a fixed step on nudge
+        while “world dir of node” stays constant.
+      </div>
+    </div>
+    <div class="card">
+      <h2>log</h2>
+      <div style="display:flex;gap:8px;margin-bottom:8px">
+        <button id="savelog">Mark (drop a marker)</button>
+        <button id="clearlog">Clear</button>
+      </div>
+      <div id="log" style="font:11px/1.45 ui-monospace,Menlo,monospace;color:#9aa4b2;
+        max-height:150px;overflow:auto;white-space:pre-wrap"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const cv=document.getElementById('cv'), ctx=cv.getContext('2d');
+  const TAU=Math.PI*2, D2R=Math.PI/180, R2D=180/Math.PI;
+  const clamp=(v,a,b)=>v<a?a:v>b?b:v;
+
+  // ===== quaternion + vector algebra (the ONLY math the pole uses) =========
+  const V={
+    add:(a,b)=>({x:a.x+b.x,y:a.y+b.y,z:a.z+b.z}),
+    sub:(a,b)=>({x:a.x-b.x,y:a.y-b.y,z:a.z-b.z}),
+    scale:(a,s)=>({x:a.x*s,y:a.y*s,z:a.z*s}),
+    dot:(a,b)=>a.x*b.x+a.y*b.y+a.z*b.z,
+    cross:(a,b)=>({x:a.y*b.z-a.z*b.y,y:a.z*b.x-a.x*b.z,z:a.x*b.y-a.y*b.x}),
+    len:a=>Math.hypot(a.x,a.y,a.z),
+    norm:a=>{const l=Math.hypot(a.x,a.y,a.z)||1;return {x:a.x/l,y:a.y/l,z:a.z/l};},
+  };
+  const Q={
+    id:{w:1,x:0,y:0,z:0},
+    mul:(a,b)=>({
+      w:a.w*b.w-a.x*b.x-a.y*b.y-a.z*b.z,
+      x:a.w*b.x+a.x*b.w+a.y*b.z-a.z*b.y,
+      y:a.w*b.y-a.x*b.z+a.y*b.w+a.z*b.x,
+      z:a.w*b.z+a.x*b.y-a.y*b.x+a.z*b.w}),
+    conj:q=>({w:q.w,x:-q.x,y:-q.y,z:-q.z}),
+    axisAngle:(ax,ang)=>{const s=Math.sin(ang/2);const n=V.norm(ax);
+      return {w:Math.cos(ang/2),x:n.x*s,y:n.y*s,z:n.z*s};},
+    // rotate vector v by quaternion q  (v' = v + 2w(u×v) + 2u×(u×v), u=q.xyz)
+    apply:(q,v)=>{const u={x:q.x,y:q.y,z:q.z};
+      const t=V.scale(V.cross(u,v),2);
+      return V.add(V.add(v,V.scale(t,q.w)),V.cross(u,t));},
+    // shortest rotation taking unit a -> unit b
+    between:(a,b)=>{const d=clamp(V.dot(a,b),-1,1);
+      if(d>0.999999) return Q.id;
+      if(d<-0.999999){let ax=V.cross({x:1,y:0,z:0},a); if(V.len(ax)<1e-6)ax=V.cross({x:0,y:1,z:0},a);
+        return Q.axisAngle(ax,Math.PI);}
+      const ax=V.cross(a,b);return Q.axisAngle(ax,Math.acos(d));},
+  };
+  const YP={x:0,y:1,z:0};                                // +y : the pole-frame base axis
+
+  // ===== model state =======================================================
+  const STEP={r:1.5, t:6*D2R, p:6*D2R};
+  const KICK=6*D2R;                                     // the FIXED pole tilt (small; real model = 1°)
+  const COS_KICK=Math.cos(KICK);                        // ONE-TIME constant: the "near +y" threshold
+  const SIN_H=Math.sin(KICK/2), COS_H=Math.cos(KICK/2); // ONE-TIME constants: the fixed tilt half-angle
+  // TRIG-FREE per update: near +y is the constant compare wd.y > cos(KICK). Then tilt +y AWAY from N by
+  // the fixed angle — the direction is just N's horizontal components (wd.x,wd.z), no atan2. The tilt
+  // quaternion is (constants) × (wd-derived unit axis); only a sqrt for the axis, no per-frame trig.
+  function autoPole(wd){
+    if(!document.getElementById('dodge').checked || wd.y<=COS_KICK) return Q.id;
+    let ax={x:-wd.z, z:wd.x}; const l=Math.hypot(ax.x,ax.z);   // axis ⟂ N's horizontal projection
+    if(l<1e-9){ax={x:1,z:0};} else {ax.x/=l; ax.z/=l;}
+    return {w:COS_H, x:ax.x*SIN_H, y:0, z:ax.z*SIN_H};   // fixed-angle tilt, aimed away from N
+  }
+  let R=9.0;                                             // node radius (scalar abc)
+  let qRel=Q.between(YP, V.norm({x:0.55,y:0.62,z:0.40})); // node orientation IN POLE FRAME
+  let qPole=Q.id;                                        // pole orientation (from +y)
+  let cam={yaw:0.6,pitch:-0.35}; const SCALE0=26;
+
+  // qRel/R are CONTINUOUS (dragging accumulates on them). Snapping is a DISPLAY transform only,
+  // so sub-cell drag motion is never discarded — the node just renders on the nearest grid cell.
+  const snapOn=()=>document.getElementById('snap').checked;
+  const rawPolar=()=>{const d=Q.apply(qRel,YP);return {colat:Math.acos(clamp(d.y,-1,1)),bear:Math.atan2(d.z,d.x)};};
+  const dispRel=()=>qRel;   // N renders at its CONTINUOUS position; snapping is shown as a highlighted cell
+  const dispR=()=>R;
+  const relDir=()=>Q.apply(dispRel(),YP);                                // displayed pole-frame dir
+  const relPolar=()=>{const d=relDir();return {colat:Math.acos(clamp(d.y,-1,1)),bear:Math.atan2(d.z,d.x)};};
+  const worldDir=()=>Q.apply(Q.mul(qPole,dispRel()),YP);                 // displayed
+  const worldDirCont=()=>Q.apply(Q.mul(qPole,qRel),YP);                  // continuous (for trackball)
+  const worldNode=()=>V.scale(worldDir(),dispR());
+  const poleAxis=()=>Q.apply(qPole,YP);
+  const qz=(v,s)=>Math.round(v/s)*s, idx=(v,s)=>Math.round(v/s);
+  // build a pole-frame rotation from (colat,bearing): rotation taking +y to that dir
+  const relFrom=(colat,bear)=>Q.between(YP,{x:Math.sin(colat)*Math.cos(bear),y:Math.cos(colat),z:Math.sin(colat)*Math.sin(bear)});
+
+  // ===== camera / projection ==============================================
+  function rot(v){const cy=Math.cos(cam.yaw),sy=Math.sin(cam.yaw),cp=Math.cos(cam.pitch),sp=Math.sin(cam.pitch);
+    const x1=v.x*cy+v.z*sy,z1=-v.x*sy+v.z*cy,y1=v.y;
+    return {x:x1,y:y1*cp-z1*sp,z:y1*sp+z1*cp};}
+  function invRot(v){const cy=Math.cos(cam.yaw),sy=Math.sin(cam.yaw),cp=Math.cos(cam.pitch),sp=Math.sin(cam.pitch);
+    const y1=v.y*cp+v.z*sp,z1=-v.y*sp+v.z*cp,x1=v.x;
+    return {x:x1*cy-z1*sy,y:y1,z:x1*sy+z1*cy};}
+  let W=0,H=0,DPR=1;
+  const project=v=>{const c=rot(v),persp=520/(520+c.z);
+    return {x:W/2+c.x*SCALE0*persp,y:H/2-c.y*SCALE0*persp,z:c.z,s:persp};};
+
+  // ===== drawing ==========================================================
+  const line=(a,b,col,w=2,dash=null)=>{const pa=project(a),pb=project(b);
+    ctx.strokeStyle=col;ctx.lineWidth=w;ctx.setLineDash(dash||[]);ctx.beginPath();
+    ctx.moveTo(pa.x,pa.y);ctx.lineTo(pb.x,pb.y);ctx.stroke();ctx.setLineDash([]);};
+  const disc=(v,rad,fill)=>{const p=project(v);ctx.fillStyle=fill;ctx.strokeStyle='#0e1116';
+    ctx.lineWidth=2;ctx.beginPath();ctx.arc(p.x,p.y,rad*p.s,0,TAU);ctx.fill();ctx.stroke();return p;};
+  const label=(v,txt,col,dx=8,dy=-8)=>{const p=project(v);ctx.fillStyle=col;
+    ctx.font='600 12px system-ui';ctx.textAlign='start';ctx.textBaseline='alphabetic';ctx.fillText(txt,p.x+dx,p.y+dy);};
+  const poly=(pts,col,w,dash=null)=>{ctx.strokeStyle=col;ctx.lineWidth=w;ctx.setLineDash(dash||[]);
+    ctx.beginPath();pts.forEach((p,i)=>{const s=project(p);i?ctx.lineTo(s.x,s.y):ctx.moveTo(s.x,s.y);});
+    ctx.stroke();ctx.setLineDash([]);};
+
+  function draw(){
+    W=cv.width/DPR;H=cv.height/DPR;ctx.setTransform(DPR,0,0,DPR,0,0);ctx.clearRect(0,0,W,H);
+    const A=13;
+    line({x:-A,y:0,z:0},{x:A,y:0,z:0},'#233',1);
+    line({x:0,y:0,z:-A},{x:0,y:0,z:A},'#233',1);
+
+    const pv=poleAxis(), {colat,bear}=relPolar();
+    const arcR=dispR();                             // grid/rings on the node's DISPLAYED sphere
+
+    // abc cell grid: colatitude rings + bearing meridians about the pole, on the node's sphere.
+    // Drawn by rotating pole-frame directions into world (qPole) — the grid tilts WITH the pole.
+    if(document.getElementById('showGrid').checked){
+      const gp=d=>V.scale(Q.apply(qPole,d),arcR);          // pole-frame dir -> world point on sphere
+      for(let ti=1; ti<Math.round(Math.PI/STEP.t); ti++){  // colatitude rings
+        const c=ti*STEP.t, ring=[];
+        for(let j=0;j<=48;j++){const a=j/48*TAU;
+          ring.push(gp({x:Math.sin(c)*Math.cos(a),y:Math.cos(c),z:Math.sin(c)*Math.sin(a)}));}
+        poly(ring,'#213040',1);
+      }
+      for(let pi=0; pi<Math.round(TAU/STEP.p); pi++){       // bearing meridians
+        const b=pi*STEP.p, mer=[];
+        for(let j=0;j<=30;j++){const c=j/30*Math.PI;
+          mer.push(gp({x:Math.sin(c)*Math.cos(b),y:Math.cos(c),z:Math.sin(c)*Math.sin(b)}));}
+        poly(mer,'#213040',1);
+      }
+    }
+
+    if(document.getElementById('showPole').checked){
+      line({x:0,y:0,z:0},{x:0,y:A*0.55,z:0},'#3a4657',1.5,[3,4]); label({x:0,y:A*0.55,z:0},'+y home','#5b6b7f',6,0);
+      line(V.scale(pv,-A),V.scale(pv,A),'#ff7b72',2.5,[7,6]); label(V.scale(pv,A),'pole','#ff7b72',6,0);
+      // dodge cone ring at colatitude KICK about the pole
+      const rk=[];for(let i=0;i<=48;i++){const d=Q.apply(qPole,{x:Math.sin(KICK)*Math.cos(i/48*TAU),y:Math.cos(KICK),z:Math.sin(KICK)*Math.sin(i/48*TAU)});rk.push(V.scale(d,arcR));}
+      poly(rk,'#4b2b2b',1.5);
+    }
+    // highlight the cell N currently snaps to (continuous θ,φ rounded to the grid)
+    if(document.getElementById('snap').checked){
+      const c0=clamp(qz(colat,STEP.t),0,Math.PI), b0=qz(bear,STEP.p), ht=STEP.t/2, hp=STEP.p/2;
+      const dc=(c,b)=>V.scale(Q.apply(qPole,{x:Math.sin(c)*Math.cos(b),y:Math.cos(c),z:Math.sin(c)*Math.sin(b)}),arcR);
+      const cell=[],n=8;
+      for(let i=0;i<=n;i++)cell.push(dc(c0-ht, b0-hp+STEP.p*i/n));
+      for(let i=0;i<=n;i++)cell.push(dc(c0-ht+STEP.t*i/n, b0+hp));
+      for(let i=0;i<=n;i++)cell.push(dc(c0+ht, b0+hp-STEP.p*i/n));
+      for(let i=0;i<=n;i++)cell.push(dc(c0+ht-STEP.t*i/n, b0-hp));
+      ctx.fillStyle='rgba(88,166,255,0.22)';ctx.beginPath();
+      cell.forEach((p,i)=>{const s=project(p);i?ctx.lineTo(s.x,s.y):ctx.moveTo(s.x,s.y);});
+      ctx.closePath();ctx.fill();
+    }
+
+    if(document.getElementById('showArc').checked){
+      const ring=[];for(let i=0;i<=64;i++){const d=Q.apply(qPole,{x:Math.sin(colat)*Math.cos(i/64*TAU),y:Math.cos(colat),z:Math.sin(colat)*Math.sin(i/64*TAU)});ring.push(V.scale(d,arcR));}
+      poly(ring,'#245c39',1.5);
+      const arc=[];for(let i=0;i<=40;i++){const cc=colat*i/40;const d=Q.apply(qPole,{x:Math.sin(cc)*Math.cos(bear),y:Math.cos(cc),z:Math.sin(cc)*Math.sin(bear)});arc.push(V.scale(d,arcR));}
+      poly(arc,'#3fb950',2.5);
+      const md=Q.apply(qPole,{x:Math.sin(colat/2)*Math.cos(bear),y:Math.cos(colat/2),z:Math.sin(colat/2)*Math.sin(bear)});
+      label(V.scale(md,arcR),'θ','#3fb950');
+    }
+
+    // ---- abc shown geometrically: each index = a count of step-units on its axis ----
+    if(document.getElementById('showArc').checked){
+      const a=idx(R,STEP.r), b=idx(colat,STEP.t), c=idx(bear,STEP.p);
+      const pf=(cl,be,rad)=>V.scale(Q.apply(qPole,{x:Math.sin(cl)*Math.cos(be),y:Math.cos(cl),z:Math.sin(cl)*Math.sin(be)}),rad);
+      const dot=(v,col)=>{const p=project(v);ctx.fillStyle=col;ctx.beginPath();ctx.arc(p.x,p.y,3.5,0,TAU);ctx.fill();};
+      // θ: one step-wedge highlighted, then b ticks along the pole→node arc
+      const wedge=[];for(let i=0;i<=10;i++)wedge.push(pf(STEP.t*i/10,bear,arcR));
+      poly(wedge,'#7ee787',5);
+      label(pf(STEP.t*0.5,bear,arcR),`θ step ${(STEP.t*R2D)|0}°`,'#7ee787',6,-2);
+      for(let k=1;k<=b;k++){if(k*STEP.t>colat+1e-6)break;dot(pf(k*STEP.t,bear,arcR),'#3fb950');}
+      label(pf(colat,bear,arcR),`b=${b}`,'#3fb950',10,16);
+      // φ: reference meridian (bearing 0), azimuth arc 0→bear on the node's ring, c ticks
+      const ref=[];for(let i=0;i<=20;i++)ref.push(pf(colat*i/20,0,arcR));poly(ref,'#5b6b7f',1,[3,3]);
+      const n=Math.max(2,Math.round(Math.abs(bear)/(2*D2R))),az=[];
+      for(let i=0;i<=n;i++)az.push(pf(colat,bear*i/n,arcR));poly(az,'#ff7b72',3);
+      for(let k=1;k<=Math.abs(c);k++){const be=Math.sign(c||1)*k*STEP.p;if(Math.abs(be)>Math.abs(bear)+1e-6)break;dot(pf(colat,be,arcR),'#ff7b72');}
+      label(pf(colat,bear*0.5,arcR),`φ step ${(STEP.p*R2D)|0}° · c=${c}`,'#ff7b72',6,-4);
+      // r: ticks along the center→node wire, each = STEP.r
+      const wdir=worldDir();
+      for(let k=1;k<=a;k++){if(k*STEP.r>R+1e-6)break;dot(V.scale(wdir,k*STEP.r),'#58a6ff');}
+      label(V.scale(wdir,R*0.55),`r step ${STEP.r} · a=${a}`,'#58a6ff',6,-4);
+    }
+
+    const nW=worldNode();
+    line({x:0,y:0,z:0},nW,'#8b949e',2.5);
+    const items=[{v:{x:0,y:0,z:0},fill:'#f0b429',g:'C'},{v:nW,fill:'#58a6ff',g:'N'}];
+    items.sort((a,b)=>project(b.v).z-project(a.v).z);
+    for(const it of items){const p=disc(it.v,9,it.fill);
+      ctx.fillStyle='#000';ctx.font='700 11px system-ui';ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText(it.g,p.x,p.y);ctx.textAlign='start';ctx.textBaseline='alphabetic';}
+
+    // HUD
+    const wd=worldDir(), pt=Math.acos(clamp(poleAxis().y,-1,1));
+    S('sR',STEP.r.toFixed(1));S('sT',(STEP.t*R2D).toFixed(0));S('sP',(STEP.p*R2D).toFixed(0));
+    S('aR',idx(R,STEP.r));S('aT',idx(colat,STEP.t));S('aP',idx(bear,STEP.p));
+    S('cT',(colat*R2D).toFixed(1)+'°');S('cP',(bear*R2D).toFixed(1)+'°');
+    S('poleT',(pt*R2D).toFixed(1)+'°');
+    S('chk',`(${wd.x.toFixed(2)}, ${wd.y.toFixed(2)}, ${wd.z.toFixed(2)})`);
+    document.getElementById('flag').textContent = colat<KICK ? '⚠ inside dodge zone — pole will tilt (fixed ΔR)' : '';
+  }
+  const S=(id,v)=>{document.getElementById(id).textContent=v;};
+  const logEl=document.getElementById('log'); const SINK='http://127.0.0.1:8765';
+  const shown=[];
+  function LOG(msg){                                   // streamed to the local sink → repo file I read
+    shown.push(msg); if(shown.length>40) shown.shift();
+    logEl.textContent=shown.slice().reverse().join('\n'); console.log(msg);
+    try{ fetch(SINK,{method:'POST',body:msg}).catch(()=>{}); }catch(e){}}
+  window.addEventListener('error',e=>LOG('JS-ERROR: '+e.message+' @line '+(e.lineno||'?')));
+  document.getElementById('savelog').onclick=()=>LOG('--- MARK (user clicked Save) ---');
+  document.getElementById('clearlog').onclick=()=>{shown.length=0;logEl.textContent='';
+    try{ fetch(SINK+'/clear',{method:'POST',body:''}).catch(()=>{}); }catch(e){}};
+  LOG('BOOT '+new Date().toLocaleTimeString());
+
+  // ===== the pole nudge: a FIXED increment applied by multiplication ========
+  // q_pole ← q_pole · ΔR ;  q_rel ← ΔR⁻¹ · q_rel .  World = q_pole·q_rel is invariant.
+  // ΔR is a fixed axis-angle; nothing is rederived. Animated by scaling the angle 0→full.
+  let anim=null;
+  function animateNudge(axis,angle,dur=650){
+    if(anim)cancelAnimationFrame(anim);
+    const pole0=qPole, rel0=qRel, t0=performance.now();
+    (function frame(now){
+      let k=Math.min(1,(now-t0)/dur); k=k<.5?2*k*k:1-Math.pow(-2*k+2,2)/2;
+      const dR=Q.axisAngle(axis, k*angle);
+      qPole=Q.mul(pole0,dR);
+      qRel =Q.mul(Q.conj(dR),rel0);          // SAME fixed increment, applied to the node's abc
+      draw();
+      anim = k<1 ? requestAnimationFrame(frame) : null;
+    })(performance.now());
+  }
+  // dodge: choose the fixed ΔR (in pole frame) that carries the node to colatitude KICK
+  function maybeDodge(){
+    if(!document.getElementById('dodge').checked){LOG('dodge: checkbox off');return;}
+    const {colat,bear}=relPolar();
+    if(colat>=KICK){LOG(`dodge: skip (θ=${(colat*R2D).toFixed(1)}° ≥ ${(KICK*R2D)|0}°)`);return;}
+    const d=relDir();
+    const target={x:Math.sin(KICK)*Math.cos(bear),y:Math.cos(KICK),z:Math.sin(KICK)*Math.sin(bear)};
+    const F=Q.between(d,target);            // fixed increment applied to the node (q_rel ← F·q_rel)
+    // ΔR = conj(F); extract its axis/angle to animate
+    const dR=Q.conj(F); const ang=2*Math.acos(clamp(dR.w,-1,1));
+    if(ang<1e-4) return;
+    LOG(`DODGE: node at θ=${(colat*R2D).toFixed(1)}° < ${(KICK*R2D)|0}° → tilt pole by ${(ang*R2D).toFixed(1)}°`);
+    const s=Math.sqrt(1-dR.w*dR.w)||1; const axis={x:dR.x/s,y:dR.y/s,z:dR.z/s};
+    animateNudge(axis,ang,600);
+  }
+
+  // ===== interaction =======================================================
+  let mode=null,last={x:0,y:0};
+  const nodePx=()=>project(worldNode());
+  cv.addEventListener('pointerdown',e=>{cv.setPointerCapture(e.pointerId);
+    const r=cv.getBoundingClientRect(),mx=e.clientX-r.left,my=e.clientY-r.top,np=nodePx();
+    const dist=Math.hypot(mx-np.x,my-np.y);
+    mode=dist<24?'node':'orbit';cv.style.cursor='grabbing';last={x:mx,y:my};
+    LOG(`DOWN mode=${mode} click=(${mx|0},${my|0}) N@(${np.x|0},${np.y|0}) dist=${dist|0} R=${R.toFixed(1)}`);});
+  cv.addEventListener('pointermove',e=>{if(!mode)return;
+    const r=cv.getBoundingClientRect(),mx=e.clientX-r.left,my=e.clientY-r.top;
+    const dx=mx-last.x,dy=my-last.y;last={x:mx,y:my};
+    if(mode==='orbit'){cam.yaw+=dx*0.01;cam.pitch=clamp(cam.pitch+dy*0.01,-1.5,1.5);}
+    else{
+      // relative trackball: rotate N's direction by the screen delta. No rim limit — N can travel
+      // all the way around the sphere; reach the far side by continuing to drag.
+      const p=worldDirCont();
+      const camR=V.norm(invRot({x:1,y:0,z:0})), camU=V.norm(invRot({x:0,y:1,z:0}));
+      const GAIN=0.006;                                 // CONSTANT rad per screen px (~0.34°/px), depth-independent
+      const dp=V.add(V.scale(camR,dx*GAIN), V.scale(camU,-dy*GAIN));
+      const perp=V.sub(dp, V.scale(p, V.dot(dp,p)));
+      const ang=Math.min(V.len(perp),0.6);
+      if(ang>1e-6){
+        const wd=Q.apply(Q.axisAngle(V.cross(p,perp),ang),p);
+        qPole=autoPole(wd);                                  // fixed constant tilt when N is near +y, else identity
+        qRel=Q.mul(Q.conj(qPole),Q.between(YP,wd));          // hold N at wd; abc re-express about the pole
+        const rp=rawPolar();
+        LOG(`drag raw θ=${(rp.colat*R2D).toFixed(1)}° φ=${(rp.bear*R2D).toFixed(1)}° → cell b=${idx(rp.colat,STEP.t)} c=${idx(rp.bear,STEP.p)}`);
+      }
+    }
+    draw();
+  });
+  const end=()=>{const wasNode=mode==='node';mode=null;cv.style.cursor='grab';
+    if(wasNode) LOG('UP (end node drag)');};   // pole is live (autoPole in the drag), no release dodge
+  cv.addEventListener('pointerup',end);cv.addEventListener('pointercancel',end);
+  const zoomEl=document.getElementById('zoom'), zoomVal=document.getElementById('zoomval');
+  zoomEl.addEventListener('input',()=>{R=parseFloat(zoomEl.value);zoomVal.textContent=R.toFixed(1);draw();});
+
+  document.getElementById('nudge').onclick=()=>{LOG('NUDGE: fixed ΔR = 22° about pole-frame axis');animateNudge(V.norm({x:1,y:0,z:0.3}),22*D2R);};
+  document.getElementById('home').onclick=()=>{ // animate pole back to +y as a fixed rotation
+    const ax=poleAxis(); const q=Q.between(ax,YP); const ang=2*Math.acos(clamp(q.w,-1,1));
+    if(ang<1e-4){qPole=Q.id;draw();return;}
+    const s=Math.sqrt(1-q.w*q.w)||1;
+    // rotate the pole toward home: ΔR about pole-frame axis = conj(qPole)*worldAxis
+    const worldAxis={x:q.x/s,y:q.y/s,z:q.z/s};
+    const localAxis=Q.apply(Q.conj(qPole),worldAxis);
+    animateNudge(localAxis,ang);
+  };
+  document.getElementById('reset').onclick=()=>{R=9.0;zoomEl.value=9;zoomVal.textContent='9.0';
+    qRel=Q.between(YP,V.norm({x:0.55,y:0.62,z:0.40}));qPole=Q.id;draw();};
+  ['snap','dodge','showGrid','showArc','showPole'].forEach(id=>document.getElementById(id).addEventListener('change',draw));
+
+  function resize(){DPR=Math.min(2,window.devicePixelRatio||1);
+    cv.width=cv.clientWidth*DPR;cv.height=cv.clientHeight*DPR;draw();}
+  new ResizeObserver(resize).observe(cv);resize();
+})();
+</script>
+</body>
+</html>
