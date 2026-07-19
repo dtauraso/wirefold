@@ -29,7 +29,7 @@ import (
 //   portMove  — a CONNECTED port is being dragged along its node's ring (ring-anchor snap).
 //   handhold  — a handhold grab-sphere is dragged for axis-locked (constrained) orbit.
 //
-// Phase 7 closed the interaction gaps: click-select is Go-owned (md.selected +
+// Phase 7 closed the interaction gaps: click-select is Go-owned (md.sel.selected +
 // KindSelect trace → buffer Selected column); handhold-constrained orbit and
 // connected-port ring-move are ported here formula-faithfully from
 // interaction-handlers.ts. Wire-drop no longer creates an edge — the create/delete edit
@@ -472,7 +472,7 @@ func (md *MoveDispatch) gestPointerUp(ev rawInputMsg, slotReg SlotRegistry, tr *
 		// Rotation completed (free or handhold-constrained): nothing to flush.
 	case g.phase == gestPending:
 		// Click → Go-owned selection. A node hit selects it; empty space clears the
-		// selection. md.selected is the authoritative selection; Select() emits it so the
+		// selection. md.sel.selected is the authoritative selection; Select() emits it so the
 		// buffer snapshot marks the node's Selected column.
 		md.applySelect(ev, tr)
 	}
@@ -482,10 +482,10 @@ func (md *MoveDispatch) gestPointerUp(ev rawInputMsg, slotReg SlotRegistry, tr *
 // setHover is the shared dedupe+emit hover write; updateHover (pointer path) is its
 // one caller.
 func (md *MoveDispatch) setHover(node, port string, isInput bool, tr *T.Trace) {
-	if node == md.hoverNode && port == md.hoverPort && isInput == md.hoverInput {
+	if node == md.sel.hoverNode && port == md.sel.hoverPort && isInput == md.sel.hoverInput {
 		return // no change → no re-emit (dedupe)
 	}
-	md.hoverNode, md.hoverPort, md.hoverInput = node, port, isInput
+	md.sel.hoverNode, md.sel.hoverPort, md.sel.hoverInput = node, port, isInput
 	if tr != nil {
 		tr.Hover(node, port, isInput)
 	}
@@ -494,19 +494,19 @@ func (md *MoveDispatch) setHover(node, port string, isInput bool, tr *T.Trace) {
 // applySelect sets the Go-owned selection from a click hit and emits it. Selection is
 // single + EXCLUSIVE across nodes and edges: an EDGE hit selects that edge (clearing any
 // node selection); a node/port hit selects that node (clearing any edge selection); an
-// empty-space hit CLEARS the transient highlight (md.selected / md.selectedEdge) — this is
+// empty-space hit CLEARS the transient highlight (md.sel.selected / md.sel.selectedEdge) — this is
 // the original click-empty-clears behavior.
 func (md *MoveDispatch) applySelect(ev rawInputMsg, tr *T.Trace) {
 	if ev.Hit.Kind == "empty" {
-		md.selected = ""
-		md.selectedEdge = ""
+		md.sel.selected = ""
+		md.sel.selectedEdge = ""
 		tr.Select("")
 		return
 	}
 	if ev.Hit.Kind == "edge" {
 		if label, ok := md.edgeFromHit(ev.Hit); ok {
-			md.selectedEdge = label
-			md.selected = ""
+			md.sel.selectedEdge = label
+			md.sel.selected = ""
 			tr.SelectEdge(label)
 			return
 		}
@@ -524,8 +524,8 @@ func (md *MoveDispatch) applySelect(ev rawInputMsg, tr *T.Trace) {
 			node = n
 		}
 	}
-	md.selected = node
-	md.selectedEdge = ""
+	md.sel.selected = node
+	md.sel.selectedEdge = ""
 	tr.Select(node)
 }
 
@@ -666,8 +666,8 @@ func (md *MoveDispatch) applyRingAnchor(node, port string, isInput bool, dir vec
 		}
 	}
 	// Persist the snapped anchor index to the port file (debounced, fire-and-forget).
-	if md.anchorPersist != nil {
-		md.anchorPersist.schedule(node, port, isInput, anchorID)
+	if md.persist.anchor != nil {
+		md.persist.anchor.schedule(node, port, isInput, anchorID)
 	}
 }
 

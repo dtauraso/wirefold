@@ -45,7 +45,7 @@ func TestPersistViewpointRoundTrips(t *testing.T) {
 
 	md.SetViewpoint(wantPivot, wantR, wantPos, wantUp)
 	md.EmitViewpoint(nil) // schedules the debounced write (gesture path is EmitViewpoint)
-	md.vpPersist.flush()  // force the coalesced write now (no timing dependence)
+	md.persist.vp.flush() // force the coalesced write now (no timing dependence)
 
 	pivot, r, pos, up, ok := loadSceneViewpoint(td)
 	if !ok {
@@ -77,7 +77,7 @@ func TestPersistPreservesOtherSceneFields(t *testing.T) {
 	md.EnableViewpointPersist(td)
 	md.SetViewpoint(vec3{X: 7, Y: 8, Z: 9}, 123, dir{Theta: 1, Phi: 2}, dir{Theta: 0.1, Phi: 0.2})
 	md.EmitViewpoint(nil)
-	md.vpPersist.flush()
+	md.persist.vp.flush()
 
 	raw, err := os.ReadFile(scenePath)
 	if err != nil {
@@ -121,12 +121,12 @@ func TestPersistDebounceCoalesces(t *testing.T) {
 		md.SetViewpoint(vec3{X: float64(i)}, float64(100+i), dir{Theta: float64(i) * 0.01}, dir{Phi: float64(i) * 0.02})
 		md.EmitViewpoint(nil) // schedule; resets the debounce window each time
 	}
-	if md.vpPersist.timer != nil {
-		md.vpPersist.timer.Stop()
+	if md.persist.vp.timer != nil {
+		md.persist.vp.timer.Stop()
 	}
-	md.vpPersist.flush()
+	md.persist.vp.flush()
 
-	if got := md.vpPersist.writes; got != 1 {
+	if got := md.persist.vp.writes; got != 1 {
 		t.Fatalf("writes=%d want 1 (burst should coalesce to a single write)", got)
 	}
 	// Final value is the last scheduled viewpoint (i=49).
@@ -138,8 +138,8 @@ func TestPersistDebounceCoalesces(t *testing.T) {
 		vec3{X: 49}, 149, dir{Theta: 49 * 0.01}, dir{Phi: 49 * 0.02})
 
 	// A second flush with nothing pending does not write again.
-	md.vpPersist.flush()
-	if got := md.vpPersist.writes; got != 1 {
+	md.persist.vp.flush()
+	if got := md.persist.vp.writes; got != 1 {
 		t.Fatalf("writes=%d want 1 after empty flush", got)
 	}
 }
@@ -156,7 +156,7 @@ func TestWriteSceneOverlaysPreservesCameraPolar(t *testing.T) {
 	md.EnableViewpointPersist(td)
 	md.SetViewpoint(vec3{X: 11, Y: 22, Z: 33}, 321, dir{Theta: 0.5, Phi: 1.5}, dir{Theta: 0.05, Phi: 0.15})
 	md.EmitViewpoint(nil)
-	md.vpPersist.flush()
+	md.persist.vp.flush()
 
 	// A save persists Go's OWN overlay state. Here labelsGlobal is hidden (visible=false),
 	// which must land as labelsGlobalHidden:true in scene.json.

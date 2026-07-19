@@ -223,7 +223,7 @@ func TestDragPersistsOnlyDraggedNodeAndRequantizesNeighborsOnDisk(t *testing.T) 
 	// Force the debounced scene-position persister to land before reading disk (the
 	// per-node local-polar writes from neighborSetCRequantize are synchronous, not
 	// debounced, but A's own scenePolar/quantOffset write is).
-	md.quantOffsetPersist.flush()
+	md.persist.quantOffset.flush()
 
 	// ---- Read the RE-PERSISTED bytes on disk. ----
 	metaA := persistedMeta(t, root, "A")

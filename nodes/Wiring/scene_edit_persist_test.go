@@ -83,7 +83,7 @@ func TestPersistAnchorRoundTrips(t *testing.T) {
 	dir := vec3{X: 1, Y: 0, Z: 0}
 	want := snapToRingAnchorIndex(md.NodeKind("src"), dir)
 	md.applyRingAnchor("src", "Out", false, dir)
-	md.anchorPersist.flush()
+	md.persist.anchor.flush()
 
 	spec, err := parseSpec(root)
 	if err != nil {
@@ -125,8 +125,8 @@ func TestPersistOverlaysRoundTrips(t *testing.T) {
 	// Flip a visible-sense flag off (tori) and the hidden-sense flag on (labelsGlobal off).
 	md.ToggleSceneTori(nil)    // sceneToriVisible: true -> false
 	md.ToggleLabelsGlobal(nil) // labelsGlobalVisible: true -> false
-	md.overlaysPersist.schedule(md.ov)
-	md.overlaysPersist.flush()
+	md.persist.overlays.schedule(md.ov)
+	md.persist.overlays.flush()
 
 	ov, found := loadSceneOverlays(sceneCameraPath(root))
 	if !found {
@@ -162,13 +162,13 @@ func TestOverlaysPersistPreservesCamera(t *testing.T) {
 	md.EnableViewpointPersist(root)
 	md.SetViewpoint(vec3{X: 1, Y: 2, Z: 3}, 200, dir{Theta: 0.5, Phi: 1.5}, dir{Theta: 0.05, Phi: 0.15})
 	md.EmitViewpoint(nil)
-	md.vpPersist.flush()
+	md.persist.vp.flush()
 
 	md.EnableEditPersist(root)
 
 	md.ToggleSceneTori(nil)
-	md.overlaysPersist.schedule(md.ov)
-	md.overlaysPersist.flush()
+	md.persist.overlays.schedule(md.ov)
+	md.persist.overlays.flush()
 
 	// Camera survives.
 	if _, _, _, _, ok := loadSceneViewpoint(root); !ok {
@@ -194,11 +194,11 @@ func TestEnableEditPersistTrueMonolithicNoTree(t *testing.T) {
 	}
 	md := &MoveDispatch{ov: defaultOverlayState()}
 	md.EnableEditPersist(topoFile)
-	if md.posPersist.root != "" {
-		t.Fatalf("posPersist.root=%q want empty (no nodes/ subdir → true monolithic)", md.posPersist.root)
+	if md.persist.pos.root != "" {
+		t.Fatalf("posPersist.root=%q want empty (no nodes/ subdir → true monolithic)", md.persist.pos.root)
 	}
-	if md.anchorPersist.root != "" {
-		t.Fatalf("anchorPersist.root=%q want empty", md.anchorPersist.root)
+	if md.persist.anchor.root != "" {
+		t.Fatalf("anchorPersist.root=%q want empty", md.persist.anchor.root)
 	}
 }
 
@@ -219,14 +219,14 @@ func TestOverlaysPersistMonolithicForm(t *testing.T) {
 	md.EnableEditPersist(topoFile) // topologyPath is a FILE, not a dir
 
 	// overlaysPersist.path must be non-empty (the sceneCameraPath sibling).
-	if md.overlaysPersist.path == "" {
+	if md.persist.overlays.path == "" {
 		t.Fatal("overlaysPersist.path is empty for monolithic topologyPath — EnableEditPersist bug")
 	}
 
 	// Toggle an overlay and flush.
 	md.ToggleSceneTori(nil) // sceneToriVisible: true -> false
-	md.overlaysPersist.schedule(md.ov)
-	md.overlaysPersist.flush()
+	md.persist.overlays.schedule(md.ov)
+	md.persist.overlays.flush()
 
 	// Load back via sceneCameraPath.
 	ov, found := loadSceneOverlays(sceneCameraPath(topoFile))

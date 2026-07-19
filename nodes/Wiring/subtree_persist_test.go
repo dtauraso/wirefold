@@ -117,7 +117,7 @@ func TestIndividualSnap_OnlyDraggedNodePersists(t *testing.T) {
 			lpAfter.QuantITheta, lpAfter.QuantIPhi, lpAfter.QuantIR, wantTheta, wantPhi, wantR)
 	}
 
-	md.quantOffsetPersist.flush()
+	md.persist.quantOffset.flush()
 
 	// dst's meta got its EXACT scene-polar position (the lossless source of truth loaded
 	// verbatim on reload) plus the quantized scalar triple as a self-describing cache; src
@@ -193,7 +193,7 @@ func TestDragPositionRoundTripsExactly(t *testing.T) {
 		t.Fatal("RootMove(dst) returned false")
 	}
 	pollDragConverged(t, md, "dst", target)
-	md.quantOffsetPersist.flush()
+	md.persist.quantOffset.flush()
 
 	// Reload from disk into a fresh MoveDispatch and read dst's center back.
 	md2 := loadTreeMD(t, root)

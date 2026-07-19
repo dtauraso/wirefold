@@ -225,7 +225,7 @@ func TestRotatingPoleClearsSingularityOnDrag(t *testing.T) {
 			got.QuantITheta, got.QuantIPhi, got.QuantIR, wantTheta, wantPhi, wantR)
 	}
 
-	md.quantOffsetPersist.flush()
+	md.persist.quantOffset.flush()
 }
 
 // TestRotatingPolePersistReload drags src's neighbor, flushes, then RELOADS from disk
@@ -287,7 +287,7 @@ func TestRotatingPolePersistReload(t *testing.T) {
 		}
 		time.Sleep(time.Millisecond)
 	}
-	md.quantOffsetPersist.flush()
+	md.persist.quantOffset.flush()
 
 	raw, err := os.ReadFile(filepath.Join(root, "nodes", "src", "meta.json"))
 	if err != nil {
