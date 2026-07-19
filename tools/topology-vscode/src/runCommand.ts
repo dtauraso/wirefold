@@ -14,6 +14,41 @@ function goErrorLine(message: string): string {
   return JSON.stringify({ ts_ms: Date.now(), src: "go", kind: "error", message }) + "\n";
 }
 
+/** Append a Go-side error line to goErrorsFile, swallowing write failures (the same
+ *  best-effort append repeated at every stderr/build-error/close/error call site below). */
+function appendGoError(goErrorsFile: string | undefined, message: string): void {
+  if (!goErrorsFile) return;
+  try {
+    fs.appendFileSync(goErrorsFile, goErrorLine(message), "utf8");
+  } catch { /* swallow */ }
+}
+
+/** The probe-path set derived once per run() from the workspace folder — see
+ *  probePathsFor. */
+interface ProbePaths {
+  probeFile: string;
+  goErrorsFile: string;
+  goDebugFile: string;
+  tsFile: string;
+  tsErrorsFile: string;
+}
+
+/** Computes (and ensures on disk) the probe-directory file paths for one run. Pure w.r.t.
+ *  the runner — returns a plain object rather than writing `this.*` fields, so a caller can
+ *  use goErrorsFile to report a build failure BEFORE deciding whether to arm the runner's
+ *  own fields (see run()). */
+function probePathsFor(folder: vscode.WorkspaceFolder): ProbePaths {
+  const probeDir = path.join(folder.uri.fsPath, PROBE_DIR);
+  fs.mkdirSync(probeDir, { recursive: true });
+  return {
+    probeFile: path.join(probeDir, PROBE_FILES.go),
+    goErrorsFile: path.join(probeDir, PROBE_FILES.goErrors),
+    goDebugFile: path.join(probeDir, PROBE_FILES.goDebug),
+    tsFile: path.join(probeDir, PROBE_FILES.ts),
+    tsErrorsFile: path.join(probeDir, PROBE_FILES.tsErrors),
+  };
+}
+
 // splitJsonlLines is the pure newline-framing step for stdout: given the carried-over
 // partial buffer and a freshly-arrived chunk, it returns every COMPLETE (newline-
 // terminated) line and the trailing partial `rest` to carry into the next call. A line
@@ -195,29 +230,25 @@ export class BuildAndRunRunner {
     if (topologyPath) this.topologyPath = topologyPath;
     const folder = vscode.workspace.workspaceFolders?.[0];
     if (!folder) return;
-    const probeDir = path.join(folder.uri.fsPath, PROBE_DIR);
-    fs.mkdirSync(probeDir, { recursive: true });
-    this.probeFile = path.join(probeDir, PROBE_FILES.go);
-    this.goErrorsFile = path.join(probeDir, PROBE_FILES.goErrors);
-    this.goDebugFile = path.join(probeDir, PROBE_FILES.goDebug);
-    this.tsFile = path.join(probeDir, PROBE_FILES.ts);
-    this.tsErrorsFile = path.join(probeDir, PROBE_FILES.tsErrors);
+    // Channel setup happens here (not folded into the post-build block below) because the
+    // build-failure branch needs a visible place to report the error to the user, same as
+    // before this refactor.
     if (!this.channel) this.channel = vscode.window.createOutputChannel("topology run");
     this.channel.clear();
     this.channel.show(true);
     const repoRoot = folder.uri.fsPath;
     const binPath = path.join(repoRoot, ".wirefold-cache", "wirefold");
     const topArgs = this.topologyPath ? ["-topology", this.topologyPath] : [];
+    // probePathsFor computes the probe-directory paths as PLAIN LOCALS (not yet written to
+    // `this.*`) so the build-failure branch below can log to goErrorsFile without arming
+    // any of the runner's own fields — see the ProbePaths/probePathsFor doc comment.
+    const probePaths = probePathsFor(folder);
     // Build the binary once (and only rebuild when a .go source changed) instead of
     // relinking a throwaway binary via `go run .` on every start/restart.
     const built = ensureBinaryBuilt(repoRoot, binPath);
     if (!built.ok) {
       this.channel.appendLine(`\n[build error: ${built.error}]`);
-      if (this.goErrorsFile) {
-        try {
-          fs.appendFileSync(this.goErrorsFile, goErrorLine(built.error), "utf8");
-        } catch { /* swallow */ }
-      }
+      appendGoError(probePaths.goErrorsFile, built.error);
       this.looping = false;
       return;
     }
@@ -232,6 +263,16 @@ export class BuildAndRunRunner {
     // is always undefined — the cast overrides TypeScript's control-flow narrowing.
     const activePid: number | undefined = (this.proc as cp.ChildProcess | undefined)?.pid;
     const { killed } = killOrphanedSims(binPath, activePid);
+
+    // Build (and orphan-reap) succeeded: from here on, arm every receiver field this run()
+    // call touches in ONE uninterrupted run immediately before cp.spawn, so no early return
+    // inserted above this point can ever leave probeFile/.../stream/lastSnapshot half-set —
+    // see the ProbePaths doc comment for why probePaths was computed as locals above.
+    this.probeFile = probePaths.probeFile;
+    this.goErrorsFile = probePaths.goErrorsFile;
+    this.goDebugFile = probePaths.goDebugFile;
+    this.tsFile = probePaths.tsFile;
+    this.tsErrorsFile = probePaths.tsErrorsFile;
     if (killed > 0) {
       this.channel.appendLine(`[cleanup] killed ${killed} orphaned sim process(es)`);
     }
@@ -278,11 +319,7 @@ export class BuildAndRunRunner {
     this.proc.stderr?.on("data", (d: Buffer) => {
       const msg = d.toString();
       this.channel!.append(msg);
-      if (this.goErrorsFile) {
-        try {
-          fs.appendFileSync(this.goErrorsFile, goErrorLine(msg), "utf8");
-        } catch { /* swallow */ }
-      }
+      appendGoError(this.goErrorsFile, msg);
     });
     this.proc.on("close", (code) => {
       const cancelled = this.cancelled;
@@ -300,22 +337,14 @@ export class BuildAndRunRunner {
       } else {
         const message = `exit code ${code}`;
         this.channel!.appendLine(`\n[${message}]`);
-        if (this.goErrorsFile) {
-          try {
-            fs.appendFileSync(this.goErrorsFile, goErrorLine(message), "utf8");
-          } catch { /* swallow */ }
-        }
+        appendGoError(this.goErrorsFile, message);
       }
     });
     this.proc.on("error", (err) => {
       this.proc = undefined;
       this.cancelled = false;
       this.channel!.appendLine(`\n[spawn error: ${err.message}]`);
-      if (this.goErrorsFile) {
-        try {
-          fs.appendFileSync(this.goErrorsFile, goErrorLine(err.message), "utf8");
-        } catch { /* swallow */ }
-      }
+      appendGoError(this.goErrorsFile, err.message);
     });
   }
 

@@ -8,6 +8,7 @@
 package Buffer
 
 import (
+	"bytes"
 	"testing"
 
 	T "github.com/dtauraso/wirefold/Trace"
@@ -427,5 +428,29 @@ func TestNodeKindIDRoundTrip(t *testing.T) {
 	}
 	if n1KindId != 5 {
 		t.Errorf("n1 KindId = %d, want 5 (Pulse)", n1KindId)
+	}
+}
+
+// TestStateMutatingEventEmitsFrame guards the bug class named in the emit-obligation
+// refactor: a state-mutating event kind (e.g. KindSelect) must produce a NEW frame on
+// s.out, not silently mutate state that only shows up whenever some UNRELATED later
+// event happens to emit. If a future event kind mutates SnapshotState but forgets to
+// set `emit = true` in its Update arm, this test catches it by asserting the frame count
+// strictly increases across that Update call.
+func TestStateMutatingEventEmitsFrame(t *testing.T) {
+	var buf bytes.Buffer
+	s := NewSnapshotState(&buf)
+
+	s.Update(T.Event{Kind: T.KindNodeGeometry, Node: "n0", Radius: 1})
+	before := buf.Len()
+
+	// KindSelect mutates s.nodes[idx].selected/latchedSel — a state-mutating arm that
+	// carries no EVENT-block-only exemption (unlike Recv/Fire/Send) and is not
+	// tick-coalesced (unlike Position). It must emit a new frame every call.
+	s.Update(T.Event{Kind: T.KindSelect, Node: "n0"})
+	after := buf.Len()
+
+	if after <= before {
+		t.Fatalf("KindSelect did not emit a new frame: buf.Len() before=%d after=%d (want after > before)", before, after)
 	}
 }
