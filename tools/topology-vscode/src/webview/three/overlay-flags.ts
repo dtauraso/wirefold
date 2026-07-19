@@ -21,6 +21,7 @@ import {
   readOverlayLabelsGlobal,
   readOverlayOverlaysVis,
   readOverlayDoubleLinks,
+  readOverlayAbcDragCount,
 } from "../../schema/buffer-layout";
 
 // Keyed by OverlayFlag. Polarity is MIXED — a historical wart worth stating plainly, since
@@ -76,3 +77,21 @@ export function readOverlayFlags(): OverlayFlagVals | null {
 export function useOverlayFlags(): OverlayFlagVals | null {
   return useSyncExternalStore(subscribeSnapshot, readOverlayFlags, readOverlayFlags);
 }
+
+/** Decode the latest snapshot's running time-node abc-drag event count (Overlay block
+ *  AbcDragCount column). Read-only affirmation counter — never authored by TS, only
+ *  reflects the buffer. Returns 0 if no snapshot / decode failure yet. */
+export function readAbcDragCount(): number {
+  const snap = getLatestSnapshot();
+  if (!snap) return 0;
+  const decoded = decodeSnapshot(snap);
+  if (!decoded) return 0;
+  return readOverlayAbcDragCount(decoded.overlayView);
+}
+
+/** React hook: re-renders the caller as time.abc-drag events accumulate (Go-owned
+ *  counter; affirms the drag-log is happening live). */
+export function useAbcDragCount(): number {
+  return useSyncExternalStore(subscribeSnapshot, readAbcDragCount, readAbcDragCount);
+}
+

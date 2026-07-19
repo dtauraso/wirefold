@@ -19,3 +19,5 @@
 {"step":23,"kind":"hover","node":"A","port":"","value":0}
 {"step":24,"kind":"scene-sphere","cx":1,"cy":2,"cz":3,"radius":100}
 {"step":25,"kind":"layout-link","node":"A","target":"B"}
+{"step":26,"kind":"abc-drag","node":"A","port":"B","value":0}
+{"step":27,"kind":"abc-drag-reset","node":"","port":"","value":0}

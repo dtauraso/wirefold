@@ -24,7 +24,7 @@
 package Buffer
 
 // BufLayoutVersion is the schema version. Bump when any column changes.
-const BufLayoutVersion = 30
+const BufLayoutVersion = 31
 
 // BufInteriorSlotsPerNode is the fixed number of interior grid slots reserved per
 // node in the Interior block (a 2x2 held/interior-bead grid: slot = row*2 + col).
@@ -109,6 +109,12 @@ type bufLayoutNode struct {
 	// `latchedSel` React state in NavGuides.tsx (that was a second, TS-invented selection
 	// concept unreachable from Go); the render path now just reads this column.
 	LatchedSel uint8 `buf:"u8"` // 1 = this is the last-selected node (persists through deselect)
+	// GotDragMsg is Go-owned and STICKY: 1 marks a node that has received AT LEAST ONE
+	// time.abc-drag message this session (see SnapshotState.abcDragged in snapshot.go,
+	// set from the KindAbcDrag event's Node id via nodeIndex, never cleared). This is the
+	// accumulating SET the AbcDragLabel overlay lists by name — it replaces the old
+	// single-recipient Overlay.LastAbcDragNodeRow column.
+	GotDragMsg uint8 `buf:"u8"` // 1 = this node has received at least one time.abc-drag message
 }
 
 // bufLayoutInterior defines one row of the interior-bead column block.
@@ -245,6 +251,11 @@ type bufLayoutOverlay struct {
 	// only when this is set. NOT the same thing as the LayoutLink block existing: the data
 	// streams every snapshot regardless, this just gates the render.
 	DoubleLinks uint8 `buf:"u8"` // 1 = layout-link overlay visible
+	// AbcDragCount is a running count of time.abc-drag events (time-node
+	// abc-index polar drag re-quantize) emitted by neighborSetCRequantize.
+	// Read-only affirmation counter for the in-editor overlay label; not a
+	// gate, never decrements.
+	AbcDragCount uint32 `buf:"u32"` // count of time.abc-drag events observed
 }
 
 // bufLayoutScene defines the scene-sphere column block (always 1 row).

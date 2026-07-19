@@ -1224,6 +1224,29 @@ func (md *MoveDispatch) neighborSetCRequantize(selfID, fromID string, fromCenter
 	// boundary, while every OTHER neighbor of selfID is carried forward as index x step.
 	md.requantizePoleTraced(lh, map[string]vec3{fromID: fromCenter.sub(selfCenter)})
 
+	// EVERY node that receives an abc change from a dragged peer logs its response so the
+	// drag propagation is observable (probe-merge.sh --debug -> .probe/go-debug.jsonl) and
+	// the in-editor overlay log can list all recipients — NOT gated to time nodes: any node
+	// that gets the message (gate, time, pulse, ...) is a recipient and must be mentioned.
+	// Behavior is still the plain stay-put re-quantize above; this is the observability
+	// step, not a motion/propagation change. The logged abc is selfID's freshly re-quantized
+	// edge to the peer.
+	if md.tr != nil {
+		var it, ip, ir int
+		for _, lp := range lh.LocalPolarsSnapshot() {
+			if lp.To == fromID {
+				it, ip, ir = lp.QuantITheta, lp.QuantIPhi, lp.QuantIR
+				break
+			}
+		}
+		md.tr.Breadcrumb("abc-drag", selfID, fromID,
+			fmt.Sprintf("peer=%s peerCenter=(%.3f,%.3f,%.3f) abc=(%d,%d,%d)",
+				fromID, fromCenter.X, fromCenter.Y, fromCenter.Z, it, ip, ir))
+		// Routed counterpart of the breadcrumb above: marks selfID in the buffer so the
+		// in-editor overlay log lists it (the breadcrumb alone never reaches the buffer).
+		md.tr.AbcDrag(selfID)
+	}
+
 	if md.quantOffsetPersist != nil {
 		if root := md.quantOffsetPersist.root; root != "" {
 			if err := WriteLocalPolars(root, selfID, lh.LocalPolarsSnapshot(), lh.Pole()); err != nil {
@@ -1278,6 +1301,12 @@ func (md *MoveDispatch) commitNodeMoveLocal(nodeID string, newPos vec3) {
 // affected double-link's local polars are re-quantized on BOTH ends. Returns false for
 // an unknown node.
 func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
+	// Re-scope the in-editor drag-log to THIS drag: emit the reset BEFORE routing the
+	// drag message, so it is ordered ahead of the neighborSetC fan's AbcDrag marks
+	// (which land asynchronously on each recipient's own goroutine, after this send).
+	if md.tr != nil {
+		md.tr.AbcDragReset()
+	}
 	// EVERY node's drag is a FREE move on the decentralized goroutine-message path —
 	// no equal-radii solve, no rule/gate/anchor cascade. The dragged node commits its
 	// own new position, then requantizeLocalPolars fans a single neighborSetC

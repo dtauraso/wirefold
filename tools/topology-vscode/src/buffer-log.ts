@@ -70,7 +70,11 @@ export type DecodedEventLine =
   | { step: number; kind: "layout-link"; node: string; target: string }
   // Go-owned click-selection: the currently-selected node id (node="" clears it).
   | { step: number; kind: "select"; node: string }
-  | { step: number; kind: "hover"; node: string; port?: string; value?: number };
+  | { step: number; kind: "hover"; node: string; port?: string; value?: number }
+  // abc-drag: no dedicated payload, falls through decodeEventLine's default {node,port,value}
+  // shape — same as recv/hover. The routed counterpart of the "time.abc-drag" breadcrumb;
+  // the buffer's Overlay.AbcDragCount column is what the in-editor label actually reads.
+  | { step: number; kind: "abc-drag"; node: string; port?: string; value?: number };
 
 /**
  * Decode a snapshot into `.probe/go.jsonl` lines (one JSON object per line, trailing \n each).
