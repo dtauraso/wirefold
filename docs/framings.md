@@ -18,16 +18,34 @@ observer**, which requires knowing what this system is and who is looking at it.
 | Budget is pixels of relative displacement during motion | Every block of a frame must describe the same instant | `SnapshotState`'s accumulate-then-pack, the drain merge | Planned — `task/per-owner-buffer-rows` |
 | Each owner's own event order is the only real one | Events have a global total order | `Trace.mu`, the event channel, the drain's ordering | Planned — same branch. Note the merged log is already only *arrival order at the drain*, which is scheduler order, not causal order |
 | Pack at the rate the consumer consumes | Emission must be driven by change | `emitSnapshot` scattered across `Update`'s arms, tick coalescing | Planned — same branch |
-| A queue's invariant genuinely must be maintained | — | `outbox.mu` + cond, `PacedWire.mu` | **Confirmed, staying** — no restructuring makes these fall out for free |
+| *(not yet examined)* | A queue's invariant must be maintained | `outbox.mu` + cond, `PacedWire.mu` | **Contention verified, restructuring NOT examined** — see below |
 
-## Why the last row is different
+## The last row is NOT settled
 
-Not every guarantee is a mistake. `outbox.mu` and `PacedWire.mu` guard state that several
-goroutines genuinely mutate, and no split makes the property structural. A torn slice
-header is wrong at any resolution — there is no observer threshold below which corrupted
-memory is acceptable.
+Two claims were conflated there. Only one is verified.
 
-The distinction is not global-vs-local. It is:
+**Verified:** the contention is real. Bypassing the outbox reproduces the cascade deadlock
+as a timeout; removing `pw.mu` from `ReviseInFlightGeometry` gives `WARNING: DATA RACE`.
+Both red-proven, both currently guarded by tests.
+
+**Asserted, and NOT examined:** that no restructuring makes the sharing go away. That is
+the same claim made about `geomMu` and about `LayoutHolder.mu`, and it was wrong both
+times. Candidates dismissed without looking:
+
+- `outbox` is **single-producer, single-consumer** — the mover's own handler enqueues, one
+  dedicated sender drains. SPSC is precisely the shape with well-known lock-free
+  implementations. The unbounded requirement complicates it; it does not obviously rule it
+  out.
+- `PacedWire`'s `inflight` and `delivered` are guarded as one pair. Whether they separate
+  by owner — placement/stepping on one side, delivery handoff on the other — has not been
+  traced.
+
+What IS categorical, and does not depend on any of the above: a torn slice header is wrong
+at any resolution. There is no observer threshold below which corrupted memory is
+acceptable. So whatever replaces these must still be memory-safe — but that is a
+constraint on the replacement, not a reason there cannot be one.
+
+The distinction that sorts the other rows is not global-vs-local. It is:
 
 - **Maintained** guarantees — something must keep doing work to hold them true. These
   break under real conditions, because holding them requires everyone present and prompt.
