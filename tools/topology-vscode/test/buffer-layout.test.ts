@@ -53,6 +53,8 @@ import {
   readOverlayLabelsGlobal, readOverlayOverlaysVis,
   readOverlayDoubleLinks,
   readOverlayAbcDragCount,
+  readOverlayLastAbcDragNodeRow,
+  OVERLAY_COL_LAST_ABC_DRAG_NODE_ROW,
   // Port block
   PORT_COL_NODE_ROW, PORT_COL_IS_INPUT, PORT_COL_HOVERED, PORT_STRIDE,
   readPortNodeRow, readPortIsInput, readPortHovered,
@@ -275,8 +277,8 @@ describe("buffer-layout — Camera block", () => {
 
 describe("buffer-layout — Overlay block", () => {
   it("stride equals packed field sizes", () => {
-    // 8×u8 + 1×u32 = 12 (8 overlay flags + AbcDragCount)
-    expect(OVERLAY_STRIDE).toBe(12);
+    // 8×u8 + 2×u32 = 16 (8 overlay flags + AbcDragCount + LastAbcDragNodeRow)
+    expect(OVERLAY_STRIDE).toBe(16);
   });
 
   it("column offsets are 0..7", () => {
@@ -289,6 +291,7 @@ describe("buffer-layout — Overlay block", () => {
     expect(OVERLAY_COL_OVERLAYS_VIS).toBe(6);
     expect(OVERLAY_COL_DOUBLE_LINKS).toBe(7);
     expect(OVERLAY_COL_ABC_DRAG_COUNT).toBe(8);
+    expect(OVERLAY_COL_LAST_ABC_DRAG_NODE_ROW).toBe(12);
   });
 
   it("read helpers decode known bytes (alternating pattern)", () => {
@@ -299,6 +302,7 @@ describe("buffer-layout — Overlay block", () => {
 
     const dv = new DataView(buf);
     dv.setUint32(OVERLAY_COL_ABC_DRAG_COUNT, 7, true);
+    dv.setUint32(OVERLAY_COL_LAST_ABC_DRAG_NODE_ROW, 3, true);
     expect(readOverlaySceneTori(dv)).toBe(1);
     expect(readOverlayScenePoles(dv)).toBe(0);
     expect(readOverlayNodePoles(dv)).toBe(1);
@@ -308,6 +312,7 @@ describe("buffer-layout — Overlay block", () => {
     expect(readOverlayOverlaysVis(dv)).toBe(1);
     expect(readOverlayDoubleLinks(dv)).toBe(0);
     expect(readOverlayAbcDragCount(dv)).toBe(7);
+    expect(readOverlayLastAbcDragNodeRow(dv)).toBe(3);
   });
 });
 

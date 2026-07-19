@@ -303,7 +303,14 @@ type overlaySnapState struct {
 	overlaysVis    uint8
 	doubleLinks    uint8
 	abcDragCount   uint32
+	// lastAbcDragNodeRow is the buffer node row of the most recent abc-drag recipient
+	// (resolved from Event.Node via nodeIndex). Sentinel abcDragNoneRow = none yet.
+	lastAbcDragNodeRow uint32
 }
+
+// abcDragNoneRow is the "no abc-drag event yet" sentinel for overlaySnapState.lastAbcDragNodeRow
+// and the Overlay block's LastAbcDragNodeRow column.
+const abcDragNoneRow uint32 = 0xFFFFFFFF
 
 // NewSnapshotState creates an empty SnapshotState that writes framed snapshots
 // to out. Pass nil for out to build snapshots without emitting them (useful in
@@ -318,6 +325,7 @@ func NewSnapshotState(out io.Writer) *SnapshotState {
 		kindID:          buildKindIDMap(),
 		lastPosEmitTick: -1,
 	}
+	s.overlay.lastAbcDragNodeRow = abcDragNoneRow
 	s.overlayFlagFields = map[string]*uint8{
 		T.KindSceneTori:      &s.overlay.sceneTori,
 		T.KindScenePoles:     &s.overlay.scenePoles,
@@ -384,6 +392,13 @@ func (s *SnapshotState) Update(ev T.Event) {
 		// Read-only affirmation counter for the in-editor overlay label; never
 		// decrements, no gating semantics (unlike the bool overlay flags above).
 		s.overlay.abcDragCount++
+		// Resolve the firing time node (ev.Node) to its buffer node row via the same
+		// id->row map onNodeGeometry maintains, so the label can show the recipient's
+		// name. Leave the prior row in place if the node hasn't registered geometry yet
+		// (should not happen in practice — the node already exists to have moved).
+		if idx, ok := s.nodeIndex[ev.Node]; ok {
+			s.overlay.lastAbcDragNodeRow = uint32(idx)
+		}
 		s.emitSnapshot()
 
 	case T.KindPosition:
@@ -1122,7 +1137,7 @@ func (s *SnapshotState) writeOverlayBlock(buf []byte, off int) int {
 		ov.sceneTori, ov.scenePoles, ov.nodePoles,
 		ov.selSpherePoles, ov.handholds,
 		ov.labelsGlobal,
-		ov.overlaysVis, ov.doubleLinks, ov.abcDragCount)
+		ov.overlaysVis, ov.doubleLinks, ov.abcDragCount, ov.lastAbcDragNodeRow)
 	return off + BufOverlayStride
 }
 

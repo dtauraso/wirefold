@@ -250,6 +250,11 @@ type bufLayoutOverlay struct {
 	// Read-only affirmation counter for the in-editor overlay label; not a
 	// gate, never decrements.
 	AbcDragCount uint32 `buf:"u32"` // count of time.abc-drag events observed
+	// LastAbcDragNodeRow is the buffer NODE-ROW of the time node that most recently
+	// received an abc-drag re-quantize (the firing selfID, not the dragged peer).
+	// Sentinel 0xFFFFFFFF = no drag has happened yet. Resolved via SnapshotState's
+	// nodeIndex id->row map at the same point AbcDragCount increments.
+	LastAbcDragNodeRow uint32 `buf:"u32"` // node row of most recent abc-drag recipient
 }
 
 // bufLayoutScene defines the scene-sphere column block (always 1 row).

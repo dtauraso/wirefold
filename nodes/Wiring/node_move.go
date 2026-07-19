@@ -1243,7 +1243,7 @@ func (md *MoveDispatch) neighborSetCRequantize(selfID, fromID string, fromCenter
 		// Routed counterpart of the breadcrumb above: increments the buffer Overlay
 		// block's AbcDragCount so the in-editor overlay label can affirm this is
 		// happening live (the breadcrumb alone never reaches the content buffer).
-		md.tr.AbcDrag()
+		md.tr.AbcDrag(selfID)
 	}
 
 	if md.quantOffsetPersist != nil {

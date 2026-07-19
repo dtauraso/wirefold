@@ -486,11 +486,12 @@ func (t *Trace) LayoutLink(src, dst string) {
 	t.emit(Event{Kind: KindLayoutLink, Node: src, Target: dst})
 }
 
-// AbcDrag emits one time-node abc-drag re-quantize event (KindAbcDrag). No payload;
-// the snapshot layer just increments a running count. Emitted alongside the
-// "time.abc-drag" debug breadcrumb, never in place of it.
-func (t *Trace) AbcDrag() {
-	t.emit(Event{Kind: KindAbcDrag})
+// AbcDrag emits one time-node abc-drag re-quantize event (KindAbcDrag). nodeID is the
+// firing time node (selfID) that just received the drag re-quantize — the snapshot layer
+// increments a running count AND resolves nodeID to its buffer node row for the in-editor
+// label. Emitted alongside the "time.abc-drag" debug breadcrumb, never in place of it.
+func (t *Trace) AbcDrag(nodeID string) {
+	t.emit(Event{Kind: KindAbcDrag, Node: nodeID})
 }
 
 // Select emits the currently-selected node id (KindSelect). node="" clears the selection.
