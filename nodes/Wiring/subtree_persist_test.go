@@ -32,6 +32,31 @@ func pollDragConverged(t *testing.T, md *MoveDispatch, nodeID string, target vec
 	}
 }
 
+// pollLocalPolarRequantized waits until lh's own stored LocalPolar entry to the given
+// neighbor id picks up a fresh QuantIR (async moveMsgKindNeighborSetC delivery race) and
+// returns the converged entry. Shared by every test in this package that drives a real
+// drag and then waits for a neighbor's re-quantize to land, rather than re-deriving the
+// same deadline-bounded poll loop at each call site.
+func pollLocalPolarRequantized(t *testing.T, lh *LayoutHolder, to string, before LocalPolar) LocalPolar {
+	t.Helper()
+	var after LocalPolar
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		for _, lp := range lh.LocalPolarsSnapshot() {
+			if lp.To == to {
+				after = lp
+			}
+		}
+		if after.QuantIR != before.QuantIR {
+			return after
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("local polar to %q never picked up the requantize: before=%+v after=%+v", to, before, after)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 // Individual snapping: dragging a node moves and persists ONLY that node (its grid-snapped
 // scalar triple, quantITheta/quantIPhi/quantIR — the sole persisted position source under
 // the plain-polar model), leaving every other node untouched — no subtree cascade.
@@ -73,22 +98,7 @@ func TestIndividualSnap_OnlyDraggedNodePersists(t *testing.T) {
 	// (QuantITheta/QuantIPhi/QuantIR) to dst fresh from the live offset. Poll for src's
 	// own LocalPolar entry's QuantIR to change (the async moveMsgKindNeighborSetC
 	// delivery race, same shape as rotating_pole_test.go's polls).
-	var lpAfter LocalPolar
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		for _, lp := range lhSrc.LocalPolarsSnapshot() {
-			if lp.To == "dst" {
-				lpAfter = lp
-			}
-		}
-		if lpAfter.QuantIR != lpBefore.QuantIR {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("src's local polar to dst never picked up the new set-c: before=%+v after=%+v", lpBefore, lpAfter)
-		}
-		time.Sleep(time.Millisecond)
-	}
+	lpAfter := pollLocalPolarRequantized(t, lhSrc, "dst", lpBefore)
 
 	// src's own world center must NOT have moved — only dst moved.
 	srcCenter, ok := md.centerOfNode("src")

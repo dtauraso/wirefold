@@ -15,8 +15,6 @@ package Wiring
 import (
 	"fmt"
 	"math"
-	"os"
-	"path/filepath"
 	"reflect"
 	"testing"
 )
@@ -212,15 +210,7 @@ func TestPersistedPoleDrivesReloadWorldPositions(t *testing.T) {
 	// pole computation from the reduced neighbor set (just "far", whose direction
 	// (60°) is nowhere near +y) would resolve to HOME, not tiltedPole.
 	root := t.TempDir()
-	mk := func(rel, body string) {
-		p := filepath.Join(root, rel)
-		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-			t.Fatalf("mkdir %s: %v", p, err)
-		}
-		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
-			t.Fatalf("write %s: %v", p, err)
-		}
-	}
+	mk := func(rel, body string) { writeTreeFile(t, root, rel, body) }
 	mk("nodes/self/meta.json", `{"id":"self","type":"FanInSink","scenePolarR":0,"scenePolarTheta":0,"scenePolarPhi":0}`)
 	mk("nodes/self/inputs/In.json", `{"name":"In"}`)
 	// "far" gets a REAL position, at exactly dirFar/40 from self (self sits at the

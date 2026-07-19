@@ -27,8 +27,6 @@ package Wiring
 import (
 	"context"
 	"encoding/binary"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -41,15 +39,7 @@ import (
 func writeXTNY(t *testing.T) string {
 	t.Helper()
 	root := writeXTN(t)
-	mk := func(rel, body string) {
-		p := filepath.Join(root, rel)
-		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-			t.Fatalf("mkdir %s: %v", p, err)
-		}
-		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
-			t.Fatalf("write %s: %v", p, err)
-		}
-	}
+	mk := func(rel, body string) { writeTreeFile(t, root, rel, body) }
 	mk("nodes/y/meta.json", `{"id":"y","type":"FanInSrc","r":100,"scenePolarR":60,"scenePolarTheta":0.5,"scenePolarPhi":2.0}`)
 	mk("nodes/y/outputs/Out.json", `{"name":"Out"}`)
 	mk("nodes/z/meta.json", `{"id":"z","type":"FanInSink","r":100,"scenePolarR":70,"scenePolarTheta":1.4,"scenePolarPhi":-0.6}`)

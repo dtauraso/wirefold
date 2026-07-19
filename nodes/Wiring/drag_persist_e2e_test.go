@@ -16,6 +16,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -27,15 +28,7 @@ import (
 func writeStar3(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
-	mk := func(rel, body string) {
-		p := filepath.Join(root, rel)
-		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-			t.Fatalf("mkdir %s: %v", p, err)
-		}
-		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
-			t.Fatalf("write %s: %v", p, err)
-		}
-	}
+	mk := func(rel, body string) { writeTreeFile(t, root, rel, body) }
 	// Scene-polar (r, theta, phi) triples — arbitrary but distinct, spread the three
 	// nodes apart so a drag on A demonstrably changes the quantized bearing to both
 	// leaves, not just their distance.
@@ -173,6 +166,18 @@ func TestDragPersistsOnlyDraggedNodeAndRequantizesNeighborsOnDisk(t *testing.T) 
 		t.Fatal("C has no pre-drag LocalPolar entry for A")
 	}
 
+	// Tap every routed message so the post-drag absence check below is a genuine proof
+	// (no forbidden cascade kind reaches B or C), not just a sleep-and-hope — same
+	// mechanism as neighbor_setc_test.go's (3).
+	var mu sync.Mutex
+	var recorded []tappedMsg
+	md.SetMsgTap(func(destID string, msg moveMsg) {
+		mu.Lock()
+		recorded = append(recorded, tappedMsg{destID: destID, kind: msg.Kind, senderID: msg.SenderID})
+		mu.Unlock()
+	})
+	defer md.SetMsgTap(nil)
+
 	// Drag A far enough, off both leaves' prior bearings, that quantization actually
 	// changes the neighbor indices for BOTH B and C (a purely radial move along an
 	// existing bearing would leave theta/phi unchanged for that one neighbor and not
@@ -185,29 +190,24 @@ func TestDragPersistsOnlyDraggedNodeAndRequantizesNeighborsOnDisk(t *testing.T) 
 
 	// Poll for BOTH B's and C's own LocalPolar entries to A to pick up the requantize
 	// (async moveMsgKindNeighborSetC delivery, same shape as this package's other tests).
-	var lpBAfter, lpCAfter LocalPolar
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		for _, lp := range lhB.LocalPolarsSnapshot() {
-			if lp.To == "A" {
-				lpBAfter = lp
-			}
+	pollLocalPolarRequantized(t, lhB, "A", lpBBefore)
+	pollLocalPolarRequantized(t, lhC, "A", lpCBefore)
+
+	// The poll above only proves QuantIR eventually changed; it is not proof that no
+	// FURTHER unwanted cascade message is in flight toward B or C. That proof is the
+	// forbidden-kind message-tap check below (same mechanism as
+	// neighbor_setc_test.go's (3)); the sleep that follows only widens the window for
+	// the tap to observe anything that lands.
+	time.Sleep(cascadeSettle)
+	mu.Lock()
+	trace := append([]tappedMsg(nil), recorded...)
+	mu.Unlock()
+	forbidden := map[string]bool{"equalize": true, "trigger": true, "gatePlace": true, "requantize": true}
+	for _, m := range trace {
+		if (m.destID == "B" || m.destID == "C") && forbidden[m.kind] {
+			t.Fatalf("no cascade message should reach %s; got %+v in trace %+v", m.destID, m, trace)
 		}
-		for _, lp := range lhC.LocalPolarsSnapshot() {
-			if lp.To == "A" {
-				lpCAfter = lp
-			}
-		}
-		if lpBAfter.QuantIR != lpBBefore.QuantIR && lpCAfter.QuantIR != lpCBefore.QuantIR {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("B/C local polar to A never picked up the requantize: B before=%+v after=%+v; C before=%+v after=%+v",
-				lpBBefore, lpBAfter, lpCBefore, lpCAfter)
-		}
-		time.Sleep(time.Millisecond)
 	}
-	time.Sleep(20 * time.Millisecond) // let any (unwanted) further cascade settle
 
 	// In-memory sanity before touching disk: B and C must NOT have moved.
 	for _, id := range []string{"B", "C"} {
@@ -288,11 +288,9 @@ func TestDragPersistsOnlyDraggedNodeAndRequantizesNeighborsOnDisk(t *testing.T) 
 		}
 
 		// (d) No degenerate step got written — StepR must be the sane local-polar grid
-		// constant (localStepR), never a near-zero value like 1e-06.
-		const degenerate = 1e-6
-		if stR <= degenerate {
-			t.Fatalf("(d) %s's persisted local-polar StepR is degenerate: %g (want ~%g)", id, stR, localStepR)
-		}
+		// constant (localStepR), never a near-zero value like 1e-06. Checking equality to
+		// localStepR (a known-positive constant) already subsumes any "is it near zero"
+		// check, so there is no separate degenerate-threshold branch here.
 		if stR != localStepR {
 			t.Fatalf("(d) %s's persisted local-polar StepR should be the sane grid constant localStepR=%g, got %g", id, localStepR, stR)
 		}

@@ -87,23 +87,8 @@ func TestNeighborSetCRequantizesEdgeNeighborStaysPut(t *testing.T) {
 	// Poll for src's own LocalPolar entry to dst to pick up the new quantized values
 	// (async message-delivery race — the same shape every other test in this package
 	// uses).
-	var lpAfter LocalPolar
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		for _, lp := range lhSrc.LocalPolarsSnapshot() {
-			if lp.To == "dst" {
-				lpAfter = lp
-			}
-		}
-		if lpAfter.QuantIR != lpBefore.QuantIR {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("src's local polar to dst never picked up the set-c requantize: before=%+v after=%+v", lpBefore, lpAfter)
-		}
-		time.Sleep(time.Millisecond)
-	}
-	time.Sleep(20 * time.Millisecond) // let any (unwanted) further cascade settle
+	lpAfter := pollLocalPolarRequantized(t, lhSrc, "dst", lpBefore)
+	time.Sleep(cascadeSettle) // let any (unwanted) further cascade settle
 
 	// (1) src's world center is UNCHANGED — the neighbor stays put; only dst moved.
 	srcCenterAfter, ok := md.centerOfNode("src")

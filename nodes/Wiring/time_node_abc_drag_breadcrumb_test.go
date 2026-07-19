@@ -17,8 +17,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -55,15 +53,7 @@ func (s *syncBuffer) String() string {
 func writeXTN(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
-	mk := func(rel, body string) {
-		p := filepath.Join(root, rel)
-		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-			t.Fatalf("mkdir %s: %v", p, err)
-		}
-		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
-			t.Fatalf("write %s: %v", p, err)
-		}
-	}
+	mk := func(rel, body string) { writeTreeFile(t, root, rel, body) }
 	mk("nodes/x/meta.json", `{"id":"x","type":"FanInSrc","r":100,"scenePolarR":40,"scenePolarTheta":1.0,"scenePolarPhi":1.2}`)
 	mk("nodes/x/outputs/Out.json", `{"name":"Out"}`)
 	mk("nodes/t/meta.json", `{"id":"t","type":"HoldNewSendOld","data":{"state":{"held":0}},"r":100,"scenePolarR":90,"scenePolarTheta":0.9,"scenePolarPhi":-2.1}`)
