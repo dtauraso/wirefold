@@ -22,11 +22,7 @@ import {
   readOverlayOverlaysVis,
   readOverlayDoubleLinks,
   readOverlayAbcDragCount,
-  readOverlayLastAbcDragNodeRow,
 } from "../../schema/buffer-layout";
-
-/** Sentinel "no abc-drag event yet" node row — mirrors Buffer/snapshot.go's abcDragNoneRow. */
-export const ABC_DRAG_NO_ROW = 0xffffffff;
 
 // Keyed by OverlayFlag. Polarity is MIXED — a historical wart worth stating plainly, since
 // the ViewerState key names it mirrored are gone (that state island was deleted once Go
@@ -99,18 +95,3 @@ export function useAbcDragCount(): number {
   return useSyncExternalStore(subscribeSnapshot, readAbcDragCount, readAbcDragCount);
 }
 
-/** Decode the latest snapshot's most-recent abc-drag RECIPIENT node row (Overlay block
- *  LastAbcDragNodeRow column). Returns ABC_DRAG_NO_ROW if no snapshot / decode failure /
- *  no drag has happened yet. Read-only — never authored by TS. */
-export function readLastAbcDragNodeRow(): number {
-  const snap = getLatestSnapshot();
-  if (!snap) return ABC_DRAG_NO_ROW;
-  const decoded = decodeSnapshot(snap);
-  if (!decoded) return ABC_DRAG_NO_ROW;
-  return readOverlayLastAbcDragNodeRow(decoded.overlayView);
-}
-
-/** React hook: re-renders the caller as the abc-drag recipient row changes (Go-owned). */
-export function useLastAbcDragNodeRow(): number {
-  return useSyncExternalStore(subscribeSnapshot, readLastAbcDragNodeRow, readLastAbcDragNodeRow);
-}

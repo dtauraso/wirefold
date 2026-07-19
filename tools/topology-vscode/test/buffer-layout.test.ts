@@ -18,6 +18,7 @@ import {
   NODE_COL_SELECTED,
   NODE_COL_KIND_ID,
   NODE_COL_LABEL_OFF, NODE_COL_LABEL_LEN, NODE_COL_HOVERED,
+  NODE_COL_GOT_DRAG_MSG,
   NODE_STRIDE,
   NODE_COL_VRX, NODE_COL_VRY, NODE_COL_VRZ, NODE_COL_FRX, NODE_COL_FRY, NODE_COL_FRZ,
   readNodeCX, readNodeCY, readNodeCZ, readNodeRadius, readNodeSphereR,
@@ -25,6 +26,7 @@ import {
   readNodeSelected,
   readNodeKindId,
   readNodeLabelOff, readNodeLabelLen, readNodeHovered,
+  readNodeGotDragMsg,
   // Interior
   INTERIOR_COL_PRESENT, INTERIOR_COL_VALUE, INTERIOR_COL_OX, INTERIOR_COL_OY, INTERIOR_COL_OZ,
   INTERIOR_STRIDE,
@@ -53,8 +55,6 @@ import {
   readOverlayLabelsGlobal, readOverlayOverlaysVis,
   readOverlayDoubleLinks,
   readOverlayAbcDragCount,
-  readOverlayLastAbcDragNodeRow,
-  OVERLAY_COL_LAST_ABC_DRAG_NODE_ROW,
   // Port block
   PORT_COL_NODE_ROW, PORT_COL_IS_INPUT, PORT_COL_HOVERED, PORT_STRIDE,
   readPortNodeRow, readPortIsInput, readPortHovered,
@@ -119,9 +119,9 @@ describe("buffer-layout — Node block", () => {
   it("stride equals packed field sizes", () => {
     // 5×f32 + 6×f32 (vr/fr normals) + 1×u8 (selected)
     //   + 1×u8 (kindId) + 2×u32 (label off/len)
-    //   + 1×u8 (hovered) + 1×u8 (latchedSel)
-    //   = (5+6)×4 + 1 + 1 + 8 + 1 + 1 = 56
-    expect(NODE_STRIDE).toBe(56);
+    //   + 1×u8 (hovered) + 1×u8 (latchedSel) + 1×u8 (gotDragMsg)
+    //   = (5+6)×4 + 1 + 1 + 8 + 1 + 1 + 1 = 57
+    expect(NODE_STRIDE).toBe(57);
   });
 
   it("read helpers decode known bytes correctly", () => {
@@ -144,6 +144,7 @@ describe("buffer-layout — Node block", () => {
     dv.setUint32(NODE_COL_LABEL_OFF, 7, true);
     dv.setUint32(NODE_COL_LABEL_LEN, 4, true);
     dv.setUint8(NODE_COL_HOVERED, 1);
+    dv.setUint8(NODE_COL_GOT_DRAG_MSG, 1);
 
     expectF32(readNodeCX(dv, 0), 1.0);
     expectF32(readNodeCY(dv, 0), 2.0);
@@ -161,6 +162,7 @@ describe("buffer-layout — Node block", () => {
     expect(readNodeLabelOff(dv, 0)).toBe(7);
     expect(readNodeLabelLen(dv, 0)).toBe(4);
     expect(readNodeHovered(dv, 0)).toBe(1);
+    expect(readNodeGotDragMsg(dv, 0)).toBe(1);
   });
 });
 
@@ -277,8 +279,8 @@ describe("buffer-layout — Camera block", () => {
 
 describe("buffer-layout — Overlay block", () => {
   it("stride equals packed field sizes", () => {
-    // 8×u8 + 2×u32 = 16 (8 overlay flags + AbcDragCount + LastAbcDragNodeRow)
-    expect(OVERLAY_STRIDE).toBe(16);
+    // 8×u8 + 1×u32 = 12 (8 overlay flags + AbcDragCount)
+    expect(OVERLAY_STRIDE).toBe(12);
   });
 
   it("column offsets are 0..7", () => {
@@ -291,7 +293,6 @@ describe("buffer-layout — Overlay block", () => {
     expect(OVERLAY_COL_OVERLAYS_VIS).toBe(6);
     expect(OVERLAY_COL_DOUBLE_LINKS).toBe(7);
     expect(OVERLAY_COL_ABC_DRAG_COUNT).toBe(8);
-    expect(OVERLAY_COL_LAST_ABC_DRAG_NODE_ROW).toBe(12);
   });
 
   it("read helpers decode known bytes (alternating pattern)", () => {
@@ -302,7 +303,6 @@ describe("buffer-layout — Overlay block", () => {
 
     const dv = new DataView(buf);
     dv.setUint32(OVERLAY_COL_ABC_DRAG_COUNT, 7, true);
-    dv.setUint32(OVERLAY_COL_LAST_ABC_DRAG_NODE_ROW, 3, true);
     expect(readOverlaySceneTori(dv)).toBe(1);
     expect(readOverlayScenePoles(dv)).toBe(0);
     expect(readOverlayNodePoles(dv)).toBe(1);
@@ -312,7 +312,6 @@ describe("buffer-layout — Overlay block", () => {
     expect(readOverlayOverlaysVis(dv)).toBe(1);
     expect(readOverlayDoubleLinks(dv)).toBe(0);
     expect(readOverlayAbcDragCount(dv)).toBe(7);
-    expect(readOverlayLastAbcDragNodeRow(dv)).toBe(3);
   });
 });
 

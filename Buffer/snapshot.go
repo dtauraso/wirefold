@@ -78,6 +78,12 @@ type SnapshotState struct {
 	// Live in-flight beads, keyed by (sourceNode, sourcePort, gen).
 	beads map[beadSnapKey]beadSnapState
 
+	// abcDragged is the STICKY set of node ids that have received at least one
+	// time.abc-drag message this session (KindAbcDrag's Event.Node). Never cleared.
+	// Mirrored into each row's nodeSnapState.gotDragMsg on write so the AbcDragLabel
+	// overlay can list every recipient by name straight from the Node block.
+	abcDragged map[string]bool
+
 	// Camera, overlay, and scene-sphere singletons (always one row each in the snapshot).
 	camera  cameraSnapState
 	overlay overlaySnapState
@@ -212,6 +218,11 @@ type nodeSnapState struct {
 	// Unlike selected, it does NOT clear when the node is deselected (clicking empty space) —
 	// only selecting a DIFFERENT node moves it. Set alongside selected in setSelected.
 	latchedSel uint8
+	// gotDragMsg is PERSISTENT and STICKY: 1 marks a node that has received at least one
+	// time.abc-drag message this session (see SnapshotState.abcDragged). Set from
+	// KindAbcDrag's Event.Node id, never cleared — it's the per-node bit of the
+	// accumulating recipient SET the AbcDragLabel overlay lists by name.
+	gotDragMsg uint8
 	// kindID is the node's kind as its index into NODE_DEFS_ARRAY (from NodeKindID).
 	// Set once on first KindNodeGeometry; subsequent re-emits don't change kind.
 	kindID uint8
@@ -303,14 +314,7 @@ type overlaySnapState struct {
 	overlaysVis    uint8
 	doubleLinks    uint8
 	abcDragCount   uint32
-	// lastAbcDragNodeRow is the buffer node row of the most recent abc-drag recipient
-	// (resolved from Event.Node via nodeIndex). Sentinel abcDragNoneRow = none yet.
-	lastAbcDragNodeRow uint32
 }
-
-// abcDragNoneRow is the "no abc-drag event yet" sentinel for overlaySnapState.lastAbcDragNodeRow
-// and the Overlay block's LastAbcDragNodeRow column.
-const abcDragNoneRow uint32 = 0xFFFFFFFF
 
 // NewSnapshotState creates an empty SnapshotState that writes framed snapshots
 // to out. Pass nil for out to build snapshots without emitting them (useful in
@@ -321,11 +325,11 @@ func NewSnapshotState(out io.Writer) *SnapshotState {
 		edgeIndex:       map[string]int{},
 		layoutLinkIndex: map[string]int{},
 		beads:           map[beadSnapKey]beadSnapState{},
+		abcDragged:      map[string]bool{},
 		out:             out,
 		kindID:          buildKindIDMap(),
 		lastPosEmitTick: -1,
 	}
-	s.overlay.lastAbcDragNodeRow = abcDragNoneRow
 	s.overlayFlagFields = map[string]*uint8{
 		T.KindSceneTori:      &s.overlay.sceneTori,
 		T.KindScenePoles:     &s.overlay.scenePoles,
@@ -392,12 +396,13 @@ func (s *SnapshotState) Update(ev T.Event) {
 		// Read-only affirmation counter for the in-editor overlay label; never
 		// decrements, no gating semantics (unlike the bool overlay flags above).
 		s.overlay.abcDragCount++
-		// Resolve the firing time node (ev.Node) to its buffer node row via the same
-		// id->row map onNodeGeometry maintains, so the label can show the recipient's
-		// name. Leave the prior row in place if the node hasn't registered geometry yet
-		// (should not happen in practice — the node already exists to have moved).
+		// Add the firing time node (ev.Node) to the sticky recipient SET and mirror it
+		// into that row's gotDragMsg bit, so the label can list every recipient by name.
+		// Leave state in place if the node hasn't registered geometry yet (should not
+		// happen in practice — the node already exists to have moved).
+		s.abcDragged[ev.Node] = true
 		if idx, ok := s.nodeIndex[ev.Node]; ok {
-			s.overlay.lastAbcDragNodeRow = uint32(idx)
+			s.nodes[idx].gotDragMsg = 1
 		}
 		s.emitSnapshot()
 
@@ -537,7 +542,7 @@ func (s *SnapshotState) onNodeGeometry(ev T.Event) {
 	if _, exists := s.nodeIndex[id]; !exists {
 		s.nodeIndex[id] = len(s.nodeIDs)
 		s.nodeIDs = append(s.nodeIDs, id)
-		s.nodes = append(s.nodes, nodeSnapState{kindID: NodeKindID(ev.NodeKind)})
+		s.nodes = append(s.nodes, nodeSnapState{kindID: NodeKindID(ev.NodeKind), gotDragMsg: boolU8(s.abcDragged[id])})
 		// A new node row exists: republish the node-row table (same stable row order as the
 		// Node block) so a numeric node-row hit resolves to its node id.
 		s.rebuildNodeTable()
@@ -998,7 +1003,7 @@ func (s *SnapshotState) writeNodeBlock(buf []byte, off int, b *snapshotBuild) in
 			float32(n.vrx), float32(n.vry), float32(n.vrz),
 			float32(n.frx), float32(n.fry), float32(n.frz),
 			n.selected, n.kindID,
-			b.labelOffs[i], b.labelLens[i], n.hovered, n.latchedSel)
+			b.labelOffs[i], b.labelLens[i], n.hovered, n.latchedSel, n.gotDragMsg)
 	}
 	return off + int(b.nodeCount)*BufNodeStride
 }
@@ -1137,7 +1142,7 @@ func (s *SnapshotState) writeOverlayBlock(buf []byte, off int) int {
 		ov.sceneTori, ov.scenePoles, ov.nodePoles,
 		ov.selSpherePoles, ov.handholds,
 		ov.labelsGlobal,
-		ov.overlaysVis, ov.doubleLinks, ov.abcDragCount, ov.lastAbcDragNodeRow)
+		ov.overlaysVis, ov.doubleLinks, ov.abcDragCount)
 	return off + BufOverlayStride
 }
 
