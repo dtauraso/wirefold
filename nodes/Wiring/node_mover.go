@@ -116,15 +116,33 @@ type nodeMover struct {
 	geom  nodeGeom
 	inbox chan moveMsg
 	tr    *T.Trace
-	// geomMu guards m.geom's full-struct read in emitGeometry (which runs on a
-	// different goroutine) against the field writes, which ALL happen on nodeMover's
-	// own inbox-drain goroutine: applyCenter (the sole writer of position fields) and
-	// handle's anchor/default cases (the sole writer of port-anchor fields). There is
-	// no separate per-node "Update()" writer goroutine — that was the retired SLICE 3
-	// architecture; position is single-writer by construction (only applyCenter, on
-	// the mover goroutine, ever writes it). This mutex exists purely so emitGeometry's
-	// cross-goroutine read never races a concurrent field write — it is NOT a second
-	// position-writer.
+	// geomMu guards every access to m.geom. Verified goroutine ownership (2026-07):
+	// ALL of applyCenter (sole writer of position fields), handle's
+	// moveMsgKindAnchor case (sole writer of port-anchor fields), and emitGeometry
+	// (full-struct read for emit) run on nodeMover's OWN inbox-drain goroutine
+	// (run/handle) — so among themselves the lock is a same-goroutine no-op, not a
+	// cross-goroutine race guard. The one access that DOES cross goroutines is
+	// MoveDispatch.NodeKind (node_move.go), called from the gesture/stdin-reader
+	// goroutine (gesture.go) to read m.geom.Kind; it takes geomMu too.
+	//
+	// CHECKED BY CODE, not just this prose: TestNodeKindConcurrentWithApplyCenterUnderRace
+	// (node_mover_geom_race_test.go) drives NodeKind's reader loop and applyCenter's
+	// writer loop concurrently under -race. With today's actual NodeKind body (a bare
+	// `nm.geom.Kind` field read) the race detector reports NO race even with geomMu
+	// removed from NodeKind — confirmed by repeated -race runs with the lock stripped.
+	// This is NOT because the access is safe by construction; it is because Go's race
+	// detector is byte-range precise and Kind is write-once-at-construction (loader.go)
+	// while applyCenter only ever writes the disjoint ScenePolar/HasPos/ReachR byte
+	// ranges — so the one live cross-goroutine access (NodeKind vs. applyCenter) never
+	// touches overlapping memory today. Swapping NodeKind's body for a whole-struct copy
+	// (`geom := nm.geom; return geom.Kind`, matching emitGeometry's own pattern) DOES
+	// reproduce `WARNING: DATA RACE` immediately against the same writer, because a
+	// struct-value copy's read footprint spans every field's bytes, including Kind's.
+	// So: geomMu is defensive, not curative of a live race — it guards against Kind (or
+	// any field) gaining a second writer, or NodeKind's body ever widening its read
+	// (e.g. to a struct copy) the way emitGeometry's already does. Kept rather than
+	// deleted for that reason. There is no separate per-node "Update()" writer
+	// goroutine — that was the retired SLICE 3 architecture.
 	geomMu sync.Mutex
 	// snap is an atomically-published immutable snapshot of this node's current
 	// center+reachR. Written only by the mover's own goroutine after every center
