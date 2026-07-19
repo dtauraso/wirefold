@@ -112,6 +112,46 @@ func gotDragMsgSet(snap []byte) map[string]bool {
 	return out
 }
 
+func readI32(buf []byte, off int) int32 { return int32(binary.LittleEndian.Uint32(buf[off:])) }
+
+// nodeDragDeltas decodes one snapshot payload's Node block (+ Label section for ids) and
+// returns each node id's (DragDeltaA, DragDeltaB, DragDeltaC) triple, keyed by id, for
+// every node whose GotDragMsg bit is 1 (the drag-scoped recipient set).
+func nodeDragDeltas(snap []byte) map[string][3]int32 {
+	beadCount := int(readU32(snap, 4))
+	nodeCount := int(readU32(snap, 8))
+	edgeCount := int(readU32(snap, 12))
+	portCount := int(readU32(snap, 16))
+	layoutLinkCount := int(readU32(snap, 36))
+
+	nodeOff := B.BufHeaderSize + beadCount*B.BufBeadStride
+	interiorOff := nodeOff + nodeCount*B.BufNodeStride
+	edgeOff := interiorOff + nodeCount*B.BufInteriorSlotsPerNode*B.BufInteriorStride
+	layoutLinkOff := edgeOff + edgeCount*B.BufEdgeStride
+	portOff := layoutLinkOff + layoutLinkCount*B.BufLayoutLinkStride
+	cameraOff := portOff + portCount*B.BufPortStride
+	overlayOff := cameraOff + B.BufCameraStride
+	sceneOff := overlayOff + B.BufOverlayStride
+	labelOff := sceneOff + B.BufSceneStride
+
+	out := map[string][3]int32{}
+	for row := 0; row < nodeCount; row++ {
+		off := nodeOff + row*B.BufNodeStride
+		if snap[off+B.BufNodeColGotDragMsg] != 1 {
+			continue
+		}
+		lOff := int(readU32(snap, off+B.BufNodeColLabelOff))
+		lLen := int(readU32(snap, off+B.BufNodeColLabelLen))
+		id := string(snap[labelOff+lOff : labelOff+lOff+lLen])
+		out[id] = [3]int32{
+			readI32(snap, off+B.BufNodeColDragDeltaA),
+			readI32(snap, off+B.BufNodeColDragDeltaB),
+			readI32(snap, off+B.BufNodeColDragDeltaC),
+		}
+	}
+	return out
+}
+
 func setEq(a map[string]bool, want ...string) bool {
 	if len(a) != len(want) {
 		return false
@@ -260,5 +300,46 @@ func TestAbcDragResetAloneClearsGotDragMsgAndEmits(t *testing.T) {
 	gotAfter := gotDragMsgSet(after)
 	if len(gotAfter) != 0 {
 		t.Fatalf("gotDragMsg set after a bare KindAbcDragReset must be empty, got %v", gotAfter)
+	}
+}
+
+// TestAbcDragDeltaReachesBufferNodeColumns proves a KindAbcDrag event's DeltaA/B/C ride
+// through to the recipient's DragDeltaA/B/C buffer Node columns exactly as sent —
+// including the (0,0,0) case, which must still be a real recorded triple (not treated as
+// absent — GotDragMsg is what distinguishes "no message" from "message with zero delta").
+func TestAbcDragDeltaReachesBufferNodeColumns(t *testing.T) {
+	var frames syncBuffer
+	snap := B.NewSnapshotState(&frames)
+
+	snap.Update(T.Event{Kind: T.KindNodeGeometry, Node: "a", NodeKind: "FanInSrc", Label: "a"})
+	snap.Update(T.Event{Kind: T.KindNodeGeometry, Node: "b", NodeKind: "FanInSink", Label: "b"})
+
+	snap.Update(T.Event{Kind: T.KindAbcDrag, Node: "a", DeltaA: 3, DeltaB: -7, DeltaC: 2})
+	snap.Update(T.Event{Kind: T.KindAbcDrag, Node: "b", DeltaA: 0, DeltaB: 0, DeltaC: 0})
+
+	frame := lastFrame([]byte(frames.String()))
+	if frame == nil {
+		t.Fatal("no frame captured after two abc-drag marks")
+	}
+	got := nodeDragDeltas(frame)
+	if got["a"] != [3]int32{3, -7, 2} {
+		t.Fatalf("node a's DragDelta columns should be (3,-7,2), got %v", got["a"])
+	}
+	if _, ok := got["b"]; !ok {
+		t.Fatalf("node b should be a recipient (GotDragMsg=1) even with a (0,0,0) delta; recipients=%v", got)
+	}
+	if got["b"] != [3]int32{0, 0, 0} {
+		t.Fatalf("node b's DragDelta columns should be (0,0,0), got %v", got["b"])
+	}
+
+	// KindAbcDragReset must clear the DragDelta columns alongside GotDragMsg.
+	snap.Update(T.Event{Kind: T.KindAbcDragReset})
+	after := lastFrame([]byte(frames.String()))
+	if after == nil {
+		t.Fatal("no frame captured after reset")
+	}
+	gotAfter := nodeDragDeltas(after)
+	if len(gotAfter) != 0 {
+		t.Fatalf("DragDelta recipients after KindAbcDragReset must be empty, got %v", gotAfter)
 	}
 }

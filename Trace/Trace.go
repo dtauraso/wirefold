@@ -256,6 +256,15 @@ type Event struct {
 	// Visible carries the tori visibility state on scene-tori events (KindSceneTori).
 	// true = tori shown; false = tori hidden. Set on scene-tori events only.
 	Visible bool `json:"visible"`
+	// DeltaA/DeltaB/DeltaC carry the DRAGGED node's own quantized-triple change
+	// (newTriple - oldTriple, integer indices) on abc-drag events (KindAbcDrag): the
+	// dragged node computes this ONCE, on its own goroutine, per direct domain
+	// neighbor, and each neighbor's re-quantize message rides the SAME delta (nodes/
+	// Wiring/node_move.go requantizeLocalPolars). Zero if the dragged node had no
+	// prior stored triple to subtract from. Set on abc-drag events only.
+	DeltaA int `json:"deltaA,omitempty"`
+	DeltaB int `json:"deltaB,omitempty"`
+	DeltaC int `json:"deltaC,omitempty"`
 }
 
 // Trace is the shared recorder. Construct with New; injected into
@@ -496,9 +505,11 @@ func (t *Trace) LayoutLink(src, dst string) {
 // AbcDrag emits one time-node abc-drag re-quantize event (KindAbcDrag). nodeID is the
 // firing time node (selfID) that just received the drag re-quantize — the snapshot layer
 // increments a running count AND resolves nodeID to its buffer node row for the in-editor
-// label. Emitted alongside the "time.abc-drag" debug breadcrumb, never in place of it.
-func (t *Trace) AbcDrag(nodeID string) {
-	t.emit(Event{Kind: KindAbcDrag, Node: nodeID})
+// label. deltaA/deltaB/deltaC are the DRAGGED node's own quantized-triple change (see
+// Event.DeltaA doc) riding along so the in-editor drag-log can show what nodeID received.
+// Emitted alongside the "time.abc-drag" debug breadcrumb, never in place of it.
+func (t *Trace) AbcDrag(nodeID string, deltaA, deltaB, deltaC int) {
+	t.emit(Event{Kind: KindAbcDrag, Node: nodeID, DeltaA: deltaA, DeltaB: deltaB, DeltaC: deltaC})
 }
 
 // AbcDragReset emits one drag-start event (KindAbcDragReset), marking the beginning of a

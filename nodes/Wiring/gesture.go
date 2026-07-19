@@ -280,6 +280,13 @@ func (md *MoveDispatch) gestPointerMove(ev rawInputMsg, tr *T.Trace) {
 			if tr != nil {
 				tr.AbcDragReset()
 			}
+			// Arm the dragged node's OWN drag-anchor snapshot (moveMsgKindDragStart, see
+			// its doc comment in node_move.go) at this same slop-crossing edge — the ONE
+			// place a drag begins — so the in-editor delta log reads the drag's running
+			// total from this exact start point instead of a per-move-event (0,0,0).
+			// Blocking send (md.sendMove, not lossy): this must not be dropped, same as
+			// the drag/center kinds it rides alongside.
+			md.sendMove(g.dragNode, moveMsg{Kind: moveMsgKindDragStart, NodeID: g.dragNode})
 		case g.handholdDown:
 			// Handhold-constrained orbit: seed prevX/prevY from the GRAB point (downX/downY),
 			// not the slop-crossing point, so the first locked arc is grab→first-move (mirrors

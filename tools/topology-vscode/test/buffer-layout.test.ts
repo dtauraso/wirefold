@@ -19,6 +19,7 @@ import {
   NODE_COL_KIND_ID,
   NODE_COL_LABEL_OFF, NODE_COL_LABEL_LEN, NODE_COL_HOVERED,
   NODE_COL_GOT_DRAG_MSG,
+  NODE_COL_DRAG_DELTA_A, NODE_COL_DRAG_DELTA_B, NODE_COL_DRAG_DELTA_C,
   NODE_STRIDE,
   NODE_COL_VRX, NODE_COL_VRY, NODE_COL_VRZ, NODE_COL_FRX, NODE_COL_FRY, NODE_COL_FRZ,
   readNodeCX, readNodeCY, readNodeCZ, readNodeRadius, readNodeSphereR,
@@ -27,6 +28,7 @@ import {
   readNodeKindId,
   readNodeLabelOff, readNodeLabelLen, readNodeHovered,
   readNodeGotDragMsg,
+  readNodeDragDeltaA, readNodeDragDeltaB, readNodeDragDeltaC,
   // Interior
   INTERIOR_COL_PRESENT, INTERIOR_COL_VALUE, INTERIOR_COL_OX, INTERIOR_COL_OY, INTERIOR_COL_OZ,
   INTERIOR_STRIDE,
@@ -120,8 +122,9 @@ describe("buffer-layout — Node block", () => {
     // 5×f32 + 6×f32 (vr/fr normals) + 1×u8 (selected)
     //   + 1×u8 (kindId) + 2×u32 (label off/len)
     //   + 1×u8 (hovered) + 1×u8 (latchedSel) + 1×u8 (gotDragMsg)
-    //   = (5+6)×4 + 1 + 1 + 8 + 1 + 1 + 1 = 57
-    expect(NODE_STRIDE).toBe(57);
+    //   + 3×i32 (dragDeltaA/B/C)
+    //   = (5+6)×4 + 1 + 1 + 8 + 1 + 1 + 1 + 12 = 69
+    expect(NODE_STRIDE).toBe(69);
   });
 
   it("read helpers decode known bytes correctly", () => {
@@ -145,6 +148,9 @@ describe("buffer-layout — Node block", () => {
     dv.setUint32(NODE_COL_LABEL_LEN, 4, true);
     dv.setUint8(NODE_COL_HOVERED, 1);
     dv.setUint8(NODE_COL_GOT_DRAG_MSG, 1);
+    dv.setInt32(NODE_COL_DRAG_DELTA_A, 12, true);
+    dv.setInt32(NODE_COL_DRAG_DELTA_B, -34, true);
+    dv.setInt32(NODE_COL_DRAG_DELTA_C, 5, true);
 
     expectF32(readNodeCX(dv, 0), 1.0);
     expectF32(readNodeCY(dv, 0), 2.0);
@@ -163,6 +169,9 @@ describe("buffer-layout — Node block", () => {
     expect(readNodeLabelLen(dv, 0)).toBe(4);
     expect(readNodeHovered(dv, 0)).toBe(1);
     expect(readNodeGotDragMsg(dv, 0)).toBe(1);
+    expect(readNodeDragDeltaA(dv, 0)).toBe(12);
+    expect(readNodeDragDeltaB(dv, 0)).toBe(-34);
+    expect(readNodeDragDeltaC(dv, 0)).toBe(5);
   });
 });
 
@@ -330,8 +339,8 @@ describe("buffer-layout — event enum", () => {
 // ─ Meta ───────────────────────────────────────────────────────────────────────
 
 describe("buffer-layout — meta", () => {
-  it("schema version is 31", () => {
-    expect(BUF_LAYOUT_VERSION).toBe(31);
+  it("schema version is 32", () => {
+    expect(BUF_LAYOUT_VERSION).toBe(32);
   });
 
   it("header size is 40 bytes (10×u32)", () => {
