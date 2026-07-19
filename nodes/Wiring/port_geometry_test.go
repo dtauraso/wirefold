@@ -50,8 +50,8 @@ func TestPortWorldPosMirrorsReference(t *testing.T) {
 	anchorId1 := 1
 	center := vec3{X: 46.5425, Y: 93.085, Z: -139.6275}
 	g := nodeGeom{
-		Kind:   "HoldFlip",
-		HasPos: true, ScenePolar: cart2polar(center),
+		nodeIdentity: nodeIdentity{Kind: "HoldFlip"},
+		HasPos:       true, ScenePolar: cart2polar(center),
 		Inputs: []portGeom{
 			{Name: "In", AnchorId: &anchorId1},
 			{Name: "In2"},
@@ -81,28 +81,28 @@ func TestArcLengthBetweenPortsCases(t *testing.T) {
 	}{
 		{
 			name: "input-to-holdflip-2d",
-			src: nodeGeom{Kind: "Input", HasPos: true, ScenePolar: cart2polar(c01),
+			src: nodeGeom{nodeIdentity: nodeIdentity{Kind: "Input"}, HasPos: true, ScenePolar: cart2polar(c01),
 				Outputs: []portGeom{{Name: "ToHoldFlip", AnchorId: &anchorId1}}},
 			srcH: "ToHoldFlip",
-			tgt: nodeGeom{Kind: "HoldFlip", HasPos: true, ScenePolar: cart2polar(c11),
+			tgt: nodeGeom{nodeIdentity: nodeIdentity{Kind: "HoldFlip"}, HasPos: true, ScenePolar: cart2polar(c11),
 				Inputs: []portGeom{{Name: "In", AnchorId: &anchorId1}}},
 			tgtH: "In",
 		},
 		{
 			name: "nonzero-z-both",
-			src: nodeGeom{Kind: "HoldNewSendOld", HasPos: true, ScenePolar: cart2polar(c111),
+			src: nodeGeom{nodeIdentity: nodeIdentity{Kind: "HoldNewSendOld"}, HasPos: true, ScenePolar: cart2polar(c111),
 				Outputs: []portGeom{{Name: "ToNext0", AnchorId: &anchorId1}}},
 			srcH: "ToNext0",
-			tgt: nodeGeom{Kind: "HoldNewSendOld", HasPos: true, ScenePolar: cart2polar(c11n1),
+			tgt: nodeGeom{nodeIdentity: nodeIdentity{Kind: "HoldNewSendOld"}, HasPos: true, ScenePolar: cart2polar(c11n1),
 				Inputs: []portGeom{{Name: "FromPrevHoldNewSendOldNode", AnchorId: &anchorId1}}},
 			tgtH: "FromPrevHoldNewSendOldNode",
 		},
 		{
 			name: "anchorid0-and-anchorid2-with-z",
-			src: nodeGeom{Kind: "WindowAndInhibitRightGate", HasPos: true, ScenePolar: cart2polar(c11),
+			src: nodeGeom{nodeIdentity: nodeIdentity{Kind: "WindowAndInhibitRightGate"}, HasPos: true, ScenePolar: cart2polar(c11),
 				Outputs: []portGeom{{Name: "ToPassed", AnchorId: &anchorId0}}},
 			srcH: "ToPassed",
-			tgt: nodeGeom{Kind: "WindowAndInhibitRightGate", HasPos: true, ScenePolar: cart2polar(c201),
+			tgt: nodeGeom{nodeIdentity: nodeIdentity{Kind: "WindowAndInhibitRightGate"}, HasPos: true, ScenePolar: cart2polar(c201),
 				Inputs: []portGeom{{Name: "FromRight", AnchorId: &anchorId2}}},
 			tgtH: "FromRight",
 		},
@@ -157,7 +157,7 @@ func TestPortRadiusPerPort(t *testing.T) {
 	anchorId0 := 0
 	r1, r2 := 15.0, 40.0
 	g := nodeGeom{
-		Kind: "HoldFlip",
+		nodeIdentity: nodeIdentity{Kind: "HoldFlip"},
 		Inputs: []portGeom{
 			{Name: "InSmall", AnchorId: &anchorId0, PortR: &r1},
 			{Name: "InBig", AnchorId: &anchorId0, PortR: &r2},
@@ -204,9 +204,9 @@ func TestPortAnchorIdRingPath(t *testing.T) {
 
 	anchorId1 := 1
 	g := nodeGeom{
-		Kind:    kind,
-		Inputs:  []portGeom{{Name: "In", AnchorId: &anchorId1}},
-		Outputs: []portGeom{{Name: "Out"}}, // nil AnchorId → ring slot 0
+		nodeIdentity: nodeIdentity{Kind: kind},
+		Inputs:       []portGeom{{Name: "In", AnchorId: &anchorId1}},
+		Outputs:      []portGeom{{Name: "Out"}}, // nil AnchorId → ring slot 0
 	}
 
 	// Anchored input: direction == ringAnchorDir(R, 1)

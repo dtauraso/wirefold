@@ -393,8 +393,8 @@ func TestGestureHandholdOrbits(t *testing.T) {
 func TestGestureConnectedPortRingMove(t *testing.T) {
 	center := vec3{0, 0, 0}
 	geoms := map[string]nodeGeom{
-		"N1": {Kind: "Input", HasPos: true, ScenePolar: cart2polar(center), Inputs: []portGeom{{Name: "in"}}, Outputs: []portGeom{{Name: "out"}}},
-		"N2": {Kind: "Input", HasPos: true, ScenePolar: cart2polar(vec3{50, 0, 0}), Inputs: []portGeom{{Name: "in"}}},
+		"N1": {nodeIdentity: nodeIdentity{Kind: "Input"}, HasPos: true, ScenePolar: cart2polar(center), Inputs: []portGeom{{Name: "in"}}, Outputs: []portGeom{{Name: "out"}}},
+		"N2": {nodeIdentity: nodeIdentity{Kind: "Input"}, HasPos: true, ScenePolar: cart2polar(vec3{50, 0, 0}), Inputs: []portGeom{{Name: "in"}}},
 	}
 	edges := map[string]EdgeEndpoints{
 		"e1": {Source: "N1", Target: "N2", SourceHandle: "out", TargetHandle: "in"},

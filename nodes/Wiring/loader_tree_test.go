@@ -50,7 +50,7 @@ func TestReadPortsParsesPortR(t *testing.T) {
 	}
 
 	geom := specPortsToGeom(ports)
-	g := nodeGeom{Kind: "HoldFlip", Inputs: geom}
+	g := nodeGeom{nodeIdentity: nodeIdentity{Kind: "HoldFlip"}, Inputs: geom}
 	center := nodeWorldPos(g)
 	dir0 := ringAnchorDir(nodeRadius(g.Kind), 0)
 	want := center.add(dir0.scale(33.5))

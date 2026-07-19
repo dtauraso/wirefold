@@ -103,8 +103,8 @@ func TestDecentralizedNodeMove(t *testing.T) {
 	}
 	srcCenter := vec3{X: nx, Y: ny, Z: nz}
 	dstCenter := dstCenterHeld
-	srcGeom := nodeGeom{Kind: "FanInSrc", HasPos: true, ScenePolar: cart2polar(srcCenter), Outputs: []portGeom{{Name: "Out"}}}
-	dstGeom := nodeGeom{Kind: "FanInSink", HasPos: true, ScenePolar: cart2polar(dstCenter), Inputs: []portGeom{{Name: "In"}}}
+	srcGeom := nodeGeom{nodeIdentity: nodeIdentity{Kind: "FanInSrc"}, HasPos: true, ScenePolar: cart2polar(srcCenter), Outputs: []portGeom{{Name: "Out"}}}
+	dstGeom := nodeGeom{nodeIdentity: nodeIdentity{Kind: "FanInSink"}, HasPos: true, ScenePolar: cart2polar(dstCenter), Inputs: []portGeom{{Name: "In"}}}
 	// Polar-torus port-to-port model: segment/arc between the two ports' world points.
 	wantSeg := edgeSegment(srcGeom, dstGeom, "Out", "In")
 	wantArc := edgeArcPolar(srcGeom, dstGeom, "Out", "In")

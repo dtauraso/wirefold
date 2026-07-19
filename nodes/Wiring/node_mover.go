@@ -135,34 +135,28 @@ type nodeMover struct {
 	geom  nodeGeom
 	inbox chan moveMsg
 	tr    *T.Trace
-	// geomMu guards every access to m.geom. Verified goroutine ownership (2026-07):
-	// ALL of applyCenter (sole writer of position fields), handle's
-	// moveMsgKindAnchor case (sole writer of port-anchor fields), and emitGeometry
-	// (full-struct read for emit) run on nodeMover's OWN inbox-drain goroutine
-	// (run/handle) — so among themselves the lock is a same-goroutine no-op, not a
-	// cross-goroutine race guard. The one access that DOES cross goroutines is
-	// MoveDispatch.NodeKind (node_move.go), called from the gesture/stdin-reader
-	// goroutine (gesture.go) to read m.geom.Kind; it takes geomMu too.
+	// There is no geomMu. m.geom (port_geometry.go) splits into an embedded, write-once
+	// nodeIdentity (Kind/Label/R/SceneCenter — set once at construction in loader.go,
+	// grepped clean of any later write anywhere in this package) and MUTABLE state
+	// (ScenePolar/HasPos/ReachR/Inputs/Outputs-element-AnchorId) written only by
+	// applyCenter and handle's moveMsgKindAnchor case. Every writer AND every reader of
+	// the mutable part — applyCenter, setPortAnchorId (via handle), emitGeometry's
+	// full-struct copy — runs exclusively on nodeMover's OWN inbox-drain goroutine
+	// (run/handle), so there is never more than one goroutine touching that memory. The
+	// one cross-goroutine reader, MoveDispatch.NodeKind (node_move.go), called from the
+	// gesture/stdin-reader goroutine, reads ONLY nm.geom.Kind — a field on the embedded
+	// nodeIdentity, which no writer here ever touches. So the two properties that would
+	// require a lock (a mutable field read cross-goroutine, or an identity field that
+	// could gain a second writer) both provably don't hold, by construction of the type
+	// split, not by coincidence of which byte ranges happen to overlap today.
 	//
-	// CHECKED BY CODE, not just this prose: TestNodeKindConcurrentWithApplyCenterUnderRace
+	// CHECKED BY CODE: TestNodeKindConcurrentWithApplyCenterUnderRace
 	// (node_mover_geom_race_test.go) drives NodeKind's reader loop and applyCenter's
-	// writer loop concurrently under -race. With today's actual NodeKind body (a bare
-	// `nm.geom.Kind` field read) the race detector reports NO race even with geomMu
-	// removed from NodeKind — confirmed by repeated -race runs with the lock stripped.
-	// This is NOT because the access is safe by construction; it is because Go's race
-	// detector is byte-range precise and Kind is write-once-at-construction (loader.go)
-	// while applyCenter only ever writes the disjoint ScenePolar/HasPos/ReachR byte
-	// ranges — so the one live cross-goroutine access (NodeKind vs. applyCenter) never
-	// touches overlapping memory today. Swapping NodeKind's body for a whole-struct copy
-	// (`geom := nm.geom; return geom.Kind`, matching emitGeometry's own pattern) DOES
-	// reproduce `WARNING: DATA RACE` immediately against the same writer, because a
-	// struct-value copy's read footprint spans every field's bytes, including Kind's.
-	// So: geomMu is defensive, not curative of a live race — it guards against Kind (or
-	// any field) gaining a second writer, or NodeKind's body ever widening its read
-	// (e.g. to a struct copy) the way emitGeometry's already does. Kept rather than
-	// deleted for that reason. There is no separate per-node "Update()" writer
-	// goroutine — that was the retired SLICE 3 architecture.
-	geomMu sync.Mutex
+	// writer loop concurrently under -race with no lock on either side, as a standing
+	// regression check that the split holds (a future change reintroducing a write to an
+	// identity field, or widening NodeKind's read to a whole-struct copy, would make it
+	// fail). There is no separate per-node "Update()" writer goroutine — that was the
+	// retired SLICE 3 architecture.
 	// snap is an atomically-published immutable snapshot of this node's current
 	// center+reachR. Written only by the mover's own goroutine after every center
 	// update; read by any goroutine (stdin reader) to observe the current position
@@ -252,9 +246,7 @@ func (m *nodeMover) handle(msg moveMsg) {
 	if msg.Kind == moveMsgKindAnchor {
 		// Per-port anchor update: snap to ring-anchor index, mutate this node's held
 		// port AnchorId, and re-emit node-geometry so the renderer redraws the port.
-		m.geomMu.Lock()
 		ok := setPortAnchorId(&m.geom, msg.Port, msg.IsInput, msg.AnchorId)
-		m.geomMu.Unlock()
 		if !ok {
 			return
 		}
@@ -339,12 +331,9 @@ func (m *nodeMover) armDragAnchor() {
 // observe cross-goroutine (stdin reader: centerOfNode/heldCenters/heldPolar/fanCenters'
 // partner lookup, edgeMover's partnerCenter), and re-emits this node's live geometry.
 func (m *nodeMover) applyCenter(center vec3, reach float64) {
-	m.geomMu.Lock()
 	setNodeWorld(&m.geom, center)
 	m.geom.ReachR = reach
-	scenePolar := m.geom.ScenePolar
-	m.geomMu.Unlock()
-	m.snap.Store(&centerSnap{c: center, p: scenePolar, reach: reach})
+	m.snap.Store(&centerSnap{c: center, p: m.geom.ScenePolar, reach: reach})
 	if m.tr != nil {
 		m.emitGeometry()
 	}
@@ -353,13 +342,11 @@ func (m *nodeMover) applyCenter(center vec3, reach float64) {
 // emitGeometry re-emits this node's authoritative geometry. A CONNECTED port marker is
 // AIMED at its partner's current center (m.partnerCenter, atomic-snapshot-backed); an
 // edgeless port falls back to its own polar-torus ring-anchor placement (portWorldPos).
-// geomMu-guarded: takes a local copy of m.geom under the lock so the actual emit (which
-// can be slow — trace serialization) does not hold the lock against the other writer.
+// No lock: this method, applyCenter, and setPortAnchorId (via handle) all run on
+// nodeMover's own inbox-drain goroutine only (see the doc comment on nodeMover.geom),
+// so a plain field read here can never race a concurrent writer.
 func (m *nodeMover) emitGeometry() {
-	m.geomMu.Lock()
-	geom := m.geom
-	m.geomMu.Unlock()
-	emitNodeGeometryLocked(m.tr, m.id, geom, m.partnerCenter)
+	emitNodeGeometryLocked(m.tr, m.id, m.geom, m.partnerCenter)
 }
 
 // run is the node's per-goroutine move loop: drain the inbox until ctx is done.
