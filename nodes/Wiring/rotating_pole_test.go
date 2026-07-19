@@ -204,10 +204,13 @@ func TestRotatingPoleClearsSingularityOnDrag(t *testing.T) {
 }
 
 // TestRotatingPolePersistReload drags src's neighbor, flushes, then RELOADS from disk
-// into a fresh MoveDispatch and asserts a drag-then-reload lands the same bearings: since
-// the pole is a pure function of live geometry (never persisted), both the live runtime
-// and the reload evaluate localPole on the same (persisted, lossless scenePolar) geometry
-// and must agree exactly.
+// into a fresh MoveDispatch and asserts a drag-then-reload lands the same bearings. The
+// measurement pole a node's LocalPolars entries were last quantized about IS persisted
+// (WriteLocalPolars, layout_holder.go LayoutHolder.Pole/SetPole) — required by the
+// fixed-increment/stored-index requantize model (memory/feedback_abc_times_constant_not_rederive.md):
+// requantizePoleTraced reconstructs an unchanged neighbor's direction from stored indices
+// about the OLD pole, so the pole itself must round-trip losslessly, not be re-derived from
+// scratch on reload.
 func TestRotatingPolePersistReload(t *testing.T) {
 	root := writeTree(t)
 	md := loadTreeMD(t, root)
@@ -263,8 +266,8 @@ func TestRotatingPolePersistReload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read src meta: %v", err)
 	}
-	if containsKey(raw, "localPoleTheta") || containsKey(raw, "localPolePhi") {
-		t.Fatalf("src meta.json should NOT persist a local pole (pure function of geometry): %s", raw)
+	if !containsKey(raw, "localPoleTheta") || !containsKey(raw, "localPolePhi") {
+		t.Fatalf("src meta.json should persist the local pole (fixed-increment/stored-index model): %s", raw)
 	}
 
 	// Reload into a fresh MoveDispatch.

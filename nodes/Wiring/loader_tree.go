@@ -48,6 +48,9 @@ type jsonMeta struct {
 	StepR     *float64 `json:"stepR,omitempty"`
 	// LocalPolars — see specNode's field doc (loader.go).
 	LocalPolars []specLocalPolar `json:"localPolars,omitempty"`
+	// LocalPoleTheta/LocalPolePhi — see specNode's field doc (loader.go).
+	LocalPoleTheta *float64 `json:"localPoleTheta,omitempty"`
+	LocalPolePhi   *float64 `json:"localPolePhi,omitempty"`
 	// Gate — see specNode's field doc (loader.go).
 	Gate bool `json:"gate,omitempty"`
 }
@@ -93,6 +96,8 @@ func loadTree(root string) (topoSpec, error) {
 			StepPhi:         meta.StepPhi,
 			StepR:           meta.StepR,
 			LocalPolars:     meta.LocalPolars,
+			LocalPoleTheta:  meta.LocalPoleTheta,
+			LocalPolePhi:    meta.LocalPolePhi,
 			Gate:            meta.Gate,
 		}
 

@@ -132,13 +132,15 @@ func writeQuantOffset(root, id string, off quantizedOffset, scene polar) error {
 }
 
 // WriteLocalPolars sets the node's localPolars list (layout_holder.go LocalPolar, one
-// per domain-edge neighbor, measured with this node as center) in
-// <root>/nodes/<id>/meta.json, preserving every other field — the same
-// read-modify-write contract as writeQuantOffset. There is no pole to write: the
-// measurement pole is a pure function of live geometry
-// (docs/planning/visual-editor/deterministic-local-pole.md, rotating_pole.go localPole),
-// recomputed on demand and never persisted.
-func WriteLocalPolars(root, id string, lps []LocalPolar) error {
+// per domain-edge neighbor, measured with this node as center) AND its measurement pole
+// (the direction lh's CURRENT entries were quantized about — layout_holder.go LayoutHolder.
+// Pole) in <root>/nodes/<id>/meta.json, preserving every other field — the same
+// read-modify-write contract as writeQuantOffset. The pole must be persisted (not just the
+// indices it produced): requantizePoleTraced reconstructs an unchanged neighbor's direction
+// from its stored indices about the OLD pole, so a reload that dropped the pole would
+// reconstruct against the WRONG (assumed-home) pole for any node whose pole had tilted —
+// see node_move.go requantizePoleTraced's doc comment.
+func WriteLocalPolars(root, id string, lps []LocalPolar, pole dir) error {
 	if !safeTreePathComponent(id) {
 		return fmt.Errorf("unsafe node id %q", id)
 	}
@@ -164,5 +166,9 @@ func WriteLocalPolars(root, id string, lps []LocalPolar) error {
 		}
 		b, _ := json.Marshal(out)
 		obj["localPolars"] = b
+		pt, _ := json.Marshal(pole.Theta)
+		pp, _ := json.Marshal(pole.Phi)
+		obj["localPoleTheta"] = pt
+		obj["localPolePhi"] = pp
 	})
 }

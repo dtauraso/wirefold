@@ -62,6 +62,15 @@ func dirFromOffset(o vec3) (d dir, r float64) {
 	return dir{Theta: p.Theta, Phi: p.Phi}, p.R
 }
 
+// dirToVec3 converts a direction (unit-sphere point, pole=+y) to a Cartesian unit vector.
+// This is the one place a stored-index RECONSTRUCTION (fromAxisFrame, spherical.go) needs
+// a vec3 to feed localPole's tilt-axis geometry (localPole's contract takes offset
+// vectors). It is boundary trig on a direction already reconstructed from stored indices
+// — never a re-measurement of a live cartesian position.
+func dirToVec3(d dir) vec3 {
+	return polar2cart(polar{R: 1, Theta: d.Theta, Phi: d.Phi})
+}
+
 // localPole returns the deterministic measurement pole for a node whose neighbor offset
 // vectors are `offsets` (raw Cartesian offsets, any nonzero length — normalized inside).
 // Home is world +y. When the offset nearest +y is inside the singular zone, the pole

@@ -1529,55 +1529,82 @@ func (md *MoveDispatch) placeEqualRadii(target vec3, aID, bID string) vec3 {
 // requantizePoleTraced is the SINGLE site every LOCAL-polar write routes through once a
 // node's LayoutHolder exists (this file's several call sites). `updates` carries the FRESH
 // offset (vec3, THIS node — nodeID — as origin) for each neighbor whose distance/direction
-// just changed. Every OTHER neighbor already on lh has its LIVE offset re-measured via
-// md.centerOfNode (nodeID's own live center minus that neighbor's live center) rather than
-// reconstructed from a stored quant — there is no stored pole to reconstruct against
-// (docs/planning/visual-editor/deterministic-local-pole.md): `pole = localPole(offsets)` is a
-// pure function of the WHOLE neighbor set's current offset vectors, recomputed on every call,
-// never stored, never persisted, never carried in a message. Every neighbor (fresh or
-// unchanged) is then quantized about that pole; a fresh neighbor's radius is re-measured,
-// an unchanged neighbor's radius is preserved exactly (matching the old reconstruction
-// contract — only bearing was ever re-expressed for an unchanged neighbor).
+// just changed — the legitimate cart↔polar boundary entry (dirFromOffset + azimuthFrom).
+//
+// Every OTHER neighbor already on lh (unchanged this call) is NEVER re-measured against a
+// live cartesian center: its direction is RECONSTRUCTED from its own stored indices about
+// the OLD pole (lh.Pole(), persisted from the last call) via fromAxisFrame — arithmetic on
+// stored ints × step constants, then one boundary trig call to turn that direction back into
+// a vector. This is the fixed-increment/stored-index model
+// (memory/feedback_abc_times_constant_not_rederive.md,
+// docs/demos/polar-drag-3d.html's autoPole/ΔR⁻¹·q block): an unchanged neighbor's world
+// position hasn't moved, so its stored indices ARE ground truth and are carried forward,
+// adjusted only by the fixed pole increment (rotating_pole.go) when the measurement pole
+// tilts. `pole = localPole(dirs)` is recomputed from the WHOLE neighbor set's directions
+// (fresh from cartesian, unchanged from stored-index reconstruction) and then PERSISTED on
+// lh (SetPole) so the next call's unchanged neighbors reconstruct against the pole THIS
+// call actually quantized against.
+//
+// When the pole doesn't move (the common case — home stays home), an unchanged neighbor's
+// re-expressed indices are byte-identical to what's already stored (fromAxisFrame then
+// azimuthFrom about the SAME pole is an exact round-trip): the write is skipped, a true
+// no-op, not a reproject that happens to land on the same numbers.
 func (md *MoveDispatch) requantizePoleTraced(lh *LayoutHolder, updates map[string]vec3, nodeID string) dir {
 	existing := lh.LocalPolarsSnapshot()
-	existingIR := make(map[string]int, len(existing))
+	oldPole := lh.Pole()
+
+	existingByID := make(map[string]LocalPolar, len(existing))
 	for _, lp := range existing {
-		existingIR[lp.To] = lp.QuantIR
+		existingByID[lp.To] = lp
 	}
 
-	selfCenter, hasSelf := md.centerOfNode(nodeID)
-	offsets := make(map[string]vec3, len(existing)+len(updates))
+	// Each neighbor's DIRECTION: fresh neighbors from their live cartesian offset (the
+	// legitimate boundary entry); unchanged neighbors reconstructed from stored indices
+	// about the OLD pole — no md.centerOfNode call for an unchanged neighbor.
+	dirs := make(map[string]dir, len(existing)+len(updates))
+	freshRadius := make(map[string]float64, len(updates))
 	for id, o := range updates {
-		offsets[id] = o
-	}
-	if hasSelf {
-		for _, lp := range existing {
-			if _, fresh := offsets[lp.To]; fresh {
-				continue
-			}
-			if c, ok := md.centerOfNode(lp.To); ok {
-				offsets[lp.To] = c.sub(selfCenter)
-			}
-		}
-	}
-
-	offsetVecs := make([]vec3, 0, len(offsets))
-	for _, o := range offsets {
-		offsetVecs = append(offsetVecs, o)
-	}
-	pole := localPole(offsetVecs)
-
-	for id, o := range offsets {
 		d, r := dirFromOffset(o)
-		t, p, rStep := lh.localPolarSteps(id)
-		c, psi := azimuthFrom(pole, d)
-		iR, hadEntry := existingIR[id]
-		if _, fresh := updates[id]; fresh || !hadEntry {
-			iR = int(math.Round(r / rStep))
-		}
-		lh.SetLocalPolar(id, int(math.Round(c/t)), int(math.Round(psi/p)), iR, t, p, rStep)
+		dirs[id] = d
+		freshRadius[id] = r
 	}
-	return pole
+	for _, lp := range existing {
+		if _, fresh := updates[lp.To]; fresh {
+			continue
+		}
+		t, p, _ := lp.effectiveSteps()
+		dirs[lp.To] = fromAxisFrame(oldPole, float64(lp.QuantITheta)*t, float64(lp.QuantIPhi)*p)
+	}
+
+	dirVecs := make([]vec3, 0, len(dirs))
+	for _, d := range dirs {
+		dirVecs = append(dirVecs, dirToVec3(d))
+	}
+	newPole := localPole(dirVecs)
+
+	for id, d := range dirs {
+		t, p, rStep := lh.localPolarSteps(id)
+		c, psi := azimuthFrom(newPole, d)
+		iTheta := int(math.Round(c / t))
+		iPhi := int(math.Round(psi / p))
+
+		old, hadEntry := existingByID[id]
+		_, fresh := updates[id]
+
+		iR := old.QuantIR
+		if fresh || !hadEntry {
+			iR = int(math.Round(freshRadius[id] / rStep))
+		}
+
+		if !fresh && hadEntry &&
+			old.QuantITheta == iTheta && old.QuantIPhi == iPhi && old.QuantIR == iR &&
+			old.StepTheta == t && old.StepPhi == p && old.StepR == rStep {
+			continue // true no-op: pole/indices unchanged, skip the write
+		}
+		lh.SetLocalPolar(id, iTheta, iPhi, iR, t, p, rStep)
+	}
+	lh.SetPole(newPole)
+	return newPole
 }
 
 // requantizeNeighborSelf requantizes selfID's OWN local polar to fromID (offset off, in
@@ -1594,7 +1621,7 @@ func (md *MoveDispatch) requantizeNeighborSelf(selfID, fromID string, off vec3) 
 	md.requantizePoleTraced(lh, map[string]vec3{fromID: off}, selfID)
 	if md.quantOffsetPersist != nil {
 		if root := md.quantOffsetPersist.root; root != "" {
-			if err := WriteLocalPolars(root, selfID, lh.LocalPolarsSnapshot()); err != nil {
+			if err := WriteLocalPolars(root, selfID, lh.LocalPolarsSnapshot(), lh.Pole()); err != nil {
 				logPersistErr("local_polar_persist", selfID, err)
 			}
 		}
@@ -1622,7 +1649,7 @@ func (md *MoveDispatch) requantizeNeighborSelfSetC(selfID, fromID string, off ve
 	}
 	if md.quantOffsetPersist != nil {
 		if root := md.quantOffsetPersist.root; root != "" {
-			if err := WriteLocalPolars(root, selfID, lh.LocalPolarsSnapshot()); err != nil {
+			if err := WriteLocalPolars(root, selfID, lh.LocalPolarsSnapshot(), lh.Pole()); err != nil {
 				logPersistErr("local_polar_persist", selfID, err)
 			}
 		}
@@ -1672,7 +1699,7 @@ func (md *MoveDispatch) equalizeEdgeCLocal(nodeID, aID, bID string, newPos vec3)
 	}
 	if md.quantOffsetPersist != nil {
 		if root := md.quantOffsetPersist.root; root != "" {
-			if err := WriteLocalPolars(root, nodeID, lh.LocalPolarsSnapshot()); err != nil {
+			if err := WriteLocalPolars(root, nodeID, lh.LocalPolarsSnapshot(), lh.Pole()); err != nil {
 				logPersistErr("local_polar_persist", nodeID, err)
 			}
 		}
@@ -1755,7 +1782,7 @@ func (md *MoveDispatch) moveNodeAndSetEdgeCs(nodeID string, newPos vec3, edgeA, 
 		if root == "" {
 			return
 		}
-		if err := WriteLocalPolars(root, id, holder.LocalPolarsSnapshot()); err != nil {
+		if err := WriteLocalPolars(root, id, holder.LocalPolarsSnapshot(), holder.Pole()); err != nil {
 			logPersistErr("local_polar_persist", id, err)
 		}
 	}
@@ -2003,7 +2030,7 @@ func (md *MoveDispatch) requantizeLocalPolars(nodeID string, newPos vec3) {
 		if root == "" {
 			return
 		}
-		if err := WriteLocalPolars(root, id, holder.LocalPolarsSnapshot()); err != nil {
+		if err := WriteLocalPolars(root, id, holder.LocalPolarsSnapshot(), holder.Pole()); err != nil {
 			logPersistErr("local_polar_persist", id, err)
 		}
 	}
