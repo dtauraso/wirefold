@@ -81,6 +81,18 @@ const (
 	// 6's gate cascade: the gate node used to reach directly into its far neighbor's
 	// LayoutHolder to set the shared edge-c; now it sends the far neighbor this message).
 	moveMsgKindRequantizeSetC = "requantizeSetC"
+	// moveMsgKindNeighborSetC: the plain-neighbor / general edge-length propagation
+	// (requantizeLocalPolars' per-neighbor fan, replacing moveMsgKindRequantize for that
+	// path). A dragged node X sends each of its direct domain neighbors M this SINGLE
+	// ASSIGNMENT — the new quantized edge length SnapC (X's own freshly-requantized c to
+	// M) and X's fresh FromCenter. M does NOT re-derive its stored bearing to X: it
+	// KEEPS its own persisted QuantITheta/QuantIPhi to SenderID exactly as stored, writes
+	// ONLY the new c onto that record, and repositions itself at
+	// FromCenter - dir(storedTheta,storedPhi about M's own pole)*newR — sliding along its
+	// existing viewing direction to the new distance, X held fixed. One hop only: M never
+	// forwards this to its own neighbors, and this never runs an equalize/trigger cascade
+	// (see neighborSetCReposition).
+	moveMsgKindNeighborSetC = "neighborSetC"
 )
 
 // Per-node cascade rule data (sourceID, followers, forwardTargets, isGate,
@@ -354,6 +366,12 @@ type nodeMover struct {
 	// own holder itself, decentralizing moveNodeAndSetEdgeCs's former cross-goroutine
 	// far-neighbor-holder write. nil in tests that build a bare nodeMover directly.
 	requantizeSelfSetC func(selfID, fromID string, off vec3, c int)
+	// neighborSetC runs THIS node's own plain-neighbor set-c redraw (keep stored
+	// bearing, write only the new c, reposition self) — bound to
+	// md.neighborSetCReposition. Dispatched from moveMsgKindNeighborSetC so a domain
+	// neighbor's holder AND world position are written only by that neighbor's OWN
+	// goroutine. nil in tests that build a bare nodeMover directly.
+	neighborSetC func(selfID, fromID string, fromCenter vec3, c int)
 	// Cascade rule fields — DERIVED once at load (loader.go deriveCascadeRules) from
 	// this node's own LocalPolars roles and Gate flag; see the package doc comment
 	// above where the old ruleSource/ruleFollowers/gateNeighbors maps used to live.
@@ -510,6 +528,18 @@ func (m *nodeMover) handle(msg moveMsg) {
 		if s := m.snap.Load(); s != nil && m.requantizeSelfSetC != nil {
 			off := msg.FromCenter.sub(s.c)
 			m.requantizeSelfSetC(m.id, msg.SenderID, off, msg.SnapC)
+		}
+		return
+	}
+	if msg.Kind == moveMsgKindNeighborSetC {
+		// Plain-neighbor set-c redraw (receiver-computes, one hop, no forward): THIS
+		// node keeps its own stored bearing to SenderID, writes the new c, and
+		// repositions itself relative to SenderID's fresh committed center
+		// (msg.FromCenter). No snap.Load/off computation needed here — unlike
+		// moveMsgKindRequantize/RequantizeSetC, the bearing is NOT re-derived from a
+		// live offset; neighborSetCReposition reads the stored bearing itself.
+		if m.neighborSetC != nil {
+			m.neighborSetC(m.id, msg.SenderID, msg.FromCenter, msg.SnapC)
 		}
 		return
 	}
@@ -1139,6 +1169,7 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 		nm.gatePlace = md.gatePlaceNode
 		nm.requantizeSelf = md.requantizeNeighborSelf
 		nm.requantizeSelfSetC = md.requantizeNeighborSelfSetC
+		nm.neighborSetC = md.neighborSetCReposition
 		md.nodeMovers[id] = nm
 		md.dispatch[id] = nm.inbox
 	}
@@ -1656,6 +1687,70 @@ func (md *MoveDispatch) requantizeNeighborSelfSetC(selfID, fromID string, off ve
 	}
 }
 
+// neighborSetCReposition is the OWNER-GOROUTINE half of a plain neighbor's set-c
+// redraw (moveMsgKindNeighborSetC): selfID keeps its OWN stored bearing
+// (QuantITheta/QuantIPhi) to fromID exactly as persisted — no requantizePoleTraced
+// call, no re-derivation from a live offset — writes ONLY the new edge length c onto
+// that one LocalPolar record, and repositions itself at
+// fromCenter - dirToVec3(fromAxisFrame(pole, storedTheta, storedPhi)) * newR
+// (fromID held fixed; selfID slides along its existing viewing direction to the new
+// distance). This is a single hop: it commits selfID's own center/geometry the same
+// way commitNodeMoveLocal does (applyCenter + fanEdgesAndPartners, so the edge
+// redraws from both endpoints) but deliberately does NOT call requantizeLocalPolars
+// (no forward past selfID, no equalize/trigger cascade) and does NOT touch any OTHER
+// neighbor's LocalPolar entry. No-op for an unknown selfID or an fromID selfID has no
+// recorded LocalPolar for.
+func (md *MoveDispatch) neighborSetCReposition(selfID, fromID string, fromCenter vec3, c int) {
+	lh, ok := md.layoutHolders[selfID]
+	if !ok {
+		return
+	}
+	var lp LocalPolar
+	found := false
+	for _, e := range lh.LocalPolarsSnapshot() {
+		if e.To == fromID {
+			lp, found = e, true
+			break
+		}
+	}
+	if !found {
+		return
+	}
+	t, p, rStep := lp.effectiveSteps()
+	lh.SetLocalPolar(fromID, lp.QuantITheta, lp.QuantIPhi, c, t, p, rStep)
+
+	d := fromAxisFrame(lh.Pole(), float64(lp.QuantITheta)*t, float64(lp.QuantIPhi)*p)
+	newR := float64(c) * rStep
+	newPos := fromCenter.sub(dirToVec3(d).scale(newR))
+
+	edges := md.heldEdges()
+	polars := md.heldPolar()
+	polars[selfID] = cart2polar(newPos.sub(md.sceneSphere.Center))
+	reach := reachRFromPolar(polars, edges)
+
+	nm, hasMover := md.nodeMovers[selfID]
+	if hasMover {
+		nm.applyCenter(newPos, reach[selfID])
+	}
+	md.fanEdgesAndPartners(map[string]vec3{selfID: newPos}, md.enqueueFuncFor(selfID))
+
+	if md.quantizedLayout && hasMover {
+		off := measureScalar(newPos, md.sceneSphere.Center, nm.quantOffset)
+		nm.quantOffset = off
+		if md.quantOffsetPersist != nil {
+			md.quantOffsetPersist.schedule(selfID, off, cart2polar(newPos.sub(md.sceneSphere.Center)))
+		}
+	}
+
+	if md.quantOffsetPersist != nil {
+		if root := md.quantOffsetPersist.root; root != "" {
+			if err := WriteLocalPolars(root, selfID, lh.LocalPolarsSnapshot(), lh.Pole()); err != nil {
+				logPersistErr("local_polar_persist", selfID, err)
+			}
+		}
+	}
+}
+
 // equalizeEdgeCLocal is a two-neighbor gate node's edge-c requantize step — the per-node
 // replacement for requantizeLocalPolars, called from rootMove AFTER the node has already
 // moved through the normal path (fan + scene c refresh, so it repositions on screen like any
@@ -2052,17 +2147,47 @@ func (md *MoveDispatch) requantizeLocalPolars(nodeID string, newPos vec3) {
 	md.requantizePoleTraced(lhX, updatesX, nodeID)
 	writePersist(nodeID, lhX)
 
-	// M's local polar TO X, on M's own rotating local pole: routed as a message to M's
-	// OWN inbox instead of reaching into M's LayoutHolder from X's (this) goroutine. M's
-	// own moveMsgKindRequantize handler computes its offset to X from FromCenter (X's
-	// fresh newPos) and its own published snap center, then requantizes+persists itself
-	// — each M is a SEPARATE node whose pole only needs to see M's own (reconstructed +
-	// this fresh) neighbor set. Sent via sendMoveLossy (non-blocking): a full M inbox
-	// means M is already mid-cascade and will requantize itself on its own next commit,
-	// so the drop is safe — and blocking here risks deadlock against M's own symmetric
-	// send back to X when both commit concurrently with full inboxes.
+	// X tells each direct domain neighbor M its NEW c (the quantized edge radius X just
+	// requantized to M above) as a SINGLE ASSIGNMENT — moveMsgKindNeighborSetC. M keeps
+	// its OWN stored bearing (QuantITheta/QuantIPhi) to X and repositions itself at the
+	// new distance along that same stored direction, X held fixed; M does NOT
+	// re-derive its bearing from a live offset and does NOT forward beyond this one
+	// hop (neighborSetCReposition). Routed as a message to M's OWN inbox instead of
+	// reaching into M's LayoutHolder from X's (this) goroutine — each M's holder and
+	// center are written only by M's own goroutine. Sent via sendMoveLossy
+	// (non-blocking): a full M inbox means M is already mid-cascade and will pick up
+	// X's fresh c on its own next commit, so the drop is safe — and blocking here
+	// risks deadlock against M's own symmetric send back to X when both commit
+	// concurrently with full inboxes.
+	//
+	// Scoped to PLAIN edges only (scope discipline: rule-node/gate-node cascades are
+	// untouched). If EITHER end of this edge participates in ANY cascade role
+	// (sourceID/followers/isGate/anchoredGates/followerOwner — all derived once at load,
+	// loader.go deriveCascadeRoles), that edge's position is already owned by the
+	// existing gate/rule cascade (placeEqualRadii, equalizeEdgeCLocal, handleTrigger's
+	// Equalize/GatePlace), so M keeps the OLD bearing-only requantize
+	// (moveMsgKindRequantize) instead — reassigning M's position here would fight the
+	// cascade's own placement of M. Only a neighbor pair with NO role on either side gets
+	// the new set-c reposition.
+	lpByTo := map[string]LocalPolar{}
+	for _, lp := range lhX.LocalPolarsSnapshot() {
+		lpByTo[lp.To] = lp
+	}
+	hasRole := func(nm *nodeMover) bool {
+		return nm == nil || nm.isGate || nm.sourceID != "" || len(nm.followers) > 0 ||
+			len(nm.anchoredGates) > 0 || nm.followerOwner != ""
+	}
+	nmX := md.nodeMovers[nodeID]
 	for m := range updatesX {
-		md.sendMoveLossy(m, moveMsg{Kind: moveMsgKindRequantize, NodeID: m, SenderID: nodeID, FromCenter: newPos})
+		if hasRole(nmX) || hasRole(md.nodeMovers[m]) {
+			md.sendMoveLossy(m, moveMsg{Kind: moveMsgKindRequantize, NodeID: m, SenderID: nodeID, FromCenter: newPos})
+			continue
+		}
+		lp, ok := lpByTo[m]
+		if !ok {
+			continue
+		}
+		md.sendMoveLossy(m, moveMsg{Kind: moveMsgKindNeighborSetC, NodeID: m, SenderID: nodeID, FromCenter: newPos, SnapC: lp.QuantIR})
 	}
 }
 
