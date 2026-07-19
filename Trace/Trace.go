@@ -270,9 +270,27 @@ type Event struct {
 // all nodes have stopped to drain
 // the channel and receive the final event slice via Events().
 type Trace struct {
-	ch        chan Event
-	done      chan struct{}
-	stopped   chan struct{} // closed by Close() to signal senders to stop; ch is NEVER closed
+	ch      chan Event
+	done    chan struct{}
+	stopped chan struct{} // closed by Close() to signal senders to stop; ch is NEVER closed
+	// mu guards events/closed/sink/onEvent/debugSink against the real contention
+	// shape: every node goroutine calls Emit/Breadcrumb concurrently, the single
+	// drain goroutine appends to events and writes sink under this lock (drain.go
+	// record), and Close() flips closed. CHECKED: TestTraceConcurrentEmitVsClose
+	// and TestTraceBreadcrumbConcurrentWithClose (trace_concurrency_test.go) drive
+	// many concurrent Emit/Breadcrumb callers against one Close() (plus concurrent
+	// Events()/SetDebugSink() readers) under `go test -race`, and are RED
+	// (reproducible data-race reports on these exact fields/buffers) when the
+	// Lock/Unlock calls are removed from Close/Events/SetDebugSink/Breadcrumb/
+	// drain's record. The doc claim "`ch` is NEVER closed" (a send on a closed
+	// channel panics — verified by reading emit()/Close(): Close only closes
+	// `stopped`, never `ch`) is CHECKED by TestTraceConcurrentEmitVsClose, which
+	// recovers any goroutine panic from an Emit racing Close and fails the test
+	// if one occurs; it passes today (no panic observed) — this is a positive
+	// (no-panic) claim so it cannot be red-proofed by deletion the same way the
+	// data-race claims can, since removing the mutex around closed/stopped does
+	// not reintroduce a close(ch) call. Guard against reintroducing a `close(t.ch)`
+	// anywhere: that is the one change this test does NOT independently rule out.
 	mu        sync.Mutex
 	events    []Event
 	closed    bool
