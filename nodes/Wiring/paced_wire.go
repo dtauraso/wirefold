@@ -109,6 +109,24 @@ func (pw *PacedWire) ticksToCross(arc float64) float64 {
 // scheduler — every wire reads the same clock independently. Pause freezes the
 // tick (the clock does not advance while halted).
 type PacedWire struct {
+	// mu guards inflight/delivered/nextGen against the THREE independent goroutines
+	// that actually touch them in production (traced from every non-test call site,
+	// not asserted from the type's shape alone):
+	//   - the SOURCE node's own driving goroutine: placeBeadNoWalker(At) (via
+	//     Out.PlaceDriven/PlaceDrivenAt) and StepOnce(At) (via Out.StepOnce/StepOnceAt),
+	//     e.g. gatecommon/drive.go DriveHeld, holdnewsendold/node.go's Update loop.
+	//   - the DESTINATION node's own goroutine: PollRecv/PollRecvTick (via
+	//     In.PollRecv) — a different goroutine than the source side.
+	//   - the EDGE's own move-handler goroutine: ReviseInFlightGeometry (called only
+	//     from edgeMover.recomputeGeometry, node_mover.go) on a node-move/anchor edit.
+	//
+	// CHECKED BY CODE: TestPacedWireSourceDestEdgeConcurrentRace
+	// (paced_wire_concurrency_race_test.go) drives exactly these three goroutines
+	// concurrently on one wire under `go test -race`. Confirmed as a MANDATORY RED
+	// PROOF: temporarily removing the pw.mu lock/unlock from ReviseInFlightGeometry
+	// makes this same test report `WARNING: DATA RACE` (StepOnceAt's read racing
+	// ReviseInFlightGeometry's write) every time; restoring the lock makes it pass
+	// clean again.
 	mu sync.Mutex
 	// inflight holds beads traversing the wire, in send order. delivered holds
 	// arrived-but-unread values, in arrival order (FIFO). All mutation under mu.

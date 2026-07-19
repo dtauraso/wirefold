@@ -26,14 +26,33 @@ type outboxItem struct {
 // outbox is a per-mover UNBOUNDED FIFO of outgoing messages, decoupling *enqueue* (done
 // by the mover's own inbox-drain goroutine, inside handle — must never
 // block) from *delivery* (done by a dedicated sender goroutine, which blocks on the
-// target's inbox exactly like the old synchronous send did). See
-// docs/planning/visual-editor/cascade-deadlock-fix.md: two mutually-adjacent movers,
-// both mid-handle with full inboxes, would otherwise deadlock each blocking a send into
-// the other's full inbox while neither drains. Unbounded by design — a bounded queue
-// reintroduces the same blocking-enqueue deadlock; cascades are finite (idempotent
-// quiescence) so the queue drains in practice. Nothing is ever dropped and per-target
-// order is exactly enqueue order (a single sender pops FIFO), so "latest wins" still
-// holds — this defers delivery by a goroutine hop, it never re-derives or reorders.
+// target's inbox exactly like the old synchronous send did). Two mutually-adjacent
+// movers, both mid-handle with full inboxes, would otherwise deadlock each blocking a
+// send into the other's full inbox while neither drains (the planning doc that first
+// diagnosed this, cascade-deadlock-fix.md, was branch-local and has since been
+// stripped per this repo's branch-local-docs convention — the claim below is checked
+// by tests, not by that doc).
+//
+// CHECKED BY CODE:
+//   - TestMutuallyAdjacentDragFloodNoDeadlock (outbox_mutual_adjacency_test.go) drives
+//     two real mutually-adjacent nodeMovers (src/dst) under sustained concurrent drag
+//     load and asserts completion within a timeout. Confirmed as a MANDATORY RED PROOF:
+//     temporarily rewiring nm.sendMove to the old blocking md.sendMove (bypassing this
+//     outbox) makes this same test hang and fail on timeout every time; restoring the
+//     outbox wiring makes it pass again.
+//   - TestOutboxFIFOPerTargetOrderNoDrop (outbox_mutual_adjacency_test.go) drives a
+//     single enqueuer (matching the real one-handler-goroutine-per-mover shape)
+//     interleaving thousands of sequenced items across several destination ids, and
+//     asserts every item is delivered (no drops) and each destination's own
+//     subsequence arrives in exactly enqueue order. Confirmed as a MANDATORY RED
+//     PROOF: temporarily popping the queue LIFO instead of FIFO makes this same test
+//     fail on out-of-order delivery every time; restoring FIFO pop makes it pass again.
+//
+// Unbounded by design — a bounded queue reintroduces the same blocking-enqueue
+// deadlock; this is asserted by the same red-proof rewiring above, not by a separate
+// bounded-queue test. Cascades are finite (idempotent quiescence) so the queue drains
+// in practice — UNCHECKED: no test asserts a bound on queue growth or drain time,
+// only that a bounded stress run completes within a timeout.
 type outbox struct {
 	mu     sync.Mutex
 	cond   *sync.Cond
