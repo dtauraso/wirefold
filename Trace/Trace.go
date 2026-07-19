@@ -135,6 +135,13 @@ const (
 	// itself; the buffer's Overlay block increments a running count on each occurrence
 	// so the in-editor overlay label can affirm the log is happening live.
 	KindAbcDrag = "abc-drag"
+	// KindAbcDragReset marks the START of one drag operation (RootMove), BEFORE the
+	// dragged node's neighborSetC fan emits any KindAbcDrag marks for that drag. The
+	// snapshot layer clears its sticky recipient SET (and every node's gotDragMsg bit)
+	// on this event, so the in-editor drag-log overlay lists only THIS drag's
+	// recipients — not recipients accumulated across the whole session. No payload
+	// beyond the kind itself.
+	KindAbcDragReset = "abc-drag-reset"
 )
 
 // TraceEventKinds is the single source of truth for the closed kind
@@ -143,7 +150,7 @@ const (
 // buffer EVENT block for the .probe log. There is no tsc exhaustiveness
 // check derived from it — adding a kind here does not force a TS branch
 // anywhere; it only extends the lookup table.
-var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindPosition, KindGeometry, KindNodeGeometry, KindArrive, KindNodeBead, KindCamera, KindSceneTori, KindScenePoles, KindNodePoles, KindSelSpherePoles, KindHandholds, KindLabelsGlobal, KindOverlaysVis, KindDoubleLinks, KindLayoutLink, KindSelect, KindHover, KindSceneSphere, KindAbcDrag}
+var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindPosition, KindGeometry, KindNodeGeometry, KindArrive, KindNodeBead, KindCamera, KindSceneTori, KindScenePoles, KindNodePoles, KindSelSpherePoles, KindHandholds, KindLabelsGlobal, KindOverlaysVis, KindDoubleLinks, KindLayoutLink, KindSelect, KindHover, KindSceneSphere, KindAbcDrag, KindAbcDragReset}
 
 // PortGeom is one port's authoritative world geometry on a node-geometry event:
 // its name, whether it is an input, its sphere-surface world position (PX/PY/PZ),
@@ -492,6 +499,14 @@ func (t *Trace) LayoutLink(src, dst string) {
 // label. Emitted alongside the "time.abc-drag" debug breadcrumb, never in place of it.
 func (t *Trace) AbcDrag(nodeID string) {
 	t.emit(Event{Kind: KindAbcDrag, Node: nodeID})
+}
+
+// AbcDragReset emits one drag-start event (KindAbcDragReset), marking the beginning of a
+// single RootMove drag operation. The snapshot layer clears its sticky abc-drag
+// recipient set on receipt, so a subsequent drag's neighborSetC fan (AbcDrag marks)
+// starts from an empty set instead of accumulating across drags. No payload.
+func (t *Trace) AbcDragReset() {
+	t.emit(Event{Kind: KindAbcDragReset})
 }
 
 // Select emits the currently-selected node id (KindSelect). node="" clears the selection.

@@ -68,6 +68,7 @@ func TestMarshalEventMatchesFixture(t *testing.T) {
 		{Step: 24, Kind: KindSceneSphere, PX: 1.0, PY: 2.0, PZ: 3.0, R: 100.0},
 		{Step: 25, Kind: KindLayoutLink, Node: "A", Target: "B"},
 		{Step: 26, Kind: KindAbcDrag, Node: "A", Port: "B"},
+		{Step: 27, Kind: KindAbcDragReset},
 	}
 
 	fixture := fixtureLines(t)

@@ -1301,6 +1301,12 @@ func (md *MoveDispatch) commitNodeMoveLocal(nodeID string, newPos vec3) {
 // affected double-link's local polars are re-quantized on BOTH ends. Returns false for
 // an unknown node.
 func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
+	// Re-scope the in-editor drag-log to THIS drag: emit the reset BEFORE routing the
+	// drag message, so it is ordered ahead of the neighborSetC fan's AbcDrag marks
+	// (which land asynchronously on each recipient's own goroutine, after this send).
+	if md.tr != nil {
+		md.tr.AbcDragReset()
+	}
 	// EVERY node's drag is a FREE move on the decentralized goroutine-message path —
 	// no equal-radii solve, no rule/gate/anchor cascade. The dragged node commits its
 	// own new position, then requantizeLocalPolars fans a single neighborSetC

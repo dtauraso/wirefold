@@ -78,10 +78,12 @@ type SnapshotState struct {
 	// Live in-flight beads, keyed by (sourceNode, sourcePort, gen).
 	beads map[beadSnapKey]beadSnapState
 
-	// abcDragged is the STICKY set of node ids that have received at least one
-	// time.abc-drag message this session (KindAbcDrag's Event.Node). Never cleared.
-	// Mirrored into each row's nodeSnapState.gotDragMsg on write so the AbcDragLabel
-	// overlay can list every recipient by name straight from the Node block.
+	// abcDragged is the CURRENT-DRAG-SCOPED set of node ids that have received at least
+	// one time.abc-drag message during the drag in progress (KindAbcDrag's Event.Node).
+	// Cleared to empty on KindAbcDragReset (emitted once per RootMove, before that
+	// drag's neighborSetC fan) so a new drag's recipients don't accumulate on top of a
+	// prior drag's. Mirrored into each row's nodeSnapState.gotDragMsg on write so the
+	// AbcDragLabel overlay can list every recipient by name straight from the Node block.
 	abcDragged map[string]bool
 
 	// Camera, overlay, and scene-sphere singletons (always one row each in the snapshot).
@@ -218,10 +220,12 @@ type nodeSnapState struct {
 	// Unlike selected, it does NOT clear when the node is deselected (clicking empty space) —
 	// only selecting a DIFFERENT node moves it. Set alongside selected in setSelected.
 	latchedSel uint8
-	// gotDragMsg is PERSISTENT and STICKY: 1 marks a node that has received at least one
-	// time.abc-drag message this session (see SnapshotState.abcDragged). Set from
-	// KindAbcDrag's Event.Node id, never cleared — it's the per-node bit of the
-	// accumulating recipient SET the AbcDragLabel overlay lists by name.
+	// gotDragMsg is CURRENT-DRAG-SCOPED: 1 marks a node that has received a time.abc-drag
+	// message during the drag in progress (see SnapshotState.abcDragged). Set from
+	// KindAbcDrag's Event.Node id; cleared back to 0 on KindAbcDragReset (once per
+	// RootMove, before that drag's fan) — it's the per-node bit of the CURRENT drag's
+	// recipient SET the AbcDragLabel overlay lists by name, not an accumulating session
+	// total.
 	gotDragMsg uint8
 	// kindID is the node's kind as its index into NODE_DEFS_ARRAY (from NodeKindID).
 	// Set once on first KindNodeGeometry; subsequent re-emits don't change kind.
@@ -391,6 +395,17 @@ func (s *SnapshotState) Update(ev T.Event) {
 			*field = boolU8(ev.Visible)
 		}
 		s.emitSnapshot()
+
+	case T.KindAbcDragReset:
+		// Re-scope the recipient SET to the drag that is about to start: clear the
+		// sticky set AND every node row's mirrored bit. Count (abcDragCount) is a
+		// cumulative total-events affirmation and is intentionally left alone — only
+		// the NAME SET is drag-scoped. No emitSnapshot here: the subsequent AbcDrag
+		// marks for this drag will emit; emitting here would flash an empty log.
+		s.abcDragged = map[string]bool{}
+		for i := range s.nodes {
+			s.nodes[i].gotDragMsg = 0
+		}
 
 	case T.KindAbcDrag:
 		// Read-only affirmation counter for the in-editor overlay label; never
