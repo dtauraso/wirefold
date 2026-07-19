@@ -26,29 +26,52 @@ type portGeom struct {
 	PortR    *float64 // optional per-port radius (distance from node center); nil → nodeRadius(kind) fallback (see portRadiusByName)
 }
 
-// nodeGeom carries everything the port-curve math needs for one node.
-//
-// Position is POLAR (polar-frame-rewrite.md): ScenePolar (r,θ,φ) about SceneCenter is the
-// source of truth; the node's world center is DERIVED only at the display/geometry boundary
-// as SceneCenter + polar2cart(ScenePolar) (nodeWorldPos). SceneCenter is the scene sphere's
-// center — the ONLY cartesian value carried here. HasPos is false for hand-written/partial
-// specs that carry no position (nodeWorldPos then falls back to the world origin).
-type nodeGeom struct {
+// nodeIdentity is the WRITE-ONCE-AT-CONSTRUCTION part of a node's geometry: set by the
+// loader (loader.go) when the nodeGeom is built and never written again by any handler
+// (applyCenter, setPortAnchorId, emitGeometry — grepped clean of writes to these fields).
+// It is split out from nodeGeom specifically so a reader that only wants IDENTITY (e.g.
+// MoveDispatch.NodeKind, called from the gesture/stdin-reader goroutine, NOT the mover's
+// own goroutine) can read it with NO LOCK: the memory it touches is never in a writer's
+// footprint, by construction of the type, not by coincidence of which fields a particular
+// access happens to touch. See node_mover.go's geomMu doc-comment history for why a
+// "the two byte ranges just don't happen to overlap today" argument is the bug class this
+// split exists to make unrepresentable (memory/feedback_make_bug_class_unrepresentable.md).
+type nodeIdentity struct {
 	Kind  string
 	Label string   // human label for this node (data.label, else node id); streamed on node-geometry events for the new-system label sidecar
 	R     *float64 // optional per-node sphere radius for this node's edges; nil → defaultNodeR (see nodeR)
-	// ScenePolar is the node's position as (r,θ,φ) about SceneCenter — the polar source of
-	// truth. SceneCenter is the scene-sphere center (the one cartesian anchor). World is
-	// derived: SceneCenter + polar2cart(ScenePolar). Valid only when HasPos.
-	ScenePolar  polar
+	// SceneCenter is the scene sphere's center — the ONLY cartesian value carried here.
+	// Set once at construction (loader.go) alongside the rest of identity; never
+	// reassigned afterward (grepped clean — no `.SceneCenter =` outside the literal).
 	SceneCenter vec3
-	HasPos      bool // false for hand-written/partial specs with no position → nodeWorldPos returns origin
+}
+
+// nodeGeom carries everything the port-curve math needs for one node: the write-once
+// nodeIdentity (embedded, so its fields read/promote as g.Kind/g.Label/g.R/g.SceneCenter)
+// plus the MUTABLE per-node state that applyCenter/setPortAnchorId update on every move.
+//
+// Position is POLAR (polar-frame-rewrite.md): ScenePolar (r,θ,φ) about SceneCenter is the
+// source of truth; the node's world center is DERIVED only at the display/geometry boundary
+// as SceneCenter + polar2cart(ScenePolar) (nodeWorldPos). HasPos is false for
+// hand-written/partial specs that carry no position (nodeWorldPos then falls back to the
+// world origin).
+type nodeGeom struct {
+	nodeIdentity
+	// ScenePolar is the node's position as (r,θ,φ) about SceneCenter — the polar source of
+	// truth. World is derived: SceneCenter + polar2cart(ScenePolar). Valid only when HasPos.
+	// Mutated only by setNodeWorld (applyCenter's sole write path), on the node's own
+	// mover goroutine.
+	ScenePolar polar
+	HasPos     bool // false for hand-written/partial specs with no position → nodeWorldPos returns origin
 	// ReachR is the sphere REACH radius: the max distance from this node's center to
 	// any node it outputs to (its surface children), under the resolved centers. It is
 	// streamed in the NodeGeometry sphereR field and consumed by the TS SphereRing so the
 	// "show the sphere" ring reaches every surface node even when a child was placed by a
 	// different parent. 0 when the node has no outgoing edges (childless).
-	ReachR  float64
+	ReachR float64
+	// Inputs/Outputs: slice HEADERS are set once at construction (loader.go) and never
+	// reassigned; individual elements' AnchorId ARE mutated in place (setPortAnchorId) —
+	// so these are mutable state, not identity, even though the header never moves.
 	Inputs  []portGeom
 	Outputs []portGeom
 }

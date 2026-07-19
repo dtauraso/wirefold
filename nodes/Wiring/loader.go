@@ -120,7 +120,7 @@ func (n specNode) toNodeGeom(sceneCenter vec3) nodeGeom {
 	// x/y/z load path. When it is absent the node has no position (HasPos false → nodeWorldPos
 	// returns origin). Scene presence does not gate polar adoption: the stored polar is
 	// authoritative regardless.
-	g := nodeGeom{Kind: n.Type, Label: n.label(), R: n.R, SceneCenter: sceneCenter}
+	g := nodeGeom{nodeIdentity: nodeIdentity{Kind: n.Type, Label: n.label(), R: n.R, SceneCenter: sceneCenter}}
 	if n.ScenePolarR != nil && n.ScenePolarTheta != nil && n.ScenePolarPhi != nil {
 		g.ScenePolar = polar{R: *n.ScenePolarR, Theta: *n.ScenePolarTheta, Phi: *n.ScenePolarPhi}
 		g.HasPos = true

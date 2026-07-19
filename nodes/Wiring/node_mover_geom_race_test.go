@@ -7,15 +7,17 @@ import (
 	"time"
 )
 
-// node_mover_geom_race_test.go — exercises the specific cross-goroutine contention
-// geomMu's doc comment (node_mover.go) claims: MoveDispatch.NodeKind, called from a
-// goroutine OTHER than the mover's own inbox-drain goroutine, reads nm.geom while
+// node_mover_geom_race_test.go — regression check on the nodeIdentity/mutable-state
+// split (port_geometry.go, node_mover.go). There is NO geomMu: MoveDispatch.NodeKind,
+// called from a goroutine OTHER than the mover's own inbox-drain goroutine, reads
+// nm.geom.Kind (on the embedded, write-once nodeIdentity) with no lock, while
 // applyCenter (driven from the mover's own goroutine via RootMove/moveMsgKindCenter)
-// concurrently writes nm.geom. This is a MANDATORY RED-PROOF test: with geomMu held on
-// both sides it must pass under -race; with the lock removed from NodeKind it is used to
-// determine whether the race detector can actually observe a conflicting access (see the
-// test's own doc note on the outcome — Kind is write-once so a plain `.Kind` field read
-// may not overlap the byte range applyCenter writes).
+// concurrently writes the MUTABLE ScenePolar/HasPos/ReachR fields, also with no lock.
+// This drives both concurrently under -race: it must stay clean, because Kind lives in
+// a struct no writer here ever touches — not because the byte ranges happen not to
+// overlap today. If a future change ever made NodeKind read something mutable (e.g. a
+// whole-struct copy, matching emitGeometry's own pattern) or made a handler write an
+// identity field, this test would start reporting a real DATA RACE.
 func TestNodeKindConcurrentWithApplyCenterUnderRace(t *testing.T) {
 	root := writeTree(t)
 	md := loadTreeMD(t, root)

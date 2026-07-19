@@ -83,7 +83,7 @@ func TestPortDirAnchorIdPath(t *testing.T) {
 	anchorIdx := 1 % N // safe even if N==1
 
 	g := nodeGeom{
-		Kind: kind,
+		nodeIdentity: nodeIdentity{Kind: kind},
 		Inputs: []portGeom{
 			{Name: "ring_port", AnchorId: &anchorIdx},
 		},
