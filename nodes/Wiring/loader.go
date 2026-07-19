@@ -517,16 +517,15 @@ func (b *buildCtx) computeLocalPolars() {
 		// (docs/planning/visual-editor/deterministic-local-pole.md, rotating_pole.go
 		// localPole) — resolved from EVERY neighbor's CURRENT world offset, never a
 		// stored/persisted value.
-		dirs := make([]dir, 0, len(ids))
+		offsetVecs := make([]vec3, 0, len(ids))
 		if hasOwn {
 			for _, mid := range ids {
 				if mCenter, ok := b.centers[mid]; ok {
-					d, _ := dirFromOffset(mCenter.sub(ownCenter))
-					dirs = append(dirs, d)
+					offsetVecs = append(offsetVecs, mCenter.sub(ownCenter))
 				}
 			}
 		}
-		finalPole := localPole(dirs)
+		finalPole := localPole(offsetVecs)
 
 		list := make([]LocalPolar, 0, len(ids))
 		for _, mid := range ids {

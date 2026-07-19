@@ -1532,8 +1532,8 @@ func (md *MoveDispatch) placeEqualRadii(target vec3, aID, bID string) vec3 {
 // just changed. Every OTHER neighbor already on lh has its LIVE offset re-measured via
 // md.centerOfNode (nodeID's own live center minus that neighbor's live center) rather than
 // reconstructed from a stored quant — there is no stored pole to reconstruct against
-// (docs/planning/visual-editor/deterministic-local-pole.md): `pole = localPole(dirs)` is a
-// pure function of the WHOLE neighbor set's current directions, recomputed on every call,
+// (docs/planning/visual-editor/deterministic-local-pole.md): `pole = localPole(offsets)` is a
+// pure function of the WHOLE neighbor set's current offset vectors, recomputed on every call,
 // never stored, never persisted, never carried in a message. Every neighbor (fresh or
 // unchanged) is then quantized about that pole; a fresh neighbor's radius is re-measured,
 // an unchanged neighbor's radius is preserved exactly (matching the old reconstruction
@@ -1561,12 +1561,11 @@ func (md *MoveDispatch) requantizePoleTraced(lh *LayoutHolder, updates map[strin
 		}
 	}
 
-	dirs := make([]dir, 0, len(offsets))
+	offsetVecs := make([]vec3, 0, len(offsets))
 	for _, o := range offsets {
-		d, _ := dirFromOffset(o)
-		dirs = append(dirs, d)
+		offsetVecs = append(offsetVecs, o)
 	}
-	pole := localPole(dirs)
+	pole := localPole(offsetVecs)
 
 	for id, o := range offsets {
 		d, r := dirFromOffset(o)
