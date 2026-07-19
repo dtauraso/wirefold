@@ -367,132 +367,145 @@ func (s *SnapshotState) Update(ev T.Event) {
 	// GENERATED IsOverlayFlagKind/overlayFlagFieldsOf (buffer_layout_gen.go, mechanically
 	// derived from the Overlay block's u8 columns in Buffer/layout.go) rather than a
 	// hand-listed switch case — adding a flag column requires no edit here.
+	// emit tracks whether THIS event's arm should trigger emitSnapshot at the end of Update.
+	// One visible line per arm below (instead of a call buried in each body) is the invariant
+	// this refactor makes explicit: "does this arm emit?" — every state-mutating arm emits,
+	// except the ones whose event rides the EVENT block only (Recv/Fire/Send) or whose bead
+	// update is tick-coalesced (Position).
+	var emit bool
 	if IsOverlayFlagKind(ev.Kind) {
 		if field, ok := s.overlayFlagFields[ev.Kind]; ok {
 			*field = boolU8(ev.Visible)
 		}
-		s.emitSnapshot()
-		return
+		emit = true
+	} else {
+		switch ev.Kind {
+		case T.KindNodeGeometry:
+			s.onNodeGeometry(ev)
+			emit = true // state-change point: emit on geometry updates
+
+		case T.KindGeometry:
+			s.onEdgeGeometry(ev)
+			emit = true // state-change point: emit on edge geometry updates
+
+		case T.KindLayoutLink:
+			s.onLayoutLink(ev)
+			emit = true // state-change point: emit on layout-link registration
+
+		case T.KindCamera:
+			s.camera = cameraSnapState{
+				px: ev.PX, py: ev.PY, pz: ev.PZ,
+				r:        ev.R,
+				posTheta: ev.PosTheta, posPhi: ev.PosPhi,
+				upTheta: ev.UpTheta, upPhi: ev.UpPhi,
+			}
+			emit = true // state-change point: emit on camera changes
+
+		case T.KindSceneSphere:
+			// The scene sphere is established ONCE at load and never moves (MODEL.md); Go emits
+			// this a single time at startup, so a plain assign (not a merge) is correct.
+			s.scene = sceneSnapState{cx: ev.PX, cy: ev.PY, cz: ev.PZ, radius: ev.R}
+			emit = true
+
+		case T.KindAbcDragReset:
+			// Re-scope the recipient SET to the drag that is about to start: clear the
+			// drag-scoped set AND every node row's mirrored bit. Count (abcDragCount) is a
+			// cumulative total-events affirmation and is intentionally left alone — only
+			// the NAME SET is drag-scoped.
+			s.abcDragged = map[string]bool{}
+			for i := range s.nodes {
+				s.nodes[i].gotDragMsg = 0
+				s.nodes[i].dragDeltaA = 0
+				s.nodes[i].dragDeltaB = 0
+				s.nodes[i].dragDeltaC = 0
+			}
+			// Emit the CLEARED state. A drag that produces no AbcDrag marks at all is a real
+			// path (isolated node, unresolved neighbor center, lossy-dropped fan) — without
+			// this emit, the webview keeps rendering the PREVIOUS drag's recipients as if they
+			// were this drag's. An empty log for a drag with no recipients is the truth.
+			emit = true
+
+		case T.KindAbcDrag:
+			// Read-only affirmation counter for the in-editor overlay label; never
+			// decrements, no gating semantics (unlike the bool overlay flags above).
+			s.overlay.AbcDragCount++
+			// Add the firing time node (ev.Node) to the current-drag recipient SET and mirror it
+			// into that row's gotDragMsg bit, so the label can list every recipient by name.
+			// Leave state in place if the node hasn't registered geometry yet (should not
+			// happen in practice — the node already exists to have moved).
+			s.abcDragged[ev.Node] = true
+			if idx, ok := s.nodeIndex[ev.Node]; ok {
+				s.nodes[idx].gotDragMsg = 1
+				s.nodes[idx].dragDeltaA = int32(ev.DeltaA)
+				s.nodes[idx].dragDeltaB = int32(ev.DeltaB)
+				s.nodes[idx].dragDeltaC = int32(ev.DeltaC)
+			}
+			emit = true
+
+		case T.KindPosition:
+			// Update the live bead state. Every bead steps once per tick (paced_wire.go), so with
+			// N beads in flight this event fires N times per tick — but the tick, not the event, is
+			// the animation clock (clock.go), so coalesce to at most one emit per tick: emit only
+			// when tickSource reports a tick we have not yet emitted for this stream. positionDirty
+			// tracks any update an emit skip left unpublished, so FinalFlush cannot drop it.
+			k := beadSnapKey{ev.Node, ev.Port, ev.Bead}
+			s.beads[k] = beadSnapState{
+				x: ev.X, y: ev.Y, z: ev.Z,
+				value: ev.Value,
+			}
+			s.positionDirty = true
+			if s.tickSource == nil {
+				emit = true
+			} else if t := s.tickSource(); t != s.lastPosEmitTick {
+				s.lastPosEmitTick = t
+				emit = true
+			}
+
+		case T.KindArrive:
+			// Bead completed traversal: remove it from live beads.
+			delete(s.beads, beadSnapKey{ev.Node, ev.Port, ev.Bead})
+
+		case T.KindRecv:
+			// No per-node state to update; the event itself is already recorded above
+			// (recordEvent) for the EVENT block.
+
+		case T.KindFire:
+			// No per-node state to update; see KindRecv comment above.
+
+		case T.KindSend:
+			// Nothing further to record here; see KindRecv comment above.
+
+		case T.KindNodeBead:
+			// One interior grid slot's authoritative state (node's 2x2 held/interior
+			// grid). Persistent per-node slot state; present=false clears a popped slot.
+			// X/Y/Z are the Go-owned NODE-LOCAL offset (renderer adds the node center).
+			s.setInteriorSlot(ev.Node, ev.Row, ev.Col, ev.Present, int32(ev.Value), ev.X, ev.Y, ev.Z)
+			emit = true // state-change point: emit on interior-bead updates
+
+		case T.KindSelect:
+			// Go-owned selection: a select event marks EITHER one node (ev.Node) OR one edge
+			// (ev.Edge) — never both (the gesture FSM enforces the exclusivity). ev.Edge!=""
+			// selects that edge and clears any node selection; otherwise ev.Node selects that
+			// node (or clears everything when empty) and clears any edge selection. Persistent —
+			// survives across snapshots until the next select. Emit so the change is reflected
+			// in the buffer immediately.
+			if ev.Edge != "" {
+				s.setSelectedEdge(ev.Edge)
+			} else {
+				s.setSelected(ev.Node)
+			}
+			emit = true
+
+		case T.KindHover:
+			// Go-owned hover: a hover event marks EITHER one port (ev.Port != "", on node
+			// ev.Node, ev.Value=1 for an input port) OR one node (ev.Node), never both. It clears
+			// all other node/port hover flags. ev.Node=="" && ev.Port=="" clears all hover.
+			// Persistent until the next hover; emit so the change reflects in the buffer.
+			s.setHovered(ev.Node, ev.Port, ev.Value == 1)
+			emit = true
+		}
 	}
-	switch ev.Kind {
-	case T.KindNodeGeometry:
-		s.onNodeGeometry(ev)
-		s.emitSnapshot() // state-change point: emit on geometry updates
-	case T.KindGeometry:
-		s.onEdgeGeometry(ev)
-		s.emitSnapshot() // state-change point: emit on edge geometry updates
-	case T.KindLayoutLink:
-		s.onLayoutLink(ev)
-		s.emitSnapshot() // state-change point: emit on layout-link registration
-	case T.KindCamera:
-		s.camera = cameraSnapState{
-			px: ev.PX, py: ev.PY, pz: ev.PZ,
-			r:        ev.R,
-			posTheta: ev.PosTheta, posPhi: ev.PosPhi,
-			upTheta: ev.UpTheta, upPhi: ev.UpPhi,
-		}
-		s.emitSnapshot() // state-change point: emit on camera changes
-	case T.KindSceneSphere:
-		// The scene sphere is established ONCE at load and never moves (MODEL.md); Go emits
-		// this a single time at startup, so a plain assign (not a merge) is correct.
-		s.scene = sceneSnapState{cx: ev.PX, cy: ev.PY, cz: ev.PZ, radius: ev.R}
-		s.emitSnapshot()
-
-	case T.KindAbcDragReset:
-		// Re-scope the recipient SET to the drag that is about to start: clear the
-		// drag-scoped set AND every node row's mirrored bit. Count (abcDragCount) is a
-		// cumulative total-events affirmation and is intentionally left alone — only
-		// the NAME SET is drag-scoped.
-		s.abcDragged = map[string]bool{}
-		for i := range s.nodes {
-			s.nodes[i].gotDragMsg = 0
-			s.nodes[i].dragDeltaA = 0
-			s.nodes[i].dragDeltaB = 0
-			s.nodes[i].dragDeltaC = 0
-		}
-		// Emit the CLEARED state. A drag that produces no AbcDrag marks at all is a real
-		// path (isolated node, unresolved neighbor center, lossy-dropped fan) — without
-		// this emit, the webview keeps rendering the PREVIOUS drag's recipients as if they
-		// were this drag's. An empty log for a drag with no recipients is the truth.
-		s.emitSnapshot()
-
-	case T.KindAbcDrag:
-		// Read-only affirmation counter for the in-editor overlay label; never
-		// decrements, no gating semantics (unlike the bool overlay flags above).
-		s.overlay.AbcDragCount++
-		// Add the firing time node (ev.Node) to the current-drag recipient SET and mirror it
-		// into that row's gotDragMsg bit, so the label can list every recipient by name.
-		// Leave state in place if the node hasn't registered geometry yet (should not
-		// happen in practice — the node already exists to have moved).
-		s.abcDragged[ev.Node] = true
-		if idx, ok := s.nodeIndex[ev.Node]; ok {
-			s.nodes[idx].gotDragMsg = 1
-			s.nodes[idx].dragDeltaA = int32(ev.DeltaA)
-			s.nodes[idx].dragDeltaB = int32(ev.DeltaB)
-			s.nodes[idx].dragDeltaC = int32(ev.DeltaC)
-		}
-		s.emitSnapshot()
-
-	case T.KindPosition:
-		// Update the live bead state. Every bead steps once per tick (paced_wire.go), so with
-		// N beads in flight this event fires N times per tick — but the tick, not the event, is
-		// the animation clock (clock.go), so coalesce to at most one emit per tick: emit only
-		// when tickSource reports a tick we have not yet emitted for this stream. positionDirty
-		// tracks any update an emit skip left unpublished, so FinalFlush cannot drop it.
-		k := beadSnapKey{ev.Node, ev.Port, ev.Bead}
-		s.beads[k] = beadSnapState{
-			x: ev.X, y: ev.Y, z: ev.Z,
-			value: ev.Value,
-		}
-		s.positionDirty = true
-		if s.tickSource == nil {
-			s.emitSnapshot()
-		} else if t := s.tickSource(); t != s.lastPosEmitTick {
-			s.lastPosEmitTick = t
-			s.emitSnapshot()
-		}
-
-	case T.KindArrive:
-		// Bead completed traversal: remove it from live beads.
-		delete(s.beads, beadSnapKey{ev.Node, ev.Port, ev.Bead})
-
-	case T.KindRecv:
-		// No per-node state to update; the event itself is already recorded above
-		// (recordEvent) for the EVENT block.
-
-	case T.KindFire:
-		// No per-node state to update; see KindRecv comment above.
-
-	case T.KindSend:
-		// Nothing further to record here; see KindRecv comment above.
-
-	case T.KindNodeBead:
-		// One interior grid slot's authoritative state (node's 2x2 held/interior
-		// grid). Persistent per-node slot state; present=false clears a popped slot.
-		// X/Y/Z are the Go-owned NODE-LOCAL offset (renderer adds the node center).
-		s.setInteriorSlot(ev.Node, ev.Row, ev.Col, ev.Present, int32(ev.Value), ev.X, ev.Y, ev.Z)
-		s.emitSnapshot() // state-change point: emit on interior-bead updates
-
-	case T.KindSelect:
-		// Go-owned selection: a select event marks EITHER one node (ev.Node) OR one edge
-		// (ev.Edge) — never both (the gesture FSM enforces the exclusivity). ev.Edge!=""
-		// selects that edge and clears any node selection; otherwise ev.Node selects that
-		// node (or clears everything when empty) and clears any edge selection. Persistent —
-		// survives across snapshots until the next select. Emit so the change is reflected
-		// in the buffer immediately.
-		if ev.Edge != "" {
-			s.setSelectedEdge(ev.Edge)
-		} else {
-			s.setSelected(ev.Node)
-		}
-		s.emitSnapshot()
-
-	case T.KindHover:
-		// Go-owned hover: a hover event marks EITHER one port (ev.Port != "", on node
-		// ev.Node, ev.Value=1 for an input port) OR one node (ev.Node), never both. It clears
-		// all other node/port hover flags. ev.Node=="" && ev.Port=="" clears all hover.
-		// Persistent until the next hover; emit so the change reflects in the buffer.
-		s.setHovered(ev.Node, ev.Port, ev.Value == 1)
+	if emit {
 		s.emitSnapshot()
 	}
 }
