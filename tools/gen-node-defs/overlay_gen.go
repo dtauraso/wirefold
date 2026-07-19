@@ -1,0 +1,269 @@
+// overlay_gen.go emitter: mechanically derives the entire Go-side overlay
+// wiring (overlayState struct, flip/emit methods, MoveDispatch delegators,
+// the overlayToggles table) from OVERLAY_FLAG_NAMES in messages.ts. TS is the
+// input here, Go the output — the one inverted-direction pipeline.
+package main
+
+import (
+	"bufio"
+	"bytes"
+	"fmt"
+	"go/format"
+	"os"
+	"regexp"
+	"strings"
+)
+
+// overlayFlag is one entry of the OVERLAY_FLAG_NAMES vocabulary with the mechanical
+// Go names derived from (or overridden for) its camelCase flag string.
+type overlayFlag struct {
+	flag       string // camelCase wire flag, e.g. "tori"
+	field      string // overlayState bool field, e.g. "sceneToriVisible"
+	method     string // Toggle/Emit/Trace method basename, e.g. "SceneTori"
+	breadcrumb string // Breadcrumb scope arg on Toggle ("scene"/"nodes"); "" = uniform flip
+	accessor   bool   // emit a bare bool accessor method
+	defaultOn  bool   // startup default value
+}
+
+// overlayOverride names the per-flag deviations from the uniform derivation. Kept
+// data-driven (per the task's option 1) so the deviating flags are still generated,
+// just with their extra behavior. Any flag absent here is fully uniform.
+type overlayOverride struct {
+	field, method, breadcrumb string
+	accessor, defaultOff      bool
+}
+
+var overlayOverrides = map[string]overlayOverride{
+	"tori":        {field: "sceneToriVisible", method: "SceneTori"},
+	"scenePoles":  {breadcrumb: "scene"},
+	"nodePoles":   {breadcrumb: "nodes"},
+	"overlays":    {method: "OverlaysVis"},
+	"doubleLinks": {defaultOff: true},
+}
+
+// parseOverlayFlags reads the OVERLAY_FLAG_NAMES const in messages.ts (bounded by the
+// OVERLAY_FLAGS_START / OVERLAY_FLAGS_END sentinels) and returns the flag metadata in
+// source order, applying overlayOverrides for the deviating flags.
+func parseOverlayFlags(messagesPath string) ([]overlayFlag, error) {
+	data, err := os.ReadFile(messagesPath)
+	if err != nil {
+		return nil, err
+	}
+	lines := strings.Split(string(data), "\n")
+	// Match the sentinels ANCHORED: a comment line carrying the marker and nothing else.
+	// strings.Contains is a trap here — the moment messages.ts's own prose names the
+	// sentinel (e.g. "the flags below are fenced by OVERLAY_FLAGS_START/END", exactly the
+	// style this repo uses), an unanchored scan opens the fence on that prose line and the
+	// generator silently emits a WRONG flag set. Same class as the guards' fence bug.
+	start, end := -1, -1
+	for i, l := range lines {
+		switch strings.TrimSpace(l) {
+		case "// OVERLAY_FLAGS_START":
+			if start == -1 {
+				start = i
+			}
+		case "// OVERLAY_FLAGS_END":
+			if start != -1 && end == -1 {
+				end = i
+			}
+		}
+		if end != -1 {
+			break
+		}
+	}
+	if start == -1 || end == -1 || end <= start {
+		return nil, fmt.Errorf("OVERLAY_FLAGS_START/END sentinels not found in %s", messagesPath)
+	}
+	strLit := regexp.MustCompile(`"([A-Za-z][A-Za-z0-9]*)"`)
+	var flags []overlayFlag
+	seen := map[string]bool{}
+	for _, l := range lines[start+1 : end] {
+		m := strLit.FindStringSubmatch(l)
+		if m == nil {
+			continue
+		}
+		name := m[1]
+		seen[name] = true
+		of := overlayFlag{
+			flag:      name,
+			field:     name + "Visible",
+			method:    strings.ToUpper(name[:1]) + name[1:],
+			defaultOn: true,
+		}
+		if ov, ok := overlayOverrides[name]; ok {
+			if ov.field != "" {
+				of.field = ov.field
+			}
+			if ov.method != "" {
+				of.method = ov.method
+			}
+			of.breadcrumb = ov.breadcrumb
+			of.accessor = ov.accessor
+			if ov.defaultOff {
+				of.defaultOn = false
+			}
+		}
+		flags = append(flags, of)
+	}
+	if len(flags) == 0 {
+		return nil, fmt.Errorf("no overlay flags parsed from %s", messagesPath)
+	}
+	// Every overlayOverrides key MUST name a real flag in OVERLAY_FLAG_NAMES. A typo
+	// in an override key (e.g. "tori" mistyped "toriz") would otherwise silently fall
+	// back to the uniform derivation, generating a wrong Go field/method with a clean
+	// build. fatalf naming the bad key closes that gap.
+	for key := range overlayOverrides {
+		if !seen[key] {
+			fatalf("overlayOverrides key %q is not a real overlay flag in OVERLAY_FLAG_NAMES", key)
+		}
+	}
+	return flags, nil
+}
+
+// writeOverlayGen emits nodes/Wiring/overlay_gen.go: the entire Go-side overlay wiring
+// mechanically derived from OVERLAY_FLAG_NAMES — the overlayState struct + flip/emit
+// methods, the defaultOverlayState constructor, the MoveDispatch delegators, and the
+// overlayToggles method-expression table. Deviating flags (scene/node poles Breadcrumb)
+// are generated from overlayOverrides. Adding an overlay flag
+// now means editing OVERLAY_FLAG_NAMES (+ the ~4-5 TS/render sites); every Go site above
+// is regenerated. Parity of the generated table is guarded by check-edit-op-parity.sh
+// (which reads this file's OVERLAY_TOGGLES sentinel) and staleness by check-generated.sh.
+func writeOverlayGen(outPath string, flags []overlayFlag) error {
+	var buf bytes.Buffer
+	w := bufio.NewWriter(&buf)
+
+	fmt.Fprintln(w, `// GENERATED by tools/gen-node-defs — do not edit.`)
+	fmt.Fprintln(w, `// Source: OVERLAY_FLAG_NAMES in tools/topology-vscode/src/messages.ts.`)
+	fmt.Fprintln(w, `// Regenerate with: cd tools/topology-vscode && npm run gen:node-defs`)
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, `package Wiring`)
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, `import (`)
+	fmt.Fprintln(w, "\t\"fmt\"")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "\tT \"github.com/dtauraso/wirefold/Trace\"")
+	fmt.Fprintln(w, `)`)
+	fmt.Fprintln(w)
+
+	// overlayState struct.
+	fmt.Fprintln(w, `// overlayState groups the per-toggle overlay-visibility booleans and their`)
+	fmt.Fprintln(w, `// flip/emit logic. Owned by MoveDispatch (md.ov); the delegators below keep the`)
+	fmt.Fprintln(w, `// stdin reader's overlayToggles method-expression table binding MoveDispatch.`)
+	fmt.Fprintln(w, `type overlayState struct {`)
+	for _, f := range flags {
+		fmt.Fprintf(w, "\t%s bool\n", f.field)
+	}
+	fmt.Fprintln(w, `}`)
+	fmt.Fprintln(w)
+
+	// setFlag helper.
+	fmt.Fprintln(w, `// setFlag flips *field and emits the new value via emit. Shared body of the uniform`)
+	fmt.Fprintln(w, `// (flip-then-emit) Toggle* methods.`)
+	fmt.Fprintln(w, `func (o *overlayState) setFlag(field *bool, emit func(bool)) {`)
+	fmt.Fprintln(w, "\t*field = !*field")
+	fmt.Fprintln(w, "\temit(*field)")
+	fmt.Fprintln(w, `}`)
+	fmt.Fprintln(w)
+
+	// Per-flag Toggle/Emit (+ accessor) on overlayState.
+	for _, f := range flags {
+		fmt.Fprintf(w, "// Toggle%s flips %s and emits a %s event.\n", f.method, f.field, kebabOf(f.method))
+		fmt.Fprintf(w, "func (o *overlayState) Toggle%s(tr *T.Trace) {\n", f.method)
+		if f.breadcrumb != "" {
+			fmt.Fprintf(w, "\to.%s = !o.%s\n", f.field, f.field)
+			fmt.Fprintf(w, "\ttr.Breadcrumb(\"pole-toggle-go\", %q, \"\", fmt.Sprintf(\"visible=%%v\", o.%s))\n", f.breadcrumb, f.field)
+			fmt.Fprintf(w, "\ttr.%s(o.%s)\n", f.method, f.field)
+		} else {
+			fmt.Fprintf(w, "\to.setFlag(&o.%s, tr.%s)\n", f.field, f.method)
+		}
+		fmt.Fprintln(w, `}`)
+		fmt.Fprintln(w)
+		fmt.Fprintf(w, "// Emit%s emits the current %s without toggling it.\n", f.method, f.field)
+		fmt.Fprintf(w, "func (o *overlayState) Emit%s(tr *T.Trace) {\n", f.method)
+		fmt.Fprintf(w, "\ttr.%s(o.%s)\n", f.method, f.field)
+		fmt.Fprintln(w, `}`)
+		fmt.Fprintln(w)
+		if f.accessor {
+			fmt.Fprintf(w, "// %s returns the current %s.\n", f.method, f.field)
+			fmt.Fprintf(w, "func (o *overlayState) %s() bool {\n", f.method)
+			fmt.Fprintf(w, "\treturn o.%s\n", f.field)
+			fmt.Fprintln(w, `}`)
+			fmt.Fprintln(w)
+		}
+	}
+
+	// SetGuideVisibility on overlayState.
+	fmt.Fprintln(w, `// SetGuideVisibility installs an explicit-visibility snapshot wholesale (the TS`)
+	fmt.Fprintln(w, `// startup push so settings survive a Go respawn) and emits each so the renderer`)
+	fmt.Fprintln(w, `// reflects them.`)
+	fmt.Fprintln(w, `func (o *overlayState) SetGuideVisibility(ov overlayState, tr *T.Trace) {`)
+	fmt.Fprintln(w, "\t*o = ov")
+	for _, f := range flags {
+		fmt.Fprintf(w, "\to.Emit%s(tr)\n", f.method)
+	}
+	fmt.Fprintln(w, `}`)
+	fmt.Fprintln(w)
+
+	// defaultOverlayState constructor.
+	fmt.Fprintln(w, `// defaultOverlayState is the startup overlay snapshot used by newMoveDispatch.`)
+	fmt.Fprintln(w, `func defaultOverlayState() overlayState {`)
+	fmt.Fprintln(w, "\treturn overlayState{")
+	for _, f := range flags {
+		if f.defaultOn {
+			fmt.Fprintf(w, "\t\t%s: true,\n", f.field)
+		}
+	}
+	fmt.Fprintln(w, "\t}")
+	fmt.Fprintln(w, `}`)
+	fmt.Fprintln(w)
+
+	// MoveDispatch delegators. Only Toggle* (and accessors) are delegated: callers
+	// that need Emit*/SetGuideVisibility reach md.ov directly (no MoveDispatch-level
+	// Emit tier — see scene_overlays_persist.go).
+	fmt.Fprintln(w, `// Overlay-visibility API — thin delegators to the owned overlayState. The public`)
+	fmt.Fprintln(w, `// signatures are unchanged (overlayToggles binds these method expressions).`)
+	for _, f := range flags {
+		fmt.Fprintf(w, "func (md *MoveDispatch) Toggle%s(tr *T.Trace) { md.ov.Toggle%s(tr) }\n", f.method, f.method)
+		if f.accessor {
+			fmt.Fprintf(w, "func (md *MoveDispatch) %s() bool { return md.ov.%s() }\n", f.method, f.method)
+		}
+	}
+	fmt.Fprintln(w)
+
+	// overlayToggles map (sentinel-bounded for check-edit-op-parity.sh axis 3).
+	fmt.Fprintln(w, `// overlayToggles maps an overlay FLAG name (the attr="toggle" wire name) to the`)
+	fmt.Fprintln(w, `// MoveDispatch method that flips it.`)
+	fmt.Fprintln(w, `//`)
+	fmt.Fprintln(w, `// OVERLAY_TOGGLES_START`)
+	fmt.Fprintln(w, `var overlayToggles = map[string]func(*MoveDispatch, *T.Trace){`)
+	for _, f := range flags {
+		fmt.Fprintf(w, "\t%q: (*MoveDispatch).Toggle%s,\n", f.flag, f.method)
+	}
+	fmt.Fprintln(w, `}`)
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, `// OVERLAY_TOGGLES_END`)
+	fmt.Fprintln(w)
+
+	w.Flush()
+	formatted, err := format.Source(buf.Bytes())
+	if err != nil {
+		return fmt.Errorf("format overlay_gen.go: %w", err)
+	}
+	return os.WriteFile(outPath, formatted, 0644)
+}
+
+// kebabOf converts a PascalCase method name to its kebab trace-kind string (doc only).
+func kebabOf(s string) string {
+	var out []rune
+	for i, r := range s {
+		if i > 0 && r >= 'A' && r <= 'Z' {
+			out = append(out, '-')
+		}
+		if r >= 'A' && r <= 'Z' {
+			out = append(out, r+32)
+		} else {
+			out = append(out, r)
+		}
+	}
+	return string(out)
+}
