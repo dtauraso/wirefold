@@ -1224,6 +1224,24 @@ func (md *MoveDispatch) neighborSetCRequantize(selfID, fromID string, fromCenter
 	// boundary, while every OTHER neighbor of selfID is carried forward as index x step.
 	md.requantizePoleTraced(lh, map[string]vec3{fromID: fromCenter.sub(selfCenter)})
 
+	// A time node (HoldNewSendOld) interprets an incoming abc change from a peer as a
+	// "drag" event; log its response so the interpretation is observable (probe-merge.sh
+	// --debug -> .probe/go-debug.jsonl). Behavior is still the plain stay-put re-quantize
+	// above — this breadcrumb is the observability step, not (yet) a motion/propagation
+	// change. The logged abc is selfID's freshly re-quantized edge to the peer.
+	if md.tr != nil && md.NodeKind(selfID) == "HoldNewSendOld" {
+		var it, ip, ir int
+		for _, lp := range lh.LocalPolarsSnapshot() {
+			if lp.To == fromID {
+				it, ip, ir = lp.QuantITheta, lp.QuantIPhi, lp.QuantIR
+				break
+			}
+		}
+		md.tr.Breadcrumb("time.abc-drag", selfID, fromID,
+			fmt.Sprintf("peer=%s peerCenter=(%.3f,%.3f,%.3f) abc=(%d,%d,%d)",
+				fromID, fromCenter.X, fromCenter.Y, fromCenter.Z, it, ip, ir))
+	}
+
 	if md.quantOffsetPersist != nil {
 		if root := md.quantOffsetPersist.root; root != "" {
 			if err := WriteLocalPolars(root, selfID, lh.LocalPolarsSnapshot(), lh.Pole()); err != nil {
