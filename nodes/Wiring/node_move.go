@@ -1142,7 +1142,7 @@ func (md *MoveDispatch) fanEdgesAndPartners(newCenters map[string]vec3, enqueue 
 // re-expressed indices are byte-identical to what's already stored (fromAxisFrame then
 // azimuthFrom about the SAME pole is an exact round-trip): the write is skipped, a true
 // no-op, not a reproject that happens to land on the same numbers.
-func (md *MoveDispatch) requantizePoleTraced(lh *LayoutHolder, updates map[string]vec3, nodeID string) dir {
+func (md *MoveDispatch) requantizePoleTraced(lh *LayoutHolder, updates map[string]vec3) dir {
 	existing := lh.LocalPolarsSnapshot()
 	oldPole := lh.Pole()
 
@@ -1222,7 +1222,7 @@ func (md *MoveDispatch) neighborSetCRequantize(selfID, fromID string, fromCenter
 	// center. fromID is the ONLY fresh update, so requantizePoleTraced re-derives selfID's
 	// edge to fromID (theta, phi AND r, about selfID's rotating pole) at the cart<->polar
 	// boundary, while every OTHER neighbor of selfID is carried forward as index x step.
-	md.requantizePoleTraced(lh, map[string]vec3{fromID: fromCenter.sub(selfCenter)}, selfID)
+	md.requantizePoleTraced(lh, map[string]vec3{fromID: fromCenter.sub(selfCenter)})
 
 	if md.quantOffsetPersist != nil {
 		if root := md.quantOffsetPersist.root; root != "" {
@@ -1368,7 +1368,7 @@ func (md *MoveDispatch) requantizeLocalPolars(nodeID string, newPos vec3) {
 	if len(updatesX) == 0 {
 		return
 	}
-	md.requantizePoleTraced(lhX, updatesX, nodeID)
+	md.requantizePoleTraced(lhX, updatesX)
 	writePersist(nodeID, lhX)
 
 	// X tells EVERY direct domain neighbor M its NEW c (the quantized edge radius X just

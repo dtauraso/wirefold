@@ -59,7 +59,7 @@ func TestRequantizeUsesStoredIndicesNotLiveCartesian(t *testing.T) {
 	}
 
 	offFar := offsetFromDir(dirStored).scale(40)
-	md.requantizePoleTraced(lh, map[string]vec3{"far": offFar}, "self")
+	md.requantizePoleTraced(lh, map[string]vec3{"far": offFar})
 	if lh.Pole() != (dir{Theta: 0, Phi: 0}) {
 		t.Fatalf("pole should still be home before any offender enters: got %+v", lh.Pole())
 	}
@@ -76,7 +76,7 @@ func TestRequantizeUsesStoredIndicesNotLiveCartesian(t *testing.T) {
 	// offset, and D1/D2 share the same Y-component (cos(70°)) regardless of bearing.
 	dirNear := dir{Theta: poleKickTheta / 2, Phi: 0}
 	offNear := offsetFromDir(dirNear).scale(20)
-	newPole := md.requantizePoleTraced(lh, map[string]vec3{"near": offNear}, "self")
+	newPole := md.requantizePoleTraced(lh, map[string]vec3{"near": offNear})
 	if newPole == (dir{Theta: 0, Phi: 0}) {
 		t.Fatalf("expected the pole to tilt off home once a neighbor entered the singular zone")
 	}
@@ -140,7 +140,7 @@ func TestRequantizeIndexTimesStepIsAuthoritative(t *testing.T) {
 
 	before := lh.LocalPolarsSnapshot()
 
-	newPole := md.requantizePoleTraced(lh, map[string]vec3{}, "self")
+	newPole := md.requantizePoleTraced(lh, map[string]vec3{})
 	if newPole != (dir{Theta: 0, Phi: 0}) {
 		t.Fatalf("pole should stay home: got %+v", newPole)
 	}
@@ -185,14 +185,14 @@ func TestPersistedPoleDrivesReloadWorldPositions(t *testing.T) {
 
 	dirFar := dir{Theta: 60 * testDeg, Phi: 30 * testDeg}
 	offFar := offsetFromDir(dirFar).scale(40)
-	md.requantizePoleTraced(lh, map[string]vec3{"far": offFar}, "self")
+	md.requantizePoleTraced(lh, map[string]vec3{"far": offFar})
 	if lh.Pole() != (dir{Theta: 0, Phi: 0}) {
 		t.Fatalf("pole should still be home before the offender enters: got %+v", lh.Pole())
 	}
 
 	dirNear := dir{Theta: poleKickTheta / 2, Phi: 0}
 	offNear := offsetFromDir(dirNear).scale(20)
-	tiltedPole := md.requantizePoleTraced(lh, map[string]vec3{"near": offNear}, "self")
+	tiltedPole := md.requantizePoleTraced(lh, map[string]vec3{"near": offNear})
 	if tiltedPole == (dir{Theta: 0, Phi: 0}) {
 		t.Fatalf("expected the pole to tilt off home")
 	}

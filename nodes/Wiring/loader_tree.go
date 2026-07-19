@@ -51,7 +51,9 @@ type jsonMeta struct {
 	// LocalPoleTheta/LocalPolePhi — see specNode's field doc (loader.go).
 	LocalPoleTheta *float64 `json:"localPoleTheta,omitempty"`
 	LocalPolePhi   *float64 `json:"localPolePhi,omitempty"`
-	// Gate — see specNode's field doc (loader.go).
+	// Gate — see specNode's field doc (loader.go). UNCONSUMED since the
+	// rule/gate/anchor cascade was deleted (2026-07-18): round-tripped to/from
+	// meta.json only, no code path reads it for behavior.
 	Gate bool `json:"gate,omitempty"`
 }
 

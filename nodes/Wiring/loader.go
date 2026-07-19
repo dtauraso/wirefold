@@ -82,6 +82,11 @@ type specNode struct {
 	// neighbors (derived from LocalPolars, in the same order), commits, and
 	// self-triggers its own edge-c equalize. NOT derivable from degree (other
 	// 2-link nodes exist that are plain leaves) — authored in the spec.
+	//
+	// UNCONSUMED since the rule/gate/anchor cascade was deleted (2026-07-18): still
+	// read/written for meta.json round-trip only (loader_tree.go copies it into
+	// jsonMeta.Gate and back), but no code path branches on it. Do not assume it
+	// drives behavior; grep call sites before relying on it again.
 	Gate bool `json:"gate,omitempty"`
 }
 
