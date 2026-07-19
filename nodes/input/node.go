@@ -25,9 +25,20 @@ type Node struct {
 	// Clock is the shared node-level clock, injected by Wiring.reflectBuild
 	// directly (not derived from any specific wired output port — deriving it
 	// from ToHoldNewSendOld/ToExcitatory/ToPacer was fragile: whichever port
-	// happened to be wired first controlled pacing). nil on test builds
-	// without a loader; tests that exercise the paced path must set it
-	// (e.g. Wiring.NewRealClock()).
+	// happened to be wired first controlled pacing). reflectBuild injects by
+	// matching struct fields typed exactly `Wiring.Clock` (builders.go
+	// reflectBuild) — a bare field like this is an unguarded nil-interface trap
+	// on any construction path reflectBuild doesn't reach (a type rename that
+	// silently drops the injection, or a test building &Node{} directly),
+	// exactly the hazard ports.go's In.Clock() comment describes for
+	// PORT-derived clocks: an unguarded `clk.Tick()` panics with no recover
+	// over the node goroutine, taking down every other node and the buffer
+	// stream with it. Defaulted to Wiring.NewInertClock() by the Register
+	// factory below so it is NEVER nil even before reflectBuild runs (or on a
+	// test build with no loader); clock() re-guards on every read as a second
+	// line of defense in case some future construction path bypasses the
+	// factory. Production reflectBuild always overwrites this with the real
+	// shared clock.
 	Clock            Wiring.Clock
 	Init             []int `wire:"data.init"`
 	Repeat           bool  `wire:"data.repeat"`
@@ -41,6 +52,17 @@ type Node struct {
 	// is skipped so existing topologies without a Pacer are unaffected.
 	ToPacer    *Wiring.Out
 	FeedbackIn *Wiring.In
+}
+
+// clock returns n.Clock, guarded against nil (belt-and-suspenders: the
+// Register factory below already seeds a real default, but this is the single
+// read path every call site goes through so no future construction path can
+// reintroduce the bare-nil panic hazard described on the Clock field).
+func (n *Node) clock() Wiring.Clock {
+	if n.Clock == nil {
+		return Wiring.NewInertClock()
+	}
+	return n.Clock
 }
 
 // fanOutPlace places v on every wired fan-out output (same cycle — preserves
@@ -57,13 +79,13 @@ type Node struct {
 // different placementTicks, delivering a full cycle apart despite identical
 // latency.
 func (n *Node) fanOutPlace(v int, tick int64) bool {
-	if n.ToHoldNewSendOld.Wired() && !n.ToHoldNewSendOld.PlaceDrivenAt(v, tick).Live() {
+	if n.ToHoldNewSendOld.Wired() && n.ToHoldNewSendOld.PlaceDrivenAt(v, tick).Failed() {
 		return false
 	}
-	if n.ToExcitatory.Wired() && !n.ToExcitatory.PlaceDrivenAt(v, tick).Live() {
+	if n.ToExcitatory.Wired() && n.ToExcitatory.PlaceDrivenAt(v, tick).Failed() {
 		return false
 	}
-	if n.ToPacer.Wired() && !n.ToPacer.PlaceDrivenAt(v, tick).Live() {
+	if n.ToPacer.Wired() && n.ToPacer.PlaceDrivenAt(v, tick).Failed() {
 		return false
 	}
 	return true
@@ -115,7 +137,7 @@ func popEnd(working, backup *[]int, init []int) int {
 //	s == 1 -> POP the end (the "change the bead" action); refill on empty.
 //	s == 0 -> hold: do nothing, keep sending the same last bead next loop.
 func (n *Node) updateFeedbackRing(ctx context.Context, working, backup *[]int, init []int, emitBeads func()) {
-	clk := n.Clock
+	clk := n.clock()
 
 	// ONE flat loop, identical in shape to the plain source path below: each
 	// cycle does exactly one step of work, with NO nested wait loop. The
@@ -232,7 +254,7 @@ func (n *Node) Update(ctx context.Context) {
 	// drained it simply idles (no fire) but keeps cycling. Layout/drag handling
 	// is NOT here — the node's dedicated always-on layout goroutine owns it
 	// (split-layout-bead-goroutines.md), independent of this pausable bead loop.
-	clk := n.Clock
+	clk := n.clock()
 	emitted := 0
 	// Fire cadence is measured in CLOCK TICKS, exactly like a gate's window/dwell
 	// (gatecommon/gate.go: fire when now()-dwellStart >= fireDwellTicks). Tick()
@@ -280,5 +302,8 @@ func inputCadenceTicks(n *Node) int64 {
 }
 
 func init() {
-	Wiring.Register("Input", func() any { return &Node{} })
+	// Seed Clock to the real inert default (never nil) at construction, so it
+	// is safe even before reflectBuild's field-type injection runs (or on a
+	// test build that registers/builds this kind with no loader at all).
+	Wiring.Register("Input", func() any { return &Node{Clock: Wiring.NewInertClock()} })
 }

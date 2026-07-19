@@ -469,7 +469,7 @@ func (md *MoveDispatch) gestPointerUp(ev rawInputMsg, slotReg SlotRegistry, tr *
 		// buffer snapshot marks the node's Selected column.
 		md.applySelect(ev, tr)
 	}
-	g.reset()
+	g.reset(&md.vp.viewpoint)
 }
 
 // SetHoverPortByRow resolves nodeRow → node id and sets the SAME hover state updateHover
@@ -632,7 +632,17 @@ func (md *MoveDispatch) gestWheel(ev rawInputMsg, tr *T.Trace) {
 	md.PanViewpoint(disp, tr)
 }
 
-func (g *gestureState) reset() {
+// reset clears the gesture FSM back to idle at the end of every gesture (pointer-up).
+// It also clears vp.lockedAxis (the handhold-constrained-orbit rotation axis frozen at
+// gesture start — see viewpoint.lockedAxis's doc comment) so that field's own "nil
+// between gestures" doc is actually true: lockedAxis is gesture-scoped state, exactly
+// like dragNode/wireNode/portMoveNode above, it just happens to live on viewpoint
+// instead of gestureState (frozen once per handhold gesture in orbit's lazy-init path).
+// Today it is always overwritten before use anyway (every new gesture reseeds it via
+// SetViewpoint/seedOrbitPivot before orbit ever reads it), so this had no live bug —
+// but reset() is the obvious single home for "gesture-scoped state ends here", so it
+// belongs here rather than living only as an unenforced comment.
+func (g *gestureState) reset(vp *viewpoint) {
 	g.phase = gestIdle
 	g.emptyDown = false
 	g.dragNode = ""
@@ -640,12 +650,25 @@ func (g *gestureState) reset() {
 	g.portMoveNode = ""
 	g.handholdDown = false
 	g.secondary = false
+	vp.lockedAxis = nil
 }
 
 // applyRingAnchor snaps a world-space direction (node center → pointer) to the node's
 // nearest ring-anchor index and mail-sorts a moveMsgKindAnchor to the node's mover AND
 // every incident edge mover — the SAME dispatch the op=update kind=node attr=anchor path
 // uses (applyUpdate). Live-only (no disk persistence), matching the FSM node-drag path.
+//
+// This sends `ch <- msg` DIRECTLY into the target inboxes, bypassing the
+// enqueueFor/outbox split every mover's OWN handler goroutine must use for its
+// sends (cascade-deadlock-fix.md). That split exists to prevent two mutually-
+// adjacent MOVER goroutines from deadlocking each other — both mid-handle, each
+// blocked sending into the other's full inbox, while neither is draining its
+// own (draining only resumes after handle returns). applyRingAnchor runs on the
+// stdin/gesture goroutine, not on any mover's own handler: it is never itself
+// the target of one of these sends, so it cannot be a link in that cycle — a
+// block here can only ever be "wait for the target's drain goroutine to read",
+// never "wait for a goroutine that is itself waiting on us". That is a real,
+// structural reason this exemption holds, not just "it hasn't happened yet".
 func (md *MoveDispatch) applyRingAnchor(node, port string, isInput bool, dir vec3) {
 	anchorID := snapToRingAnchorIndex(md.NodeKind(node), dir)
 	msg := moveMsg{Kind: moveMsgKindAnchor, NodeID: node, Port: port, IsInput: isInput, AnchorId: anchorID}

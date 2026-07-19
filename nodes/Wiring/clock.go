@@ -167,3 +167,16 @@ func (inertClock) SetSpeed(float64) {}
 
 // Compile-time assertion that inertClock satisfies Clock.
 var _ Clock = inertClock{}
+
+// NewInertClock returns the same inert, never-nil, never-spinning Clock that an
+// unwired In falls back to (inertClock, unexported so it can't be constructed
+// outside this package). It is exported so a node kind that holds a bare
+// `Wiring.Clock` struct field injected by reflectBuild (rather than derived
+// from a wired port's In.Clock/Out.Clock) can SEED that field to a real, safe
+// default at construction instead of leaving it as an unrepresentable-nil trap
+// on test builds without a loader. See input.Node.Clock's doc comment for the
+// motivating case: reflectBuild injects by matching the field's exact type, so
+// a rename silently misses it and an unguarded `clk.Tick()` panics with no
+// recover over the node goroutine — the same hazard ports.go's In.Clock()
+// comment describes for PORT-derived clocks, reintroduced via a bare field.
+func NewInertClock() Clock { return inertClock{} }

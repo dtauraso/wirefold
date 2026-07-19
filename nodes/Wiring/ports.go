@@ -346,39 +346,71 @@ func (o *Out) StepOnceAt(ctx context.Context, tick int64) {
 	o.pw.StepOnceAt(ctx, tick)
 }
 
+// DriveOutcome distinguishes the three outcomes a drive placement can have.
+// Collapsing them onto a single bool (the pre-fix shape) made "chan mode, sent
+// fine, nothing more to drive" indistinguishable from "placement failed /
+// wire torn down" — callers that stopped their loop on !Live() then stopped
+// on every chan-mode send too. Keeping all three explicit makes that
+// conflation unrepresentable.
+type DriveOutcome uint8
+
+const (
+	// DrivePlaced: a real bead was placed on a paced wire; delivery is driven
+	// by subsequent StepOnce/StepOnceAt calls.
+	DrivePlaced DriveOutcome = iota
+	// DriveSentChan: chan mode (tests) — the value was sent (or dropped by a
+	// full non-blocking select) on the raw channel. Nothing to drive further.
+	DriveSentChan
+	// DriveFailed: nil Out, or paced placement failed (wire torn down). The
+	// caller should treat this as "stop, the wire is gone".
+	DriveFailed
+)
+
 // DriveItem is an exported handle to one placed bead. Delivery is driven by
 // per-cycle StepOnce on the underlying wire, not by the caller directly — this
-// type only reports whether the placement succeeded (Live).
+// type reports which of the three DriveOutcomes occurred.
 type DriveItem struct {
-	live bool
+	outcome DriveOutcome
 }
 
 // Live reports whether this DriveItem carries a bead actually placed on a
-// paced wire (i.e. PlaceDriven succeeded in paced-wire mode). False for a nil
-// Out, chan mode, or a failed placement (torn-down wire) — callers that
-// need to detect placement failure check this.
+// paced wire (i.e. PlaceDriven succeeded in paced-wire mode) — outcome ==
+// DrivePlaced. False for a nil Out, chan mode, or a failed placement
+// (torn-down wire). Callers that need ONLY "did this become a real,
+// time-able in-flight bead" (e.g. holdnewsendold's processing-window length)
+// check this; callers that need "should I stop, the wire is gone" must check
+// Failed() instead — Live() alone cannot distinguish chan-mode success from
+// failure.
 func (di DriveItem) Live() bool {
-	return di.live
+	return di.outcome == DrivePlaced
+}
+
+// Failed reports whether the placement failed outright: a nil Out, or a paced
+// placement that could not proceed (wire torn down). Callers driving a
+// continuous-placement loop should stop on Failed(), not on !Live() — a
+// chan-mode successful send is also !Live() (DriveSentChan) but is not a
+// failure and must not stop the loop.
+func (di DriveItem) Failed() bool {
+	return di.outcome == DriveFailed
 }
 
 // PlaceDriven places one bead on this Out WITHOUT spawning a walker, emits the
-// SendWire trace, and returns a DriveItem reporting whether the placement
-// succeeded. Delivery is driven by the caller's per-cycle StepOnce/StepOnceAt
-// on this Out (or the underlying wire) each subsequent cycle. In chan mode
-// (tests) it sends immediately on the raw channel and returns an inert item,
-// so unit tests keep their synchronous chan semantics. A nil Out, or a failed
-// placement (deleted), returns an inert item.
+// SendWire trace, and returns a DriveItem reporting the outcome. Delivery is
+// driven by the caller's per-cycle StepOnce/StepOnceAt on this Out (or the
+// underlying wire) each subsequent cycle. In chan mode (tests) it sends
+// immediately on the raw channel and returns DriveSentChan, so unit tests keep
+// their synchronous chan semantics. A nil Out returns DriveFailed.
 func (o *Out) PlaceDriven(v int) DriveItem {
 	if o == nil {
-		return DriveItem{}
+		return DriveItem{outcome: DriveFailed}
 	}
 	if o.pw != nil {
 		if _, ok := o.placeDrivenNoWalker(v); !ok {
-			return DriveItem{}
+			return DriveItem{outcome: DriveFailed}
 		}
-		return DriveItem{live: true}
+		return DriveItem{outcome: DrivePlaced}
 	}
-	// chan mode (tests): no drive needed, send now and return inert.
+	// chan mode (tests): no drive needed, send now and return DriveSentChan.
 	if o.ch != nil {
 		select {
 		case o.ch <- v:
@@ -386,7 +418,7 @@ func (o *Out) PlaceDriven(v int) DriveItem {
 		default:
 		}
 	}
-	return DriveItem{}
+	return DriveItem{outcome: DriveSentChan}
 }
 
 // PlaceDrivenAt is PlaceDriven with the placement tick PINNED by the caller
@@ -397,24 +429,24 @@ func (o *Out) PlaceDriven(v int) DriveItem {
 // placementTick concept there).
 func (o *Out) PlaceDrivenAt(v int, tick int64) DriveItem {
 	if o == nil {
-		return DriveItem{}
+		return DriveItem{outcome: DriveFailed}
 	}
 	if o.pw != nil {
 		if _, ok := o.placeDrivenNoWalkerAt(v, tick); !ok {
-			return DriveItem{}
+			return DriveItem{outcome: DriveFailed}
 		}
-		return DriveItem{live: true}
+		return DriveItem{outcome: DrivePlaced}
 	}
-	// chan mode (tests): no drive needed, send now and return inert.
+	// chan mode (tests): no drive needed, send now and return DriveSentChan.
 	if o.ch != nil {
 		select {
 		case o.ch <- v:
 			o.trace.Send(o.node, o.port, v)
 		default:
 		}
-		return DriveItem{}
+		return DriveItem{outcome: DriveSentChan}
 	}
-	return DriveItem{}
+	return DriveItem{outcome: DriveSentChan}
 }
 
 // OutMulti is a fanout port: a slice of Outs sharing one logical name.
@@ -452,6 +484,15 @@ func NewInPaced(pw *PacedWire, ctx context.Context, node, port string, tr *T.Tra
 // with real segments, not through this.
 func NewPacedOutNoGeom(pw *PacedWire, ctx context.Context, node, port string, tr *T.Trace, rule SendRule, arcLength, simLatencyMs float64, edgeLabel string) *Out {
 	return NewOutPaced(pw, ctx, node, port, tr, rule, arcLength, simLatencyMs, wireSegment{}, edgeLabel)
+}
+
+// NewOutChanForTest builds a chan-mode Out for tests outside the Wiring
+// package. Chan mode's backing channel (ch) is unexported so other packages'
+// tests (e.g. gatecommon's DriveHeld regression) cannot construct one
+// directly; this is the supported entry point, mirroring NewPacedOutNoGeom's
+// role for paced-mode tests.
+func NewOutChanForTest(ch chan<- int, node, port string, tr *T.Trace) *Out {
+	return &Out{ch: ch, node: node, port: port, trace: tr}
 }
 
 func NewOutPaced(pw *PacedWire, ctx context.Context, node, port string, tr *T.Trace, rule SendRule, arcLength, simLatencyMs float64, seg wireSegment, edgeLabel string) *Out {
