@@ -1,47 +1,49 @@
 ---
 name: project_lock_propagation_decentralized
-description: Lock/colinearity propagation on node move must be decentralized message-passing between node goroutines, never a central worklist/collection
+description: Node-move propagation is decentralized (node writes only itself, no central worklist); the rule/gate/anchor equalize/trigger cascade was DELETED 2026-07-18 and replaced by a one-hop neighbor edge re-quantize (neighborSetC)
 metadata:
   type: project
 ---
 
-Agreed 2026-07-04 replacement for editor-time lock (colinearity) propagation on node drag.
+Durable doctrine + a history of propagation mechanisms that were tried and removed.
 
-**Model (David's words):** a node can only update ITSELF and send update messages to the
-nodes it's doubly-linked to. Any node receiving the message checks if it needs to
-recalculate; if it does, it updates itself and broadcasts the same update to ITS
-doubly-linked neighbors. No queues. No collections.
+**Durable principle (David, still holds):** a node can only update ITSELF and send
+messages to nodes it's doubly-linked to; a receiver writes only its OWN state. No central
+worklist, no collection, no coordinator. State rides the MESSAGE, not shared-memory reads
+across goroutines. Still true of the current model. See [[feedback_go_vs_coordinator_bias]].
 
-**Why:** the central worklist (`RootMove` fixpoint over `md.polarEqs`, commit cb3dd91c)
-was a coordinator+collection — the exact shape MODEL.md forbids. On an over-constrained
-lock set it did not converge: each central re-solve amplified positions past 1e28 and
-persisted the garbage into scene.json/meta.json permanently. Reverted in
-`revert(locks): remove transitive lock-propagation worklist`. See [[feedback_go_vs_coordinator_bias]].
+**Durable invariant (David):** editor-time propagation must NEVER be able to explode the
+sim. The central worklist (`RootMove` fixpoint over `md.polarEqs`, commit cb3dd91c) was a
+coordinator+collection — the shape MODEL.md forbids — and on an over-constrained set it
+amplified positions past 1e28 and persisted the garbage. Reverted in
+`revert(locks): remove transitive lock-propagation worklist`. Don't reintroduce a worklist.
 
-**Invariant (David):** panel-authorable locks must NEVER be able to explode the sim.
-The decentralized cascade can't amplify because each node only COPIES its own value from a
-neighbor (idempotent once equal) and re-broadcasts only if it actually moved > epsilon —
-a consistent set converges, an over-constrained one settles to last-consistent and goes silent.
+**CURRENT model (merged 590a119c, 2026-07-18 — verify against `node_move.go`):** dragging
+node X moves ONLY X (to the cursor). Each direct neighbor STAYS PUT and re-quantizes its
+OWN local polar to X from the live offset — θ, φ AND r all fresh — via a single
+`moveMsgKindNeighborSetC` message → `neighborSetCRequantize` → `requantizePoleTraced` with
+X as the one fresh edge (that neighbor's OTHER edges are carried as index×step, not
+re-derived). One hop, no forwarding, no cascade. Distances/angles to the (stationary)
+neighbors change because X moved. `nodeMover` goroutines + per-node `inbox chan moveMsg`
+still exist; routing is still `sendMove`/`sendMoveLossy` node-to-node, no worklist.
 
-**Go-layer facts (verified against code, not the file layout — a later round is expected
-to move these tables onto `LayoutHolder`, so treat the MECHANISM below as durable and the
-current file/symbol names as incidental):** each node is a `nodeMover` goroutine with an
-`inbox chan moveMsg` + select loop (`nodes/Wiring/node_move.go`). Propagation is routed
-node-to-node via `sendMove` (a lookup into `md.dispatch`, a map keyed by node/edge id →
-inbox channel) — no central worklist. Which nodes a rule-node's cascade reaches is
-described by three tables in `node_move.go`: `ruleSource` (rule-node → its designated
-source neighbor), `ruleFollowers` (rule-node → follower neighbors it repositions), and
-`gateNeighbors` (a two-neighbor gate node → its two fixed neighbors). Key MODEL.md rule
-for this: state rides the MESSAGE (e.g. `moveMsg.FromCenter`/`TargetC` for an `equalize`
-message), not shared-memory reads across goroutines. Keep the dragged node's own
-edge/aimed-port fan; only the lock-FOLLOWER propagation becomes the node-to-node cascade.
+**DELETED mechanism (was documented here as live fact; gone as of 590a119c):** the
+rule/gate/anchor cascade — `handleTrigger`, `moveMsgKindEqualize`/`Trigger`/`GatePlace`/
+`Requantize`/`RequantizeSetC`, the per-node role tables (`sourceID`/`ruleSource`,
+`followers`/`ruleFollowers`, `forwardTargets`, `isGate`/`gateNeighbors`, `anchoredGates`,
+`followerOwner`), `ApplyCascadeRoles`/`deriveCascadeRoles`, `placeEqualRadii`,
+`gatePlaceNode`/`equalizeEdgeCLocal`/`moveNodeAndSetEdgeCs`/`placeAtDistanceFromBoth`. It
+propagated multi-hop (a rule node re-measured L from its source, equalized its followers,
+forwarded to further rule neighbors; gate nodes solved equal-radii placement). David
+removed it because the model he wants is one-hop single-assignment, not multi-hop
+constraint solving — a drag moves the dragged node and neighbors just re-quantize, they do
+NOT reposition to satisfy a length/equal-radii constraint. Do not re-propose the cascade.
 
-There is no `links.go` or `locks.go` in the tree, and no `movementLink`/`applyPolarEqs`/
-`applyPortTorusColinearity` symbols, as of 2026-07-14. They WERE real: `links.go` landed in
-`e82bf3d8` (declare the double-link movement graph) and `locks.go` in `81464a2e` (rebuild
-lock #1 on the double-link graph); the whole subsystem was deleted in `9e247aea`
-("phase 4 — delete the polar-lock/rule-builder subsystem; quantized compose is
-authoritative"). An earlier version of this note named them as live facts and went stale
-on that deletion, which cost real time: an audit agent read this file, trusted the section
-header "Go-layer facts", and reported a finding telling another agent to move code INTO
-`locks.go`. Grep `node_move.go` fresh rather than trusting any filename cited here.
+**Verified-then-stale lesson (kept as a warning):** an earlier version listed
+`links.go`/`locks.go`/`ruleSource`/etc. under a "Go-layer facts" header as live; an audit
+agent trusted the header after those symbols were deleted and told another agent to move
+code INTO a file that no longer existed — real wasted time. Grep `node_move.go` fresh for
+any symbol before acting; treat symbol names here as historical, the MECHANISM as durable.
+Initial layout does NOT depend on any cascade — it is a pure forward computation
+(`deriveCenters`, `quantized_layout.go`) from each node's stored triple; that is why the
+cascade could be deleted without leaving nodes unplaced on load.
