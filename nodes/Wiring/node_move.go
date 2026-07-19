@@ -662,6 +662,14 @@ type MoveDispatch struct {
 	// routing. Stored as an atomic.Pointer (not a plain field) because sendMove is the
 	// one chokepoint every mover goroutine calls concurrently.
 	msgTap atomic.Pointer[func(destID string, msg moveMsg)]
+	// ctx is the process-lifetime context, captured in Start. sendMove (the bare
+	// blocking directory send, used by external entry points like RootMove with
+	// no owning mover goroutine to thread a ctx from) selects on ctx.Done() so a
+	// send into a full inbox aborts on shutdown instead of leaking the calling
+	// goroutine forever. nil in tests that build a bare MoveDispatch without
+	// calling Start — sendMove treats a nil ctx as "no cancellation available"
+	// and falls back to the plain blocking send (matches prior test behavior).
+	ctx context.Context
 }
 
 // SetMsgTap installs (or clears, with nil) the test-only message-trace hook. Test-only —
@@ -895,14 +903,18 @@ func (md *MoveDispatch) Bind(outSink map[string]*Out, slotReg SlotRegistry) {
 // Start launches every mover's goroutine. Each node and each edge drains its own
 // inbox until ctx is done — per-goroutine ownership, no central coordinator.
 func (md *MoveDispatch) Start(ctx context.Context) {
+	md.ctx = ctx
 	for _, nm := range md.nodeMovers {
 		go nm.run(ctx)
 		// Dedicated sender goroutine for this node's outbound queue (see the outbox
 		// type doc comment / cascade-deadlock-fix.md): pops nm's queued messages in
 		// FIFO order and performs the actual blocking delivery, so nm's own
 		// inbox-drain goroutine (nm.run above) never blocks on a send and therefore
-		// always keeps draining its inbox.
-		go nm.outbox.run(ctx, md.deliverMove)
+		// always keeps draining its inbox. deliverMove itself selects on ctx.Done()
+		// (closure-captured here, at the goroutine's own spawn site) so a send into
+		// a full/abandoned inbox aborts on shutdown instead of leaking this sender
+		// goroutine forever.
+		go nm.outbox.run(ctx, func(id string, msg moveMsg) { md.deliverMove(ctx, id, msg) })
 	}
 	for _, em := range md.edgeMovers {
 		go em.run(ctx)
@@ -937,8 +949,27 @@ func (md *MoveDispatch) sendMove(id string, msg moveMsg) {
 	if tap := md.msgTap.Load(); tap != nil {
 		(*tap)(id, msg)
 	}
-	if ch, ok := md.dispatch[id]; ok {
+	ch, ok := md.dispatch[id]
+	if !ok {
+		return
+	}
+	// Blocking send with a ctx-cancel escape hatch: this is the bare directory
+	// send used by external entry points (RootMove -> rootMoveViaMessages) that
+	// have no owning mover goroutine to thread a ctx from. Without the
+	// ctx.Done() arm, a send into a torn-down/full inbox on shutdown parks this
+	// goroutine forever (the target's inbox-drain goroutine has already
+	// returned on the same ctx cancel, so nothing will ever drain it). md.ctx is
+	// nil only in tests that build a bare MoveDispatch without Start — a nil
+	// Context's Done() channel would panic, so guard it and fall back to a
+	// plain blocking send there (matches prior test behavior; no shutdown path
+	// exists in that setting anyway).
+	if md.ctx == nil {
 		ch <- msg
+		return
+	}
+	select {
+	case ch <- msg:
+	case <-md.ctx.Done():
 	}
 }
 
@@ -975,9 +1006,22 @@ func (md *MoveDispatch) enqueueFuncFor(nodeID string) func(id string, msg moveMs
 // sender goroutine (outbox.run), never from a handler goroutine. No tap here — the tap
 // already fired once, at enqueue (md.enqueueFor), matching the pre-split single-fire
 // contract the tap-based tests assert against.
-func (md *MoveDispatch) deliverMove(id string, msg moveMsg) {
-	if ch, ok := md.dispatch[id]; ok {
-		ch <- msg
+//
+// ctx is threaded in from the owning outbox.run's own goroutine (Start closure-captures
+// it at spawn) rather than stored on MoveDispatch: on ctx cancel every mover's inbox-drain
+// goroutine (nm.run) returns and stops draining, so a sender goroutine parked mid-send on
+// `ch <- msg` would otherwise block forever with nothing left to ever read it. The
+// select's ctx.Done() arm is ONLY a cancellation escape — the send itself stays BLOCKING
+// while ctx is live (this must not become a lossy drop like sendMoveLossy; every
+// deliverMove message carries real committed geometry that a drop would leave stale).
+func (md *MoveDispatch) deliverMove(ctx context.Context, id string, msg moveMsg) {
+	ch, ok := md.dispatch[id]
+	if !ok {
+		return
+	}
+	select {
+	case ch <- msg:
+	case <-ctx.Done():
 	}
 }
 

@@ -152,10 +152,20 @@ func NewPacedWire(arcLength float64, pulseSpeed float64) *PacedWire {
 }
 
 // SetClock injects the monotonic clock this wire reads to time delivery.
+//
+// LOAD-TIME ONLY, before any node goroutine exists: LoadTopology (which calls
+// this) runs strictly before main.go spawns node goroutines, so there is a
+// happens-before edge from this write to every later pw.clock read — the same
+// reason loader.go's plain `pw.Trace = tr` assignment is safe unlocked. No
+// lock is taken deliberately: every runtime read of pw.clock (placeBeadNoWalker,
+// StepOnceAt, tryDeliverHeadLocked's tick math) is ALSO unlocked, on purpose —
+// those happen continuously on node goroutines during normal operation, not
+// just at load, and are safe only because SetClock has already completed by
+// the time any of them can run. Taking pw.mu here (as a prior version did)
+// implied a concurrent-write/concurrent-read race over pw.clock that does not
+// exist; it protected nothing, since every reader stays unlocked regardless.
 func (pw *PacedWire) SetClock(c Clock) {
-	pw.mu.Lock()
 	pw.clock = c
-	pw.mu.Unlock()
 }
 
 // msToArcWu names the ms→world-units conversion used to reconstruct a bead's
