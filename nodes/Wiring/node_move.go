@@ -69,13 +69,11 @@ const (
 	// every ~8ms pointer-move, far finer than one quantize step). Sent from gesture.go's
 	// gestPending->gestDragging transition (the one place a drag begins), the same edge
 	// that already emits tr.AbcDragReset() — see that call site's comment for why it
-	// must not live in RootMove. Sent via the BLOCKING md.sendMove (not sendMoveLossy):
-	// a dropped drag-start would silently leave X's anchor either unset (falling back to
-	// the lazy-arm-on-first-commit path below, which is still correct but anchors one
-	// commit later than the true drag start) or, worse, STALE from a prior drag if this
-	// were the second+ drag on the same node — sendMoveLossy's "drop is safe, self-heals
-	// next commit" reasoning does not apply here, so this rides the same
-	// must-not-be-dropped guarantee as drag/center (see sendMoveLossy's doc comment).
+	// must not live in RootMove. Sent via the BLOCKING md.sendMove: a dropped drag-start
+	// would silently leave X's anchor either unset (falling back to the
+	// lazy-arm-on-first-commit path below, which is still correct but anchors one commit
+	// later than the true drag start) or, worse, STALE from a prior drag if this were the
+	// second+ drag on the same node — so this must never be dropped, same as drag/center.
 	moveMsgKindDragStart = "dragStart"
 )
 
@@ -587,8 +585,9 @@ func (md *MoveDispatch) enqueueFuncFor(nodeID string) func(id string, msg moveMs
 // goroutine (nm.run) returns and stops draining, so a sender goroutine parked mid-send on
 // `ch <- msg` would otherwise block forever with nothing left to ever read it. The
 // select's ctx.Done() arm is ONLY a cancellation escape — the send itself stays BLOCKING
-// while ctx is live (this must not become a lossy drop like sendMoveLossy; every
-// deliverMove message carries real committed geometry that a drop would leave stale).
+// while ctx is live; every deliverMove message carries real committed geometry that a
+// drop would leave stale, and (as of the neighborSetC-drop investigation below) nothing
+// in this package sends a message it is willing to see dropped anymore.
 func (md *MoveDispatch) deliverMove(ctx context.Context, id string, msg moveMsg) {
 	ch, ok := md.dispatch[id]
 	if !ok {
@@ -600,36 +599,24 @@ func (md *MoveDispatch) deliverMove(ctx context.Context, id string, msg moveMsg)
 	}
 }
 
-// sendMoveLossy is sendMove's non-blocking twin, reserved for moveMsgKindNeighborSetC
-// (requantizeLocalPolars' per-neighbor fan) ONLY. Per MODEL.md there is no
-// cross-goroutine delivery guarantee — a goroutine does its own work and drives its
-// own outputs, fire-and-forget. Every OTHER sendMove call (drag, center, anchor)
-// carries a node's actual position and MUST stay blocking: dropping one of those
-// leaves a node's committed geometry stale with no self-heal. A NeighborSetC message
-// is different: it exists only to keep a neighbor's cached edge-length fresh, and a
-// full inbox means the receiver is already mid-cascade and about to pick up the fresh
-// c from its own next commit anyway (or self-heals on reload) — so a drop here is
-// redundant, not just tolerable. Blocking would instead risk deadlock: domain
-// adjacency is symmetric, so two mutually-adjacent nodes committing concurrently with
-// full inboxes could each block sending a set-c to the other while neither is
-// draining (handle runs synchronously inside commitLocal), hanging both nodeMover
-// goroutines.
-func (md *MoveDispatch) sendMoveLossy(id string, msg moveMsg) {
-	if tap := md.msgTap.Load(); tap != nil {
-		(*tap)(id, msg)
-	}
-	if ch, ok := md.dispatch[id]; ok {
-		select {
-		case ch <- msg:
-		default:
-			// Inbox full: receiver is mid-cascade and will self-requantize on its own
-			// next commit (or self-heals on reload) — dropping is safe, not just tolerated.
-			if md.tr != nil {
-				md.tr.Breadcrumb("requantize.drop", id, "", msg.Kind)
-			}
-		}
-	}
-}
+// NOTE (neighborSetC drop history): moveMsgKindNeighborSetC (requantizeLocalPolars'
+// per-neighbor fan, quantized_move.go) used to route through a non-blocking
+// sendMoveLossy — "receiver is mid-cascade and will self-requantize on its own next
+// commit, so a full-inbox drop is safe" was the reasoning, and blocking was avoided to
+// dodge a mutual-adjacency deadlock (two nodes each trying to set-c the other while
+// both inboxes are full and neither is draining). Measuring it under the SAME
+// concurrent mutually-adjacent drag flood TestMutuallyAdjacentDragFloodNoDeadlock
+// drives (TestNeighborSetCDropReachability) showed sendMoveLossy dropping ~98% of
+// NeighborSetC sends (9417/9600 in one run) — the drop path was not a rare backstop,
+// it was silently discarding almost every message. NeighborSetC is now routed through
+// the SENDING node's own outbox (md.enqueueFuncFor(nodeID) in requantizeLocalPolars),
+// the same decoupling every other per-commit fan in this file already uses
+// (fanEdgesAndPartners) — it gets the same deadlock-avoidance property (the enqueue
+// never blocks the handler goroutine) without ever dropping: the outbox's own sender
+// goroutine performs the actual blocking delivery later, off the handler's critical
+// path. TestMutuallyAdjacentDragFloodNoDeadlock still passes with this change (run
+// -count=5), so the deadlock risk sendMoveLossy was guarding against does not require a
+// lossy send — the outbox already solved it for every other message kind.
 
 // NodeKind returns the kind string for the given node id, or "" if unknown.
 // Used by applyEdit to resolve the node's kind when snapping a port-anchor

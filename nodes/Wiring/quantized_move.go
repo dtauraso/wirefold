@@ -427,12 +427,22 @@ func (md *MoveDispatch) requantizeLocalPolars(nodeID string, newPos vec3) {
 	// re-derive its bearing from a live offset and does NOT forward beyond this one
 	// hop (neighborSetCReposition). Routed as a message to M's OWN inbox instead of
 	// reaching into M's LayoutHolder from X's (this) goroutine — each M's holder and
-	// center are written only by M's own goroutine. Sent via sendMoveLossy
-	// (non-blocking): a full M inbox means M is already mid-cascade and will pick up
-	// X's fresh c on its own next commit, so the drop is safe — and blocking here
-	// risks deadlock against M's own symmetric send back to X when both commit
-	// concurrently with full inboxes. Unconditional for every neighbor — there is no
-	// rule/gate/anchor cascade left to defer to.
+	// center are written only by M's own goroutine. Sent via X's OWN outbox
+	// (md.enqueueFuncFor(nodeID), the same handle every other fan in this commit path
+	// uses — see commitNodeMoveLocal's fanEdgesAndPartners call above) instead of the
+	// direct-to-inbox sendMoveLossy this used before: measured under the same
+	// mutually-adjacent concurrent-drag flood TestMutuallyAdjacentDragFloodNoDeadlock
+	// drives, sendMoveLossy dropped ~98% of NeighborSetC sends (9417/9600 in one run,
+	// TestNeighborSetCDropReachability) — the "drop is safe, self-heals" justification
+	// was true in the sense that nothing deadlocked, but the drop path was not a rare
+	// backstop, it was the common case, silently discarding almost every
+	// NeighborSetC. Routing through nodeID's own outbox instead — the SAME
+	// deadlock-safety property sendMoveLossy was reaching for (decouples the send from
+	// this handler goroutine, so two mutually-adjacent nodes committing concurrently
+	// can't block each other) but via the outbox's dedicated sender goroutine and
+	// blocking delivery instead of a drop. Unconditional for every neighbor — there is
+	// no rule/gate/anchor cascade left to defer to.
+	enqueue := md.enqueueFuncFor(nodeID)
 	lpByTo := map[string]LocalPolar{}
 	for _, lp := range lhX.LocalPolarsSnapshot() {
 		lpByTo[lp.To] = lp
@@ -452,7 +462,7 @@ func (md *MoveDispatch) requantizeLocalPolars(nodeID string, newPos vec3) {
 			deltaB = newLP.QuantIPhi - oldLP.QuantIPhi
 			deltaC = newLP.QuantIR - oldLP.QuantIR
 		}
-		md.sendMoveLossy(m, moveMsg{Kind: moveMsgKindNeighborSetC, NodeID: m, SenderID: nodeID, FromCenter: newPos,
+		enqueue(m, moveMsg{Kind: moveMsgKindNeighborSetC, NodeID: m, SenderID: nodeID, FromCenter: newPos,
 			DeltaA: deltaA, DeltaB: deltaB, DeltaC: deltaC})
 	}
 }
