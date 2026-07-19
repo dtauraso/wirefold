@@ -84,15 +84,36 @@ func (lp LocalPolar) effectiveSteps() (t, p, r float64) {
 // mu does NOT guard against the stdin-reader goroutine: RootMove (node_move.go)
 // routes a drag's moveMsgKindDrag to the DRAGGED NODE'S OWN
 // inbox, so commitLocal -> requantizeLocalPolars runs on that node's own
-// goroutine (nodeMover.handle), never on the stdin reader. What mu actually
-// guards is genuinely concurrent cross-goroutine access within
-// requantizeLocalPolars' neighbor fan: node X's own goroutine calls
-// SetLocalPolar/LocalPolarsSnapshot/Pole on a NEIGHBOR node M's LayoutHolder
-// (to persist M's updated local polars) while M's own goroutine may
-// concurrently mutate the same LocalPolars via its own fanned-out
-// SetLocalPolar. That access pattern is real, so mu is still earning its
-// keep — it is just guarding a different pair of goroutines than this
-// comment used to claim.
+// goroutine (nodeMover.handle), never on the stdin reader.
+//
+// REFUTED (a third time — this comment previously named the wrong goroutine
+// pair twice): a prior version of this comment claimed node X's own goroutine
+// calls SetLocalPolar/LocalPolarsSnapshot/Pole DIRECTLY on a NEIGHBOR node M's
+// LayoutHolder while M's own goroutine concurrently mutates the same fields.
+// That is false. requantizeLocalPolars (quantized_move.go) only ever looks up
+// md.layoutHolders[nodeID] — X itself — and never md.layoutHolders[m] for a
+// neighbor m; X reaches M exclusively by sending it a moveMsgKindNeighborSetC
+// message (sendMoveLossy, to M's OWN inbox), and it is M's own run/handle
+// goroutine (node_mover.go) that drains that message and calls
+// neighborSetCRequantize -> lh.SetLocalPolar/SetPole on M's OWN holder. Every
+// LayoutHolder in md.layoutHolders is therefore written and read ONLY by its
+// owning node's single per-node goroutine (channel-serialized, one at a time,
+// same pattern as nodeMover.quantOffset) — there is no cross-goroutine writer
+// of a given holder to guard against.
+//
+// NOT CHECKED BY A TEST, deliberately. A test was written to drive the claimed
+// X-writes-M contention concurrently through RootMove and could NOT be made to
+// fail with mu removed (10/10 clean runs under -race) — because the contention
+// does not exist. Every other mutex in this package now carries a test that
+// provably goes red when its guard is removed; this one cannot, so shipping one
+// would have meant shipping a test that can never fail, which is the exact
+// failure mode that discipline exists to prevent. The absence of a test here is
+// the honest signal.
+//
+// So mu is currently UNCONTENDED. It is retained as cheap insurance against a
+// future direct md.layoutHolders[m] call from another node's goroutine, not
+// because it guards a present race. Do not cite it as evidence that
+// cross-goroutine holder access is expected — it is not.
 type LayoutHolder struct {
 	mu          sync.Mutex
 	localPolars []LocalPolar
