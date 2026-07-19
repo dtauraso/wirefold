@@ -80,9 +80,10 @@ type SnapshotState struct {
 
 	// abcDragged is the CURRENT-DRAG-SCOPED set of node ids that have received at least
 	// one time.abc-drag message during the drag in progress (KindAbcDrag's Event.Node).
-	// Cleared to empty on KindAbcDragReset (emitted once per RootMove, before that
-	// drag's neighborSetC fan) so a new drag's recipients don't accumulate on top of a
-	// prior drag's. Mirrored into each row's nodeSnapState.gotDragMsg on write so the
+	// Cleared to empty on KindAbcDragReset (emitted once per drag, at the gesture FSM's
+	// pending→dragging transition, before that drag's neighborSetC fan) so a new drag's
+	// recipients don't accumulate on top of a prior drag's. Mirrored into each row's
+	// nodeSnapState.gotDragMsg on write so the
 	// AbcDragLabel overlay can list every recipient by name straight from the Node block.
 	abcDragged map[string]bool
 
@@ -223,7 +224,8 @@ type nodeSnapState struct {
 	// gotDragMsg is CURRENT-DRAG-SCOPED: 1 marks a node that has received a time.abc-drag
 	// message during the drag in progress (see SnapshotState.abcDragged). Set from
 	// KindAbcDrag's Event.Node id; cleared back to 0 on KindAbcDragReset (once per
-	// RootMove, before that drag's fan) — it's the per-node bit of the CURRENT drag's
+	// drag, at the gesture FSM's pending→dragging transition, before that drag's fan) —
+	// it's the per-node bit of the CURRENT drag's
 	// recipient SET the AbcDragLabel overlay lists by name, not an accumulating session
 	// total.
 	gotDragMsg uint8
@@ -398,20 +400,24 @@ func (s *SnapshotState) Update(ev T.Event) {
 
 	case T.KindAbcDragReset:
 		// Re-scope the recipient SET to the drag that is about to start: clear the
-		// sticky set AND every node row's mirrored bit. Count (abcDragCount) is a
+		// drag-scoped set AND every node row's mirrored bit. Count (abcDragCount) is a
 		// cumulative total-events affirmation and is intentionally left alone — only
-		// the NAME SET is drag-scoped. No emitSnapshot here: the subsequent AbcDrag
-		// marks for this drag will emit; emitting here would flash an empty log.
+		// the NAME SET is drag-scoped.
 		s.abcDragged = map[string]bool{}
 		for i := range s.nodes {
 			s.nodes[i].gotDragMsg = 0
 		}
+		// Emit the CLEARED state. A drag that produces no AbcDrag marks at all is a real
+		// path (isolated node, unresolved neighbor center, lossy-dropped fan) — without
+		// this emit, the webview keeps rendering the PREVIOUS drag's recipients as if they
+		// were this drag's. An empty log for a drag with no recipients is the truth.
+		s.emitSnapshot()
 
 	case T.KindAbcDrag:
 		// Read-only affirmation counter for the in-editor overlay label; never
 		// decrements, no gating semantics (unlike the bool overlay flags above).
 		s.overlay.abcDragCount++
-		// Add the firing time node (ev.Node) to the sticky recipient SET and mirror it
+		// Add the firing time node (ev.Node) to the current-drag recipient SET and mirror it
 		// into that row's gotDragMsg bit, so the label can list every recipient by name.
 		// Leave state in place if the node hasn't registered geometry yet (should not
 		// happen in practice — the node already exists to have moved).

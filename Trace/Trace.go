@@ -135,12 +135,12 @@ const (
 	// itself; the buffer's Overlay block increments a running count on each occurrence
 	// so the in-editor overlay label can affirm the log is happening live.
 	KindAbcDrag = "abc-drag"
-	// KindAbcDragReset marks the START of one drag operation (RootMove), BEFORE the
-	// dragged node's neighborSetC fan emits any KindAbcDrag marks for that drag. The
-	// snapshot layer clears its sticky recipient SET (and every node's gotDragMsg bit)
-	// on this event, so the in-editor drag-log overlay lists only THIS drag's
-	// recipients — not recipients accumulated across the whole session. No payload
-	// beyond the kind itself.
+	// KindAbcDragReset marks the START of one drag operation — emitted exactly once at
+	// the gesture FSM's pending→dragging transition (nodes/Wiring/gesture.go), BEFORE
+	// the dragged node's neighborSetC fan emits any KindAbcDrag marks for that drag. The
+	// snapshot layer clears its recipient SET (and every node's gotDragMsg bit) on this
+	// event, so the in-editor drag-log overlay lists only THIS drag's recipients — not
+	// recipients accumulated across the whole session. No payload beyond the kind itself.
 	KindAbcDragReset = "abc-drag-reset"
 )
 
@@ -502,9 +502,10 @@ func (t *Trace) AbcDrag(nodeID string) {
 }
 
 // AbcDragReset emits one drag-start event (KindAbcDragReset), marking the beginning of a
-// single RootMove drag operation. The snapshot layer clears its sticky abc-drag
-// recipient set on receipt, so a subsequent drag's neighborSetC fan (AbcDrag marks)
-// starts from an empty set instead of accumulating across drags. No payload.
+// single drag operation — called once at the gesture FSM's pending→dragging transition,
+// not per pointer-move. The snapshot layer clears its abc-drag recipient set on receipt,
+// so this drag's neighborSetC fan (AbcDrag marks) starts from an empty set instead of
+// accumulating across drags. No payload.
 func (t *Trace) AbcDragReset() {
 	t.emit(Event{Kind: KindAbcDragReset})
 }

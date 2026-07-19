@@ -109,11 +109,12 @@ type bufLayoutNode struct {
 	// `latchedSel` React state in NavGuides.tsx (that was a second, TS-invented selection
 	// concept unreachable from Go); the render path now just reads this column.
 	LatchedSel uint8 `buf:"u8"` // 1 = this is the last-selected node (persists through deselect)
-	// GotDragMsg is Go-owned and STICKY: 1 marks a node that has received AT LEAST ONE
-	// time.abc-drag message this session (see SnapshotState.abcDragged in snapshot.go,
-	// set from the KindAbcDrag event's Node id via nodeIndex, never cleared). This is the
-	// accumulating SET the AbcDragLabel overlay lists by name — it replaces the old
-	// single-recipient Overlay.LastAbcDragNodeRow column.
+	// GotDragMsg is Go-owned and DRAG-SCOPED: 1 marks a node that has received a
+	// time.abc-drag message during the CURRENT drag (see SnapshotState.abcDragged in
+	// snapshot.go, set from the KindAbcDrag event's Node id via nodeIndex, and cleared
+	// at the start of each new drag via KindAbcDragReset). This is the recipient SET
+	// the AbcDragLabel overlay lists by name — it replaces the old single-recipient
+	// Overlay.LastAbcDragNodeRow column.
 	GotDragMsg uint8 `buf:"u8"` // 1 = this node has received at least one time.abc-drag message
 }
 
