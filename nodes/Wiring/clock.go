@@ -79,6 +79,21 @@ type Clock interface {
 // a condition variable — pacing loops call SleepCycle (wall time.After) and
 // re-check Tick() themselves.
 type RealClock struct {
+	// mu guards speed/accScaled/lastChange against the real contention shape:
+	// every pacing loop in the system (paced_wire.go StepOnce, input/holdnewsendold/
+	// gatecommon Update loops) calls Tick() continuously and concurrently with the
+	// ONE writer, stdin_reader.go's "speed" message handler, which calls SetSpeed —
+	// many concurrent readers vs. one occasional writer. CHECKED:
+	// TestRealClockConcurrentTickVsSetSpeedRace (clock_concurrency_test.go) drives
+	// exactly that shape under `go test -race` and is RED (reproducible data-race
+	// report on these three fields) with the Lock/Unlock calls removed from Tick
+	// and SetSpeed. TestRealClockConcurrentMonotonic additionally checks the
+	// correctness claim that Tick() never goes backward for a given reader even
+	// while a second goroutine is racing SetSpeed continuously — under the tested
+	// weakenings (removing the lock) this failed via data race before it could be
+	// observed producing a plain backward jump without -race, so the backward-jump
+	// path itself remains UNCHECKED in isolation; the race is the failure mode this
+	// guard actually catches.
 	mu sync.Mutex
 	// speed is the current playback multiplier (>= 0). Default 1.
 	speed float64
