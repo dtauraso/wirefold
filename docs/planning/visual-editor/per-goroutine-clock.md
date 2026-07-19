@@ -4,148 +4,128 @@ branch: task/mutex-shared-services
 
 # Per-goroutine clock
 
+## Premise
+
+**Overshoot is not an issue.** A speed change reaches each goroutine when it next wakes,
+so the spread across all of them is about one cycle — `MsPerTick = 16`, so ~16 ms on a
+control the user operates by hand. Nobody perceives a sixteenth of a second of stagger on
+pause. This is settled, not a risk to mitigate.
+
+Everything below follows from accepting that.
+
 ## The change
 
-Today there is ONE `*RealClock`, constructed in `main.go` and injected into every node,
-port and wire. ~16 goroutines call `Tick()` on it continuously; `stdin_reader.go` calls
-`SetSpeed` on it occasionally. Its mutex exists solely because those two collide.
+Today one `*RealClock` is constructed in `main.go` and injected into every node, port and
+wire. ~16 goroutines call `Tick()` on it continuously; `stdin_reader.go` calls `SetSpeed`
+occasionally. Its mutex exists solely because those two collide — it is the widest-fan-in
+lock in the system and the only one hit on every cycle by nearly every goroutine.
 
-The new model: **every goroutine holds its own clock object**, and each one reads the
-system monotonic clock directly. Nothing is shared, so nothing needs a lock.
+New model: **every goroutine holds its own clock, reading the system monotonic clock
+directly.** Nothing shared, nothing to lock.
 
-The system clock is already global, already consistent across goroutines, and already
-safe to read concurrently. It is the shared timeline. There is no reason to wrap it in a
-second shared object and then guard that object.
+The system clock is already global, already consistent, already safe to read
+concurrently. It is the shared timeline. Wrapping it in a second shared object and then
+guarding that object is the thing being removed.
 
-## Why the timeline still agrees
+## Why copies agree
 
-`Tick()` is a pure function of three things: an origin, the speed history, and `now`.
+`Tick()` is a pure function of an origin, a speed history, and `now`:
 
     tick(now) = (accScaled + (now - lastChange) * speed) / tickPeriod
 
-If two clocks start from the same origin and apply the same speed history, they return
-identical values for the same `now` — no communication required. They agree because they
-compute the same function, not because they consult the same memory.
+Copies of mutable state drift. Copies of a pure function do not. Two clocks from the same
+origin, given the same speed history, return the same value for the same `now` — they
+agree by computing, not by consulting shared memory.
 
-That is what makes this work at all. Copies of mutable state drift; copies of a pure
-function do not.
+## Speed changes: bank at local now
 
-## The one real problem: speed changes
+Each clock applies a transition when it hears it, using its own `time.Now()` — exactly
+what `SetSpeed` does today, just N times instead of once.
 
-This is the whole design risk, and it is not the distribution mechanism — it is WHEN
-each copy applies the change.
+No `effectiveAt`, no transition timestamps, no scheduling. An earlier draft of this plan
+built all of that to force every copy to bank at an identical instant; it is unnecessary
+under the premise, and it created a worse problem than it solved (retroactive correction
+sends a clock backward over ticks it already acted on, which the monotonicity test
+forbids). Do not reintroduce it.
 
-`SetSpeed` today banks the elapsed segment at `time.Now()`:
+### The residual, sized
 
-    accScaled += (now - lastChange) * speed
-    lastChange = now
-    speed = newSpeed
+Banking at local `now` means clocks acquire a permanent offset per speed change:
 
-If each local clock ran that on receipt, every clock would bank at a slightly different
-instant. That error does not wash out — it is added to `accScaled` and carried forever.
-Sixteen clocks would each acquire their own permanent offset, and beads on different
-wires would fall progressively out of step. A drift bug of this shape would be very hard
-to see and very hard to attribute.
+    offset = (delivery skew) x (new speed - old speed)   ~= 1 tick per change
 
-**Fix: the transition carries its own wall instant.** A speed change is distributed as
-`{speed, effectiveAt}`, and a local clock banks using `effectiveAt`, never `time.Now()`:
+Sized against this topology: edges are 57-268 wu, so a crossing is tens of ticks. One tick
+of offset is **1-2% of a wire per speed change**. Offsets are signed by direction, so
+1->2 and 2->1 partly cancel rather than accumulating monotonically.
 
-    accScaled += (effectiveAt - lastChange) * speed
-    lastChange = effectiveAt
-    speed = newSpeed
+This matters in exactly one place, which is verified, not theoretical:
+`ReviseInFlightGeometry` (paced_wire.go) runs on the EDGE MOVER's goroutine and computes
 
-Now it does not matter when a goroutine hears about the change. Applying it late produces
-exactly the same state as applying it on time. Ordering and latency stop mattering, which
-is what makes this safe to do without coordination.
+    t = (nowTick - b.placementTick) / (b.arc / pulseSpeed)
 
-## OPEN FLAW — effectiveAt conflicts with monotonicity
+where `placementTick` was written by the SOURCE node's goroutine. Two clocks, subtracted.
 
-Found by asking what a PAUSE looks like. The plan above is not yet sound.
+**Resolution: a wire keeps ONE clock.** `pw.clock` stays a single object shared by the
+three goroutines that touch that wire (source placing/stepping, destination polling, edge
+mover revising). Then the subtraction above is within one clock and the offset cannot
+appear. Per-goroutine is the wrong granularity; **per-wire** is the boundary that matters,
+because a wire is the only place two goroutines' ticks are compared.
 
-Today `SetSpeed(0)` is one write to one object, so the tick stops advancing instantly and
-every goroutine's next read — whenever it wakes — sees it frozen. Pause is atomic in
-tick-space even though goroutines wake staggered.
+Everything else — node loop pacing, drive placement cadence, sleep — is self-contained
+within one goroutine and needs no agreement with anyone.
 
-Per-goroutine it is not. A goroutine that has not yet received the transition keeps
-computing at the old speed and keeps stepping beads. Then applying `{speed, effectiveAt}`
-retroactively banks the segment as of T — and its tick goes BACKWARD:
+## Delivery — the real open question
 
-    pause at T=100, goroutine hears at 110
-    at t=105 it computed tick 105 and advanced a bead on it
-    at t=110 it banks accScaled=100, speed=0  ->  tick now reads 100
+This, not timing, is the hard part.
 
-It already acted on ticks the corrected clock says never happened.
-`TestRealClockConcurrentMonotonic` asserts exactly that this never occurs.
+A speed change must reach every clock. It must NOT be droppable: a dropped transition
+means that goroutine runs at the wrong rate indefinitely, with no event to correct it.
+That is not the same class as a stale value that self-heals. `sendMoveLossy` discarded
+9345 of 9600 neighbour messages this session under a comment claiming drops were safe —
+do not reuse a lossy path here and do not add one.
 
-So the two properties cannot both hold:
+Two unresolved shape questions:
 
-  - CLAMP (never go backward): the overshoot is permanent and clocks disagree by exactly
-    the quantity effectiveAt was introduced to eliminate.
-  - CORRECT (apply as of T): clocks agree, but ticks run backward and work has already
-    been done on un-issued ticks.
+1. **`DriveHeld` goroutines have no inbox.** They are spawned per driven output and hold
+   only an `Out`. Reaching them needs a new channel per drive goroutine, or the clock
+   being a small value they re-read from somewhere they already touch.
+2. **Every paced loop grows a poll.** Look at `input/node.go`'s loop: it polls exactly one
+   channel (`FeedbackIn`) today. Each loop like it needs a second thing to check. That is
+   a change to the shape of every node kind, and it is the real cost of this work —
+   independent of whether the timing story is easy.
 
-The claim above that late delivery is "indistinguishable from applying it on time" is
-true of the arithmetic and FALSE of the observable behaviour of a goroutine that already
-acted during the window. Do not build on it until this is resolved.
-
-Directions worth considering, none verified:
-  - Make a speed change take effect at a FUTURE tick rather than a past instant, chosen
-    far enough ahead that every loop will have woken — turns a retroactive correction
-    into a scheduled one, at the cost of pause not being immediate.
-  - Accept bounded overshoot and drop the exact-agreement requirement, if beads being up
-    to one cycle out of step is acceptable visually.
-  - Keep one shared clock. The mutex is cheap; this problem is not.
-
-## Delivery
-
-Whatever carries the transition MUST NOT DROP IT. A dropped transition is permanent
-divergence for that goroutine — not a stale value that self-heals on the next event.
-
-This is the same trap as `sendMoveLossy` earlier this session, where 9345 of 9600
-neighbour messages were being discarded under a comment claiming the drop was safe. Do
-not reuse a lossy path here, and do not add one.
-
-Open: `nodeMover`s have inboxes, but `DriveHeld` goroutines do not — they are spawned per
-driven output and only hold an `Out`. Reaching them needs either a new channel per drive
-goroutine, or the clock handed to them being a small value they re-read. Decide this
-before writing code; it is the part most likely to force a shape change.
+Settle both before writing code.
 
 ## What must be proven
 
-1. **No drift.** N independent clocks, constructed at one origin, driven through a
-   sequence of speed changes at randomised delivery latencies, must return IDENTICAL
-   ticks for the same `now`. Test this directly with an injectable `now` rather than
-   wall time, so it is deterministic. This is the test that would have caught the
-   bank-at-receipt bug.
-2. **Late delivery is indistinguishable.** Apply the same transition immediately to one
-   clock and 500ms late to another; assert both agree afterwards.
-3. **Cross-goroutine tick comparisons still hold.** A bead's placement tick is recorded
-   by one goroutine and evaluated later; the buffer coalesces per tick. Prove a wire's
-   crossing decision is unchanged.
-4. **The mutex is genuinely gone.** `RealClock.mu` deleted, and
-   `clock_concurrency_test.go`'s existing race tests either deleted or rewritten — they
-   exist to prove a lock is load-bearing, and a test that cannot fail must not survive
-   the lock it guarded.
+1. **Per-wire agreement holds.** A bead placed by the source goroutine and measured by the
+   edge mover during a geometry rebase must land at the same `t` as today. This is the one
+   place the split could bite, so it is the one test that must exist.
+2. **Delivery is not lossy.** A goroutine that is asleep when a transition is sent must
+   still apply it on waking. Prove by sending during a sleep window and asserting the rate
+   changes.
+3. **No goroutine is left behind.** Every clock-holder receives every transition — assert
+   over the full set, not a sample. This guards the failure mode that is impossible today.
+4. **The mutex is genuinely gone.** `RealClock.mu` deleted; `clock_concurrency_test.go`'s
+   race tests deleted or rewritten. They exist to prove a lock is load-bearing, and a test
+   that cannot fail must not outlive the lock it guarded.
 5. `-race` clean at `-count=5`, plus the drag and persistence suites.
 
 ## What this buys
 
-- Deletes the widest-fan-in mutex in the system — ~16 goroutines currently serialise on it
-  on every cycle, forever.
-- Removes a shared object from a model whose whole claim is that nodes own their own
-  state and coordinate by message.
-- The clock stops being an exception to that rule.
+- Deletes the widest-fan-in mutex in the system.
+- The clock stops being an exception to the rule that nodes own their own state.
 
 ## What it costs
 
-- Speed changes become a distributed fact rather than a single write. That is strictly
-  more machinery than `c.speed = x`.
-- A new failure mode that does not exist today: a goroutine whose clock never learns of a
-  transition runs at the wrong rate indefinitely. Today that is impossible, because there
-  is one object. Item 1 above is the guard against it.
+- Every paced loop grows a poll (see Delivery).
+- A failure mode that cannot exist today: a clock that never hears a transition runs at
+  the wrong rate forever. Item 3 is the guard.
+- Up to ~16 ms of stagger on pause, and 1-2% per-wire offset per speed change — both
+  accepted under the premise.
 
 ## Not doing
 
-Not replacing the shared object with an `atomic.Pointer` snapshot. That would also remove
-the lock and would be a smaller change, but it keeps one shared clock — which is the thing
-being removed. Recording it here only so it is not re-proposed as an improvement.
+Not replacing the shared object with an `atomic.Pointer` snapshot. It would also remove
+the lock and is a smaller change, but it keeps one shared clock, which is what is being
+removed. Recorded so it is not re-proposed as an improvement.
