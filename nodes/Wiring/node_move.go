@@ -64,6 +64,22 @@ const (
 	// never forwards this to its own neighbors, and this never runs any further cascade
 	// (see neighborSetCReposition).
 	moveMsgKindNeighborSetC = "neighborSetC"
+	// moveMsgKindDragStart arms the dragged node X's OWN drag-anchor snapshot: X's
+	// per-neighbor LocalPolar triples AT DRAG START, captured once on X's own goroutine
+	// (nodeMover.handle), so every subsequent requantizeLocalPolars call during the same
+	// drag reports current-minus-ANCHOR (the drag's running total) instead of
+	// current-minus-previous-move-event (which is almost always 0 — RootMove runs on
+	// every ~8ms pointer-move, far finer than one quantize step). Sent from gesture.go's
+	// gestPending->gestDragging transition (the one place a drag begins), the same edge
+	// that already emits tr.AbcDragReset() — see that call site's comment for why it
+	// must not live in RootMove. Sent via the BLOCKING md.sendMove (not sendMoveLossy):
+	// a dropped drag-start would silently leave X's anchor either unset (falling back to
+	// the lazy-arm-on-first-commit path below, which is still correct but anchors one
+	// commit later than the true drag start) or, worse, STALE from a prior drag if this
+	// were the second+ drag on the same node — sendMoveLossy's "drop is safe, self-heals
+	// next commit" reasoning does not apply here, so this rides the same
+	// must-not-be-dropped guarantee as drag/center (see sendMoveLossy's doc comment).
+	moveMsgKindDragStart = "dragStart"
 )
 
 // centerSnap is an immutable snapshot of a node's position published by the nodeMover
@@ -298,6 +314,26 @@ type nodeMover struct {
 	// blocking delivery. This is what lets handle's sends stay non-blocking while
 	// every OTHER send-in-handle property (order, no drops) is unchanged.
 	outbox *outbox
+	// layoutHolderFn resolves THIS node's own LocalPolar holder (md.layoutHolders[id])
+	// at CALL TIME rather than caching the *LayoutHolder at nodeMover construction:
+	// buildMoveDispatch (which constructs nodeMovers) runs BEFORE buildNodes (which is
+	// what actually populates md.layoutHolders[id] on each node's embedded
+	// LayoutHolder), so a value cached at construction would be permanently nil. The
+	// map itself is a read-only directory once the whole load completes (same pattern
+	// as dispatch/edgeIDs) — safe to read from any goroutine after that point. Read
+	// here only by armDragAnchor, which runs exclusively on this node's own goroutine
+	// (moveMsgKindDragStart, dispatched via handle).
+	layoutHolderFn func() *LayoutHolder
+	// dragAnchorByTo, dragAnchorArmed: THIS node's drag-anchor snapshot (see
+	// moveMsgKindDragStart's doc comment) — the per-neighbor LocalPolar triples as of
+	// the start of the CURRENT drag. Written only by armDragAnchor (moveMsgKindDragStart
+	// handler) or by requantizeLocalPolars' lazy-arm fallback (first commit of a drag
+	// that never got an explicit dragStart, e.g. a programmatic RootMove in a test) —
+	// both run on this node's own goroutine. Cleared (dragAnchorArmed=false) by
+	// armDragAnchor so a NEW drag on the same node always re-arms rather than reusing a
+	// stale anchor from a previous drag.
+	dragAnchorByTo  map[string]LocalPolar
+	dragAnchorArmed bool
 }
 
 func newNodeMover(id string, geom nodeGeom, tr *T.Trace) *nodeMover {
@@ -361,6 +397,10 @@ func (m *nodeMover) handle(msg moveMsg) {
 		}
 		return
 	}
+	if msg.Kind == moveMsgKindDragStart {
+		m.armDragAnchor()
+		return
+	}
 	if msg.Kind == moveMsgKindNeighborSetC {
 		// Neighbor edge re-quantize (receiver-computes, one hop, no forward): SenderID
 		// (the dragged node) moved to msg.FromCenter; THIS node stays put and re-quantizes
@@ -374,6 +414,24 @@ func (m *nodeMover) handle(msg moveMsg) {
 	if m.tr != nil {
 		m.emitGeometry()
 	}
+}
+
+// armDragAnchor (re-)arms this node's drag-anchor snapshot from its CURRENT
+// LocalPolar triples — always overwriting whatever was there, so a new drag on this
+// same node re-arms rather than keeping a stale anchor from the previous drag. Runs
+// only on this node's own goroutine (moveMsgKindDragStart handler). See
+// moveMsgKindDragStart's doc comment for why this fires exactly once per drag.
+func (m *nodeMover) armDragAnchor() {
+	byTo := map[string]LocalPolar{}
+	if m.layoutHolderFn != nil {
+		if lh := m.layoutHolderFn(); lh != nil {
+			for _, lp := range lh.LocalPolarsSnapshot() {
+				byTo[lp.To] = lp
+			}
+		}
+	}
+	m.dragAnchorByTo = byTo
+	m.dragAnchorArmed = true
 }
 
 // applyCenter is the SOLE WRITE of this node's center/reach. It is called ONLY from
@@ -857,6 +915,9 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 		nm.centerOf = md.centerOfNode
 		nm.commitLocal = md.commitNodeMoveLocal
 		nm.neighborSetC = md.neighborSetCRequantize
+		// Go 1.22+ loop semantics give each iteration its own id, so this closure safely
+		// captures THIS iteration's id (no shared-variable capture bug).
+		nm.layoutHolderFn = func() *LayoutHolder { return md.layoutHolders[id] }
 		md.nodeMovers[id] = nm
 		md.dispatch[id] = nm.inbox
 	}
@@ -1453,14 +1514,28 @@ func (md *MoveDispatch) requantizeLocalPolars(nodeID string, newPos vec3) {
 	if len(updatesX) == 0 {
 		return
 	}
-	// Snapshot X's OWN triple to each neighbor BEFORE requantizePoleTraced mutates lhX,
-	// so the delta below is X's new triple minus X's CURRENT (pre-drag) triple — computed
-	// once, on X's own goroutine — per CLAUDE.md's model (each goroutine reports what it
-	// itself picked up). Pure observability: it does not gate or alter the requantize
-	// below in any way.
+	// oldByTo is X's DRAG-ANCHORED triple to each neighbor — the triple X had at the
+	// START of the CURRENT drag, not at the previous move event. RootMove runs on every
+	// ~8ms pointer-move, far finer than one quantize step (round(angle/step) lands on
+	// the same integer for dozens of consecutive frames), so a per-move-event delta was
+	// almost always (0,0,0) even mid-drag. The anchor is armed once, at the real
+	// drag-start edge (gesture.go's gestPending->gestDragging transition sends
+	// moveMsgKindDragStart to nodeID's own inbox, handled by armDragAnchor on this same
+	// goroutine) so it accumulates across the whole drag and reads the drag's true total
+	// on release. If no dragStart ever armed it (a programmatic RootMove with no
+	// gesture, as several tests do), lazy-arm it right here from X's CURRENT
+	// (pre-requantize) triple, so that first commit's delta is (0,0,0) and every later
+	// commit in the same unarmed "drag" is relative to it — never a stale anchor from a
+	// previous drag, since armDragAnchor always overwrites. Computed once, on X's own
+	// goroutine — per CLAUDE.md's model (each goroutine reports what it itself picked
+	// up). Pure observability: it does not gate or alter the requantize below in any way.
+	nmX := md.nodeMovers[nodeID]
+	if nmX != nil && !nmX.dragAnchorArmed {
+		nmX.armDragAnchor()
+	}
 	oldByTo := map[string]LocalPolar{}
-	for _, lp := range lhX.LocalPolarsSnapshot() {
-		oldByTo[lp.To] = lp
+	if nmX != nil {
+		oldByTo = nmX.dragAnchorByTo
 	}
 	md.requantizePoleTraced(lhX, updatesX)
 	writePersist(nodeID, lhX)
