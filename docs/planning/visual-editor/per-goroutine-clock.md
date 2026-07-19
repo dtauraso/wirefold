@@ -42,7 +42,7 @@ agree by computing, not by consulting shared memory.
 Each clock applies a transition when it hears it, using its own `time.Now()` — exactly
 what `SetSpeed` does today, just N times instead of once.
 
-No `effectiveAt`, no transition timestamps, no scheduling. An earlier draft of this plan
+No "effective at" timestamp on transitions, no scheduling. An earlier draft of this plan
 built all of that to force every copy to bank at an identical instant; it is unnecessary
 under the premise, and it created a worse problem than it solved (retroactive correction
 sends a clock backward over ticks it already acted on, which the monotonicity test

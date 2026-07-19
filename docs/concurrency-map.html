@@ -615,59 +615,66 @@
   <div class="layout">
     <div>
       <div class="plate">
-        <svg viewBox="0 0 860 520" role="img" aria-label="Why splitting the shared clock per goroutine does not remove its mutex: a wire's bead position is computed from a tick stamped by the source node and a tick read by the edge mover, so those goroutines must share one clock.">
-          <text class="d-tl" x="0" y="12">THE COMPARISON THAT SETS THE FLOOR</text>
-          <rect class="d-group" x="0" y="22" width="860" height="188" rx="6"/>
+        <svg viewBox="0 0 860 470" role="img" aria-label="Every clock user holds its own copy, so no two goroutines share a clock and its mutex is deleted; the one place two copies are subtracted from each other is within the accepted tolerance.">
+          <text class="d-tl" x="0" y="12">TODAY — ONE OBJECT, ONE LOCK</text>
+          <rect class="d-group" x="0" y="22" width="410" height="150" rx="6"/>
+          <rect class="d-box-flow" x="20" y="44" width="120" height="24" rx="3"/>
+          <rect class="d-box-flow" x="20" y="74" width="120" height="24" rx="3"/>
+          <rect class="d-box-flow" x="20" y="104" width="120" height="24" rx="3"/>
+          <text class="d-ts" x="20" y="148">≈16 goroutines</text>
+          <line class="d-arrow-flow" x1="142" y1="56" x2="236" y2="94"/>
+          <line class="d-arrow-flow" x1="142" y1="86" x2="236" y2="100"/>
+          <line class="d-arrow-flow" x1="142" y1="116" x2="236" y2="106"/>
+          <rect class="d-box-haz" x="240" y="78" width="150" height="46" rx="4"/>
+          <text class="d-t"  x="254" y="98">RealClock</text>
+          <text class="d-ts" x="254" y="115">mu — contended</text>
 
-          <rect class="d-box-flow" x="20" y="46" width="220" height="44" rx="4"/>
-          <text class="d-t"  x="34" y="66">source node's loop</text>
-          <text class="d-ts" x="34" y="82">stamps placementTick</text>
+          <text class="d-tl" x="450" y="12">PROPOSED — A COPY EACH, NO LOCK</text>
+          <rect class="d-group" x="450" y="22" width="410" height="150" rx="6"/>
+          <rect class="d-box-flow" x="470" y="44" width="120" height="24" rx="3"/>
+          <rect class="d-box-flow" x="470" y="74" width="120" height="24" rx="3"/>
+          <rect class="d-box-flow" x="470" y="104" width="120" height="24" rx="3"/>
+          <line class="d-arrow-flow" x1="592" y1="56" x2="626" y2="56"/>
+          <line class="d-arrow-flow" x1="592" y1="86" x2="626" y2="86"/>
+          <line class="d-arrow-flow" x1="592" y1="116" x2="626" y2="116"/>
+          <rect class="d-box-passive" x="630" y="44" width="120" height="24" rx="3"/>
+          <rect class="d-box-passive" x="630" y="74" width="120" height="24" rx="3"/>
+          <rect class="d-box-passive" x="630" y="104" width="120" height="24" rx="3"/>
+          <text class="d-ts" x="762" y="60">own</text>
+          <text class="d-ts" x="762" y="90">copy</text>
+          <text class="d-ts" x="762" y="120">each</text>
+          <text class="d-ts" x="470" y="148">nothing shared → no mutex at all</text>
 
-          <rect class="d-box-flow" x="20" y="120" width="220" height="44" rx="4"/>
-          <text class="d-t"  x="34" y="140">edge mover</text>
-          <text class="d-ts" x="34" y="156">reads pw.clock.Tick()</text>
+          <text class="d-tl" x="0" y="212">THE ONE PLACE TWO COPIES MEET</text>
+          <rect class="d-group" x="0" y="222" width="860" height="118" rx="6"/>
+          <rect class="d-box-flow" x="20" y="244" width="210" height="34" rx="4"/>
+          <text class="d-ts" x="34" y="265">source node stamps placementTick</text>
+          <rect class="d-box-flow" x="20" y="288" width="210" height="34" rx="4"/>
+          <text class="d-ts" x="34" y="309">edge mover reads its own Tick()</text>
+          <line class="d-arrow-sig" x1="232" y1="261" x2="296" y2="278"/>
+          <line class="d-arrow-sig" x1="232" y1="305" x2="296" y2="288"/>
+          <rect class="d-box-sig" x="300" y="264" width="250" height="38" rx="4"/>
+          <text class="d-ts" x="314" y="288">t = (nowTick − placementTick)</text>
+          <text class="d-ts" x="576" y="272">off by ~1 tick per speed change</text>
+          <text class="d-ts" x="576" y="290">= 1–2% of the wire</text>
+          <text class="d-ts" x="576" y="316">within the accepted band</text>
 
-          <line class="d-arrow-sig" x1="242" y1="68" x2="330" y2="96"/>
-          <line class="d-arrow-sig" x1="242" y1="142" x2="330" y2="112"/>
-
-          <rect class="d-box-sig" x="334" y="82" width="300" height="46" rx="4"/>
-          <text class="d-t"  x="348" y="102">t = (nowTick − placementTick)</text>
-          <text class="d-ts" x="348" y="119">how far along the wire the bead is</text>
-
-          <text class="d-ts" x="660" y="96">two goroutines' ticks,</text>
-          <text class="d-ts" x="660" y="112">subtracted from each other</text>
-          <text class="d-ts" x="660" y="136">→ they MUST share a clock</text>
-          <text class="d-ts" x="20" y="192">verified in ReviseInFlightGeometry (paced_wire.go) — not theoretical</text>
-
-          <text class="d-tl" x="0" y="244">SO THE SMALLEST GROUP THAT CAN SHARE ONE CLOCK</text>
-          <rect class="d-group" x="0" y="254" width="860" height="150" rx="6"/>
-          <rect class="d-box-flow" x="20" y="276" width="240" height="38" rx="4"/>
-          <text class="d-ts" x="34" y="300">the node's own loop</text>
-          <rect class="d-box-flow" x="20" y="322" width="240" height="38" rx="4"/>
-          <text class="d-ts" x="34" y="346">its DriveHeld goroutines  × per output</text>
-          <rect class="d-box-flow" x="300" y="276" width="260" height="38" rx="4"/>
-          <text class="d-ts" x="314" y="300">edge movers of its OUT wires</text>
-          <text class="d-ts" x="300" y="346">3–5 goroutines per clock</text>
-          <rect class="d-box-passive" x="610" y="288" width="220" height="60" rx="5"/>
-          <text class="d-t"  x="624" y="312">one clock per node</text>
-          <text class="d-ts" x="624" y="330">still shared → still a mutex</text>
-          <text class="d-ts" x="20" y="386">the floor is not zero: a wire inherently spans two goroutines that must agree on time</text>
-
-          <text class="d-tl" x="0" y="436">WHAT THE SPLIT WOULD ACTUALLY CHANGE</text>
-          <rect class="d-box" x="0" y="448" width="420" height="58" rx="5"/>
-          <text class="d-ts" x="18" y="470">gains: contention split ~9 ways</text>
-          <text class="d-ts" x="18" y="490">(3–5 goroutines per lock, not ~16)</text>
-          <rect class="d-box-haz" x="440" y="448" width="420" height="58" rx="5"/>
-          <text class="d-ts" x="458" y="470">costs: every paced loop grows a poll · DriveHeld</text>
-          <text class="d-ts" x="458" y="490">needs a channel · a missed change is permanent</text>
+          <text class="d-tl" x="0" y="386">STAYS SHARED</text>
+          <rect class="d-box-passive" x="0" y="398" width="410" height="52" rx="5"/>
+          <text class="d-t"  x="18" y="420">Trace</text>
+          <text class="d-ts" x="18" y="438">an accumulator — copies would give N partial streams</text>
+          <rect class="d-box" x="440" y="398" width="420" height="52" rx="5"/>
+          <text class="d-ts" x="458" y="420">still to settle: DriveHeld has no inbox, and every</text>
+          <text class="d-ts" x="458" y="438">paced loop grows a second poll — plumbing, not semantics</text>
         </svg>
         <p class="plate-cap">plan: docs/planning/visual-editor/per-goroutine-clock.md (branch-local)</p>
       </div>
 
       <div class="note">
-        <b>THE HEADLINE DOES NOT SURVIVE</b> — the reason to do this was “delete the widest
-        fan-in mutex.” It cannot be deleted. A wire’s bead position is computed from two
-        goroutines’ clock reads, so some sharing is structural.
+        <b>NO FLOOR</b> — an earlier draft argued a wire must keep one shared clock, which
+        left 3–5 goroutines per lock and lost the point. That was exactness re-imported
+        after it had already been dropped: the error at that subtraction is the same 1–2%
+        accepted everywhere else. <code>RealClock.mu</code> is deleted, not reduced.
       </div>
     </div>
 
@@ -688,15 +695,21 @@
       </p>
       <h2>What got dropped</h2>
       <p>
-        An earlier draft carried an <code>effectiveAt</code> instant on every transition so
+        An earlier draft carried an “effective at” instant on every transition so
         all copies banked identically. It was machinery for a problem that measurement
         showed was not there — and it sent a clock backward over ticks it had already
         acted on.
       </p>
       <h2>The real cost</h2>
       <p>
-        Not timing. Delivery. Every paced loop grows a second poll, and that is a change to
-        the shape of every node kind whether or not the timing is easy.
+        Not timing, and no longer a correctness cliff. A copy that hears late is off by the
+        band already accepted, so no timestamps and no special handling. What is left is
+        plumbing: every paced loop grows a second poll.
+      </p>
+      <h2>Trace is different</h2>
+      <p>
+        It cannot be copied. Every event has to land in one place to become one buffer, so
+        copies would produce partial streams and no whole picture. That mutex stays.
       </p>
     </aside>
   </div>
