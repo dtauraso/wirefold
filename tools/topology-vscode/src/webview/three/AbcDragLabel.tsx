@@ -4,8 +4,8 @@ import { getLatestSnapshot } from "../snapshot-buffer";
 import { decodeSnapshot, nodeLabel } from "./buffer-decode";
 import { readNodeGotDragMsg } from "../../schema/buffer-layout";
 
-// AbcDragLabel — a small in-editor affirmation that the time-node abc-drag log is
-// happening: a live count of "time.abc-drag" events plus the NAMES of every node that
+// AbcDragLabel — a small in-editor affirmation that the abc-drag log is
+// happening: a live count of "abc-drag" events plus the NAMES of every node that
 // has received at least one drag re-quantize, read-only from the content buffer
 // (AbcDragCount Overlay column + the Node block's per-row GotDragMsg flag). The
 // recipient set is Go-owned and sticky (accumulates in the buffer, never cleared) —
@@ -29,7 +29,7 @@ export function AbcDragLabel() {
 
   return createPortal(
     <span className="abc-drag-label">
-      time drag-log ×{count}
+      drag-log ×{count}
       {names.length ? `: ${names.join(", ")}` : ""}
     </span>,
     mount,

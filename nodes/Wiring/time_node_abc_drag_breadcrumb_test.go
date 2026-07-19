@@ -1,17 +1,16 @@
 package Wiring
 
-// time_node_abc_drag_breadcrumb_test.go — proves the "time.abc-drag" breadcrumb added
-// to neighborSetCRequantize (node_move.go) is both OBSERVABLE (the debug sink captures a
-// real, well-formed line for the HoldNewSendOld neighbor) and CORRECTLY GATED (a non-time
-// neighbor of the same drag emits nothing). Two failure modes this guards against:
-//   - if the `md.NodeKind(selfID) == "HoldNewSendOld"` gate were removed/widened, the
-//     non-time neighbor "n" would ALSO emit a breadcrumb and assertion (b) below would see
-//     a "time.abc-drag" line keyed to "n" — it currently sees none, so removing the gate
-//     flips this test to fail.
-//   - if the Breadcrumb call itself were deleted, the time neighbor "t" would receive its
+// time_node_abc_drag_breadcrumb_test.go — proves the "abc-drag" breadcrumb added to
+// neighborSetCRequantize (node_move.go) fires for EVERY direct neighbor that receives a
+// moveMsgKindNeighborSetC when a node is dragged — not just HoldNewSendOld ("time") nodes.
+// This guards against:
+//   - if the abc-drag Breadcrumb/AbcDrag call were re-gated to a specific NodeKind (e.g.
+//     `md.NodeKind(selfID) == "HoldNewSendOld"`), the non-time neighbor "n" would emit
+//     nothing and assertion (b) below (which requires exactly one line for n) would fail.
+//   - if the Breadcrumb call itself were deleted, both "t" and "n" would receive their
 //     moveMsgKindNeighborSetC exactly as before (behavior is unchanged — this is
-//     observability only) but the debug sink would capture zero "time.abc-drag" lines,
-//     so assertion (a) below (which requires exactly one) would fail.
+//     observability only) but the debug sink would capture zero "abc-drag" lines, so
+//     assertions (a) and (b) below would both fail.
 
 import (
 	"bytes"
@@ -51,8 +50,8 @@ func (s *syncBuffer) String() string {
 // writeXTN lays down a 3-node topology: "x" (FanInSrc, the node that will be dragged),
 // "t" (a real HoldNewSendOld node — a "time node") and "n" (FanInSink, a plain non-time
 // node) — both t and n are direct neighbors of x via one edge each, so dragging x sends
-// BOTH a moveMsgKindNeighborSetC. t is the positive case (breadcrumb expected), n is the
-// negative control (no breadcrumb expected).
+// BOTH a moveMsgKindNeighborSetC. Both are positive cases now: every drag-message
+// recipient must log an abc-drag breadcrumb, regardless of kind.
 func writeXTN(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
@@ -101,10 +100,11 @@ func parseBreadcrumbLines(t *testing.T, raw string) []breadcrumbLine {
 	return out
 }
 
-// TestTimeNodeLogsAbcDragBreadcrumbGatedByKind drags x and asserts (a) the time neighbor
-// t emits exactly one time.abc-drag breadcrumb matching its freshly re-quantized abc, and
-// (b) the non-time neighbor n emits none.
-func TestTimeNodeLogsAbcDragBreadcrumbGatedByKind(t *testing.T) {
+// TestEveryDragRecipientLogsAbcDragBreadcrumb drags x and asserts that EVERY direct
+// neighbor that receives a moveMsgKindNeighborSetC — both the time node t (HoldNewSendOld)
+// and the non-time node n (FanInSink) — emits exactly one "abc-drag" breadcrumb matching
+// its freshly re-quantized abc, keyed node=<recipient> port=x.
+func TestEveryDragRecipientLogsAbcDragBreadcrumb(t *testing.T) {
 	root := writeXTN(t)
 	md := loadTreeMD(t, root)
 	md.EnableEditPersist(root)
@@ -120,6 +120,10 @@ func TestTimeNodeLogsAbcDragBreadcrumbGatedByKind(t *testing.T) {
 	if !ok {
 		t.Fatal("no LayoutHolder for t")
 	}
+	lhN, ok := md.layoutHolders["n"]
+	if !ok {
+		t.Fatal("no LayoutHolder for n")
+	}
 
 	xBefore, ok := md.centerOfNode("x")
 	if !ok {
@@ -130,21 +134,26 @@ func TestTimeNodeLogsAbcDragBreadcrumbGatedByKind(t *testing.T) {
 		t.Fatal("RootMove(x) returned false")
 	}
 	pollDragConverged(t, md, "x", target)
-	// Let the neighborSetC messages to both t and n (and t's requantize + breadcrumb)
+	// Let the neighborSetC messages to both t and n (and their requantize + breadcrumb)
 	// settle before reading the debug sink.
 	deadline := time.Now().Add(2 * time.Second)
-	var lpAfter LocalPolar
+	var lpTAfter, lpNAfter LocalPolar
 	for {
 		for _, lp := range lhT.LocalPolarsSnapshot() {
 			if lp.To == "x" {
-				lpAfter = lp
+				lpTAfter = lp
 			}
 		}
-		if lpAfter.To == "x" {
+		for _, lp := range lhN.LocalPolarsSnapshot() {
+			if lp.To == "x" {
+				lpNAfter = lp
+			}
+		}
+		if lpTAfter.To == "x" && lpNAfter.To == "x" {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("t's local polar to x never appeared")
+			t.Fatal("t's and/or n's local polar to x never appeared")
 		}
 		time.Sleep(time.Millisecond)
 	}
@@ -154,7 +163,7 @@ func TestTimeNodeLogsAbcDragBreadcrumbGatedByKind(t *testing.T) {
 
 	var tLines, nLines []breadcrumbLine
 	for _, b := range lines {
-		if b.Label != "time.abc-drag" {
+		if b.Label != "abc-drag" {
 			continue
 		}
 		switch b.Node {
@@ -165,37 +174,35 @@ func TestTimeNodeLogsAbcDragBreadcrumbGatedByKind(t *testing.T) {
 		}
 	}
 
-	// (b) NEGATIVE CONTROL: n is not a time node (FanInSink), so its neighborSetC
-	// handling must emit zero time.abc-drag breadcrumbs. If the `NodeKind == "HoldNewSendOld"`
-	// gate in neighborSetCRequantize were removed (or widened to match any kind), n would
-	// receive its own neighborSetC from x exactly like t does and would emit one here too —
-	// this assertion would then fail, proving the gate is load-bearing.
-	if len(nLines) != 0 {
-		t.Fatalf("(b) non-time neighbor n must never emit time.abc-drag; got %+v", nLines)
+	checkOne := func(who string, got []breadcrumbLine, lp LocalPolar) {
+		t.Helper()
+		// If the abc-drag Breadcrumb/AbcDrag call were re-gated to a specific NodeKind (or
+		// deleted outright), one of the two recipients would emit zero lines here and this
+		// assertion would fail.
+		if len(got) != 1 {
+			t.Fatalf("expected exactly one abc-drag breadcrumb for %s; got %d: %+v", who, len(got), got)
+		}
+		b := got[0]
+		if b.Kind != "breadcrumb" {
+			t.Fatalf("%s: expected kind=breadcrumb, got %q", who, b.Kind)
+		}
+		if b.Node != who || b.Port != "x" {
+			t.Fatalf("%s: expected node=%s port=x, got node=%q port=%q", who, who, b.Node, b.Port)
+		}
+		if !strings.Contains(b.Value, "peer=x") {
+			t.Fatalf("%s: value must name the peer: %q", who, b.Value)
+		}
+		wantAbc := fmt.Sprintf("abc=(%d,%d,%d)", lp.QuantITheta, lp.QuantIPhi, lp.QuantIR)
+		if !strings.Contains(b.Value, wantAbc) {
+			t.Fatalf("%s: value abc triple must match freshly re-quantized LocalPolar to x: want substring %q, got %q", who, wantAbc, b.Value)
+		}
 	}
 
-	// (a) POSITIVE CASE: t (HoldNewSendOld) must emit exactly one time.abc-drag
-	// breadcrumb for this drag, keyed node=t, port=x (the peer), whose value carries the
-	// peer id and an abc triple matching t's freshly re-quantized LocalPolar to x. If the
-	// Breadcrumb call were deleted from neighborSetCRequantize entirely, tLines would be
-	// empty and this assertion would fail.
-	if len(tLines) != 1 {
-		t.Fatalf("(a) expected exactly one time.abc-drag breadcrumb for t; got %d: %+v", len(tLines), tLines)
-	}
-	b := tLines[0]
-	if b.Kind != "breadcrumb" {
-		t.Fatalf("(a) expected kind=breadcrumb, got %q", b.Kind)
-	}
-	if b.Node != "t" || b.Port != "x" {
-		t.Fatalf("(a) expected node=t port=x, got node=%q port=%q", b.Node, b.Port)
-	}
-	if !strings.Contains(b.Value, "peer=x") {
-		t.Fatalf("(a) value must name the peer: %q", b.Value)
-	}
-	wantAbc := fmt.Sprintf("abc=(%d,%d,%d)", lpAfter.QuantITheta, lpAfter.QuantIPhi, lpAfter.QuantIR)
-	if !strings.Contains(b.Value, wantAbc) {
-		t.Fatalf("(a) value abc triple must match t's freshly re-quantized LocalPolar to x: want substring %q, got %q", wantAbc, b.Value)
-	}
+	// (a) t (HoldNewSendOld, a "time node") must emit its abc-drag breadcrumb.
+	checkOne("t", tLines, lpTAfter)
+	// (b) n (FanInSink, NOT a time node) must ALSO emit its abc-drag breadcrumb — the old
+	// kind gate is gone; every drag-message recipient is logged.
+	checkOne("n", nLines, lpNAfter)
 
 	md.quantOffsetPersist.flush()
 }
