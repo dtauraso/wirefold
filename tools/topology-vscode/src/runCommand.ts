@@ -180,14 +180,6 @@ export class BuildAndRunRunner {
 
   private topologyPath: string | undefined;
 
-  // Status-bar affirmation that the time-node abc-drag breadcrumb stream is live.
-  // Created lazily on the FIRST "time.abc-drag" breadcrumb (not in the constructor) so
-  // importing/constructing this class in a non-extension context (e.g. a unit test) can
-  // never touch vscode.window before it's needed. Disposed alongside the runner in
-  // dispose(), matching this.channel's lifecycle.
-  private abcDragStatusItem: vscode.StatusBarItem | undefined;
-  private abcDragCount = 0;
-
   constructor(
     private readonly onSnapshot?: (msg: HostToWebviewMsg & { type: "buffer-snapshot" }) => void,
   ) {}
@@ -344,7 +336,6 @@ export class BuildAndRunRunner {
             fs.appendFileSync(this.goDebugFile, JSON.stringify({ ts_ms: Date.now(), src: "go-debug", ...crumb }) + "\n", "utf8");
           } catch { /* swallow */ }
         }
-        if (crumb.label === "time.abc-drag") this.recordAbcDrag(crumb);
         continue;
       }
       // Trace events are NO LONGER emitted on stdout: Go's JSON-trace emitter was removed and
@@ -353,20 +344,6 @@ export class BuildAndRunRunner {
       // stdout; any remaining stdout line is just process output.
       this.channel!.appendLine(line);
     }
-  }
-
-  // recordAbcDrag affirms in the VS Code status bar that a time-node peer abc-drag
-  // breadcrumb was just interpreted. Purely additive: it never changes the
-  // go-debug.jsonl append above, and it touches no webview/domain state.
-  private recordAbcDrag(crumb: Record<string, unknown>) {
-    if (!this.abcDragStatusItem) {
-      this.abcDragStatusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left);
-    }
-    this.abcDragCount++;
-    this.abcDragStatusItem.text = `$(pulse) time drag-log ×${this.abcDragCount}`;
-    this.abcDragStatusItem.tooltip =
-      `time-node abc-drag: node=${String(crumb.node)} peer-port=${String(crumb.port)} abc=${String(crumb.value)}`;
-    this.abcDragStatusItem.show();
   }
 
   private handleFd3(chunk: Buffer) {
@@ -453,6 +430,5 @@ export class BuildAndRunRunner {
   dispose() {
     this.cancel();
     this.channel?.dispose();
-    this.abcDragStatusItem?.dispose();
   }
 }

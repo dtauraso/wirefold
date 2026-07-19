@@ -1240,6 +1240,10 @@ func (md *MoveDispatch) neighborSetCRequantize(selfID, fromID string, fromCenter
 		md.tr.Breadcrumb("time.abc-drag", selfID, fromID,
 			fmt.Sprintf("peer=%s peerCenter=(%.3f,%.3f,%.3f) abc=(%d,%d,%d)",
 				fromID, fromCenter.X, fromCenter.Y, fromCenter.Z, it, ip, ir))
+		// Routed counterpart of the breadcrumb above: increments the buffer Overlay
+		// block's AbcDragCount so the in-editor overlay label can affirm this is
+		// happening live (the breadcrumb alone never reaches the content buffer).
+		md.tr.AbcDrag()
 	}
 
 	if md.quantOffsetPersist != nil {

@@ -24,7 +24,7 @@
 package Buffer
 
 // BufLayoutVersion is the schema version. Bump when any column changes.
-const BufLayoutVersion = 30
+const BufLayoutVersion = 31
 
 // BufInteriorSlotsPerNode is the fixed number of interior grid slots reserved per
 // node in the Interior block (a 2x2 held/interior-bead grid: slot = row*2 + col).
@@ -245,6 +245,11 @@ type bufLayoutOverlay struct {
 	// only when this is set. NOT the same thing as the LayoutLink block existing: the data
 	// streams every snapshot regardless, this just gates the render.
 	DoubleLinks uint8 `buf:"u8"` // 1 = layout-link overlay visible
+	// AbcDragCount is a running count of time.abc-drag events (time-node
+	// abc-index polar drag re-quantize) emitted by neighborSetCRequantize.
+	// Read-only affirmation counter for the in-editor overlay label; not a
+	// gate, never decrements.
+	AbcDragCount uint32 `buf:"u32"` // count of time.abc-drag events observed
 }
 
 // bufLayoutScene defines the scene-sphere column block (always 1 row).

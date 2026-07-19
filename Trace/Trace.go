@@ -129,6 +129,12 @@ const (
 	// different, non-authoritative sphere). Reuses the PX/PY/PZ/R fields (center/radius);
 	// no new Event fields.
 	KindSceneSphere = "scene-sphere"
+	// KindAbcDrag marks one time-node (HoldNewSendOld) abc-drag re-quantize event —
+	// the routed counterpart to the "time.abc-drag" debug breadcrumb emitted alongside
+	// it (nodes/Wiring/node_move.go neighborSetCRequantize). No payload beyond the kind
+	// itself; the buffer's Overlay block increments a running count on each occurrence
+	// so the in-editor overlay label can affirm the log is happening live.
+	KindAbcDrag = "abc-drag"
 )
 
 // TraceEventKinds is the single source of truth for the closed kind
@@ -137,7 +143,7 @@ const (
 // buffer EVENT block for the .probe log. There is no tsc exhaustiveness
 // check derived from it — adding a kind here does not force a TS branch
 // anywhere; it only extends the lookup table.
-var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindPosition, KindGeometry, KindNodeGeometry, KindArrive, KindNodeBead, KindCamera, KindSceneTori, KindScenePoles, KindNodePoles, KindSelSpherePoles, KindHandholds, KindLabelsGlobal, KindOverlaysVis, KindDoubleLinks, KindLayoutLink, KindSelect, KindHover, KindSceneSphere}
+var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindPosition, KindGeometry, KindNodeGeometry, KindArrive, KindNodeBead, KindCamera, KindSceneTori, KindScenePoles, KindNodePoles, KindSelSpherePoles, KindHandholds, KindLabelsGlobal, KindOverlaysVis, KindDoubleLinks, KindLayoutLink, KindSelect, KindHover, KindSceneSphere, KindAbcDrag}
 
 // PortGeom is one port's authoritative world geometry on a node-geometry event:
 // its name, whether it is an input, its sphere-surface world position (PX/PY/PZ),
@@ -478,6 +484,13 @@ func (t *Trace) DoubleLinks(visible bool) {
 // (nodes/Wiring/loader.go emitLayoutLinks dedupes by the alphabetically-first id).
 func (t *Trace) LayoutLink(src, dst string) {
 	t.emit(Event{Kind: KindLayoutLink, Node: src, Target: dst})
+}
+
+// AbcDrag emits one time-node abc-drag re-quantize event (KindAbcDrag). No payload;
+// the snapshot layer just increments a running count. Emitted alongside the
+// "time.abc-drag" debug breadcrumb, never in place of it.
+func (t *Trace) AbcDrag() {
+	t.emit(Event{Kind: KindAbcDrag})
 }
 
 // Select emits the currently-selected node id (KindSelect). node="" clears the selection.

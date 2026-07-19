@@ -46,11 +46,13 @@ import {
   OVERLAY_COL_SEL_SPHERE_POLES, OVERLAY_COL_HANDHOLDS,
   OVERLAY_COL_LABELS_GLOBAL, OVERLAY_COL_OVERLAYS_VIS,
   OVERLAY_COL_DOUBLE_LINKS,
+  OVERLAY_COL_ABC_DRAG_COUNT,
   OVERLAY_STRIDE,
   readOverlaySceneTori, readOverlayScenePoles, readOverlayNodePoles,
   readOverlaySelSpherePoles, readOverlayHandholds,
   readOverlayLabelsGlobal, readOverlayOverlaysVis,
   readOverlayDoubleLinks,
+  readOverlayAbcDragCount,
   // Port block
   PORT_COL_NODE_ROW, PORT_COL_IS_INPUT, PORT_COL_HOVERED, PORT_STRIDE,
   readPortNodeRow, readPortIsInput, readPortHovered,
@@ -273,8 +275,8 @@ describe("buffer-layout — Camera block", () => {
 
 describe("buffer-layout — Overlay block", () => {
   it("stride equals packed field sizes", () => {
-    // 8×u8 = 8 (8 overlay flags)
-    expect(OVERLAY_STRIDE).toBe(8);
+    // 8×u8 + 1×u32 = 12 (8 overlay flags + AbcDragCount)
+    expect(OVERLAY_STRIDE).toBe(12);
   });
 
   it("column offsets are 0..7", () => {
@@ -286,6 +288,7 @@ describe("buffer-layout — Overlay block", () => {
     expect(OVERLAY_COL_LABELS_GLOBAL).toBe(5);
     expect(OVERLAY_COL_OVERLAYS_VIS).toBe(6);
     expect(OVERLAY_COL_DOUBLE_LINKS).toBe(7);
+    expect(OVERLAY_COL_ABC_DRAG_COUNT).toBe(8);
   });
 
   it("read helpers decode known bytes (alternating pattern)", () => {
@@ -295,6 +298,7 @@ describe("buffer-layout — Overlay block", () => {
     ([1, 0, 1, 0, 1, 0, 1, 0] as const).forEach((v, i) => { bytes[i] = v; });
 
     const dv = new DataView(buf);
+    dv.setUint32(OVERLAY_COL_ABC_DRAG_COUNT, 7, true);
     expect(readOverlaySceneTori(dv)).toBe(1);
     expect(readOverlayScenePoles(dv)).toBe(0);
     expect(readOverlayNodePoles(dv)).toBe(1);
@@ -303,6 +307,7 @@ describe("buffer-layout — Overlay block", () => {
     expect(readOverlayLabelsGlobal(dv)).toBe(0);
     expect(readOverlayOverlaysVis(dv)).toBe(1);
     expect(readOverlayDoubleLinks(dv)).toBe(0);
+    expect(readOverlayAbcDragCount(dv)).toBe(7);
   });
 });
 
@@ -321,8 +326,8 @@ describe("buffer-layout — event enum", () => {
 // ─ Meta ───────────────────────────────────────────────────────────────────────
 
 describe("buffer-layout — meta", () => {
-  it("schema version is 30", () => {
-    expect(BUF_LAYOUT_VERSION).toBe(30);
+  it("schema version is 31", () => {
+    expect(BUF_LAYOUT_VERSION).toBe(31);
   });
 
   it("header size is 40 bytes (10×u32)", () => {

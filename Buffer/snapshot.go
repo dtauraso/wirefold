@@ -302,6 +302,7 @@ type overlaySnapState struct {
 	labelsGlobal   uint8
 	overlaysVis    uint8
 	doubleLinks    uint8
+	abcDragCount   uint32
 }
 
 // NewSnapshotState creates an empty SnapshotState that writes framed snapshots
@@ -377,6 +378,12 @@ func (s *SnapshotState) Update(ev T.Event) {
 		if field, ok := s.overlayFlagFields[ev.Kind]; ok {
 			*field = boolU8(ev.Visible)
 		}
+		s.emitSnapshot()
+
+	case T.KindAbcDrag:
+		// Read-only affirmation counter for the in-editor overlay label; never
+		// decrements, no gating semantics (unlike the bool overlay flags above).
+		s.overlay.abcDragCount++
 		s.emitSnapshot()
 
 	case T.KindPosition:
@@ -1115,7 +1122,7 @@ func (s *SnapshotState) writeOverlayBlock(buf []byte, off int) int {
 		ov.sceneTori, ov.scenePoles, ov.nodePoles,
 		ov.selSpherePoles, ov.handholds,
 		ov.labelsGlobal,
-		ov.overlaysVis, ov.doubleLinks)
+		ov.overlaysVis, ov.doubleLinks, ov.abcDragCount)
 	return off + BufOverlayStride
 }
 

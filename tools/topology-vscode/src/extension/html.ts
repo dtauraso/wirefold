@@ -55,6 +55,7 @@ export function buildWebviewHtml(
     <span id="run-mount"></span>
   </div>
   <div id="rule-eq-mount"></div>
+  <div id="abc-drag-mount"></div>
   <div id="app"></div>
   <script nonce="${nonce}" src="${scriptUri.toString()}"></script>
 </body>

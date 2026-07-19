@@ -140,7 +140,7 @@ func TestSetCameraRow(t *testing.T) {
 
 func TestSetOverlayRow(t *testing.T) {
 	buf := make([]byte, BufOverlayStride)
-	SetOverlayRow(buf, 1, 0, 1, 0, 1, 0, 0, 1)
+	SetOverlayRow(buf, 1, 0, 1, 0, 1, 0, 0, 1, 42)
 
 	assertU8At(t, buf, BufOverlayColSceneTori, 1, "SceneTori")
 	assertU8At(t, buf, BufOverlayColScenePoles, 0, "ScenePoles")
@@ -150,6 +150,7 @@ func TestSetOverlayRow(t *testing.T) {
 	assertU8At(t, buf, BufOverlayColLabelsGlobal, 0, "LabelsGlobal")
 	assertU8At(t, buf, BufOverlayColOverlaysVis, 0, "OverlaysVis")
 	assertU8At(t, buf, BufOverlayColDoubleLinks, 1, "DoubleLinks")
+	assertU32At(t, buf, BufOverlayColAbcDragCount, 42, "AbcDragCount")
 }
 
 func TestBeadStrideIsPackedSize(t *testing.T) {
@@ -186,8 +187,8 @@ func TestCameraStrideIsPackedSize(t *testing.T) {
 }
 
 func TestOverlayStrideIsPackedSize(t *testing.T) {
-	// Overlay block: 8×u8 = 8 (8 overlay flags)
-	want := 8
+	// Overlay block: 8×u8 + 1×u32 = 12 (8 overlay flags + AbcDragCount)
+	want := 8*1 + 4
 	if BufOverlayStride != want {
 		t.Errorf("BufOverlayStride = %d, want %d (packed size)", BufOverlayStride, want)
 	}
