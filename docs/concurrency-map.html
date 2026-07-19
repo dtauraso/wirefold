@@ -171,9 +171,9 @@
   <div class="layout">
     <div>
       <div class="plate">
-        <svg viewBox="0 0 860 430" role="img" aria-label="Goroutines that run for a nine node, ten edge graph, grouped into per-node, per-edge and singleton goroutines.">
+        <svg viewBox="0 0 860 450" role="img" aria-label="Goroutines that run for a nine node, ten edge graph, grouped into per-node, per-edge and singleton goroutines.">
           <text class="d-tl" x="0" y="12">PER NODE  × 9</text>
-          <rect class="d-group" x="0" y="22" width="270" height="180" rx="6"/>
+          <rect class="d-group" x="0" y="22" width="270" height="216" rx="6"/>
           <rect class="d-box-flow" x="18" y="42" width="234" height="34" rx="4"/>
           <text class="d-t" x="30" y="63">nodeMover.run</text>
           <text class="d-ts" x="196" y="63">inbox</text>
@@ -183,22 +183,25 @@
           <rect class="d-box-flow" x="18" y="134" width="234" height="34" rx="4"/>
           <text class="d-t" x="30" y="155">node kind loop</text>
           <text class="d-ts" x="186" y="155">fires</text>
-          <text class="d-ts" x="18" y="188">writes only its own position</text>
+          <rect class="d-box-flow" x="18" y="176" width="234" height="30" rx="4"/>
+          <text class="d-t" x="30" y="195">DriveHeld</text>
+          <text class="d-ts" x="120" y="195">one per driven output</text>
+          <text class="d-ts" x="18" y="224">writes only its own position</text>
 
           <text class="d-tl" x="300" y="12">PER EDGE  × 10</text>
-          <rect class="d-group" x="300" y="22" width="250" height="180" rx="6"/>
+          <rect class="d-group" x="300" y="22" width="250" height="216" rx="6"/>
           <rect class="d-box-flow" x="318" y="42" width="214" height="34" rx="4"/>
           <text class="d-t" x="330" y="63">edgeMover.run</text>
-          <rect class="d-box-sig" x="318" y="88" width="214" height="34" rx="4"/>
-          <text class="d-t" x="330" y="109">PacedWire</text>
-          <text class="d-ts" x="452" y="109">beads</text>
-          <rect class="d-box-sig" x="318" y="134" width="214" height="34" rx="4"/>
-          <text class="d-t" x="330" y="155">DriveHeld</text>
-          <text class="d-ts" x="424" y="155">per output</text>
-          <text class="d-ts" x="318" y="188">holds both endpoints; draws itself</text>
+          <text class="d-ts" x="318" y="88">holds both endpoints; draws the curve</text>
+
+          <rect class="d-box-passive" x="318" y="106" width="214" height="62" rx="4"/>
+          <text class="d-t" x="330" y="126">PacedWire</text>
+          <text class="d-ts" x="330" y="142">NOT a goroutine —</text>
+          <text class="d-ts" x="330" y="158">stepped by the source node</text>
+          <text class="d-ts" x="318" y="188">passive struct: inflight · delivered</text>
 
           <text class="d-tl" x="580" y="12">SINGLETONS</text>
-          <rect class="d-group" x="580" y="22" width="270" height="180" rx="6"/>
+          <rect class="d-group" x="580" y="22" width="270" height="216" rx="6"/>
           <rect class="d-box" x="598" y="42" width="234" height="34" rx="4"/>
           <text class="d-t" x="610" y="63">Trace drain</text>
           <rect class="d-box" x="598" y="88" width="234" height="34" rx="4"/>
@@ -207,20 +210,20 @@
           <rect class="d-box" x="598" y="134" width="234" height="34" rx="4"/>
           <text class="d-t" x="610" y="155">persist timers</text>
           <text class="d-ts" x="742" y="155">debounced</text>
-          <text class="d-ts" x="598" y="188">one each, whole process</text>
+          <text class="d-ts" x="598" y="224">one each, whole process</text>
 
-          <line class="d-arrow" x1="430" y1="230" x2="430" y2="258"/>
-          <path class="d-arrow" d="M426 252 L430 260 L434 252"/>
+          <line class="d-arrow" x1="430" y1="256" x2="430" y2="278"/>
+          <path class="d-arrow" d="M426 272 L430 280 L434 272"/>
 
-          <rect class="d-box" x="150" y="262" width="560" height="62" rx="5"/>
-          <text class="d-t" x="176" y="288">≈ 40 long-lived goroutines</text>
-          <text class="d-ts" x="176" y="308">for a 9-node / 10-edge graph — all running continuously, all session</text>
+          <rect class="d-box" x="150" y="282" width="560" height="62" rx="5"/>
+          <text class="d-t" x="176" y="308">≈ 45 long-lived goroutines</text>
+          <text class="d-ts" x="176" y="328">for a 9-node / 10-edge graph — all running continuously, all session</text>
 
-          <text class="d-tl" x="150" y="356">SCALING</text>
-          <line class="d-arrow-flow" x1="150" y1="366" x2="710" y2="366"/>
-          <text class="d-ts" x="150" y="386">add a node in the editor</text>
-          <text class="d-ts" x="470" y="386">→ you add goroutines</text>
-          <text class="d-ts" x="150" y="404">the concurrency structure is the picture you drew, not a function of load</text>
+          <text class="d-tl" x="150" y="376">SCALING</text>
+          <line class="d-arrow-flow" x1="150" y1="386" x2="710" y2="386"/>
+          <text class="d-ts" x="150" y="406">add a node in the editor</text>
+          <text class="d-ts" x="470" y="406">→ you add goroutines</text>
+          <text class="d-ts" x="150" y="424">the concurrency structure is the picture you drew, not a function of load</text>
         </svg>
         <p class="plate-cap">spawn sites: node_mover.go · node_move.go · main.go · gatecommon/drive.go</p>
       </div>
