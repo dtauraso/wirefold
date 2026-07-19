@@ -93,7 +93,7 @@ func (lp LocalPolar) effectiveSteps() (t, p, r float64) {
 // That is false. requantizeLocalPolars (quantized_move.go) only ever looks up
 // md.layoutHolders[nodeID] — X itself — and never md.layoutHolders[m] for a
 // neighbor m; X reaches M exclusively by sending it a moveMsgKindNeighborSetC
-// message (sendMoveLossy, to M's OWN inbox), and it is M's own run/handle
+// message (via X's own outbox, to M's OWN inbox), and it is M's own run/handle
 // goroutine (node_mover.go) that drains that message and calls
 // neighborSetCRequantize -> lh.SetLocalPolar/SetPole on M's OWN holder. Every
 // LayoutHolder in md.layoutHolders is therefore written and read ONLY by its
