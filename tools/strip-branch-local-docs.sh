@@ -45,4 +45,16 @@ for f in "${matched[@]}"; do
   git rm "$f"
   echo "  removed: $f"
 done
+
+# Warn (don't block) if any removed doc is still cited from outside docs/ —
+# check-doc-drift.sh will fail the next stop-checks run on these, but a warning
+# here means the doc-drift failure is expected and fixable in the same commit
+# that stripped the doc, rather than surfacing later as a surprise.
+for f in "${matched[@]}"; do
+  hits=$(grep -rln --exclude-dir=node_modules --exclude-dir=.git -- "$f" . 2>/dev/null | grep -v '^\./docs/' || true)
+  if [[ -n "$hits" ]]; then
+    echo "WARNING: $f is still cited from:"
+    echo "$hits" | sed 's/^/  /'
+  fi
+done
 echo "Done."
