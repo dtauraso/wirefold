@@ -188,20 +188,47 @@ func NewPacedWire(arcLength float64, pulseSpeed float64) *PacedWire {
 // means at that call site, without changing the value.
 const msToArcWu = PulseSpeedWuPerMs
 
+// SendOutcome distinguishes WHY Send did not place a bead, so a caller cannot
+// accidentally treat "buffer momentarily full" (transient — never exit on this)
+// the same as a genuinely terminal condition. There is currently only one
+// non-terminal failure mode (inCh full); SendOutcome exists as a TYPE so that
+// if a real terminal wire-teardown path is ever reintroduced, it lands as a
+// third, distinct constant rather than silently widening SendBufferFull's
+// meaning.
+type SendOutcome uint8
+
+const (
+	// SendPlaced: the bead was enqueued onto inCh.
+	SendPlaced SendOutcome = iota
+	// SendBufferFull: inCh's buffer (wireChanBufferSize) was full at send time.
+	// TRANSIENT, NOT TERMINAL — the wire's own goroutine drains inCh every
+	// cycle, so room reappears almost immediately. A caller must NOT exit its
+	// drive loop on this outcome; it should skip this cycle's placement and
+	// retry on the next one. See the wireChanBufferSize doc comment: this
+	// should never occur under realistic load, but if it does, the source
+	// keeps running rather than silently losing its drive goroutine forever.
+	SendBufferFull
+)
+
 // Send enqueues one bead placement onto this wire's IN-CHANNEL from the SOURCE
 // node's own goroutine (Out.placeDrivenNoWalkerAt). Non-blocking by construction:
 // the buffered channel means this call always succeeds immediately under any
 // realistic load, so the source never waits on the wire or the destination
-// (MODEL.md "Sending" — no back-pressure, ever). Returns false only if the
-// (generously sized) buffer is somehow already full — a condition that would
+// (MODEL.md "Sending" — no back-pressure, ever). Returns SendBufferFull only if
+// the (generously sized) buffer is somehow already full — a condition that would
 // itself indicate a bug elsewhere (a source firing far faster than any wire could
-// ever drain), never ordinary traffic.
-func (pw *PacedWire) Send(v int, bp beadPlacement) bool {
+// ever drain), never ordinary traffic. Emits ONE breadcrumb per occurrence (this
+// should never fire; it is a control-event signal, not a per-tick firehose) —
+// see CLAUDE.md's debug-breadcrumb section.
+func (pw *PacedWire) Send(v int, bp beadPlacement) SendOutcome {
 	select {
 	case pw.inCh <- placeRequest{val: v, bp: bp}:
-		return true
+		return SendPlaced
 	default:
-		return false
+		if pw.Trace != nil {
+			pw.Trace.Breadcrumb("wire-send-buffer-full", pw.Target, pw.TargetHandle, "")
+		}
+		return SendBufferFull
 	}
 }
 

@@ -85,7 +85,7 @@ func TestDecentralizedNodeMove(t *testing.T) {
 	// the wire on its own clock copy — no manual driving needed from the test.
 	seg0 := wireSegment{Start: out.Geom().Start, End: out.Geom().End}
 	bp := beadPlacement{InFlightMs: out.Geom().SimLatencyMs, Start: seg0.Start, End: seg0.End, Node: "src", Port: "Out"}
-	if !pw.Send(7, bp) {
+	if pw.Send(7, bp) != SendPlaced {
 		t.Fatal("Send rejected on fresh wire")
 	}
 	// Give the wire's own goroutine a moment to drain the send into its inflight

@@ -32,7 +32,7 @@ func TestReviseInFlightGeometryNoSkewWithSingleClockCopy(t *testing.T) {
 
 	// Place via the production path (Send + DriveOneCycle): the WIRE's own
 	// clock reading stamps placementTick.
-	if !pw.Send(0, beadPlacement{InFlightMs: inFlightMs, Start: vec3{}, End: vec3{X: 1}}) {
+	if pw.Send(0, beadPlacement{InFlightMs: inFlightMs, Start: vec3{}, End: vec3{X: 1}}) != SendPlaced {
 		t.Fatalf("Send failed")
 	}
 	placementTick := clk.Tick()

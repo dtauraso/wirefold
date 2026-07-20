@@ -133,10 +133,15 @@ func DriveHeld(ctx context.Context, out *Wiring.Out, held *atomic.Int64, transfo
 				// else: geometry not yet known — don't place this cycle.
 			}
 			if place {
-				if out.PlaceDrivenAt(transform(held.Load())).Failed() {
+				di := out.PlaceDrivenAt(transform(held.Load()))
+				if di.Failed() {
 					return
 				}
-				if paced {
+				// DriveBufferFull is TRANSIENT (the paced wire's inCh was
+				// momentarily full) — do not stop the loop or advance
+				// lastPlaceTick; retry the placement next cycle instead of
+				// silently losing this drive goroutine forever.
+				if !di.BufferFull() && paced {
 					lastPlaceTick = tick()
 				}
 			}

@@ -79,10 +79,15 @@ func (n *Node) clock() Wiring.Clock {
 }
 
 // fanOutPlace places v on every wired fan-out output (same cycle — preserves
-// concurrent fan-out) without driving them. Returns false if any wired
-// placement failed (torn-down wire), mirroring EmitOneDriven's
-// false-return-stops-the-goroutine convention. Delivery is timed by each
-// wire's own goroutine — this node no longer pins or steps a tick.
+// concurrent fan-out) without driving them. Returns false only on a
+// structural, TERMINAL failure (DriveItem.Failed() — a nil Out), mirroring
+// EmitOneDriven's false-return-stops-the-goroutine convention. A momentarily
+// full paced-wire buffer (DriveItem.BufferFull()) is TRANSIENT — the wire's
+// own goroutine drains it every cycle — so it must NOT stop this node's
+// goroutine; that bead is simply dropped from this cycle's fan-out (a
+// breadcrumb was already emitted by PacedWire.Send) and the next Fire cycle
+// tries again. Delivery is timed by each wire's own goroutine — this node no
+// longer pins or steps a tick.
 func (n *Node) fanOutPlace(v int) bool {
 	if n.ToHoldNewSendOld.Wired() && n.ToHoldNewSendOld.PlaceDrivenAt(v).Failed() {
 		return false

@@ -237,14 +237,18 @@ func (o *Out) Gated() bool {
 // emits the SendWire trace at placement time. The wire's own goroutine stamps the
 // placement tick from its own clock when it drains the send; the source no longer
 // pins one (MODEL.md: "The wire goroutine reads its OWN clock copy and its own
-// tick"). Caller must have already checked o.pw != nil.
-func (o *Out) placeDrivenNoWalker(v int) (ok bool) {
+// tick"). Caller must have already checked o.pw != nil. Returns the wire's
+// SendOutcome verbatim so the caller (PlaceDrivenAt) can distinguish a transient
+// buffer-full from a genuinely terminal condition instead of collapsing both to
+// one bool.
+func (o *Out) placeDrivenNoWalker(v int) SendOutcome {
 	g := o.Geom()
-	if !o.pw.Send(v, o.placementFrom(g)) {
-		return false
+	outcome := o.pw.Send(v, o.placementFrom(g))
+	if outcome != SendPlaced {
+		return outcome
 	}
 	o.trace.SendWire(o.node, o.port, v, g.ArcLength, g.SimLatencyMs, o.pw.Target, o.pw.TargetHandle)
-	return true
+	return SendPlaced
 }
 
 // Wired reports whether this Out port is bound to a real edge (paced-wire
@@ -258,12 +262,21 @@ func (o *Out) Wired() bool {
 	return o.pw != nil
 }
 
-// DriveOutcome distinguishes the three outcomes a drive placement can have.
+// DriveOutcome distinguishes the outcomes a drive placement can have.
 // Collapsing them onto a single bool (the pre-fix shape) made "chan mode, sent
 // fine, nothing more to drive" indistinguishable from "placement failed /
 // wire torn down" — callers that stopped their loop on !Live() then stopped
-// on every chan-mode send too. Keeping all three explicit makes that
-// conflation unrepresentable.
+// on every chan-mode send too. Keeping them explicit makes that conflation
+// unrepresentable.
+//
+// DriveBufferFull is its own constant, split out from DriveFailed, for the
+// same reason: a paced wire's inCh being momentarily full (PacedWire.
+// SendBufferFull) is TRANSIENT — the wire's own goroutine drains inCh every
+// cycle — and must never be treated as "stop, the wire is gone". Only a nil
+// Out (no destination at all, a structural condition) is DriveFailed. Naming
+// them apart means a caller who writes `.Failed()` gets ONLY the terminal
+// case by construction; it cannot accidentally also catch buffer-full the way
+// the pre-fix single bool did.
 type DriveOutcome uint8
 
 const (
@@ -273,37 +286,56 @@ const (
 	// DriveSentChan: chan mode (tests) — the value was sent (or dropped by a
 	// full non-blocking select) on the raw channel. Nothing to drive further.
 	DriveSentChan
-	// DriveFailed: nil Out, or paced placement failed (wire torn down). The
-	// caller should treat this as "stop, the wire is gone".
+	// DriveBufferFull: the paced wire's inCh was momentarily full
+	// (PacedWire.SendBufferFull). TRANSIENT, NOT TERMINAL — a caller driving a
+	// continuous-placement loop must NOT stop on this; skip this cycle's
+	// placement and retry next cycle. A breadcrumb was already emitted by
+	// PacedWire.Send.
+	DriveBufferFull
+	// DriveFailed: nil Out — there is no destination at all. Structural and
+	// terminal; the caller should stop.
 	DriveFailed
 )
 
 // DriveItem is an exported handle to one placed bead. Delivery is timed by the
 // wire's own goroutine, not by the caller — this type reports which of the
-// three DriveOutcomes occurred.
+// DriveOutcomes occurred.
 type DriveItem struct {
 	outcome DriveOutcome
 }
 
 // Live reports whether this DriveItem carries a bead actually placed on a
 // paced wire (i.e. PlaceDriven succeeded in paced-wire mode) — outcome ==
-// DrivePlaced. False for a nil Out, chan mode, or a failed placement
-// (torn-down wire). Callers that need ONLY "did this become a real,
-// time-able in-flight bead" (e.g. holdnewsendold's processing-window length)
-// check this; callers that need "should I stop, the wire is gone" must check
-// Failed() instead — Live() alone cannot distinguish chan-mode success from
-// failure.
+// DrivePlaced. False for a nil Out, chan mode, a momentary buffer-full, or a
+// failed placement. Callers that need ONLY "did this become a real, time-able
+// in-flight bead" (e.g. holdnewsendold's processing-window length) check
+// this; callers that need "should I stop, the wire is gone" must check
+// Failed() instead — Live() alone cannot distinguish chan-mode success,
+// buffer-full, or true failure.
 func (di DriveItem) Live() bool {
 	return di.outcome == DrivePlaced
 }
 
-// Failed reports whether the placement failed outright: a nil Out, or a paced
-// placement that could not proceed (wire torn down). Callers driving a
-// continuous-placement loop should stop on Failed(), not on !Live() — a
-// chan-mode successful send is also !Live() (DriveSentChan) but is not a
-// failure and must not stop the loop.
+// Failed reports whether the placement failed for a STRUCTURAL, TERMINAL
+// reason: a nil Out (no destination at all). It deliberately does NOT report
+// true for DriveBufferFull — a momentarily-full paced-wire buffer is
+// transient and self-clears as the wire's own goroutine drains it; treating
+// it as terminal would silently and permanently kill a source's drive
+// goroutine on ordinary transient load. Callers driving a continuous-
+// placement loop should stop on Failed(), not on !Live() — a chan-mode
+// successful send or a buffer-full retry are also !Live() but must not stop
+// the loop. See BufferFull() for the transient case.
 func (di DriveItem) Failed() bool {
 	return di.outcome == DriveFailed
+}
+
+// BufferFull reports whether this placement did not go through because the
+// paced wire's inCh was momentarily full. This is the DISTINCT, NON-TERMINAL
+// counterpart to Failed(): a caller must handle this case (typically: skip
+// this cycle, keep looping) rather than let it fall through to a generic
+// failure branch, which is exactly the bug this type split fixes.
+func (di DriveItem) BufferFull() bool {
+	return di.outcome == DriveBufferFull
 }
 
 // PlaceDrivenAt places one bead on this Out WITHOUT spawning a walker, emits
@@ -311,16 +343,19 @@ func (di DriveItem) Failed() bool {
 // timed by the wire's own goroutine (PacedWire, driven by edgeMover.run), not by
 // the caller. In chan mode (tests) it sends immediately on the raw channel and
 // returns DriveSentChan, so unit tests keep their synchronous chan semantics. A
-// nil Out returns DriveFailed.
+// nil Out returns DriveFailed. A momentarily-full paced wire returns
+// DriveBufferFull, never DriveFailed — see the DriveOutcome doc comment.
 func (o *Out) PlaceDrivenAt(v int) DriveItem {
 	if o == nil {
 		return DriveItem{outcome: DriveFailed}
 	}
 	if o.pw != nil {
-		if !o.placeDrivenNoWalker(v) {
-			return DriveItem{outcome: DriveFailed}
+		switch o.placeDrivenNoWalker(v) {
+		case SendPlaced:
+			return DriveItem{outcome: DrivePlaced}
+		default: // SendBufferFull
+			return DriveItem{outcome: DriveBufferFull}
 		}
-		return DriveItem{outcome: DrivePlaced}
 	}
 	// chan mode (tests): no drive needed, send now and return DriveSentChan.
 	if o.ch != nil {
