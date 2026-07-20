@@ -1,8 +1,8 @@
-// Buffer-layout codegen: parses Buffer/layout.go's buf: struct tags and
-// BufEvent* consts and emits both Buffer/buffer_layout_gen.go (Go writers) and
-// src/schema/buffer-layout.ts (TS readers) from one shared schema + one
-// bufTypeTable, so the two sides cannot disagree about a column's width,
-// signedness, or endianness (see TestBufTypeTableConsistency).
+// Buffer-layout codegen: parses Buffer/layout.go's buf: struct tags and emits
+// both Buffer/buffer_layout_gen.go (Go writers) and src/schema/buffer-layout.ts
+// (TS readers) from one shared schema + one bufTypeTable, so the two sides
+// cannot disagree about a column's width, signedness, or endianness (see
+// TestBufTypeTableConsistency).
 package main
 
 import (
@@ -33,17 +33,10 @@ type bufBlock struct {
 	stride  int      // total bytes per row
 }
 
-// bufEventEntry is one entry in the semantic event enum (BufEvent* constants).
-type bufEventEntry struct {
-	name  string // e.g. "Recv"
-	value int
-}
-
 // bufLayoutSchema is the parsed content of Buffer/layout.go.
 type bufLayoutSchema struct {
 	version              int
 	blocks               []bufBlock
-	events               []bufEventEntry
 	interiorSlotsPerNode int
 }
 
@@ -128,7 +121,6 @@ func bufTypeSize(t string) (int, error) {
 
 // parseBufferLayout reads Buffer/layout.go and returns the schema:
 // - BufLayoutVersion const → version
-// - BufEvent* consts in source order → events
 // - bufLayout* struct types in source order → blocks with columns + strides
 func parseBufferLayout(layoutPath string) (bufLayoutSchema, error) {
 	fset := token.NewFileSet()
@@ -141,7 +133,7 @@ func parseBufferLayout(layoutPath string) (bufLayoutSchema, error) {
 
 	// Walk declarations in source order to preserve relative ordering of consts
 	// and struct types (they are interleaved intentionally — version first, then
-	// events, then blocks).
+	// blocks).
 	for _, decl := range f.Decls {
 		switch d := decl.(type) {
 		case *ast.GenDecl:
@@ -166,9 +158,6 @@ func parseBufferLayout(layoutPath string) (bufLayoutSchema, error) {
 							schema.version = ival
 						case nm.Name == "BufInteriorSlotsPerNode":
 							schema.interiorSlotsPerNode = ival
-						case strings.HasPrefix(nm.Name, "BufEvent"):
-							suffix := nm.Name[len("BufEvent"):]
-							schema.events = append(schema.events, bufEventEntry{name: suffix, value: ival})
 						}
 					}
 				}
@@ -222,9 +211,6 @@ func parseBufferLayout(layoutPath string) (bufLayoutSchema, error) {
 	if schema.interiorSlotsPerNode == 0 {
 		return bufLayoutSchema{}, fmt.Errorf("BufInteriorSlotsPerNode const not found in %s", layoutPath)
 	}
-	if len(schema.events) == 0 {
-		return bufLayoutSchema{}, fmt.Errorf("no BufEvent* consts found in %s", layoutPath)
-	}
 	if len(schema.blocks) == 0 {
 		return bufLayoutSchema{}, fmt.Errorf("no bufLayout* struct types found in %s", layoutPath)
 	}
@@ -244,11 +230,6 @@ func buildBufFingerprint(schema bufLayoutSchema) string {
 		}
 		parts = append(parts, fmt.Sprintf("block:%s[%s]:stride:%d", blk.name, strings.Join(cols, ","), blk.stride))
 	}
-	var evs []string
-	for _, ev := range schema.events {
-		evs = append(evs, fmt.Sprintf("%s:%d", ev.name, ev.value))
-	}
-	parts = append(parts, "event["+strings.Join(evs, ",")+"]")
 	return strings.Join(parts, "|")
 }
 
@@ -445,17 +426,6 @@ func writeBufferLayoutGo(outPath string, schema bufLayoutSchema) error {
 		}
 	}
 
-	// Event enum.
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, `// ── Semantic event enum ─────────────────────────────────────────────────────────`)
-	fmt.Fprintln(w, `// Transient per-node flags stored in node rows (EvRecv/EvFire/…).`)
-	fmt.Fprintln(w, `// These ids are embedded in snapshots; names are resolved from this schema.`)
-	fmt.Fprintln(w, `const (`)
-	for _, ev := range schema.events {
-		fmt.Fprintf(w, "\tBufEvent%sID = %d\n", ev.name, ev.value)
-	}
-	fmt.Fprintln(w, `)`)
-
 	w.Flush()
 	formatted, err := format.Source(buf.Bytes())
 	if err != nil {
@@ -510,15 +480,6 @@ func writeBufferLayoutTS(outPath string, schema bufLayoutSchema) error {
 					fnName, getter, stride, colConst, le)
 			}
 		}
-	}
-
-	// Event enum.
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, `// ── Semantic event enum ─────────────────────────────────────────────────────────`)
-	fmt.Fprintln(w, `// Transient per-node event flags; ids embedded in snapshots, names in this schema.`)
-	for _, ev := range schema.events {
-		tsName := "BUF_EVENT_" + strings.ToUpper(ev.name)
-		fmt.Fprintf(w, "export const %-25s = %d;\n", tsName, ev.value)
 	}
 
 	fmt.Fprintln(w)

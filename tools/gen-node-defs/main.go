@@ -244,13 +244,13 @@ func main() {
 	if err := writeBufferLayoutGo(bufLayoutGenGoPath, bufSchema); err != nil {
 		fatalf("write %s: %v", bufLayoutGenGoPath, err)
 	}
-	fmt.Fprintf(os.Stderr, "gen-node-defs: wrote %s (%d blocks, %d events)\n", bufLayoutGenGoPath, len(bufSchema.blocks), len(bufSchema.events))
+	fmt.Fprintf(os.Stderr, "gen-node-defs: wrote %s (%d blocks)\n", bufLayoutGenGoPath, len(bufSchema.blocks))
 
 	bufLayoutTSPath := filepath.Join(repoRoot, "tools", "topology-vscode", "src", "schema", "buffer-layout.ts")
 	if err := writeBufferLayoutTS(bufLayoutTSPath, bufSchema); err != nil {
 		fatalf("write %s: %v", bufLayoutTSPath, err)
 	}
-	fmt.Fprintf(os.Stderr, "gen-node-defs: wrote %s (%d blocks, %d events)\n", bufLayoutTSPath, len(bufSchema.blocks), len(bufSchema.events))
+	fmt.Fprintf(os.Stderr, "gen-node-defs: wrote %s (%d blocks)\n", bufLayoutTSPath, len(bufSchema.blocks))
 
 }
 

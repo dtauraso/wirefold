@@ -14,9 +14,6 @@
 // column-block definitions; the suffix becomes the block name (e.g. bufLayoutBead
 // → block "Bead").
 //
-// Event enum constants beginning with BufEvent are emitted as matching integer
-// constants on both Go and TS sides.
-//
 // BUF_LAYOUT_VERSION is bumped whenever any column definition changes; the
 // generated files carry the same version so a stale regeneration is immediately
 // visible.
@@ -38,16 +35,19 @@ const BufLayoutVersion = 32
 // just a same-symbolic-constant-on-both-sides test that could never catch a value change.
 const BufInteriorSlotsPerNode = 4
 
-// --- Semantic event enum ------------------------------------------------
-// Transient flags stored in node rows (one u8 per event kind per node per tick).
-
-const (
-	BufEventRecv   = 0 // node received a bead on an input port this tick
-	BufEventFire   = 1 // node fired (produced output) this tick
-	BufEventSend   = 2 // node sent a bead on an output port this tick
-	BufEventArrive = 3 // a bead arrived at this node's input this tick
-	BufEventDone   = 4 // node finished consuming a held bead this tick
-)
+// NOTE: this file used to also declare a "semantic event enum" (BufEventRecv,
+// BufEventFire, BufEventSend, BufEventArrive, BufEventDone), generated into
+// BufEvent*ID (Go) / BUF_EVENT_* (TS) constants. It was deleted (not
+// corrected): it was STALE and UNUSED everywhere except its own generated
+// files and a tautological test asserting the constants equal themselves.
+// The REAL per-tick event kind byte written into the buffer (EVENT block Kind
+// column, and the Node block's transient per-tick flags) is the INDEX into
+// T.TraceEventKinds (Buffer/snapshot.go buildKindIDMap: Recv=0, Fire=1,
+// Send=2, Position=3, Geometry=4, NodeGeometry=5, Arrive=6, NodeBead=7, …) —
+// an entirely different, already-correct numbering that has nothing to do
+// with the deleted enum. Do not reintroduce a parallel BufEvent* enum; if a
+// column ever needs a fixed-kind lookup, it should read T.TraceEventKinds'
+// index directly, the way production code already does.
 
 // --- Column block schemas -----------------------------------------------
 // Each struct defines one column block. Fields are packed in declaration order.

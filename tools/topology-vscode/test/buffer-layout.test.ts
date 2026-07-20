@@ -60,8 +60,6 @@ import {
   // Port block
   PORT_COL_NODE_ROW, PORT_COL_IS_INPUT, PORT_COL_HOVERED, PORT_STRIDE,
   readPortNodeRow, readPortIsInput, readPortHovered,
-  // Event enum
-  BUF_EVENT_RECV, BUF_EVENT_FIRE, BUF_EVENT_SEND, BUF_EVENT_ARRIVE, BUF_EVENT_DONE,
 } from "../src/schema/buffer-layout";
 
 // ─ helpers ──────────────────────────────────────────────────────────────────
@@ -321,18 +319,6 @@ describe("buffer-layout — Overlay block", () => {
     expect(readOverlayOverlaysVis(dv)).toBe(1);
     expect(readOverlayDoubleLinks(dv)).toBe(0);
     expect(readOverlayAbcDragCount(dv)).toBe(7);
-  });
-});
-
-// ─ Event enum ─────────────────────────────────────────────────────────────────
-
-describe("buffer-layout — event enum", () => {
-  it("ids are 0-based contiguous", () => {
-    expect(BUF_EVENT_RECV).toBe(0);
-    expect(BUF_EVENT_FIRE).toBe(1);
-    expect(BUF_EVENT_SEND).toBe(2);
-    expect(BUF_EVENT_ARRIVE).toBe(3);
-    expect(BUF_EVENT_DONE).toBe(4);
   });
 });
 
