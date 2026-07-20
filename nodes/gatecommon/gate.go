@@ -188,11 +188,8 @@ func openWindowIfNeeded(g *GateNode, w *gateWindow, now func() int64) {
 // tryFireOnDwell handles the both-inputs-held case: it starts the fire-dwell timer
 // on first entry, and once the dwell has elapsed, fires the AND result and resets
 // the held/window/dwell state. Returns true if it fired (caller should `continue`
-// its loop iteration without also running the window-timeout check). placeTick is
-// the tick to stamp the fire placement with, read by the caller from ITS OWN clock
-// copy (docs/planning/visual-editor/per-goroutine-clock.md) — this function never
-// reads a clock itself.
-func tryFireOnDwell(g *GateNode, w *gateWindow, now func() int64, placeTick int64) bool {
+// its loop iteration without also running the window-timeout check).
+func tryFireOnDwell(g *GateNode, w *gateWindow, now func() int64) bool {
 	if !(g.HasLeft && g.HasRight) {
 		return false
 	}
@@ -224,11 +221,10 @@ func tryFireOnDwell(g *GateNode, w *gateWindow, now func() int64, placeTick int6
 	w.t0Set = false
 	w.dwellSet = false
 	emitInputs(g)
-	// Place the fire result without walking it to delivery. The caller's
-	// per-cycle loop (RunGate) StepOnces it one position per human-clock
-	// cycle (or chan-mode sends immediately) — the gate goroutine is never
-	// parked across the output traversal.
-	g.ToPassed.PlaceDrivenAt(result, placeTick)
+	// Place the fire result without walking it to delivery. The wire's own
+	// goroutine times its traversal — the gate goroutine is never parked
+	// across the output traversal.
+	g.ToPassed.PlaceDrivenAt(result)
 	return true
 }
 
@@ -268,31 +264,19 @@ func RunGate(ctx context.Context, g *GateNode, invertLeft bool) {
 		g.EmitGeometry()
 	}
 
-	// paced selects whether the OUTPUT bead gets StepOnce'd this cycle (there is
-	// an out-wire to advance). It must NOT also gate which time source drives
-	// now()/sleep() below: the window/dwell timing that governs the gate's own
-	// interior-bead animation has to be speed-aware regardless of whether this
-	// gate happens to have a live out-wire in this topology. A gate with an
-	// unconnected ToPassed (Paced()==false) still owns a real Clock copy and
-	// SpeedCh (seeded unconditionally by reflectBuild whenever a loader is
-	// present — builders.go's `if pb.clock != nil` block does not check
-	// Paced()), so using them is free. Tying now()/sleep() to Paced() was the
-	// bug: it silently fell back to g.Tick, which reads the LOADER'S ORIGIN
-	// clock — a clock nothing ever applies a speed change to (only per-
-	// goroutine copies receive speed sinks) — so the window/dwell timers, and
-	// therefore the interior held-bead flicker they drive, ran deaf to the
-	// slider whenever a gate's output happened to be unwired.
-	paced := g.ToPassed.Paced()
-
 	// Copy taken ONCE at this goroutine's start (RunGate IS the goroutine, run
 	// once per gate node) — docs/planning/visual-editor/per-goroutine-clock.md.
 	// This copy backs both now() and sleep() whenever the loader provided one
-	// (g.Clock != nil), independent of paced. g.Clock is this node's own clock
-	// storage (seeded by reflectBuild from the loader's origin); ports no
-	// longer hand out a clock (API demolition item 1), so this replaces the
-	// old g.ToPassed.Clock().Copy(). g.Tick/defaultTick are kept only as the
-	// no-loader fallback for now() (unit tests with no loader), matching prior
-	// behavior there.
+	// (g.Clock != nil). g.Clock is this node's own clock storage (seeded by
+	// reflectBuild from the loader's origin); ports no longer hand out a clock
+	// (API demolition item 1), so this replaces the old g.ToPassed.Clock().Copy().
+	// g.Tick/defaultTick are kept only as the no-loader fallback for now() (unit
+	// tests with no loader), matching prior behavior there. The window/dwell
+	// timing that governs the gate's own interior-bead animation is speed-aware
+	// regardless of whether this gate happens to have a live out-wire in this
+	// topology — a gate with an unconnected ToPassed still owns a real Clock
+	// copy and SpeedCh (seeded unconditionally by reflectBuild whenever a
+	// loader is present).
 	var now func() int64
 	sleep := defaultSleep()
 	if g.Clock != nil {
@@ -321,10 +305,7 @@ func RunGate(ctx context.Context, g *GateNode, invertLeft bool) {
 		default:
 		}
 
-		// Sleep BEFORE this cycle's observe/fire/step work (not after), so a
-		// StepOnce call below is always preceded by exactly one cycle's sleep —
-		// never two StepOnce calls within the same cycle and never a StepOnce
-		// skipped by a `continue`.
+		// Sleep BEFORE this cycle's observe/fire work.
 		if sleep(ctx) != nil {
 			return
 		}
@@ -341,7 +322,7 @@ func RunGate(ctx context.Context, g *GateNode, invertLeft bool) {
 
 		openWindowIfNeeded(g, &w, now)
 
-		fired := tryFireOnDwell(g, &w, now, now())
+		fired := tryFireOnDwell(g, &w, now)
 
 		// A partial combination has been open longer than W → clear it. Only
 		// time out while still waiting for the second input; once both are held
@@ -350,15 +331,6 @@ func RunGate(ctx context.Context, g *GateNode, invertLeft bool) {
 		if !fired && w.t0Set && !(g.HasLeft && g.HasRight) && now()-w.t0 > windowTicks {
 			clearWindow(g, &w)
 			emitInputs(g)
-		}
-
-		if paced {
-			// Paced mode: advance any in-flight ToPassed output bead exactly one
-			// position-step per cycle. The gate goroutine is never parked across
-			// the output traversal — StepOnce runs every cycle regardless of
-			// whether this cycle fired, so a bead placed on a previous fire keeps
-			// moving while the window/dwell logic above continues concurrently.
-			g.ToPassed.StepOnceAt(ctx, now())
 		}
 	}
 }

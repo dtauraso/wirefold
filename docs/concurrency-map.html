@@ -194,11 +194,11 @@
           <text class="d-t" x="330" y="63">edgeMover.run</text>
           <text class="d-ts" x="318" y="88">holds both endpoints; draws the curve</text>
 
-          <rect class="d-box-passive" x="318" y="106" width="214" height="62" rx="4"/>
+          <rect class="d-box-flow" x="318" y="106" width="214" height="62" rx="4"/>
           <text class="d-t" x="330" y="126">PacedWire</text>
-          <text class="d-ts" x="330" y="142">NOT a goroutine —</text>
-          <text class="d-ts" x="330" y="158">stepped by the source node</text>
-          <text class="d-ts" x="318" y="188">passive struct: inflight · delivered</text>
+          <text class="d-ts" x="330" y="142">IS edgeMover.run's own state —</text>
+          <text class="d-ts" x="330" y="158">not a separate goroutine, no lock</text>
+          <text class="d-ts" x="318" y="188">owns inflight · in-chan/out-chan</text>
 
           <text class="d-tl" x="580" y="12">SINGLETONS</text>
           <rect class="d-group" x="580" y="22" width="270" height="216" rx="6"/>
@@ -285,7 +285,7 @@
           <text class="d-ts" x="548" y="110">goroutines via snap atomic.Pointer</text>
 
           <!-- ── 2 queues ── -->
-          <text class="d-tl" x="0" y="176">2 · QUEUES — outbox.mu + cond, PacedWire.mu</text>
+          <text class="d-tl" x="0" y="176">2 · QUEUES — outbox.mu + cond; PacedWire.mu deleted, now ownership</text>
           <rect class="d-group" x="0" y="186" width="860" height="140" rx="6"/>
 
           <rect class="d-box-flow" x="18" y="204" width="150" height="28" rx="4"/>
@@ -303,18 +303,19 @@
           <text class="d-ts" x="590" y="223">handler never blocks → no deadlock</text>
 
           <rect class="d-box-flow" x="18" y="256" width="150" height="28" rx="4"/>
-          <text class="d-ts" x="30" y="275">source: PlaceDriven</text>
+          <text class="d-ts" x="30" y="275">source: Out.PlaceDrivenAt</text>
           <rect class="d-box-flow" x="18" y="290" width="150" height="24" rx="4"/>
-          <text class="d-ts" x="30" y="307">source: StepOnce</text>
+          <text class="d-ts" x="30" y="307">→ PacedWire.Send (chan)</text>
           <rect class="d-box-flow" x="424" y="256" width="150" height="28" rx="4"/>
-          <text class="d-ts" x="436" y="275">dest: PollRecv</text>
+          <text class="d-ts" x="436" y="275">dest: In.PollRecv</text>
           <rect class="d-box-flow" x="424" y="290" width="150" height="24" rx="4"/>
-          <text class="d-ts" x="436" y="307">edge: ReviseInFlight…</text>
-          <rect class="d-box-sig" x="200" y="266" width="190" height="36" rx="4"/>
-          <text class="d-ts" x="212" y="288">inflight · delivered</text>
-          <line class="d-arrow-sig" x1="170" y1="284" x2="196" y2="284"/>
-          <line class="d-arrow-sig" x1="392" y1="284" x2="420" y2="284"/>
-          <text class="d-ts" x="590" y="284">three goroutines, one bead list</text>
+          <text class="d-ts" x="436" y="307">→ PacedWire.Recv (chan)</text>
+          <rect class="d-box-passive" x="200" y="266" width="190" height="36" rx="4"/>
+          <text class="d-ts" x="212" y="282">edgeMover.run OWNS</text>
+          <text class="d-ts" x="212" y="296">inflight — no lock</text>
+          <line class="d-arrow-flow" x1="170" y1="284" x2="196" y2="284"/>
+          <line class="d-arrow-flow" x1="392" y1="284" x2="420" y2="284"/>
+          <text class="d-ts" x="590" y="284">two channels, one owning goroutine — nothing left to lock</text>
 
           <!-- ── 3 shared services: the clock stopped being a bus, Trace is the one left ── -->
           <text class="d-tl" x="0" y="360">3 · SHARED SERVICE — the clock is no longer one; Trace still is</text>
@@ -402,8 +403,8 @@
           </tr>
           <tr>
             <td>PacedWire.mu</td>
-            <td>source node · destination node · edge mover</td>
-            <td><span class="verdict v-ok">confirmed</span></td>
+            <td>was: source node · destination node · edge mover</td>
+            <td><span class="verdict v-gone">deleted</span></td>
           </tr>
           <tr>
             <td>RealClock.mu</td>
@@ -530,7 +531,7 @@
   <div class="layout">
     <div>
       <div class="plate">
-        <svg viewBox="0 0 860 400" role="img" aria-label="A bead crossing one wire, and the three independent goroutines that touch the wire's bead lists.">
+        <svg viewBox="0 0 860 400" role="img" aria-label="A bead crossing one wire. The wire IS the edge mover's own goroutine now: the source only sends on its in-channel, the destination only receives on its out-channel, and the wire's own goroutine owns the bead list and revises its geometry on itself — no lock anywhere.">
           <rect class="d-box-flow" x="20" y="150" width="130" height="48" rx="5"/>
           <text class="d-t" x="34" y="172">source node</text>
           <text class="d-ts" x="34" y="189">own goroutine</text>
@@ -539,35 +540,34 @@
           <text class="d-t" x="724" y="172">dest node</text>
           <text class="d-ts" x="724" y="189">own goroutine</text>
 
-          <rect class="d-box-passive" x="230" y="140" width="400" height="68" rx="6"/>
-          <text class="d-t" x="248" y="162">PacedWire</text>
-          <text class="d-ts" x="248" y="178">passive — never runs; stepped by the source</text>
-          <text class="d-ts" x="248" y="194">inflight · delivered · nextGen, all under mu</text>
+          <rect class="d-box-flow" x="230" y="140" width="400" height="68" rx="6"/>
+          <text class="d-t" x="248" y="162">PacedWire — IS edgeMover.run</text>
+          <text class="d-ts" x="248" y="178">an active goroutine, not stepped from outside</text>
+          <text class="d-ts" x="248" y="194">inflight owned solely by this goroutine — no mu</text>
 
-          <line class="d-arrow-sig" x1="152" y1="174" x2="226" y2="174"/>
-          <path class="d-arrow-sig" d="M218 170 L228 174 L218 178"/>
-          <text class="d-ts" x="150" y="132">PlaceDriven</text>
-          <text class="d-ts" x="150" y="230">StepOnce</text>
+          <line class="d-arrow-flow" x1="152" y1="174" x2="226" y2="174"/>
+          <path class="d-arrow-flow" d="M218 170 L228 174 L218 178"/>
+          <text class="d-ts" x="150" y="132">Send (chan, non-blocking)</text>
 
-          <line class="d-arrow-sig" x1="634" y1="174" x2="706" y2="174"/>
-          <path class="d-arrow-sig" d="M698 170 L708 174 L698 178"/>
-          <text class="d-ts" x="632" y="132">PollRecv</text>
+          <line class="d-arrow-flow" x1="634" y1="174" x2="706" y2="174"/>
+          <path class="d-arrow-flow" d="M698 170 L708 174 L698 178"/>
+          <text class="d-ts" x="632" y="132">Recv (chan, non-blocking)</text>
 
           <circle cx="300" cy="174" r="5" fill="var(--signal)"/>
           <circle cx="380" cy="174" r="5" fill="var(--signal)" opacity=".7"/>
           <circle cx="460" cy="174" r="5" fill="var(--signal)" opacity=".45"/>
           <circle cx="540" cy="174" r="5" fill="var(--signal)" opacity=".25"/>
 
-          <rect class="d-box" x="330" y="290" width="200" height="46" rx="5"/>
-          <text class="d-t" x="346" y="311">edge mover</text>
-          <text class="d-ts" x="346" y="328">own goroutine</text>
+          <rect class="d-box-flow" x="330" y="290" width="200" height="46" rx="5"/>
+          <text class="d-t" x="346" y="311">this SAME goroutine</text>
+          <text class="d-ts" x="346" y="328">edgeMover.run's own loop</text>
           <line class="d-arrow" x1="430" y1="288" x2="430" y2="212"/>
           <path class="d-arrow" d="M426 218 L430 210 L434 218"/>
           <text class="d-ts" x="440" y="252">ReviseInFlightGeometry</text>
-          <text class="d-ts" x="440" y="268">when a node moves</text>
+          <text class="d-ts" x="440" y="268">when a node moves — on itself, no lock</text>
 
-          <text class="d-tl" x="20" y="368">THREE INDEPENDENT GOROUTINES TOUCH ONE WIRE</text>
-          <text class="d-ts" x="20" y="388">no single owner — which is why this lock cannot be split away like geomMu was</text>
+          <text class="d-tl" x="20" y="368">ONE GOROUTINE OWNS THE WIRE — SOURCE AND DEST ONLY TOUCH ITS CHANNELS</text>
+          <text class="d-ts" x="20" y="388">docs/planning/visual-editor/wire-owns-itself.md — ownership replaces the old three-goroutine lock</text>
         </svg>
         <p class="plate-cap">paced_wire.go · ports.go · node_mover.go</p>
       </div>
@@ -575,19 +575,22 @@
     <aside class="rail">
       <h2>Go times its own delivery</h2>
       <p>
-        The wire records the tick a bead was placed and sleeps cycle by cycle until it has
-        crossed. Every wire reads the same clock independently. Nothing on the render side
-        tells Go a bead arrived.
+        The wire's own goroutine reads its own clock copy, records the tick a bead was placed,
+        and sleeps cycle by cycle until it has crossed. Every wire reads its own clock
+        independently. Nothing on the render side tells Go a bead arrived.
       </p>
-      <h2>Why this lock stays</h2>
+      <h2>Why this lock is gone</h2>
       <p>
-        A queue is definitionally shared. There is no write-once subset to lift out, and all
-        three goroutines touch the same bead lists.
+        The wire is no longer a passive struct three goroutines reach into — it IS the edge
+        mover's own goroutine (the same one that already existed to revise in-flight geometry on
+        a node move, so goroutine count is unchanged). The source and destination now only ever
+        touch its channel ends (<code>Send</code>/<code>Recv</code>), never <code>inflight</code>
+        directly, so there is nothing left to lock.
       </p>
-      <h2>Open lead</h2>
+      <h2>Resolved lead</h2>
       <p>
-        Splitting <code>inflight</code> from <code>delivered</code> by owner might reduce three
-        contenders to two. Unverified — worth testing, not asserting.
+        The old open question — splitting <code>inflight</code> from <code>delivered</code> by
+        owner — is moot: there is only one owner now, so there was nothing to split.
       </p>
     </aside>
   </div>

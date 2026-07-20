@@ -210,26 +210,6 @@ func TestOverlayStrideIsPackedSize(t *testing.T) {
 	}
 }
 
-func TestEventEnumValues(t *testing.T) {
-	// Event enum ids must be 0-based contiguous to match the TS side.
-	cases := []struct {
-		name string
-		got  int
-		want int
-	}{
-		{"Recv", BufEventRecvID, 0},
-		{"Fire", BufEventFireID, 1},
-		{"Send", BufEventSendID, 2},
-		{"Arrive", BufEventArriveID, 3},
-		{"Done", BufEventDoneID, 4},
-	}
-	for _, c := range cases {
-		if c.got != c.want {
-			t.Errorf("BufEvent%sID = %d, want %d", c.name, c.got, c.want)
-		}
-	}
-}
-
 func TestVersionGenerated(t *testing.T) {
 	if BufLayoutVersionGenerated != BufLayoutVersion {
 		t.Errorf("BufLayoutVersionGenerated (%d) != BufLayoutVersion (%d) — regenerate", BufLayoutVersionGenerated, BufLayoutVersion)

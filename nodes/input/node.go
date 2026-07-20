@@ -79,45 +79,26 @@ func (n *Node) clock() Wiring.Clock {
 }
 
 // fanOutPlace places v on every wired fan-out output (same cycle — preserves
-// concurrent fan-out) without driving them. Returns false if any wired
-// placement failed (torn-down wire), mirroring EmitOneDriven's
-// false-return-stops-the-goroutine convention.
-//
-// tick is snapshotted ONCE by the caller (clk.Tick(), read a single time)
-// and passed to every wired output's PlaceDrivenAt so all fan-out beads
-// stamp the SAME placementTick. Placing sequentially with each wire
-// independently re-reading the live shared clock (PlaceDriven) lets the
-// clock advance between placements — under a concurrently advancing clock the two
-// equal-latency siblings can land on either side of a tick boundary and get
-// different placementTicks, delivering a full cycle apart despite identical
-// latency.
-func (n *Node) fanOutPlace(v int, tick int64) bool {
-	if n.ToHoldNewSendOld.Wired() && n.ToHoldNewSendOld.PlaceDrivenAt(v, tick).Failed() {
+// concurrent fan-out) without driving them. Returns false only on a
+// structural, TERMINAL failure (DriveItem.Failed() — a nil Out), mirroring
+// EmitOneDriven's false-return-stops-the-goroutine convention. A momentarily
+// full paced-wire buffer (DriveItem.BufferFull()) is TRANSIENT — the wire's
+// own goroutine drains it every cycle — so it must NOT stop this node's
+// goroutine; that bead is simply dropped from this cycle's fan-out (a
+// breadcrumb was already emitted by PacedWire.Send) and the next Fire cycle
+// tries again. Delivery is timed by each wire's own goroutine — this node no
+// longer pins or steps a tick.
+func (n *Node) fanOutPlace(v int) bool {
+	if n.ToHoldNewSendOld.Wired() && n.ToHoldNewSendOld.PlaceDrivenAt(v).Failed() {
 		return false
 	}
-	if n.ToExcitatory.Wired() && n.ToExcitatory.PlaceDrivenAt(v, tick).Failed() {
+	if n.ToExcitatory.Wired() && n.ToExcitatory.PlaceDrivenAt(v).Failed() {
 		return false
 	}
-	if n.ToPacer.Wired() && n.ToPacer.PlaceDrivenAt(v, tick).Failed() {
+	if n.ToPacer.Wired() && n.ToPacer.PlaceDrivenAt(v).Failed() {
 		return false
 	}
 	return true
-}
-
-// fanOutStepOnce advances every wired fan-out output by one non-blocking
-// tick-step. Called once per WaitTick cycle so all fan-out beads advance
-// together in lockstep, one step per cycle — never a nested pump. tick is
-// the PINNED current tick (snapshotted once by the caller right after
-// WaitTick) so every fan-out wire observes the same tick this cycle instead
-// of each independently re-reading the shared clock.
-func (n *Node) fanOutStepOnce(ctx context.Context, tick int64) {
-	n.ToHoldNewSendOld.StepOnceAt(ctx, tick)
-	if n.ToExcitatory.Wired() {
-		n.ToExcitatory.StepOnceAt(ctx, tick)
-	}
-	if n.ToPacer.Wired() {
-		n.ToPacer.StepOnceAt(ctx, tick)
-	}
 }
 
 // popEnd reads and removes the END element of working, refilling from backup
@@ -187,21 +168,20 @@ func (n *Node) updateFeedbackRing(ctx context.Context, working, backup *[]int, i
 			if n.Fire != nil {
 				n.Fire()
 			}
-			if !n.fanOutPlace(v, clk.Tick()) {
+			if !n.fanOutPlace(v) {
 				return
 			}
 			awaiting = true
 		}
 
-		// One step per cycle: sleep, StepOnce every fan-out output, and poll
-		// FeedbackIn non-blocking. Same one-step-per-cycle cadence as
-		// pacer/gatecommon.DriveHeld and the plain source path; the node is
-		// never parked across the traversal.
+		// One step per cycle: sleep and poll FeedbackIn non-blocking. Each
+		// fan-out wire's own goroutine advances its in-flight beads; this node
+		// is never parked across the traversal and no longer steps the wires
+		// itself.
 		Wiring.ApplySpeedNonBlocking(clk, n.SpeedCh)
 		if err := clk.SleepCycle(ctx); err != nil {
 			return
 		}
-		n.fanOutStepOnce(ctx, clk.Tick())
 
 		s, ok := n.FeedbackIn.PollRecv()
 		if !ok {
@@ -297,7 +277,7 @@ func (n *Node) Update(ctx context.Context) {
 			}
 			v := popEnd(&working, &backup, init)
 			emitBeads() // array changed (pop, maybe refill) → restream interior
-			if !n.fanOutPlace(v, now) {
+			if !n.fanOutPlace(v) {
 				return
 			}
 			lastFireTick = now
@@ -308,7 +288,6 @@ func (n *Node) Update(ctx context.Context) {
 		if err := clk.SleepCycle(ctx); err != nil {
 			return
 		}
-		n.fanOutStepOnce(ctx, clk.Tick())
 	}
 }
 

@@ -9,12 +9,21 @@ frame. Stop, re-read this file, and re-derive from the model.
 ## The network
 
 The network is **nodes and wires**. Each node runs on its own Go
-goroutine. A wire (`PacedWire`) is NOT a goroutine or a channel — it is
-a passive, mutex-guarded struct (`inflight`/`delivered` bead slices)
-that the owning node's goroutine STEPS via `StepOnceAt`. The
-network is self-scheduling: there is no central runner, no walker, no
-underlying layer that "runs" the nodes. The network IS the running
-program.
+goroutine, and so does each wire (`PacedWire`): the wire is an ACTIVE
+GOROUTINE with a channel on each end — a channel in from its source
+node, a channel out to its destination node. The wire goroutine owns its
+own beads (`inflight`/`delivered`) and its own geometry; nothing outside
+it locks or reaches into that state. This is not a new goroutine per
+edge — it is the same per-edge goroutine that already existed to revise
+in-flight geometry as a node was dragged, now given ownership of the
+beads it was reaching across a lock to revise. Goroutine count is
+unchanged; what changed is who owns the state. The network is
+self-scheduling: there is no central runner, no walker, no underlying
+layer that "runs" the nodes. The network IS the running program.
+
+A channel here does NOT mean a blocking, backpressured handshake — see
+§Sending below. The source places a bead on its out-channel and moves
+on; it never waits on the wire or the destination.
 
 Behavior emerges from wiring — the topology is the logic.
 
@@ -24,54 +33,67 @@ the network itself is the nodes-and-wires Go runtime.
 ## What things are
 
 - **Bead.** A value in transit from a source node to a destination node.
-- **Wire (`PacedWire`).** Transport plus visual depiction. A passive
-  mutex-guarded struct, not a goroutine or channel: the source node calls
-  `placeBeadNoWalkerAt` directly to place a bead, the owning node's
-  `StepOnceAt` times the traversal on Go's clock and moves the
-  bead from `inflight` to `delivered` via `tryDeliverHeadLocked`, and the
-  destination node consumes it with `In.PollRecv`. The wire owns no
-  parked state and applies no send policy.
-- **Node goroutine.** Consumes beads via `In.PollRecv` on its input
-  port(s), holds them in node-local state until its firing rule is
-  satisfied, then fires. There is no slot — node-local held state
-  replaces it.
-- **Input port.** One input port is one `PacedWire`, read via
-  `In.PollRecv`. There is no channel between wire and node.
+- **Wire (`PacedWire`).** Transport plus visual depiction. An ACTIVE
+  goroutine, not a passive struct: the source node sends a bead over the
+  wire's in-channel to place it, the wire goroutine itself times the
+  traversal on its own clock reading (each goroutine owns its own clock
+  copy — see the Clock bullet below) and, on traversal-complete, sends
+  the bead over its out-channel to the destination. There is one owner
+  of `inflight`/`delivered` and the in-flight geometry: the wire
+  goroutine. Because it is the sole owner, `PacedWire.mu` does not exist
+  — ownership replaces locking, the same move that removed `RealClock.mu`.
+  Do not reintroduce a lock here "for safety"; a second lock on top of
+  single-goroutine ownership is dead weight, and if two goroutines ever
+  need to touch this state again that is a sign the ownership model
+  broke, not a reason to add a mutex. The wire applies no send policy —
+  see §Sending.
+- **Node goroutine.** Receives beads over its input port's channel,
+  holds them in node-local state until its firing rule is satisfied,
+  then fires. There is no slot — node-local held state replaces it.
+- **Input port.** One input port is one wire, and the wire's out-channel
+  is the connection between them — the node receives whatever the wire
+  goroutine sends.
 - **Clock (the human-speed clock).** There is exactly one clock: the system monotonic clock, read through a **scale** so it advances in integer **ticks** at human-watchable speed (`tick = ⌊(now − start) / tickPeriod⌋`; the scale is the human-speed / playback-speed knob, `MsPerTick = 16` ⇒ ≈62.5 ticks/sec). All timing is **tick counts**, not wall-clock durations. The model is **sleep-only**: a pacing loop calls `SleepCycle` to wait exactly ONE cycle and re-reads `Tick()`, rather than blocking on a target tick — there is no wait-until-tick-k primitive. The clock is **free-running**: it advances monotonically with wall time and never pauses (there is no play/pause gate). **Everything that animates runs in these ticks:** bead traveling, all in-node animations, and all node/gate processing windows. Per-update tick counts come from formulas, not literals — a bead crossing an edge takes `ticksToCross = arcLength / pulseSpeed` (pulseSpeed in world-units-per-tick, uniform across wires); node processing windows are tick counts. There is no separate render cadence — the tick IS the animation clock.
+  The wire goroutine reads its OWN clock copy and its own tick, exactly
+  like every other goroutine — there is no shared clock to pin a tick
+  against. (A caller-pinned tick parameter existed earlier so several
+  wires observed the SAME tick instead of each re-reading one shared
+  clock; once every goroutine owns its own clock copy, including the
+  wire, that reason for pinning is gone.)
 
 ## Wire lifecycle
 
 A bead crosses a wire in one direction:
 
-1. The source node calls `placeBeadNoWalkerAt`, appending the bead to the
-   wire's `inflight` slice with its traversal timed in ticks:
-   `ticksToCross = arcLength / pulseSpeed`.
-2. While in flight, the owning node's `StepOnceAt` advances
-   the bead one position per tick and emits its position on the trace
-   stream for the renderer.
-3. On traversal-complete, `tryDeliverHeadLocked` moves the bead from
-   `inflight` to `delivered`.
-4. The destination node consumes it by calling `In.PollRecv`, which pops
-   the delivered bead.
+1. The source node sends the bead over the wire's in-channel with its
+   traversal timed in ticks: `ticksToCross = arcLength / pulseSpeed`. The
+   send does not block on the wire and does not wait for the destination
+   — see §Sending.
+2. While in flight, the wire goroutine — reading its own clock, its own
+   tick (see the Clock bullet above) — advances the bead one position per
+   tick, keeping it in its own `inflight` set, and packs its position into
+   the content buffer for the renderer.
+3. On traversal-complete, the wire goroutine sends the bead over its
+   out-channel to the destination node.
+4. The destination node receives it and holds it in node-local state.
 
-Go times its own delivery. There is no TS-driven delivery signal — the
-renderer is told where the bead is, not asked when it has arrived.
+The wire times its own delivery. There is no TS-driven delivery signal —
+the renderer is told where the bead is, not asked when it has arrived.
 
 ## Node lifecycle and fan-in
 
-- A destination node consumes beads via `In.PollRecv` on its input
-  port(s) and holds them in node-local state.
+- A destination node receives beads over its input port's channel and
+  holds them in node-local state.
 - When the node's firing rule is satisfied, it fires.
-- **Fan-in:** several beads can be in flight in one `PacedWire`'s
-  `inflight` slice at once, each carrying its own placement geometry —
-  geometry travels WITH the bead, never stored on the shared wire, so
-  fan-in is safe. The node reads that one wire via `In.PollRecv` and
-  accumulates received beads in node-local state. Distinct inputs are
-  distinct wires.
+- **Fan-in:** several beads can be in flight on one wire at once, each
+  carrying its own placement geometry — geometry travels WITH the bead,
+  never stored as one shared value on the wire, so fan-in is safe. The
+  node receives from that one wire's channel and accumulates received
+  beads in node-local state. Distinct inputs are distinct wires.
 
 ## Sending
 
-A node places a bead on its outgoing wire whenever its own rule says to. It does not check the wire's state and does not wait on the destination — there is no clear/busy state, no acknowledgment, no back-pressure. A wire may carry more than one bead at once, each its own value; it transports whatever the source emits, and the destination reads whatever arrives. Coordination between nodes is the topology and each node's local rule, not a delivery guarantee between the two.
+A node places a bead on its outgoing wire whenever its own rule says to, by sending it over the wire's in-channel. It does not check the wire's state and does not wait on the destination — there is no clear/busy state, no acknowledgment, no back-pressure. A channel here is NOT a blocking handshake: the send must never be able to stall the source node waiting on the wire or the destination, so it is sized/shaped so the source's send always succeeds immediately. A wire may carry more than one bead at once, each its own value; it transports whatever the source emits, and the destination reads whatever arrives. Coordination between nodes is the topology and each node's local rule, not a delivery guarantee between the two.
 
 Nodes time their processing in **ticks**: a firing rule may span a
 **tick-count window** (e.g. a gate's inhibit/processing window is K ticks),
@@ -103,18 +125,17 @@ resolving instantaneously.
 - Durations are tick counts: bead traversal (`ticksToCross`) and node processing windows.
 ## Driver
 
-**Self-scheduling node goroutines.** Each node is a goroutine; a wire is
-a passive struct the owning node's goroutine steps. There is no central
-walker, and no play/pause gate — the clock is free-running and the
-animation never halts.
+**Self-scheduling node AND wire goroutines.** Each node is a goroutine,
+and each wire is ALSO a goroutine — not a passive struct another
+goroutine steps. There is no central walker, and no play/pause gate —
+the clock is free-running and the animation never halts.
 
-Each wire times its OWN delivery on the human-speed clock: when its
-`ticksToCross` have elapsed (observed by the owning node's loop driving
-`StepOnceAt` one cycle at a time) `tryDeliverHeadLocked` moves the bead
-from `inflight` to `delivered`, and the destination node picks it up via
-`In.PollRecv`. Delivery is not triggered by the renderer — there is no
-cross-boundary delivery signal. The editor is told where each bead is;
-it is never asked when a bead has arrived.
+Each wire times its OWN delivery on its own reading of the human-speed
+clock: when its `ticksToCross` have elapsed, the wire goroutine sends the
+bead over its out-channel to the destination node, which receives it.
+Delivery is not triggered by the renderer — there is no cross-boundary
+delivery signal. The editor is told where each bead is; it is never
+asked when a bead has arrived.
 
 There is one tick clock (the human-speed clock) but no lockstep round or
 simultaneity layer: goroutines schedule independently against the shared

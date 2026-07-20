@@ -16,9 +16,9 @@ import (
 // held each pulse means when held changes, the next pulse carries the new
 // value.
 //
-// The goroutine steps the wire EVERY cycle (so in-flight beads keep gliding
-// one position-step per tick, never jumping) but only PLACES a new bead once
-// per this edge's OWN tick-count period, `K = ticksToCross =
+// The wire's own goroutine advances in-flight beads every cycle (one
+// position-step per tick, never jumping); this goroutine only PLACES a new
+// bead once per this edge's OWN tick-count period, `K = ticksToCross =
 // SimLatencyMs/MsPerTick` (same formula and ceil-rounding convention as
 // holdnewsendold/node.go's ToNext processing window) — one placement per
 // full crossing, so a wire carries roughly one resident bead rather than one
@@ -88,10 +88,11 @@ func DriveHeld(ctx context.Context, out *Wiring.Out, held *atomic.Int64, transfo
 		}
 		// tick returns the current tick off this goroutine's own clock copy
 		// whenever one exists (clk != nil), or 0 on a genuinely clock-less build
-		// (unit tests with no loader), where no caller reads it for anything
-		// meaningful (PlaceDrivenAt's chan-mode branch ignores the tick argument).
-		// This must NOT be gated on `paced` — an Out with no wire but a real
-		// clock copy still has to stay speed-aware (see the doc comment above).
+		// (unit tests with no loader). Used only to pace placement against K
+		// below; the wire itself now stamps its own placementTick when it drains
+		// the send, independent of this reading. This must NOT be gated on
+		// `paced` — an Out with no wire but a real clock copy still has to stay
+		// speed-aware (see the doc comment above).
 		tick := func() int64 { return 0 }
 		if clk != nil {
 			// Copy taken ONCE at this goroutine's start (the go func() literal above
@@ -132,10 +133,15 @@ func DriveHeld(ctx context.Context, out *Wiring.Out, held *atomic.Int64, transfo
 				// else: geometry not yet known — don't place this cycle.
 			}
 			if place {
-				if out.PlaceDrivenAt(transform(held.Load()), tick()).Failed() {
+				di := out.PlaceDrivenAt(transform(held.Load()))
+				if di.Failed() {
 					return
 				}
-				if paced {
+				// DriveBufferFull is TRANSIENT (the paced wire's inCh was
+				// momentarily full) — do not stop the loop or advance
+				// lastPlaceTick; retry the placement next cycle instead of
+				// silently losing this drive goroutine forever.
+				if !di.BufferFull() && paced {
 					lastPlaceTick = tick()
 				}
 			}
@@ -143,7 +149,6 @@ func DriveHeld(ctx context.Context, out *Wiring.Out, held *atomic.Int64, transfo
 			if err := sleep(ctx); err != nil {
 				return
 			}
-			out.StepOnceAt(ctx, tick())
 		}
 	}()
 }

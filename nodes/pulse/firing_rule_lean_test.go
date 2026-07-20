@@ -21,7 +21,7 @@ func stepWire(ctx context.Context, pw *Wiring.PacedWire, clk Wiring.Clock) {
 				return
 			default:
 			}
-			pw.StepOnceAt(ctx, clk.Tick())
+			pw.DriveOneCycle(ctx, clk.Tick())
 			time.Sleep(time.Millisecond)
 		}
 	}()
@@ -48,6 +48,10 @@ func TestPulseDrivesHeldValueLean(t *testing.T) {
 	inSrc := Wiring.NewPacedOutNoGeom(inPw, ctx, "seed", "Out", tr, Wiring.RuleFireAndForget, 0, 0, "")
 
 	outPw := Wiring.NewPacedWire(latMs*Wiring.PulseSpeedWuPerMs, Wiring.PulseSpeedWuPerMs)
+	// Production drives this output wire via its edge's own goroutine
+	// (edgeMover.run); this bare-wire unit test has no edgeMover, so it must
+	// supply the same per-cycle drive itself.
+	stepWire(ctx, outPw, clk.Copy())
 
 	beadCh := make(chan int, 16)
 	node := &Node{
@@ -73,7 +77,7 @@ func TestPulseDrivesHeldValueLean(t *testing.T) {
 		t.Fatal("timeout waiting for startup bead")
 	}
 
-	if !inSrc.PlaceDrivenAt(5, clk.Tick()).Live() {
+	if !inSrc.PlaceDrivenAt(5).Live() {
 		t.Fatal("PlaceDrivenAt returned false")
 	}
 

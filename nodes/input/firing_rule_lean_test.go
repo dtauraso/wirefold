@@ -9,6 +9,25 @@ import (
 	"github.com/dtauraso/wirefold/nodes/Wiring"
 )
 
+// stepWire continuously DriveOneCycles pw on a short wall-clock poll until ctx
+// is cancelled, matching the production per-cycle drive path a wire's own
+// goroutine (edgeMover.run) would otherwise supply. clk is this goroutine's OWN
+// clock copy (docs/planning/visual-editor/per-goroutine-clock.md); callers must
+// not share it with another goroutine.
+func stepWire(ctx context.Context, pw *Wiring.PacedWire, clk Wiring.Clock) {
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+			pw.DriveOneCycle(ctx, clk.Tick())
+			time.Sleep(time.Millisecond)
+		}
+	}()
+}
+
 // TestEmitsInitValuesLean covers input's core plain-emit contract on the one
 // real clock (no FeedbackIn wired): it end-pops the working array (a copy of
 // Init) each fire, so with Init=[10,20,30] and no Repeat exactly len(init)
@@ -25,6 +44,10 @@ func TestEmitsInitValuesLean(t *testing.T) {
 
 	pw := Wiring.NewPacedWire(latMs*Wiring.PulseSpeedWuPerMs, Wiring.PulseSpeedWuPerMs)
 	clk := Wiring.NewRealClock()
+	// Production drives this output wire via its edge's own goroutine
+	// (edgeMover.run); this bare-wire unit test has no edgeMover, so it must
+	// supply the same per-cycle drive itself.
+	stepWire(ctx, pw, clk.Copy())
 
 	node := &Node{
 		Fire:  func() {},

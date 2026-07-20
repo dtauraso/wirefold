@@ -80,15 +80,18 @@ func TestDecentralizedNodeMove(t *testing.T) {
 		t.Fatalf("missing Out/wire: out=%v pw=%v", out, pw)
 	}
 
-	// Place a bead on the wire so the move must revise it in flight. This test's own
-	// driving goroutine (placeAndDrive's driveGenToDelivery) gets its own copy of
-	// clk, per-goroutine-clock.md — not the same instance production goroutines
-	// (e.g. the edgeMover) hold.
+	// Place a bead on the wire so the move must revise it in flight. md.Start above
+	// already launched this wire's own goroutine (edgeMover.run), which self-drives
+	// the wire on its own clock copy — no manual driving needed from the test.
 	seg0 := wireSegment{Start: out.Geom().Start, End: out.Geom().End}
 	bp := beadPlacement{InFlightMs: out.Geom().SimLatencyMs, Start: seg0.Start, End: seg0.End, Node: "src", Port: "Out"}
-	if !placeAndDrive(pw, 7, bp, clk.Copy()) {
-		t.Fatal("placeAndDrive rejected on fresh wire")
+	if pw.Send(7, bp) != SendPlaced {
+		t.Fatal("Send rejected on fresh wire")
 	}
+	// Give the wire's own goroutine a moment to drain the send into its inflight
+	// state (its next DriveOneCycle, at most one human-clock cycle away) before
+	// the move below asks it to revise that bead's geometry.
+	time.Sleep(cascadeSettle)
 
 	// Move src — delivered per-goroutine (no central registry). The world target
 	// snaps to a lattice cell (the only position model).
@@ -122,13 +125,15 @@ func TestDecentralizedNodeMove(t *testing.T) {
 	}
 
 	// In-flight bead's geometry was revised to the new segment (still in flight).
-	pw.mu.Lock()
+	// pw is owned exclusively by its own goroutine now (the edgeMover md.Start
+	// launched) — read its state via the atomic InFlightSegments snapshot rather
+	// than the live (unexported, unlocked) inflight slice.
+	segs := pw.InFlightSegments()
 	var revisedSeg wireSegment
-	stillInFlight := len(pw.inflight) > 0
+	stillInFlight := len(segs) > 0
 	if stillInFlight {
-		revisedSeg = pw.inflight[0].seg
+		revisedSeg = segs[0]
 	}
-	pw.mu.Unlock()
 	if !stillInFlight {
 		t.Fatal("bead left flight unexpectedly during move")
 	}

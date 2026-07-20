@@ -503,7 +503,9 @@ func (m *edgeMover) recomputeGeometry() {
 		m.out.publishGeom(outGeom{ArcLength: arc, SimLatencyMs: lat, Start: seg.Start, End: seg.End})
 	}
 	// Re-derive an in-flight bead on this edge from the new arc + segment (no-op if
-	// none in flight); the dest wire owns the bead under its own mutex.
+	// none in flight); this runs on the SAME goroutine that owns the dest wire's
+	// bead state (this is that wire's own goroutine — see edgeMover.run), so no
+	// lock is needed.
 	if m.dest != nil {
 		m.dest.ReviseInFlightGeometry(m.clk.Tick(), arc, seg)
 	}
@@ -515,7 +517,16 @@ func (m *edgeMover) recomputeGeometry() {
 	}
 }
 
-// run is the edge's per-goroutine move loop: drain the inbox until ctx is done.
+// run is the edge's per-goroutine loop. It IS the wire's own goroutine
+// (MODEL.md "The network" — PacedWire is an active goroutine, and it is this
+// same per-edge goroutine that already existed to revise in-flight geometry,
+// not an additional one): every cycle it drains any pending move/speed
+// messages without blocking, then drives its dest wire's ONE cycle of bead
+// ownership (DriveOneCycle — placement drain, position-step, delivery
+// handoff), then paces to the next cycle on its OWN clock copy. This is what
+// lets ReviseInFlightGeometry (called from handle, below, on this SAME
+// goroutine) touch pw.inflight with no lock: there is exactly one goroutine
+// on either side of that call.
 func (m *edgeMover) run(ctx context.Context) {
 	// Copy taken ONCE at this goroutine's start (run IS the goroutine) —
 	// docs/planning/visual-editor/per-goroutine-clock.md. If no clockSrc was
@@ -525,22 +536,33 @@ func (m *edgeMover) run(ctx context.Context) {
 		m.clk = m.clockSrc.Copy()
 	}
 	for {
-		select {
-		case <-ctx.Done():
+		// Drain any pending move/speed messages without blocking, so a cycle
+		// always reaches the wire-drive step below even with nothing queued.
+	drain:
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case sp := <-m.speedCh:
+				// Delivery (per-goroutine-clock.md): apply directly to this
+				// goroutine's own clk copy — nothing else reaches it.
+				if rc, ok := m.clk.(*RealClock); ok {
+					rc.SetSpeed(sp)
+				}
+			case msg := <-m.inbox:
+				m.handle(msg)
+				if msg.testDone != nil {
+					close(msg.testDone)
+				}
+			default:
+				break drain
+			}
+		}
+		if m.dest != nil {
+			m.dest.DriveOneCycle(ctx, m.clk.Tick())
+		}
+		if err := m.clk.SleepCycle(ctx); err != nil {
 			return
-		case sp := <-m.speedCh:
-			// Delivery (per-goroutine-clock.md): apply directly to this
-			// goroutine's own clk copy — nothing else reaches it. Unlike the
-			// sleep-loop goroutines elsewhere, this select IS the wait point,
-			// so there is no separate non-blocking poll to fold this into.
-			if rc, ok := m.clk.(*RealClock); ok {
-				rc.SetSpeed(sp)
-			}
-		case msg := <-m.inbox:
-			m.handle(msg)
-			if msg.testDone != nil {
-				close(msg.testDone)
-			}
 		}
 	}
 }

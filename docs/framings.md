@@ -25,7 +25,7 @@ when written; re-grep before trusting it.
 
 | Lock | Where | What it guards | Status |
 |---|---|---|---|
-| `PacedWire.mu` | `paced_wire.go:131` | `inflight`/`delivered` bead slices | Contention **verified** (removing it from `ReviseInFlightGeometry` gives `WARNING: DATA RACE`). Restructuring **unexamined** — see below |
+| ~~`PacedWire.mu`~~ | — | was `inflight`/`delivered` | **DELETED.** The wire became its own goroutine, so it has one owner and nothing to guard — see below |
 | `outbox.mu` + `cond` | `node_mover.go:57-58` | the unbounded move queue | Contention **verified** (bypassing it reproduces the cascade deadlock). Restructuring **unexamined** — it is SPSC, a shape with known lock-free forms. Also UNCHECKED: nothing bounds queue growth or drain time |
 | `Trace.mu` | `Trace/Trace.go:294` | `events`/`closed`/sinks | **Staying.** Cannot be copied — every goroutine's events must land in one place to become one buffer; copies give N partial streams. The *ordering* framing above it is still open (`task/per-owner-buffer-rows`) |
 | `LayoutHolder.mu` | `layout_holder.go:118` | `localPolars`/`pole` | **Examined, UNCONTENDED.** Kept as cheap insurance against a future cross-goroutine `md.layoutHolders[m]` call, NOT because it guards a present race. Do not cite it as evidence that cross-goroutine holder access is expected |
@@ -43,30 +43,31 @@ goroutine, and because the lock defended an exactness — every reader agrees to
 millisecond — that nothing here needs. "Widest fan-in" was a structural claim being read as
 a cost claim. Check which kind you are making before pulling on any remaining lock.
 
-## `outbox.mu` and `PacedWire.mu` are NOT settled
+## `PacedWire.mu` was examined, and the answer was yes
 
-These had a row in the framings table for a while, with *(not yet examined)* standing in
-for the correct framing. That was not an item — a framing nobody has worked out is not a
-framing, and the placeholder made the table look like it had an answer it did not. The row
-is gone; the two locks are in the inventory above, and the reasoning is here.
+For a while this section said the pair `outbox.mu` and `PacedWire.mu` were unsettled: their
+contention was red-proven, but the claim that *no restructuring makes the sharing go away*
+was asserted and never examined — the same claim that had already been wrong about `geomMu`
+and about `LayoutHolder.mu`.
 
-Two claims were conflated in that row. Only one is verified.
+**`PacedWire.mu` has now been examined, and the assertion was wrong a third time.** The
+question was whether `inflight`/`delivered` separate by owner. They do — but not by
+splitting the pair. The wire itself became the owner: `PacedWire` is now an active goroutine
+with a channel on each end, and the per-edge `edgeMover.run` that used to reach across the
+lock to revise geometry IS that goroutine. One owner, nothing to guard, lock deleted. It
+cost no new goroutines, because that edge goroutine already existed.
 
-**Verified:** the contention is real. Bypassing the outbox reproduces the cascade deadlock
-as a timeout; removing `pw.mu` from `ReviseInFlightGeometry` gives `WARNING: DATA RACE`.
-Both red-proven, both currently guarded by tests.
+That is three for three. **Treat "no restructuring removes this lock" as unproven whenever
+you meet it here**, including in the one remaining row below.
 
-**Asserted, and NOT examined:** that no restructuring makes the sharing go away. That is
-the same claim made about `geomMu` and about `LayoutHolder.mu`, and it was wrong both
-times. Candidates dismissed without looking:
+**`outbox.mu` is still unexamined.** Its contention is real — bypassing the outbox
+reproduces the cascade deadlock as a timeout, red-proven and guarded by tests. But the
+restructuring question is open, and there is a specific reason to think it is live:
 
 - `outbox` is **single-producer, single-consumer** — the mover's own handler enqueues, one
   dedicated sender drains. SPSC is precisely the shape with well-known lock-free
   implementations. The unbounded requirement complicates it; it does not obviously rule it
   out.
-- `PacedWire`'s `inflight` and `delivered` are guarded as one pair. Whether they separate
-  by owner — placement/stepping on one side, delivery handoff on the other — has not been
-  traced.
 
 What IS categorical, and does not depend on any of the above: a torn slice header is wrong
 at any resolution. There is no observer threshold below which corrupted memory is
@@ -80,8 +81,9 @@ The distinction that sorts the other rows is not global-vs-local. It is:
 - **Structural** guarantees — they fall out of construction. Immutability. A pure
   function. These cost nothing and do not break.
 
-`geomMu` went away because a split made the property structural. `PacedWire.mu` stays
-because a queue's invariant has to be maintained.
+`geomMu` went away because a split made the property structural. `PacedWire.mu` went away
+because giving the wire its own goroutine made ownership structural. Both were once
+described as staying. `outbox.mu` is the last one still described that way.
 
 ## The test to apply next time
 

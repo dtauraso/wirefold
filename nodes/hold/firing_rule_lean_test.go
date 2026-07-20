@@ -22,7 +22,7 @@ func stepWire(ctx context.Context, pw *Wiring.PacedWire, clk Wiring.Clock) {
 				return
 			default:
 			}
-			pw.StepOnceAt(ctx, clk.Tick())
+			pw.DriveOneCycle(ctx, clk.Tick())
 			time.Sleep(time.Millisecond)
 		}
 	}()
@@ -70,7 +70,7 @@ func TestHoldFiresAndHoldsOnReceiveLean(t *testing.T) {
 		t.Fatal("timeout waiting for startup bead")
 	}
 
-	if !inSrc.PlaceDrivenAt(7, clk.Tick()).Live() {
+	if !inSrc.PlaceDrivenAt(7).Live() {
 		t.Fatal("PlaceDrivenAt returned false")
 	}
 

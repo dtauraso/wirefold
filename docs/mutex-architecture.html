@@ -112,7 +112,7 @@
   <div class="head-inner">
     <p class="eyebrow">wirefold · concurrency</p>
     <h1>Mutex architecture — who touches what</h1>
-    <p class="sub">Five lock groups left. Each diagram names the real goroutines, the real methods,
+    <p class="sub">Four lock groups left. Each diagram names the real goroutines, the real methods,
     and the real line numbers. A lock with one owner is not a lock.</p>
   </div>
 </header>
@@ -126,90 +126,91 @@
   <span><i class="sw k"></i>no lock needed</span>
 </div>
 
-<!-- ═══════════ 1 · PacedWire.mu ═══════════ -->
-<h2>1 · PacedWire.mu — three goroutines, one wire</h2>
-<p class="cap">Three <b>independently scheduled</b> goroutine roles reach a single
-<code>PacedWire</code>. This is the clearest real contention in the system.</p>
+<!-- ═══════════ gone · PacedWire.mu ═══════════ -->
+<h2>gone · PacedWire.mu — deleted by making the wire a goroutine, not a smaller lock</h2>
+<p class="cap">Before, three independently scheduled goroutine roles (source drive loop, destination
+Update loop, per-edge mover) all locked one shared <code>PacedWire</code> struct to reach its
+<code>inflight</code>/<code>delivered</code> slices. After, <code>PacedWire</code> IS the per-edge
+goroutine (<code>edgeMover.run</code>, unchanged goroutine count — the edge mover already existed to
+revise in-flight geometry on a node move): a channel in from the source, a channel out to the
+destination, and the bead state touched by exactly one goroutine. Ownership replaces locking, the same
+move that deleted <code>RealClock.mu</code> below.</p>
 
 <div class="plate">
-<svg viewBox="0 0 860 330" role="img" aria-label="Three goroutines — the source node's drive loop, the destination node's update loop, and the per-edge mover — all lock the same PacedWire mutex to reach its inflight and delivered bead slices.">
+<svg viewBox="0 0 860 330" role="img" aria-label="Before, three goroutines locked one PacedWire mutex. After, the source sends on the wire's in-channel, the destination receives on its out-channel, and the wire's own goroutine (the same edgeMover.run goroutine that used to revise geometry under the lock) owns inflight/delivered with no lock at all.">
   <defs>
     <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
-      <path d="M0,0 L10,5 L0,10 z" fill="#A8443C"/>
+      <path d="M0,0 L10,5 L0,10 z" fill="#2E7D9A"/>
     </marker>
   </defs>
 
   <text class="tl" x="0" y="14">GOROUTINES</text>
-  <text class="tl" x="560" y="14">ONE SHARED OBJECT</text>
+  <text class="tl" x="560" y="14">OWNED BY ONE OF THEM</text>
 
   <!-- goroutine boxes -->
-  <rect class="gor" x="0" y="30" width="250" height="62" rx="6"/>
+  <rect class="safe" x="0" y="30" width="250" height="62" rx="6"/>
   <text class="t"  x="12" y="50">source node · drive loop</text>
   <text class="ts" x="12" y="66">DriveHeld · node Update</text>
-  <text class="tf" x="12" y="82">Out.PlaceDrivenAt / Out.StepOnceAt</text>
+  <text class="tf" x="12" y="82">Out.PlaceDrivenAt → PacedWire.Send</text>
 
-  <rect class="gor" x="0" y="112" width="250" height="62" rx="6"/>
+  <rect class="safe" x="0" y="112" width="250" height="62" rx="6"/>
   <text class="t"  x="12" y="132">dest node · Update loop</text>
-  <text class="ts" x="12" y="148">In.PollRecv</text>
+  <text class="ts" x="12" y="148">In.PollRecv → PacedWire.Recv</text>
   <text class="tf" x="12" y="164">one per destination node</text>
 
   <rect class="gor" x="0" y="194" width="250" height="62" rx="6"/>
-  <text class="t"  x="12" y="214">edgeMover.run</text>
-  <text class="ts" x="12" y="230">recomputeGeometry</text>
-  <text class="tf" x="12" y="246">node_move.go:506 · one per edge</text>
+  <text class="t"  x="12" y="214">edgeMover.run — IS the wire's goroutine</text>
+  <text class="ts" x="12" y="230">DriveOneCycle + ReviseInFlightGeometry</text>
+  <text class="tf" x="12" y="246">node_mover.go · one per edge, unchanged count</text>
 
   <!-- arrows with call labels -->
-  <path class="arr" d="M250,61 L560,95" marker-end="url(#ah)"/>
-  <text class="tw" x="292" y="62">placeBeadNoWalkerAt</text>
-  <text class="tf" x="292" y="74">:188 — append to inflight</text>
+  <path class="arrq" d="M250,61 L560,95" marker-end="url(#ah)"/>
+  <text class="tq" x="292" y="62">Send</text>
+  <text class="tf" x="292" y="74">non-blocking chan send — never waits on the wire</text>
 
-  <path class="arr" d="M250,72 L560,118" marker-end="url(#ah)"/>
-  <text class="tw" x="300" y="103">StepOnceAt</text>
-  <text class="tf" x="300" y="115">:280 :294 :310 :318 :328</text>
+  <path class="arrq" d="M560,145 L250,143" marker-end="url(#ah)"/>
+  <text class="tq" x="300" y="135">Recv / RecvTick</text>
+  <text class="tf" x="300" y="157">non-blocking chan recv</text>
 
-  <path class="arr" d="M250,143 L560,160" marker-end="url(#ah)"/>
-  <text class="tw" x="310" y="145">PollRecvTick</text>
-  <text class="tf" x="310" y="157">:365 — pop delivered</text>
-
-  <path class="arr" d="M250,225 L560,196" marker-end="url(#ah)"/>
-  <text class="tw" x="300" y="215">ReviseInFlightGeometry</text>
-  <text class="tf" x="300" y="227">:389 — rewrite t of every bead</text>
+  <text class="tk" x="12" y="266">no lock reaches this goroutine from outside — nothing to race</text>
 
   <!-- the wire -->
-  <rect class="state" x="560" y="30" width="290" height="226" rx="8"/>
-  <text class="t"  x="574" y="52">PacedWire</text>
-  <text class="tf" x="574" y="67">nodes/Wiring/paced_wire.go:131</text>
+  <rect class="safe" x="560" y="30" width="290" height="226" rx="8"/>
+  <text class="t"  x="574" y="52">PacedWire — the goroutine's own state</text>
+  <text class="tf" x="574" y="67">nodes/Wiring/paced_wire.go</text>
 
-  <rect x="574" y="80" width="262" height="30" rx="4" class="box"/>
-  <text class="tw" x="586" y="99">mu sync.Mutex</text>
+  <rect x="574" y="80" width="262" height="26" rx="4" class="box"/>
+  <text class="tk" x="586" y="97">no mu — deleted, not narrowed</text>
 
-  <rect x="574" y="118" width="262" height="34" rx="4" class="box"/>
-  <text class="ts" x="586" y="132">inflight []inflightBead</text>
-  <text class="tf" x="586" y="146">beads mid-crossing, each with its own t</text>
+  <rect x="574" y="114" width="262" height="34" rx="4" class="box"/>
+  <text class="ts" x="586" y="128">inflight []inflightBead</text>
+  <text class="tf" x="586" y="142">touched only inside DriveOneCycle</text>
 
-  <rect x="574" y="160" width="262" height="34" rx="4" class="box"/>
-  <text class="ts" x="586" y="174">delivered []deliveredBead</text>
-  <text class="tf" x="586" y="188">arrived, awaiting In.PollRecv</text>
+  <rect x="574" y="156" width="262" height="34" rx="4" class="box"/>
+  <text class="ts" x="586" y="170">inCh / outCh — the channel ends</text>
+  <text class="tf" x="586" y="184">generously buffered: send never blocks</text>
 
-  <rect x="574" y="202" width="262" height="26" rx="4" class="box"/>
-  <text class="ts" x="586" y="219">nextGen · teardownGen</text>
+  <rect x="574" y="198" width="262" height="26" rx="4" class="box"/>
+  <text class="ts" x="586" y="215">nextGen · teardownGen</text>
 
-  <text class="tf" x="574" y="246">holds NO clock — every caller passes its own tick</text>
+  <text class="tf" x="574" y="240">reads its OWN clock copy — no caller-pinned tick anymore</text>
 
   <!-- verdict strip -->
   <line x1="0" y1="284" x2="860" y2="284" stroke="var(--line)"/>
-  <text class="tw" x="0" y="304">RED-PROVEN</text>
-  <text class="ts" x="86" y="304">drop mu in ReviseInFlightGeometry → WARNING: DATA RACE</text>
-  <text class="tf" x="0" y="320">paced_wire_concurrency_race_test.go</text>
+  <text class="tk" x="0" y="304">RE-PROVEN CLEAN</text>
+  <text class="ts" x="130" y="304">Send/RecvTick from other goroutines concurrent with DriveOneCycle + ReviseInFlightGeometry on the wire's own goroutine — no mutex, -race clean</text>
+  <text class="tf" x="0" y="320">paced_wire_concurrency_race_test.go · TestPacedWireOwnershipUnderRace</text>
 </svg>
 </div>
 
-<p class="verdict open"><b>OPEN:</b> <code>inflight</code> and <code>delivered</code> are guarded as
-one pair. Whether they split by owner — placement + stepping on one side, delivery handoff on the
-other — has never been traced. <span style="color:var(--muted)">task/mutex-pacedwire-restructure</span></p>
+<p class="verdict ok"><b>RESOLVED:</b> the open question below this diagram used to be whether
+<code>inflight</code>/<code>delivered</code> split by owner. They no longer need to: there is only one
+owner, period — the wire's own goroutine. See
+<span style="color:var(--muted)">docs/planning/visual-editor/wire-owns-itself.md</span> and MODEL.md.
+<span style="color:var(--muted)">task/mutex-pacedwire-restructure</span></p>
 
 <!-- ═══════════ 2 · outbox ═══════════ -->
-<h2>2 · outbox.mu + cond — single producer, single consumer</h2>
+<h2>1 · outbox.mu + cond — single producer, single consumer</h2>
 <p class="cap">The queue exists so a mover's handler <b>never blocks on a neighbour</b>. That is what
 breaks the mutual-adjacency cascade deadlock.</p>
 
@@ -272,7 +273,7 @@ lock-free forms. Unbounded complicates it; does not rule it out. <b>Also uncheck
 bounds queue growth or drain time. <span style="color:var(--muted)">task/mutex-outbox-restructure</span></p>
 
 <!-- ═══════════ 3 · Trace.mu ═══════════ -->
-<h2>3 · Trace.mu — the hot path is NOT locked</h2>
+<h2>2 · Trace.mu — the hot path is NOT locked</h2>
 <p class="cap">Every emitting goroutine sends on a <b>channel</b>, taking no lock. The mutex guards
 only the single drain goroutine's ledger. This is the most misread lock in the tree.</p>
 
@@ -349,7 +350,7 @@ and no whole picture, so the move that deleted <code>RealClock.mu</code> is unav
 <i>arrival order at the drain</i> — scheduler order, not causal order.</p>
 
 <!-- ═══════════ 4 · LayoutHolder ═══════════ -->
-<h2>4 · LayoutHolder.mu — uncontended; the neighbour path is a message</h2>
+<h2>3 · LayoutHolder.mu — uncontended; the neighbour path is a message</h2>
 <p class="cap">A node never reaches into a neighbour's holder. It <b>sends a message</b>, and the
 neighbour's own goroutine does the write. That is why there is nothing to guard.</p>
 
@@ -409,7 +410,7 @@ neighbour's own goroutine does the write. That is why there is nothing to guard.
 cross-goroutine holder access is expected. It is not.</p>
 
 <!-- ═══════════ 5 · scene_persist ═══════════ -->
-<h2>5 · scene_persist — the second party is a timer goroutine</h2>
+<h2>4 · scene_persist — the second party is a timer goroutine</h2>
 <p class="cap"><code>time.AfterFunc</code> runs every debounced flush in a <b>new goroutine</b>.
 That is the easily-missed racer against a drag-time synchronous write on the same file.</p>
 
