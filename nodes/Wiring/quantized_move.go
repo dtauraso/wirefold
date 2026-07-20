@@ -59,12 +59,15 @@ func (md *MoveDispatch) heldEdges() []sphereEdge {
 func (md *MoveDispatch) fanEdgesAndPartners(newCenters map[string]vec3, enqueue func(id string, msg moveMsg)) {
 	// Per-edge: send ONE batched message carrying every moved endpoint of that edge,
 	// so an edge whose both endpoints moved this frame recomputes/emits exactly once.
-	// enqueue (the caller's own outbox — see enqueueFuncFor) defers the actual blocking
-	// delivery to that mover's dedicated sender goroutine (cascade-deadlock-fix.md), so
-	// this call — made from inside handle via commitLocal — never blocks. The
-	// dispatch-existence check moved into deliverMove (the sender's eventual blocking
-	// write), matching enqueue's other call sites (m.sendMove), which already
-	// tap/enqueue unconditionally regardless of whether id resolves.
+	// enqueue (the sending node's own retry queue — see enqueueFuncFor) appends the
+	// message to nm.pending and attempts an immediate non-blocking send on the
+	// destination's own directed channel (extIn or the sender's slot in the
+	// destination's neighborIn map), retrying next cycle if that channel isn't ready
+	// to receive; it never blocks the calling handler goroutine, so this call — made
+	// from inside handle via commitLocal — never blocks. Dispatch-existence (does id
+	// resolve to a live mover) is checked at send time inside that retry path, matching
+	// enqueue's other call sites (m.sendMove), which already tap/enqueue unconditionally
+	// regardless of whether id resolves.
 	for edgeID, em := range md.edgeMovers {
 		eps := map[string]vec3{}
 		if c, ok := newCenters[em.srcID]; ok {
@@ -114,9 +117,10 @@ func (md *MoveDispatch) fanEdgesAndPartners(newCenters map[string]vec3, enqueue 
 		// BEHIND the real update and clobber it back to the pre-move position on
 		// drain. nodeMover.handle's nil-Center branch re-emits from the mover's own
 		// live geom (whatever it is by the time this drains), so it can never race
-		// or clobber a pending position write. Per-target FIFO order (single sender
-		// goroutine per mover) preserves this ordering guarantee even now that
-		// delivery is deferred through the outbox.
+		// or clobber a pending position write. Per-target FIFO order (each sender's
+		// own retry queue drains in append order onto that target's one directed
+		// channel) preserves this ordering guarantee now that delivery goes through
+		// the sender's own nm.pending/flushPending instead of a shared outbox.
 		enqueue(partnerID, moveMsg{Kind: moveMsgKindCenter, NodeID: partnerID, Center: nil})
 	}
 }
@@ -425,23 +429,24 @@ func (md *MoveDispatch) requantizeLocalPolars(nodeID string, newPos vec3) {
 	// its OWN stored bearing (QuantITheta/QuantIPhi) to X and repositions itself at the
 	// new distance along that same stored direction, X held fixed; M does NOT
 	// re-derive its bearing from a live offset and does NOT forward beyond this one
-	// hop (neighborSetCReposition). Routed as a message to M's OWN inbox instead of
-	// reaching into M's LayoutHolder from X's (this) goroutine — each M's holder and
-	// center are written only by M's own goroutine. Sent via X's OWN outbox
-	// (md.enqueueFuncFor(nodeID), the same handle every other fan in this commit path
-	// uses — see commitNodeMoveLocal's fanEdgesAndPartners call above) instead of the
-	// direct-to-inbox sendMoveLossy this used before: measured under the same
-	// mutually-adjacent concurrent-drag flood TestMutuallyAdjacentDragFloodNoDeadlock
-	// drives, sendMoveLossy dropped ~98% of NeighborSetC sends (9417/9600 in one run,
-	// TestNeighborSetCDropReachability) — the "drop is safe, self-heals" justification
-	// was true in the sense that nothing deadlocked, but the drop path was not a rare
-	// backstop, it was the common case, silently discarding almost every
-	// NeighborSetC. Routing through nodeID's own outbox instead — the SAME
-	// deadlock-safety property sendMoveLossy was reaching for (decouples the send from
-	// this handler goroutine, so two mutually-adjacent nodes committing concurrently
-	// can't block each other) but via the outbox's dedicated sender goroutine and
-	// blocking delivery instead of a drop. Unconditional for every neighbor — there is
-	// no rule/gate/anchor cascade left to defer to.
+	// hop (neighborSetCReposition). Routed as a message on M's own directed inbound
+	// channel (M's neighborIn[X] slot) instead of reaching into M's LayoutHolder from
+	// X's (this) goroutine — each M's holder and center are written only by M's own
+	// goroutine. Sent via X's OWN retry queue (md.enqueueFuncFor(nodeID), the same
+	// handle every other fan in this commit path uses — see commitNodeMoveLocal's
+	// fanEdgesAndPartners call above) instead of the direct-to-inbox sendMoveLossy
+	// this used before: measured under the same mutually-adjacent concurrent-drag
+	// flood TestMutuallyAdjacentDragFloodNoDeadlock drives, sendMoveLossy dropped
+	// ~98% of NeighborSetC sends (9417/9600 in one run, TestNeighborSetCDropReachability)
+	// — the "drop is safe, self-heals" justification was true in the sense that
+	// nothing deadlocked, but the drop path was not a rare backstop, it was the
+	// common case, silently discarding almost every NeighborSetC. Routing through
+	// nodeID's own retry queue instead gets the SAME deadlock-safety property
+	// sendMoveLossy was reaching for (decouples the send from this handler
+	// goroutine, so two mutually-adjacent nodes committing concurrently can't block
+	// each other) but via non-blocking send-and-retain-on-nm.pending, retried every
+	// cycle of the sender's own clock-paced run loop, instead of a drop. Unconditional
+	// for every neighbor — there is no rule/gate/anchor cascade left to defer to.
 	enqueue := md.enqueueFuncFor(nodeID)
 	lpByTo := map[string]LocalPolar{}
 	for _, lp := range lhX.LocalPolarsSnapshot() {
