@@ -1,0 +1,408 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>wirefold — debouncedPersister.mu, the last lock</title>
+<style>
+  :root {
+    --ground:#F2F4F7; --surface:#FFFFFF; --plate:#FAFBFC;
+    --ink:#131A24; --muted:#5B6779; --faint:#8894A6;
+    --line:#D3D9E2; --line-strong:#B7C0CD;
+    --signal:#C06A12; --flow:#2E7D9A; --hazard:#A8443C; --ok:#3B7350;
+    --signal-wash:#F6ECDF; --flow-wash:#E4EFF3; --hazard-wash:#F6E6E4; --ok-wash:#E4EFE8;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground:#0D1219; --surface:#141C26; --plate:#111925;
+      --ink:#E4E9F0; --muted:#94A1B2; --faint:#6C7A8B;
+      --line:#26313F; --line-strong:#3A4859;
+      --signal:#E8A147; --flow:#57AECB; --hazard:#D2685E; --ok:#6FA783;
+      --signal-wash:#241B10; --flow-wash:#0F2029; --hazard-wash:#251413; --ok-wash:#12241A;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:#0D1219; --surface:#141C26; --plate:#111925;
+    --ink:#E4E9F0; --muted:#94A1B2; --faint:#6C7A8B;
+    --line:#26313F; --line-strong:#3A4859;
+    --signal:#E8A147; --flow:#57AECB; --hazard:#D2685E; --ok:#6FA783;
+    --signal-wash:#241B10; --flow-wash:#0F2029; --hazard-wash:#251413; --ok-wash:#12241A;
+  }
+  :root[data-theme="light"] {
+    --ground:#F2F4F7; --surface:#FFFFFF; --plate:#FAFBFC;
+    --ink:#131A24; --muted:#5B6779; --faint:#8894A6;
+    --line:#D3D9E2; --line-strong:#B7C0CD;
+    --signal:#C06A12; --flow:#2E7D9A; --hazard:#A8443C; --ok:#3B7350;
+    --signal-wash:#F6ECDF; --flow-wash:#E4EFF3; --hazard-wash:#F6E6E4; --ok-wash:#E4EFE8;
+  }
+
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--ground); color:var(--ink); font-family:var(--sans); line-height:1.5; -webkit-font-smoothing:antialiased; }
+  .wrap { max-width:1120px; margin:0 auto; padding:0 20px 72px; }
+  header { border-bottom:1px solid var(--line); background:var(--surface); }
+  .head-inner { max-width:1120px; margin:0 auto; padding:24px 20px 20px; }
+  .eyebrow { font-family:var(--mono); font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--faint); margin:0 0 8px; }
+  h1 { font-family:var(--mono); font-weight:600; font-size:clamp(20px,3vw,28px); margin:0 0 6px; }
+  .sub { margin:0; color:var(--muted); max-width:76ch; font-size:14px; }
+  h2 { font-family:var(--mono); font-size:13px; font-weight:600; margin:38px 0 2px; letter-spacing:.02em; }
+  .cap { margin:0 0 10px; color:var(--muted); font-size:13px; max-width:82ch; }
+  .cap b { color:var(--ink); font-weight:600; }
+  .plate { background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:14px; margin:0 0 10px; overflow-x:auto; }
+  .plate svg { display:block; min-width:600px; width:100%; height:auto; }
+
+  .t   { font-family:var(--mono); font-size:12.5px; fill:var(--ink); font-weight:600; }
+  .ts  { font-family:var(--mono); font-size:10.5px; fill:var(--muted); }
+  .tf  { font-family:var(--mono); font-size:9.5px;  fill:var(--faint); }
+  .tl  { font-family:var(--mono); font-size:11px; fill:var(--faint); letter-spacing:.1em; }
+  .tw  { font-family:var(--mono); font-size:10.5px; fill:var(--hazard); font-weight:600; }
+  .tk  { font-family:var(--mono); font-size:10.5px; fill:var(--ok); font-weight:600; }
+  .tq  { font-family:var(--mono); font-size:10.5px; fill:var(--signal); font-weight:600; }
+  .tb  { font-family:var(--mono); font-size:10.5px; fill:var(--flow); font-weight:600; }
+  .big { font-family:var(--mono); font-size:14px; fill:var(--hazard); font-weight:700; }
+
+  .box   { fill:var(--plate); stroke:var(--line-strong); stroke-width:1; }
+  .gor   { fill:var(--flow-wash); stroke:var(--flow); stroke-width:1.2; }
+  .state { fill:var(--hazard-wash); stroke:var(--hazard); stroke-width:1.4; }
+  .safe  { fill:var(--ok-wash); stroke:var(--ok); stroke-width:1.2; }
+  .queue { fill:var(--signal-wash); stroke:var(--signal); stroke-width:1.2; }
+  .dash  { fill:none; stroke:var(--line-strong); stroke-width:1; stroke-dasharray:4 3; }
+  .arr   { fill:none; stroke:var(--hazard); stroke-width:1.4; }
+  .arrb  { fill:none; stroke:var(--flow); stroke-width:1.4; }
+  .arrk  { fill:none; stroke:var(--ok); stroke-width:1.4; }
+  .arrq  { fill:none; stroke:var(--signal); stroke-width:1.4; }
+
+  .legend { display:flex; gap:16px; flex-wrap:wrap; margin:0 0 22px; font-size:12px; color:var(--muted); }
+  .legend span { display:flex; align-items:center; gap:6px; font-family:var(--mono); font-size:11px; }
+  .sw { width:12px; height:12px; border-radius:3px; border:1.4px solid; display:inline-block; }
+  .sw.g { background:var(--flow-wash);   border-color:var(--flow); }
+  .sw.s { background:var(--hazard-wash); border-color:var(--hazard); }
+  .sw.k { background:var(--ok-wash);     border-color:var(--ok); }
+  .sw.q { background:var(--signal-wash); border-color:var(--signal); }
+
+  .verdict { font-size:13px; margin:0 0 26px; padding:9px 12px; border-radius:6px; }
+  .verdict.ok { background:var(--ok-wash); }
+  .verdict.open { background:var(--signal-wash); }
+  .verdict.hazard { background:var(--hazard-wash); }
+  .verdict b { font-family:var(--mono); font-size:11.5px; }
+  code { font-family:var(--mono); font-size:.92em; }
+  footer { margin-top:46px; padding-top:16px; border-top:1px solid var(--line); color:var(--faint); font-size:12px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="head-inner">
+    <p class="eyebrow">wirefold · concurrency</p>
+    <h1>debouncedPersister.mu — the last one</h1>
+    <p class="sub">Five instances, one mutex each, at <code>scene_persist.go:64</code>. Every
+    other lock in this repo has been deleted or settled. This one survived the file split
+    because what it guards is <b>in memory</b>, not on disk — splitting files cannot reach it.</p>
+  </div>
+</header>
+
+<div class="wrap">
+
+<div class="legend">
+  <span><i class="sw g"></i>goroutine</span>
+  <span><i class="sw s"></i>locked state</span>
+  <span><i class="sw q"></i>timer</span>
+  <span><i class="sw k"></i>safe / resolved</span>
+</div>
+
+<!-- ══ 1 · THE STATE ══ -->
+<h2>1 · what it guards — four fields, four methods</h2>
+<p class="cap">The whole lock is one small struct. Every method takes <code>mu</code>; none
+holds it across a write to disk.</p>
+
+<div class="plate">
+<svg viewBox="0 0 860 250" role="img" aria-label="The debouncedPersister struct holds pending, has, timer and writes under one mutex, and four short methods arm, take, stop and recordWrite each lock and unlock it.">
+  <text class="tl" x="0" y="14">THE STRUCT</text>
+  <text class="tl" x="440" y="14">EVERY METHOD THAT TAKES mu</text>
+
+  <rect class="state" x="0" y="28" width="400" height="164" rx="8"/>
+  <text class="t"  x="14" y="50">debouncedPersister[T]</text>
+  <text class="tf" x="14" y="65">nodes/Wiring/scene_persist.go:64</text>
+
+  <rect class="box" x="14" y="78" width="372" height="24" rx="4"/>
+  <text class="tw" x="26" y="95">mu sync.Mutex</text>
+
+  <rect class="box" x="14" y="108" width="372" height="26" rx="4"/>
+  <text class="ts" x="26" y="125">pending T</text>
+  <text class="tf" x="150" y="125">the latest value not yet written</text>
+
+  <rect class="box" x="14" y="140" width="180" height="22" rx="4"/>
+  <text class="ts" x="26" y="156">has bool</text>
+  <rect class="box" x="206" y="140" width="180" height="22" rx="4"/>
+  <text class="ts" x="218" y="156">timer *time.Timer</text>
+
+  <rect class="box" x="14" y="166" width="372" height="22" rx="4"/>
+  <text class="ts" x="26" y="182">writes int</text>
+  <text class="tf" x="120" y="182">test observability only</text>
+
+  <rect class="gor" x="440" y="28" width="420" height="34" rx="5"/>
+  <text class="ts" x="452" y="43">arm(debounce, v, flush)</text>
+  <text class="tf" x="452" y="56">:74 — set pending, set has, AfterFunc or timer.Reset</text>
+
+  <rect class="gor" x="440" y="68" width="420" height="34" rx="5"/>
+  <text class="ts" x="452" y="83">take() (T, bool)</text>
+  <text class="tf" x="452" y="96">:90 — read pending, ZERO it, clear has</text>
+
+  <rect class="gor" x="440" y="108" width="420" height="34" rx="5"/>
+  <text class="ts" x="452" y="123">stop()</text>
+  <text class="tf" x="452" y="136">:105 — cancel the timer on shutdown</text>
+
+  <rect class="gor" x="440" y="148" width="420" height="34" rx="5"/>
+  <text class="ts" x="452" y="163">recordWrite()</text>
+  <text class="tf" x="452" y="176">:117 — writes++</text>
+
+  <line x1="0" y1="212" x2="860" y2="212" stroke="var(--line)"/>
+  <text class="tk" x="0" y="232">NO I/O UNDER THE LOCK</text>
+  <text class="ts" x="212" y="232">flush() calls take(), releases, THEN writes the file. stop() never holds mu across flush().</text>
+  <text class="tf" x="0" y="246">That is deliberate — the doc comment calls it out as the reason there is no deadlock risk.</text>
+</svg>
+</div>
+
+<!-- ══ 2 · THE POINT OF IT ══ -->
+<h2>2 · what debouncing is for — a drag is one write, not sixty</h2>
+<p class="cap">Every <code>arm</code> resets the window. A continuous stream of updates
+coalesces into <b>one</b> write after activity settles.</p>
+
+<div class="plate">
+<svg viewBox="0 0 860 220" role="img" aria-label="A drag emits many schedule calls, each resetting the debounce timer, so only one write happens after the drag stops.">
+  <text class="tl" x="0" y="14">A DRAG · ~60 EVENTS/SEC</text>
+
+  <line x1="0" y1="60" x2="700" y2="60" stroke="var(--line-strong)" stroke-width="1"/>
+  <path class="arrq" d="M20,60 L20,40"/><path class="arrq" d="M60,60 L60,40"/>
+  <path class="arrq" d="M100,60 L100,40"/><path class="arrq" d="M140,60 L140,40"/>
+  <path class="arrq" d="M180,60 L180,40"/><path class="arrq" d="M220,60 L220,40"/>
+  <path class="arrq" d="M260,60 L260,40"/><path class="arrq" d="M300,60 L300,40"/>
+  <text class="tq" x="20" y="34">arm  arm  arm  arm  arm  arm  arm  arm</text>
+  <text class="tf" x="20" y="78">each call: pending = v, timer.Reset(debounce)</text>
+
+  <rect class="dash" x="300" y="92" width="180" height="30" rx="4"/>
+  <text class="tf" x="312" y="112">debounce window — nothing new arrives</text>
+
+  <path class="arrk" d="M480,107 L560,107"/>
+  <rect class="safe" x="560" y="88" width="290" height="38" rx="5"/>
+  <text class="tk" x="572" y="105">ONE write — timer fires, flush()</text>
+  <text class="tf" x="572" y="119">take() → write file → recordWrite()</text>
+
+  <line x1="0" y1="152" x2="860" y2="152" stroke="var(--line)"/>
+  <text class="tq" x="0" y="172">WHY IT EXISTS</text>
+  <text class="ts" x="106" y="172">without it a drag is ~60 file writes per second per node. The lock is incidental to that goal.</text>
+  <text class="tf" x="0" y="190">Note what this means for the lock: the mutex is not protecting the DEBOUNCE, it is protecting the state the debounce keeps.</text>
+  <text class="tf" x="0" y="206">Removing the lock must not remove the coalescing — they are separable concerns that happen to live in one struct.</text>
+</svg>
+</div>
+
+<!-- ══ 3 · THE TWO PARTIES ══ -->
+<h2>3 · the two parties — and the second one is spawned, not chosen</h2>
+<p class="cap"><code>time.AfterFunc</code> runs <code>flush</code> on a <b>brand-new goroutine</b>
+each time it fires. Nobody picks that goroutine; the runtime makes it. That is what makes
+this two-party rather than one-owner.</p>
+
+<div class="plate">
+<svg viewBox="0 0 860 260" role="img" aria-label="The arming goroutine and a timer-spawned goroutine both take the mutex, along with a third shutdown path from the stdin reader.">
+  <defs><marker id="ah4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#A8443C"/></marker></defs>
+
+  <text class="tl" x="0" y="14">PARTY 1 — ARMS IT</text>
+  <text class="tl" x="620" y="14">PARTY 2 — FIRES IT</text>
+
+  <rect class="gor" x="0" y="30" width="250" height="90" rx="6"/>
+  <text class="ts" x="12" y="49">node's own mover goroutine</text>
+  <text class="tf" x="12" y="64">quantOffset · anchor</text>
+  <text class="ts" x="12" y="84">gesture / camera path</text>
+  <text class="tf" x="12" y="99">viewpoint · sphere</text>
+  <text class="ts" x="12" y="114">stdin reader — overlays, save</text>
+
+  <path class="arr" d="M250,72 L370,110" marker-end="url(#ah4)"/>
+  <text class="tw" x="264" y="86">arm()</text>
+
+  <rect class="state" x="370" y="90" width="200" height="60" rx="6"/>
+  <text class="tw" x="382" y="112">mu</text>
+  <text class="tf" x="382" y="128">pending · has</text>
+  <text class="tf" x="382" y="142">timer · writes</text>
+
+  <path class="arr" d="M620,72 L570,110" marker-end="url(#ah4)"/>
+  <text class="tw" x="530" y="80">take()</text>
+
+  <rect class="queue" x="620" y="30" width="240" height="90" rx="6"/>
+  <text class="tq" x="632" y="49">time.AfterFunc goroutine</text>
+  <text class="tf" x="632" y="66">A NEW GOROUTINE PER FIRE</text>
+  <text class="tf" x="632" y="82">not chosen by anyone —</text>
+  <text class="tf" x="632" y="96">the runtime spawns it</text>
+  <text class="tf" x="632" y="112">runs flush()</text>
+
+  <rect class="gor" x="330" y="176" width="280" height="46" rx="6"/>
+  <text class="ts" x="342" y="195">stdin reader, clean exit</text>
+  <text class="tf" x="342" y="211">stop() then flushPending() — a THIRD path</text>
+  <path class="arr" d="M470,176 L470,152" marker-end="url(#ah4)"/>
+
+  <line x1="0" y1="240" x2="860" y2="240" stroke="var(--line)"/>
+  <text class="tw" x="0" y="256">THIS IS THE WHOLE CASE FOR THE LOCK</text>
+  <text class="ts" x="330" y="256">two parties on one struct, and the second is a goroutine nobody owns.</text>
+</svg>
+</div>
+
+<!-- ══ 4 · THE SUBTLE ONE ══ -->
+<h2>4 · why take() zeroes pending — the non-obvious reason the lock earns its keep</h2>
+<p class="cap">Two of the five persisters hold a <b>map</b> and mutate it in place. If
+<code>take()</code> handed the map out without clearing it, a schedule arriving mid-flush
+would write into the very map <code>flush</code> is iterating.</p>
+
+<div class="plate">
+<svg viewBox="0 0 860 280" role="img" aria-label="Without zeroing pending, a schedule during a flush would mutate the same map the flush is iterating; zeroing forces the next schedule to allocate a fresh map.">
+  <text class="tl" x="0" y="14">WITHOUT ZEROING — the bug that would exist</text>
+
+  <rect class="gor" x="0" y="30" width="240" height="40" rx="5"/>
+  <text class="ts" x="12" y="55">flush: take() → map M</text>
+
+  <rect class="gor" x="0" y="80" width="240" height="40" rx="5"/>
+  <text class="ts" x="12" y="105">schedule: pending[k] = v</text>
+
+  <path class="arr" d="M240,50 L360,86" marker-end="url(#ah4)"/>
+  <path class="arr" d="M240,100 L360,96" marker-end="url(#ah4)"/>
+
+  <rect class="state" x="360" y="70" width="220" height="56" rx="6"/>
+  <text class="big" x="372" y="94">SAME MAP</text>
+  <text class="tf" x="372" y="112">flush iterates it while schedule writes it</text>
+
+  <text class="tl" x="0" y="164">WITH ZEROING — what the code does</text>
+
+  <rect class="gor" x="0" y="180" width="240" height="40" rx="5"/>
+  <text class="ts" x="12" y="205">take(): return M, pending = nil</text>
+
+  <rect class="gor" x="0" y="230" width="240" height="40" rx="5"/>
+  <text class="ts" x="12" y="255">next schedule: fresh map</text>
+
+  <path class="arrk" d="M240,200 L360,208"/>
+  <path class="arrk" d="M240,250 L360,236"/>
+
+  <rect class="safe" x="360" y="186" width="220" height="40" rx="5"/>
+  <text class="tk" x="372" y="211">flush owns M alone</text>
+
+  <rect class="safe" x="360" y="232" width="220" height="40" rx="5"/>
+  <text class="tk" x="372" y="257">schedule owns the new map alone</text>
+
+  <rect class="box" x="608" y="70" width="252" height="202" rx="6"/>
+  <text class="t"  x="620" y="92">READ THIS BEFORE REMOVING mu</text>
+  <text class="tf" x="620" y="114">The lock is not only guarding four</text>
+  <text class="tf" x="620" y="128">fields. take()'s zeroing is a HANDOFF:</text>
+  <text class="tf" x="620" y="142">it transfers ownership of a reference</text>
+  <text class="tf" x="620" y="156">type from the scheduler to the flusher.</text>
+  <text class="tf" x="620" y="180">Any replacement must preserve that</text>
+  <text class="tf" x="620" y="194">handoff, not just the mutual exclusion.</text>
+  <text class="tf" x="620" y="218">Affected: the map-valued persisters</text>
+  <text class="tf" x="620" y="232">(anchor, node-pos). The scalar ones</text>
+  <text class="tf" x="620" y="246">do not care.</text>
+  <text class="tw" x="620" y="266">This is the trap in this lock.</text>
+</svg>
+</div>
+
+<!-- ══ 5 · FIVE INSTANCES ══ -->
+<h2>5 · five instances — independent, not one shared lock</h2>
+<p class="cap">Unlike <code>sceneFileMu</code>, this was never one lock over many writers. Each
+persister has its own, so they never contend with each other — only with their own timer.</p>
+
+<div class="plate">
+<svg viewBox="0 0 860 190" role="img" aria-label="Five persisters each own an independent mutex, so contention is always within one persister and never across them.">
+  <rect class="state" x="0" y="28" width="160" height="72" rx="6"/>
+  <text class="ts" x="10" y="48">viewpoint</text><text class="tf" x="10" y="63">camera.json</text><text class="tw" x="10" y="88">own mu</text>
+  <rect class="state" x="176" y="28" width="160" height="72" rx="6"/>
+  <text class="ts" x="186" y="48">overlays</text><text class="tf" x="186" y="63">overlays.json</text><text class="tw" x="186" y="88">own mu</text>
+  <rect class="state" x="352" y="28" width="160" height="72" rx="6"/>
+  <text class="ts" x="362" y="48">sceneSphere</text><text class="tf" x="362" y="63">sphere.json</text><text class="tw" x="362" y="88">own mu</text>
+  <rect class="state" x="528" y="28" width="160" height="72" rx="6"/>
+  <text class="ts" x="538" y="48">anchor</text><text class="tf" x="538" y="63">&lt;port&gt;.json · MAP</text><text class="tw" x="538" y="88">own mu</text>
+  <rect class="state" x="704" y="28" width="156" height="72" rx="6"/>
+  <text class="ts" x="714" y="48">quantOffset</text><text class="tf" x="714" y="63">position.json · MAP</text><text class="tw" x="714" y="88">own mu</text>
+
+  <line x1="0" y1="128" x2="860" y2="128" stroke="var(--line)"/>
+  <text class="tk" x="0" y="148">NO CROSS-PERSISTER CONTENTION</text>
+  <text class="ts" x="248" y="148">five separate structs, five separate mutexes. The blast radius of each is one persister.</text>
+  <text class="tf" x="0" y="166">So this is not one lock to remove — it is one PATTERN, applied five times. Fix the pattern and all five go.</text>
+  <text class="tf" x="0" y="182">The two marked MAP are the ones with the ownership-handoff trap from diagram 4.</text>
+</svg>
+</div>
+
+<!-- ══ 6 · THE CANDIDATE ══ -->
+<h2>6 · the single-owner candidate</h2>
+<p class="cap">Every lock removed so far fell the same way: give the state one owner. Here that
+means the timer stops spawning an anonymous goroutine, and the flush happens on a goroutine
+that already exists.</p>
+
+<div class="plate">
+<svg viewBox="0 0 860 260" role="img" aria-label="Instead of AfterFunc spawning a goroutine that reaches into the persister, schedules and timer expiry both become messages to one owner goroutine that holds the state privately.">
+  <text class="tl" x="0" y="14">TODAY</text>
+  <text class="tl" x="450" y="14">CANDIDATE</text>
+  <line x1="420" y1="24" x2="420" y2="212" stroke="var(--line)"/>
+
+  <rect class="gor" x="0" y="32" width="170" height="34" rx="5"/><text class="tf" x="10" y="53">arming goroutine</text>
+  <rect class="queue" x="0" y="76" width="170" height="34" rx="5"/><text class="tf" x="10" y="97">AfterFunc goroutine</text>
+  <path class="arr" d="M170,49 L250,80" marker-end="url(#ah4)"/>
+  <path class="arr" d="M170,93 L250,90" marker-end="url(#ah4)"/>
+  <rect class="state" x="250" y="62" width="150" height="56" rx="6"/>
+  <text class="tw" x="262" y="84">mu</text>
+  <text class="tf" x="262" y="100">pending · has</text>
+  <text class="tf" x="262" y="112">timer · writes</text>
+  <text class="tf" x="0" y="140">two parties reach into one struct</text>
+
+  <rect class="gor" x="450" y="32" width="170" height="34" rx="5"/><text class="tf" x="460" y="53">arming goroutine</text>
+  <rect class="queue" x="450" y="76" width="170" height="34" rx="5"/><text class="tf" x="460" y="97">timer tick</text>
+  <path class="arrk" d="M620,49 L690,80"/>
+  <path class="arrk" d="M620,93 L690,90"/>
+  <text class="tk" x="626" y="46">msg</text>
+  <text class="tk" x="626" y="112">msg</text>
+  <rect class="safe" x="690" y="52" width="170" height="76" rx="6"/>
+  <text class="tk" x="702" y="72">persister goroutine</text>
+  <text class="tf" x="702" y="90">owns pending/has/timer</text>
+  <text class="tf" x="702" y="104">privately — no lock</text>
+  <text class="tf" x="702" y="120">writes the file itself</text>
+  <text class="tf" x="450" y="150">one owner; the others send to it</text>
+
+  <line x1="0" y1="176" x2="860" y2="176" stroke="var(--line)"/>
+  <text class="tq" x="0" y="196">OPEN QUESTIONS BEFORE BUILDING THIS</text>
+  <text class="tf" x="0" y="214">· Five persisters × one goroutine each = five more goroutines. Every prior lock removal was goroutine-neutral or NEGATIVE. This one adds.</text>
+  <text class="tf" x="0" y="230">· Could they share ONE persister goroutine instead? Then the owner is one goroutine for all five — fewer goroutines than today's zero-owner design.</text>
+  <text class="tf" x="0" y="246">· take()'s ownership handoff (diagram 4) must survive, or the map persisters get a silent corruption instead of a lock.</text>
+</svg>
+</div>
+
+<!-- ══ 7 · WHAT WOULD PROVE IT ══ -->
+<h2>7 · no red proof exists</h2>
+
+<div class="plate">
+<svg viewBox="0 0 860 170" role="img" aria-label="No test fails if this mutex is deleted, so nothing currently demonstrates it is load-bearing.">
+  <rect class="state" x="0" y="24" width="420" height="96" rx="6"/>
+  <text class="t"  x="12" y="46">TODAY</text>
+  <text class="ts" x="12" y="68">Delete mu and every test still passes.</text>
+  <text class="tf" x="12" y="88">Nothing demonstrates it is load-bearing.</text>
+  <text class="tf" x="12" y="104">Same state sceneFileMu was in — and that</text>
+  <text class="tf" x="12" y="116">one turned out to be removable.</text>
+
+  <rect class="safe" x="440" y="24" width="420" height="96" rx="6"/>
+  <text class="t"  x="452" y="46">WHAT WOULD PROVE IT</text>
+  <text class="ts" x="452" y="68">Hammer arm() from one goroutine while</text>
+  <text class="ts" x="452" y="84">a timer fires flush() repeatedly, under -race.</text>
+  <text class="tf" x="452" y="104">For the MAP persisters, assert the flushed</text>
+  <text class="tf" x="452" y="116">map is not mutated mid-write.</text>
+
+  <line x1="0" y1="140" x2="860" y2="140" stroke="var(--line)"/>
+  <text class="tw" x="0" y="160">DO THIS FIRST</text>
+  <text class="ts" x="106" y="160">write the failing test before removing anything — otherwise you cannot tell removal from breakage.</text>
+</svg>
+</div>
+
+<footer>
+  Verified against the tree on <span style="font-family:var(--mono)">task/mutex-debounced-persister</span>.
+  Line numbers drift — re-grep before trusting them. Companions:
+  <span style="font-family:var(--mono)">docs/scene-persist-architecture.html</span>,
+  <span style="font-family:var(--mono)">docs/mutex-architecture.html</span>,
+  <span style="font-family:var(--mono)">docs/framings.md</span>.
+</footer>
+
+</div>
+</body>
+</html>
