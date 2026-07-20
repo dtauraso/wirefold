@@ -476,22 +476,3 @@ func TestRootMoveContinuousPositionLocalPolarRequantize(t *testing.T) {
 		t.Fatalf("dst.localPolar[src].QuantIR = %d, want round(%v/%v) = %v", foundBack.QuantIR, wantPolBack.R, rStep, wantIRBack)
 	}
 }
-
-// mockPulseSink is a minimal single-In kind registering the "Pulse" kind for the
-// Wiring test binary (loader_scene_polar_test.go / loader_tree_test.go load "Pulse"
-// nodes and need it registered). Its Update is a no-op like faninSrc/faninSink in
-// fanin_travel_time_test.go — no bead traffic is driven by it. "Hold" and
-// "HoldNewSendOld" are already registered by their real node packages (imported by
-// other _test.go files sharing this test binary via nonblocking_traversal_test.go /
-// gate_nonblocking_traversal_test.go), so tests reuse those real kinds instead of
-// re-registering mocks (Register panics on a duplicate kind).
-type mockPulseSink struct {
-	LayoutHolder
-	In *In
-}
-
-func (n *mockPulseSink) Update(ctx context.Context) { <-ctx.Done() }
-
-func init() {
-	Register("Pulse", func() any { return &mockPulseSink{} })
-}

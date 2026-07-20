@@ -17,26 +17,19 @@ import (
 	_ "github.com/dtauraso/wirefold/nodes/holdnewsendold"
 	_ "github.com/dtauraso/wirefold/nodes/input"
 	_ "github.com/dtauraso/wirefold/nodes/pacer"
+	_ "github.com/dtauraso/wirefold/nodes/pulse"
 	_ "github.com/dtauraso/wirefold/nodes/windowandinhibitleftgate"
 )
 
-// Pulse is deliberately NOT one of the kinds imported here: nodes/Wiring's own
-// node_move_test.go registers a mock "Pulse" kind (mockPulseSink) directly on the
-// Wiring package for an unrelated fixture, and this file's test binary links BOTH
-// that internal test package and this external one — importing the real
-// nodes/pulse package here as well would double-register the "Pulse" kind and
-// panic. Pulse's SpeedCh/Out1SpeedCh/Out2SpeedCh wiring is exercised directly by
-// pulse's own package tests instead; this test's job is proving full-set delivery
-// across a representative mix of the OTHER kinds, not enumerating literally every
-// kind in one place.
-//
-// speedFullSetTopo has exactly one node of every (non-Pulse) kind that owns a
-// clock copy (grep-discovered set: input, holdnewsendold, hold, pacer, holdflip,
-// gatecommon.RunGate via WindowAndInhibitLeftGate) plus exactly ONE edge (so
+// speedFullSetTopo has exactly one node of every kind that owns a clock copy
+// (grep-discovered set: input, holdnewsendold, hold, pacer, holdflip,
+// gatecommon.RunGate via WindowAndInhibitLeftGate, pulse) plus exactly ONE edge (so
 // exactly one edgeMover exists too). Downstream wiring beyond that single edge is
 // deliberately left absent — injectSpeedChans (builders.go) creates a node's speed
 // channel(s) unconditionally at construction, never gated on whether its OUTPUT
-// ports end up wired, so the channel COUNT below does not depend on it.
+// ports end up wired, so the channel COUNT below does not depend on it. Pulse is
+// left with no inputs/outputs wired for the same reason: its SpeedCh/Out1SpeedCh/
+// Out2SpeedCh are all created unconditionally at construction.
 const speedFullSetTopo = `{
   "nodes": [
     {"id":"src","type":"Input","data":{"init":[0],"repeat":false},
@@ -51,7 +44,8 @@ const speedFullSetTopo = `{
      "inputs":[{"name":"In"}], "outputs":[{"name":"Out"}]},
     {"id":"gate","type":"WindowAndInhibitLeftGate","data":{},
      "inputs":[{"name":"FromLeft"},{"name":"FromRight"}],
-     "outputs":[{"name":"ToPassed"}]}
+     "outputs":[{"name":"ToPassed"}]},
+    {"id":"pulse","type":"Pulse","data":{}}
   ],
   "edges": [
     {"label":"e0","kind":"data","source":"src","sourceHandle":"ToHoldNewSendOld","target":"hnso","targetHandle":"FromPrevHoldNewSendOldNode"}
@@ -65,10 +59,11 @@ const speedFullSetTopo = `{
 //	Input(1) + HoldNewSendOld(1) + Hold(1) + Pacer(1)  = 4   (one SpeedCh each)
 //	HoldFlip: SpeedCh + DriveSpeedCh                    = 2   (main loop + 1 drive goroutine)
 //	WindowAndInhibitLeftGate (gatecommon.RunGate)       = 1   (SpeedCh)
+//	Pulse: SpeedCh + Out1SpeedCh + Out2SpeedCh          = 3   (main loop + 2 drive goroutines)
 //	edgeMover, one per edge (exactly 1 edge above)      = 1
 //
-// Total = 4 + 2 + 1 + 1 = 8.
-const expectedSpeedSinkCount = 8
+// Total = 4 + 2 + 1 + 3 + 1 = 11.
+const expectedSpeedSinkCount = 11
 
 // TestSpeedSinksCoverEveryClockOwningGoroutine asserts LoadTopology's speed-sink list
 // has EXACTLY the expected count for this fixture — over the FULL set, not a sample.
