@@ -317,9 +317,21 @@ func applyUpdate(msg stdinMsg, md *MoveDispatch, tr *T.Trace, clk Clock) {
 		}
 		switch msg.Attr {
 		case "speed":
-			// The playback multiplier (0/1/2 from the slider). Go owns the clock; this
-			// just sets its speed. Every tick-timed thing scales together (see Clock.SetSpeed).
-			clk.SetSpeed(float64(msg.Num))
+			// The playback multiplier (0/1/2 from the slider). SetSpeed left the Clock
+			// INTERFACE in the per-goroutine-clock demolition (docs/planning/visual-
+			// editor/per-goroutine-clock.md item 4): nothing outside a goroutine's own
+			// copy may mutate it anymore, since a copy is owned by exactly one goroutine.
+			// This type-asserts down to the concrete *RealClock (still exported) so this
+			// call site keeps compiling. KNOWN REGRESSION, left on purpose: this clk is
+			// main.go's ORIGIN clock, not any goroutine's copy — every production
+			// goroutine already took its own Copy() before this point, so mutating the
+			// origin here reaches nobody. The slider is currently INERT. Delivering a
+			// speed change to every live copy (per-goroutine-clock.md "Delivery") is a
+			// separate, not-yet-built step; do not paper over this with a bus/registry
+			// here.
+			if rc, ok := clk.(*RealClock); ok {
+				rc.SetSpeed(float64(msg.Num))
+			}
 		}
 	case "overlays":
 		if md == nil {

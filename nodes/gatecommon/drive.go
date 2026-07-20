@@ -50,12 +50,15 @@ import (
 // Chan mode (!out.Paced(), unit tests) has no shared clock and no wire geometry,
 // so it keeps the OLD unconditional per-cycle placement (wall-clock sleep) — that
 // mode has no tick to read and no wire to visualize.
-func DriveHeld(ctx context.Context, out *Wiring.Out, held *atomic.Int64, transform func(int64) int) {
+// clk is the ORIGIN clock this goroutine Copies from exactly ONCE at its own start
+// (docs/planning/visual-editor/per-goroutine-clock.md) — the caller's own Clock field
+// (e.g. Pulse/HoldFlip's Node.Clock, injected by reflectBuild), not derived from out
+// (port accessors are gone: API demolition item 1). nil in chan mode (unit tests with
+// no loader): fine, because clk is never touched unless out.Paced().
+func DriveHeld(ctx context.Context, out *Wiring.Out, held *atomic.Int64, transform func(int64) int, clk Wiring.Clock) {
 	go func() {
 		paced := out.Paced()
-		// Copy taken ONCE at this goroutine's start (the go func() literal above
-		// IS the goroutine) — docs/planning/visual-editor/per-goroutine-clock.md.
-		clk := out.Clock().Copy()
+		var c Wiring.Clock
 		sleep := func(ctx context.Context) error {
 			select {
 			case <-ctx.Done():
@@ -64,15 +67,23 @@ func DriveHeld(ctx context.Context, out *Wiring.Out, held *atomic.Int64, transfo
 				return nil
 			}
 		}
+		// tick returns the current tick in paced mode (off this goroutine's own
+		// clock copy) or 0 in chan mode, where no caller reads it for anything
+		// meaningful (PlaceDrivenAt's chan-mode branch ignores the tick argument).
+		tick := func() int64 { return 0 }
 		if paced {
-			sleep = clk.SleepCycle
+			// Copy taken ONCE at this goroutine's start (the go func() literal above
+			// IS the goroutine) — docs/planning/visual-editor/per-goroutine-clock.md.
+			c = clk.Copy()
+			sleep = c.SleepCycle
+			tick = c.Tick
 		}
 
 		// lastPlaceTick anchors placement pacing in SCALED-tick space (paced mode).
 		// Seeded to now so the first bead lands one K after start, as before.
 		var lastPlaceTick int64
 		if paced {
-			lastPlaceTick = clk.Tick()
+			lastPlaceTick = tick()
 		}
 		for {
 			if ctx.Err() != nil {
@@ -88,23 +99,23 @@ func DriveHeld(ctx context.Context, out *Wiring.Out, held *atomic.Int64, transfo
 					if k < 1 {
 						k = 1
 					}
-					place = clk.Tick()-lastPlaceTick >= k
+					place = tick()-lastPlaceTick >= k
 				}
 				// else: geometry not yet known — don't place this cycle.
 			}
 			if place {
-				if out.PlaceDrivenAt(transform(held.Load()), clk.Tick()).Failed() {
+				if out.PlaceDrivenAt(transform(held.Load()), tick()).Failed() {
 					return
 				}
 				if paced {
-					lastPlaceTick = clk.Tick()
+					lastPlaceTick = tick()
 				}
 			}
 
 			if err := sleep(ctx); err != nil {
 				return
 			}
-			out.StepOnceAt(ctx, clk.Tick())
+			out.StepOnceAt(ctx, tick())
 		}
 	}()
 }

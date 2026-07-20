@@ -45,19 +45,20 @@ func TestPulseDrivesHeldValueLean(t *testing.T) {
 	// inSrc is a test-only seeding source on inPw: PlaceDrivenAt places a bead
 	// (no walker) that the stepWire loop above then drives to delivery,
 	// reusing the production placement API to inject the test's input value.
-	inSrc := Wiring.NewPacedOutNoGeom(inPw, ctx, "seed", "Out", tr, Wiring.RuleFireAndForget, 0, 0, "", clk)
+	inSrc := Wiring.NewPacedOutNoGeom(inPw, ctx, "seed", "Out", tr, Wiring.RuleFireAndForget, 0, 0, "")
 
 	outPw := Wiring.NewPacedWire(latMs*Wiring.PulseSpeedWuPerMs, Wiring.PulseSpeedWuPerMs)
 
 	beadCh := make(chan int, 16)
 	node := &Node{
 		Fire:      func() {},
-		FromInput: Wiring.NewInPaced(inPw, ctx, "pulse", "FromInput", tr, clk),
+		Clock:     clk,
+		FromInput: Wiring.NewInPaced(inPw, ctx, "pulse", "FromInput", tr),
 		Out: Wiring.NewPacedOutNoGeom(outPw, ctx, "pulse", "Out", tr,
-			Wiring.RuleFireAndForget, latMs*Wiring.PulseSpeedWuPerMs, latMs, "", clk),
+			Wiring.RuleFireAndForget, latMs*Wiring.PulseSpeedWuPerMs, latMs, ""),
 		EmitHeldBead: func(v int) { beadCh <- v },
 	}
-	observer := Wiring.NewInPaced(outPw, ctx, "obs", "In", tr, clk)
+	observer := Wiring.NewInPaced(outPw, ctx, "obs", "In", tr)
 
 	done := make(chan struct{})
 	go func() { node.Update(ctx); close(done) }()

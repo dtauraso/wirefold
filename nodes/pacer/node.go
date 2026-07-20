@@ -18,8 +18,14 @@ type Node struct {
 	EmitGeometry func()
 	EmitHeldBead func(held int)
 	Held         int `wire:"data.state"`
-	FromInput    *Wiring.In
-	FeedbackOut  *Wiring.Out
+	// Clock is this node's OWN clock storage, seeded by Wiring.reflectBuild
+	// directly from the loader's origin (bare-field injection by exact type
+	// Wiring.Clock — see input.Node.Clock; ports no longer hand out a clock,
+	// per-goroutine-clock.md API demolition item 1). Update() Copies it exactly
+	// once at its own start.
+	Clock       Wiring.Clock
+	FromInput   *Wiring.In
+	FeedbackOut *Wiring.Out
 }
 
 func (p *Node) Update(ctx context.Context) {
@@ -32,7 +38,7 @@ func (p *Node) Update(ctx context.Context) {
 
 	// Copy taken ONCE at this goroutine's start (Update IS the goroutine) —
 	// docs/planning/visual-editor/per-goroutine-clock.md.
-	clk := p.FromInput.Clock().Copy()
+	clk := p.Clock.Copy()
 
 	for {
 		select {

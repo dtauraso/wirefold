@@ -35,12 +35,6 @@ type In struct {
 	node  string
 	port  string
 	trace *T.Trace
-	// clock is the Clock this port hands to its owning goroutine for a ONE-TIME
-	// Copy() at goroutine start (docs/planning/visual-editor/per-goroutine-clock.md).
-	// Set at construction (NewInPaced for a wired port, the loader's shared clock
-	// for a dead-end/unwired port) and never touched afterward — this port's own
-	// PacedWire holds no clock of its own. See In.Clock.
-	clock Clock
 }
 
 // PollRecv is the non-blocking receive used by windowed nodes. In paced mode it
@@ -72,35 +66,6 @@ func (i *In) PollRecv() (int, bool) {
 	default:
 		return 0, false
 	}
-}
-
-// Clock returns the Clock this port hands to its owning goroutine, for a ONE-TIME
-// Copy() at goroutine start (docs/planning/visual-editor/per-goroutine-clock.md).
-// A node's Update loop calls Clock().Copy() exactly once and paces off the copy
-// from then on — this port (and the wire behind it, if any) holds no clock of
-// its own to read repeatedly.
-//
-// NEVER RETURNS NIL — that is the point, not a convenience. Every caller does
-// `clk := X.In.Clock()` then `clk.SleepCycle(ctx)` with no guard, so a nil here is a nil-
-// interface method call that panics; with no recover() over a node goroutine, one unfed
-// port took down every other node and the buffer stream with it. An unwired In is a
-// LOADABLE state on purpose (validate.go has no required-inbound-edge check: an unfed
-// node loads and stays inert by precondition-gating), so the nil was reachable from an
-// ordinary topology. It is now unrepresentable rather than guarded at five call sites:
-// an unwired In holds a real clock the same way deadEndIn gives it a real channel.
-//
-// Contrast Out.Clock, which DOES return nil and must keep doing so: there nil is a
-// deliberate mode selector (gatecommon.RunGate reads ToPassed.Clock() to choose paced vs
-// chan mode). Nil means "no wire" for an Out; for an In it only ever meant "about to
-// panic".
-func (i *In) Clock() Clock {
-	if i == nil {
-		return inertClock{}
-	}
-	if i.clock != nil {
-		return i.clock
-	}
-	return inertClock{}
 }
 
 // Wired reports whether this In port is bound to a real edge (paced-wire
@@ -204,11 +169,6 @@ type Out struct {
 	// Rule is the per-edge send policy applied by the source node after a
 	// successful TrySend. Empty string defaults to consumeGated (see Gated).
 	Rule SendRule
-	// clock is the Clock this port hands to its owning goroutine for a ONE-TIME
-	// Copy() at goroutine start (docs/planning/visual-editor/per-goroutine-clock.md).
-	// Set at construction (NewOutPaced) from the loader's shared clock; this
-	// port's own PacedWire holds no clock of its own. See Out.Clock.
-	clock Clock
 }
 
 // Geom loads the current per-edge geometry snapshot. Returns the zero outGeom when
@@ -251,38 +211,17 @@ func (o *Out) placementFrom(g outGeom) beadPlacement {
 }
 
 // Paced reports whether this Out drives a paced wire. It is the paced-vs-chan MODE
-// predicate: paced mode sleeps on the wire's clock and StepOnces the wire; chan mode
-// (unit tests) has no wire to advance and falls back to a wall-clock sleep.
+// predicate: paced mode sleeps on the caller's own clock copy and StepOnces the wire;
+// chan mode (unit tests) has no wire to advance and falls back to a wall-clock sleep.
 //
-// This says out loud what `out.Clock() != nil` used to say sideways. Mode used to be
-// encoded in a nil, so the ONLY thing stopping someone from "fixing" Clock() to never
-// return nil — and silently collapsing both modes into one — was a comment asking them
-// not to. Asking is not a mechanism (CLAUDE.md: enforce in code before adding prose).
-// With the mode in a named predicate, Clock() is free to be non-nil like In.Clock, and
-// nil carries no meaning on either port.
-//
-// The condition is now just "does this Out have a PacedWire": NewPacedWire (paced_wire.go)
-// unconditionally seeds a clock at construction and it is the only construction site in
-// the repo, so a paced wire with a nil clock cannot exist — testing the clock for nil on
-// top of pw was a dead conjunct, never false when pw was non-nil.
+// This used to say out loud what `out.Clock() != nil` said sideways — Out.Clock() is
+// gone now (per-goroutine-clock.md API demolition item 1: port accessors go away, a
+// goroutine gets its clock passed to it directly instead of reaching through a port),
+// so Paced() is the only mode selector left. The condition is just "does this Out have
+// a PacedWire": NewPacedWire (paced_wire.go) is the only construction site in the repo,
+// so pw != nil is unambiguous.
 func (o *Out) Paced() bool {
 	return o != nil && o.pw != nil
-}
-
-// Clock returns the Clock this port hands to its owning goroutine, for a ONE-TIME
-// Copy() at goroutine start (docs/planning/visual-editor/per-goroutine-clock.md).
-// NEVER RETURNS NIL in paced mode — mirrors In.Clock; see its doc for why a nil
-// Clock is a panic waiting to happen. Callers choosing paced vs chan behavior
-// must branch on Paced(), not on this being nil. In chan mode this is the inert
-// placeholder, which Paced() callers never reach.
-func (o *Out) Clock() Clock {
-	if !o.Paced() {
-		return inertClock{}
-	}
-	if o.clock != nil {
-		return o.clock
-	}
-	return inertClock{}
 }
 
 // Gated reports whether the source node should wait for consumption after a
@@ -440,12 +379,12 @@ func (outs OutMulti) PlaceDrivenAllAt(v int, tick int64, dst []DriveItem) []Driv
 	return dst
 }
 
-// NewInPaced / NewOutPaced are used by the loader. Uses PacedWire mode. clock is
-// the Clock this port hands to its owning goroutine for a one-time Copy() at
-// goroutine start (docs/planning/visual-editor/per-goroutine-clock.md); the
-// wire itself holds no clock.
-func NewInPaced(pw *PacedWire, ctx context.Context, node, port string, tr *T.Trace, clock Clock) *In {
-	return &In{pw: pw, ctx: ctx, node: node, port: port, trace: tr, clock: clock}
+// NewInPaced / NewOutPaced are used by the loader. Uses PacedWire mode. Neither the
+// port nor the wire behind it holds a clock (per-goroutine-clock.md API demolition
+// item 1: port accessors are gone) — a node's own Clock field is what its goroutine
+// Copies from at startup.
+func NewInPaced(pw *PacedWire, ctx context.Context, node, port string, tr *T.Trace) *In {
+	return &In{pw: pw, ctx: ctx, node: node, port: port, trace: tr}
 }
 
 // NewPacedOutNoGeom builds a paced Out with a zero wire segment. Node packages
@@ -455,8 +394,8 @@ func NewInPaced(pw *PacedWire, ctx context.Context, node, port string, tr *T.Tra
 // RealClock. Only bead timing is exercised; the zero segment means position
 // traces carry no geometry. Production paced Outs are built by the loader/builders
 // with real segments, not through this.
-func NewPacedOutNoGeom(pw *PacedWire, ctx context.Context, node, port string, tr *T.Trace, rule SendRule, arcLength, simLatencyMs float64, edgeLabel string, clock Clock) *Out {
-	return NewOutPaced(pw, ctx, node, port, tr, rule, arcLength, simLatencyMs, wireSegment{}, edgeLabel, clock)
+func NewPacedOutNoGeom(pw *PacedWire, ctx context.Context, node, port string, tr *T.Trace, rule SendRule, arcLength, simLatencyMs float64, edgeLabel string) *Out {
+	return NewOutPaced(pw, ctx, node, port, tr, rule, arcLength, simLatencyMs, wireSegment{}, edgeLabel)
 }
 
 // NewOutChanForTest builds a chan-mode Out for tests outside the Wiring
@@ -468,11 +407,11 @@ func NewOutChanForTest(ch chan<- int, node, port string, tr *T.Trace) *Out {
 	return &Out{ch: ch, node: node, port: port, trace: tr}
 }
 
-func NewOutPaced(pw *PacedWire, ctx context.Context, node, port string, tr *T.Trace, rule SendRule, arcLength, simLatencyMs float64, seg wireSegment, edgeLabel string, clock Clock) *Out {
+func NewOutPaced(pw *PacedWire, ctx context.Context, node, port string, tr *T.Trace, rule SendRule, arcLength, simLatencyMs float64, seg wireSegment, edgeLabel string) *Out {
 	if rule == "" {
 		rule = RuleConsumeGated
 	}
-	o := &Out{pw: pw, ctx: ctx, node: node, port: port, trace: tr, Rule: rule, EdgeLabel: edgeLabel, clock: clock}
+	o := &Out{pw: pw, ctx: ctx, node: node, port: port, trace: tr, Rule: rule, EdgeLabel: edgeLabel}
 	// Seed the atomic snapshot so the first placement reads valid geometry before any move.
 	o.publishGeom(outGeom{ArcLength: arcLength, SimLatencyMs: simLatencyMs, Start: seg.Start, End: seg.End})
 	return o

@@ -385,15 +385,22 @@ type edgeMover struct {
 	clockSrc Clock
 	// clk is this edgeMover's OWN clock copy, set once by run() at goroutine
 	// start. Only this goroutine (handle, called from run's loop) ever reads
-	// it, so no lock is needed. nil until run() has started (tests that call
-	// handle() directly without run() must set it themselves).
+	// it, so no lock is needed. Defaults to a fresh, real, live-ticking
+	// RealClock (see newEdgeMover) so a test that calls handle() directly
+	// without launching run() as a goroutine never dereferences a nil Clock —
+	// per-goroutine-clock.md's API demolition deleted the old inert/zero-Tick
+	// placeholder (item 3), so the only non-nil default left is a genuine
+	// clock, not a fake stand-in.
 	clk Clock
 }
 
 func newEdgeMover(ep EdgeEndpoints, edgeID string, srcGeom, dstGeom nodeGeom, tr *T.Trace, clockSrc Clock) *edgeMover {
-	// clk defaults to the inert placeholder so a test that calls handle()
-	// directly (without launching run() as a goroutine) never dereferences a
-	// nil Clock; run() overwrites it with a real per-goroutine copy at start.
+	// clk defaults to a fresh RealClock (its own independent origin — fine here:
+	// this default is only ever read by a test calling handle() directly, never by
+	// production, where run() always overwrites it below with clockSrc.Copy() before
+	// the goroutine does anything else) so a test that calls handle() directly
+	// (without launching run() as a goroutine) never dereferences a nil Clock;
+	// run() overwrites it with a real per-goroutine copy at start.
 	return &edgeMover{
 		edgeID:   edgeID,
 		srcID:    ep.Source,
@@ -405,7 +412,7 @@ func newEdgeMover(ep EdgeEndpoints, edgeID string, srcGeom, dstGeom nodeGeom, tr
 		inbox:    make(chan moveMsg, 8),
 		tr:       tr,
 		clockSrc: clockSrc,
-		clk:      inertClock{},
+		clk:      NewRealClock(),
 	}
 }
 

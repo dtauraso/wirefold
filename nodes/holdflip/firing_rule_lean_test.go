@@ -44,17 +44,18 @@ func TestFlipRoundTripLean(t *testing.T) {
 	// inSrc is a test-only seeding source on inPw: PlaceDrivenAt places a bead
 	// (no walker) that the stepWire loop above then drives to delivery,
 	// reusing the production placement API to inject the test's input value.
-	inSrc := Wiring.NewPacedOutNoGeom(inPw, ctx, "seed", "Out", tr, Wiring.RuleFireAndForget, 0, 0, "", clk)
+	inSrc := Wiring.NewPacedOutNoGeom(inPw, ctx, "seed", "Out", tr, Wiring.RuleFireAndForget, 0, 0, "")
 
 	outPw := Wiring.NewPacedWire(latMs*Wiring.PulseSpeedWuPerMs, Wiring.PulseSpeedWuPerMs)
 
 	node := &Node{
-		Fire: func() {},
-		In:   Wiring.NewInPaced(inPw, ctx, "hf", "In", tr, clk),
+		Fire:  func() {},
+		Clock: clk,
+		In:    Wiring.NewInPaced(inPw, ctx, "hf", "In", tr),
 		Out: Wiring.NewPacedOutNoGeom(outPw, ctx, "hf", "Out", tr,
-			Wiring.RuleFireAndForget, latMs*Wiring.PulseSpeedWuPerMs, latMs, "", clk),
+			Wiring.RuleFireAndForget, latMs*Wiring.PulseSpeedWuPerMs, latMs, ""),
 	}
-	observer := Wiring.NewInPaced(outPw, ctx, "obs", "In", tr, clk)
+	observer := Wiring.NewInPaced(outPw, ctx, "obs", "In", tr)
 
 	done := make(chan struct{})
 	go func() { node.Update(ctx); close(done) }()

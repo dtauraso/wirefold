@@ -45,7 +45,16 @@ type GateNode struct {
 	// The window and dwell are measured in ticks against it so they freeze on pause
 	// and resume on resume — never timing out mid-pause. If unset (unit tests with
 	// no loader), it falls back to a wall-clock-derived tick so timing progresses.
-	Tick      func() int64
+	Tick func() int64
+	// Clock is this node's OWN clock storage, seeded by reflectBuild from the
+	// loader's origin (builders.go injectClosures, bare-field injection matched by
+	// exact type Wiring.Clock — see input.Node.Clock for the model this mirrors).
+	// RunGate Copies it exactly ONCE at its own goroutine's start
+	// (docs/planning/visual-editor/per-goroutine-clock.md); ports no longer carry
+	// or hand out a clock (API demolition item 1), so this is the only path in.
+	// nil on a test build with no loader — RunGate falls back to Tick/wall-clock
+	// sleep in that case, exactly as before.
+	Clock     Wiring.Clock
 	Left      int
 	HasLeft   bool
 	Right     int
@@ -251,22 +260,22 @@ func RunGate(ctx context.Context, g *GateNode, invertLeft bool) {
 		g.EmitGeometry()
 	}
 
-	// paced selects paced vs chan mode: paced mode sleeps one cycle on the shared
-	// clock and StepOnces the output below (never parking across the output
-	// traversal); chan mode falls back to a wall-clock sleep.
+	// paced selects paced vs chan mode: paced mode sleeps one cycle on this
+	// goroutine's own clock copy and StepOnces the output below (never parking
+	// across the output traversal); chan mode falls back to a wall-clock sleep.
 	paced := g.ToPassed.Paced()
 
 	// Copy taken ONCE at this goroutine's start (RunGate IS the goroutine, run
 	// once per gate node) — docs/planning/visual-editor/per-goroutine-clock.md.
-	// In paced mode this ONE copy backs both now() and sleep(), replacing what
-	// used to be two independent accesses to the same shared clock (g.Tick,
-	// injected by builders.go from the loader's shared clock, and
-	// g.ToPassed.Clock()). g.Tick is kept only as the chan-mode/no-loader
-	// fallback for now(), matching prior behavior there.
+	// In paced mode this ONE copy backs both now() and sleep(). g.Clock is this
+	// node's own clock storage (seeded by reflectBuild from the loader's origin);
+	// ports no longer hand out a clock (API demolition item 1), so this replaces
+	// the old g.ToPassed.Clock().Copy(). g.Tick is kept only as the chan-mode/
+	// no-loader fallback for now(), matching prior behavior there.
 	now := g.Tick
 	sleep := defaultSleep()
 	if paced {
-		clk := g.ToPassed.Clock().Copy()
+		clk := g.Clock.Copy()
 		now = clk.Tick
 		sleep = clk.SleepCycle
 	}

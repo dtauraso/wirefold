@@ -59,13 +59,6 @@ type Clock interface {
 	// to see how many scaled ticks actually elapsed, so speed scaling lives in
 	// Tick(), not in the sleep cadence.
 	SleepCycle(ctx context.Context) error
-	// SetSpeed sets the global playback-speed multiplier applied to tick advance
-	// (0 = frozen, 1 = normal, 2 = double). Everything timed in ticks — bead
-	// travel, in-node animation, node/gate windows — scales together because they
-	// all read Tick(). Continuity is automatic: Tick() is a continuous function of
-	// wall time (piecewise-linear across speed changes), so a bead's fractional
-	// progress t=(now−placement)/crossTicks never jumps when the speed changes.
-	SetSpeed(speed float64)
 	// Copy returns a clock a single goroutine can OWN from this point on. Per
 	// per-goroutine-clock.md: a goroutine calls Copy() exactly ONCE, at its own
 	// start, and uses only the returned clock thereafter — never a second call
@@ -73,12 +66,21 @@ type Clock interface {
 	// goroutine (that would just re-share the same object under a new name).
 	// *RealClock returns a pointer to a fresh value-copy of itself, so the two
 	// clocks share no memory: the copy inherits the origin/accScaled/speed by
-	// value and from then on SetSpeed on one is invisible to the other,
-	// correctly, with nothing left to lock. inertClock returns itself — it is
-	// stateless (Tick is a constant 0, SetSpeed a no-op), so "copying" it has
-	// nothing to duplicate and sharing the single value is harmless.
+	// value and from then on a speed change on one is invisible to the other,
+	// correctly, with nothing left to lock.
 	Copy() Clock
 }
+
+// SetSpeed is deliberately NOT on the Clock interface (per-goroutine-clock.md
+// item 4): once a clock is a per-goroutine COPY, nothing outside the goroutine
+// that owns it may mutate it — a second goroutine reaching in to call SetSpeed
+// on someone else's copy is exactly the shared-object shape this model removes.
+// (*RealClock).SetSpeed stays a concrete, exported method: the owning goroutine
+// still needs to apply a speed change to ITS OWN copy. How a speed change is
+// DELIVERED to every live copy is a separate, not-yet-built step (see
+// per-goroutine-clock.md "Delivery"); stdin_reader.go's current SetSpeed call
+// site type-asserts down to *RealClock and is a KNOWN, documented no-op today
+// (see its own comment) — not this interface's concern.
 
 // RealClock is the production Clock: SCALED wall-clock elapsed since start, floored
 // to a tick via MsPerTick. "Scaled" = wall time integrated against the playback
@@ -176,46 +178,12 @@ func (c *RealClock) SleepCycle(ctx context.Context) error {
 // Compile-time assertion that RealClock satisfies Clock.
 var _ Clock = (*RealClock)(nil)
 
-// inertClock is the Clock handed to an unwired In when no shared clock exists at all
-// (a test build with no loader — see PortBindings.clock). It is the clock analogue of
-// deadEndIn's placeholder channel: it exists only so In.Clock() has something non-nil
-// to return, because a nil Clock is a nil-interface method call waiting to happen and
-// every pacing loop calls SleepCycle unconditionally.
-//
-// SleepCycle blocks until ctx is done rather than returning immediately: a node with no
-// clock has no cycle to sleep for, and returning nil would spin its pacing loop hot. The
-// node's loop sees the ctx error and exits — inert, which is the contract for an unfed
-// port (validate.go). Tick is 0: with no clock there is no time to report.
-//
-// Production never sees this: the loader always sets PortBindings.clock (loader.go), so
-// an unwired In gets the SAME shared clock every wired node runs on and stays alive,
-// polling a port that never delivers — inert by precondition-gating, not by exiting.
-type inertClock struct{}
-
-func (inertClock) Tick() int64 { return 0 }
-func (inertClock) SleepCycle(ctx context.Context) error {
-	<-ctx.Done()
-	return ctx.Err()
-}
-func (inertClock) SetSpeed(float64) {}
-
-// Copy returns itself: inertClock is stateless (Tick is a constant 0,
-// SetSpeed a no-op), so there is nothing per-instance to duplicate and
-// sharing the single zero-size value across goroutines is harmless.
-func (c inertClock) Copy() Clock { return c }
-
-// Compile-time assertion that inertClock satisfies Clock.
-var _ Clock = inertClock{}
-
-// NewInertClock returns the same inert, never-nil, never-spinning Clock that an
-// unwired In falls back to (inertClock, unexported so it can't be constructed
-// outside this package). It is exported so a node kind that holds a bare
-// `Wiring.Clock` struct field injected by reflectBuild (rather than derived
-// from a wired port's In.Clock/Out.Clock) can SEED that field to a real, safe
-// default at construction instead of leaving it as an unrepresentable-nil trap
-// on test builds without a loader. See input.Node.Clock's doc comment for the
-// motivating case: reflectBuild injects by matching the field's exact type, so
-// a rename silently misses it and an unguarded `clk.Tick()` panics with no
-// recover over the node goroutine — the same hazard ports.go's In.Clock()
-// comment describes for PORT-derived clocks, reintroduced via a bare field.
-func NewInertClock() Clock { return inertClock{} }
+// inertClock is GONE (per-goroutine-clock.md API demolition item 3). It existed only
+// because an INJECTED clock could be ABSENT: an unwired In needed a non-nil thing to
+// return from a port accessor, and reflectBuild's type-matched field injection meant a
+// rename could silently inject nothing, leaving an unguarded clk.Tick() to panic with no
+// recover over the node goroutine. A goroutine that constructs (or Copies) its own clock
+// cannot have a nil one — every clock-holder now gets a real *RealClock, seeded from the
+// loader's origin at construction, so there is no "absent" case left to paper over. Do
+// not reintroduce a placeholder/inert Clock implementation; that is exactly the
+// unrepresentable-nil trap this deletion removes.

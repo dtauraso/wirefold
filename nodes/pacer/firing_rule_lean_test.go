@@ -45,17 +45,18 @@ func TestPacerChangeStepFeedbackLean(t *testing.T) {
 	// inSrc is a test-only seeding source on inPw: PlaceDrivenAt places a bead
 	// (no walker) that the stepWire loop above then drives to delivery,
 	// reusing the production placement API to inject the test's input value.
-	inSrc := Wiring.NewPacedOutNoGeom(inPw, ctx, "seed", "Out", tr, Wiring.RuleFireAndForget, 0, 0, "", clk)
+	inSrc := Wiring.NewPacedOutNoGeom(inPw, ctx, "seed", "Out", tr, Wiring.RuleFireAndForget, 0, 0, "")
 
 	outPw := Wiring.NewPacedWire(latMs*Wiring.PulseSpeedWuPerMs, Wiring.PulseSpeedWuPerMs)
 
 	node := &Node{
 		Fire:      func() {},
-		FromInput: Wiring.NewInPaced(inPw, ctx, "pacer", "FromInput", tr, clk),
+		Clock:     clk,
+		FromInput: Wiring.NewInPaced(inPw, ctx, "pacer", "FromInput", tr),
 		FeedbackOut: Wiring.NewPacedOutNoGeom(outPw, ctx, "pacer", "FeedbackOut", tr,
-			Wiring.RuleFireAndForget, latMs*Wiring.PulseSpeedWuPerMs, latMs, "", clk),
+			Wiring.RuleFireAndForget, latMs*Wiring.PulseSpeedWuPerMs, latMs, ""),
 	}
-	observer := Wiring.NewInPaced(outPw, ctx, "obs", "In", tr, clk)
+	observer := Wiring.NewInPaced(outPw, ctx, "obs", "In", tr)
 
 	done := make(chan struct{})
 	go func() { node.Update(ctx); close(done) }()

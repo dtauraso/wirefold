@@ -57,19 +57,20 @@ func runGate(t *testing.T, left, right int) int {
 	// leftSrc/rightSrc are test-only seeding sources: PlaceDrivenAt places a
 	// bead (no walker) that the stepWire loops above then drive to delivery,
 	// reusing the production placement API to inject the test's input values.
-	leftSrc := Wiring.NewPacedOutNoGeom(leftPw, ctx, "seed", "Out", tr, Wiring.RuleFireAndForget, 0, 0, "", clk)
-	rightSrc := Wiring.NewPacedOutNoGeom(rightPw, ctx, "seed", "Out", tr, Wiring.RuleFireAndForget, 0, 0, "", clk)
+	leftSrc := Wiring.NewPacedOutNoGeom(leftPw, ctx, "seed", "Out", tr, Wiring.RuleFireAndForget, 0, 0, "")
+	rightSrc := Wiring.NewPacedOutNoGeom(rightPw, ctx, "seed", "Out", tr, Wiring.RuleFireAndForget, 0, 0, "")
 
 	outPw := Wiring.NewPacedWire(latMs*Wiring.PulseSpeedWuPerMs, Wiring.PulseSpeedWuPerMs)
 
 	node := &Node{GateNode: gatecommon.GateNode{
 		Fire:      func() {},
-		FromLeft:  Wiring.NewInPaced(leftPw, ctx, "ilg", "FromLeft", tr, clk),
-		FromRight: Wiring.NewInPaced(rightPw, ctx, "ilg", "FromRight", tr, clk),
+		Clock:     clk,
+		FromLeft:  Wiring.NewInPaced(leftPw, ctx, "ilg", "FromLeft", tr),
+		FromRight: Wiring.NewInPaced(rightPw, ctx, "ilg", "FromRight", tr),
 		ToPassed: Wiring.NewPacedOutNoGeom(outPw, ctx, "ilg", "ToPassed", tr,
-			Wiring.RuleFireAndForget, latMs*Wiring.PulseSpeedWuPerMs, latMs, "", clk),
+			Wiring.RuleFireAndForget, latMs*Wiring.PulseSpeedWuPerMs, latMs, ""),
 	}}
-	observer := Wiring.NewInPaced(outPw, ctx, "obs", "In", tr, clk)
+	observer := Wiring.NewInPaced(outPw, ctx, "obs", "In", tr)
 
 	done := make(chan struct{})
 	go func() { node.Update(ctx); close(done) }()

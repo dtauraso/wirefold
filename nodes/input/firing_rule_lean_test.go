@@ -31,9 +31,9 @@ func TestEmitsInitValuesLean(t *testing.T) {
 		Init:  []int{10, 20, 30},
 		Clock: clk,
 		ToHoldNewSendOld: Wiring.NewPacedOutNoGeom(pw, ctx, "in", "ToHoldNewSendOld", tr,
-			Wiring.RuleFireAndForget, latMs*Wiring.PulseSpeedWuPerMs, latMs, "", clk),
+			Wiring.RuleFireAndForget, latMs*Wiring.PulseSpeedWuPerMs, latMs, ""),
 	}
-	obs := Wiring.NewInPaced(pw, ctx, "obs", "In", tr, clk)
+	obs := Wiring.NewInPaced(pw, ctx, "obs", "In", tr)
 
 	done := make(chan struct{})
 	go func() { node.Update(ctx); close(done) }()

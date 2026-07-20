@@ -26,7 +26,8 @@ func TestDriveHeldChanModePlacesMultipleValues(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	DriveHeld(ctx, out, &held, func(v int64) int { return int(v) })
+	// Chan mode (out.Paced() == false): DriveHeld never touches clk, so nil is safe.
+	DriveHeld(ctx, out, &held, func(v int64) int { return int(v) }, nil)
 
 	received := 0
 	deadline := time.After(2 * time.Second)

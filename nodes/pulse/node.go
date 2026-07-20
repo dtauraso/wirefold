@@ -37,8 +37,15 @@ type Node struct {
 	// SINGLE centered interior node-bead (present when held != noValue). Re-emitted at
 	// startup (held = noValue, empty interior) and whenever the held value changes.
 	EmitHeldBead func(held int)
-	FromInput    *Wiring.In
-	Out          *Wiring.Out
+	// Clock is this node's OWN clock storage, seeded by Wiring.reflectBuild
+	// directly from the loader's origin (bare-field injection by exact type
+	// Wiring.Clock — see input.Node.Clock; ports no longer hand out a clock,
+	// per-goroutine-clock.md API demolition item 1). Update() Copies it once
+	// for its own loop, and passes the ORIGIN (not that copy) to each DRIVE
+	// goroutine below, which Copies independently at ITS OWN start.
+	Clock     Wiring.Clock
+	FromInput *Wiring.In
+	Out       *Wiring.Out
 	// Out2 is an optional SECOND continuous output driving the same held value, so a
 	// Pulse can fan to two destinations (e.g. node 6 → node 5 via Out and → node 11
 	// via Out2). Optional: when unwired (Wired()==false, e.g. node 7) its drive
@@ -49,8 +56,8 @@ type Node struct {
 // driveOutput runs a continuous-drive goroutine on out, always emitting the
 // current value of held. Delegates to gatecommon.DriveHeld (shared with
 // HoldFlip's identical-shaped drive goroutine) with an identity transform.
-func driveOutput(ctx context.Context, out *Wiring.Out, held *atomic.Int64) {
-	gatecommon.DriveHeld(ctx, out, held, func(h int64) int { return int(h) })
+func driveOutput(ctx context.Context, out *Wiring.Out, held *atomic.Int64, clk Wiring.Clock) {
+	gatecommon.DriveHeld(ctx, out, held, func(h int64) int { return int(h) }, clk)
 }
 
 func (g *Node) Update(ctx context.Context) {
@@ -63,12 +70,15 @@ func (g *Node) Update(ctx context.Context) {
 		g.EmitHeldBead(gatecommon.NoValue) // startup: empty interior
 	}
 
-	// DRIVE goroutine: continuously pulse the current held value to Out.
-	driveOutput(ctx, g.Out, &held)
+	// DRIVE goroutine: continuously pulse the current held value to Out. g.Clock is
+	// the ORIGIN clock; DriveHeld Copies it independently at its own goroutine's start
+	// (docs/planning/visual-editor/per-goroutine-clock.md) — never hand a copy to a
+	// second goroutine.
+	driveOutput(ctx, g.Out, &held, g.Clock)
 
 	// Optional SECOND drive goroutine for Out2.
 	if g.Out2 != nil && g.Out2.Wired() {
-		driveOutput(ctx, g.Out2, &held)
+		driveOutput(ctx, g.Out2, &held, g.Clock)
 	}
 
 	// MAIN loop frame: do activities (non-blocking input check + update held),
@@ -93,7 +103,7 @@ func (g *Node) Update(ctx context.Context) {
 	// Copy taken ONCE at this goroutine's start (Update IS the goroutine); each
 	// DRIVE goroutine above takes its own copy independently inside
 	// gatecommon.DriveHeld (docs/planning/visual-editor/per-goroutine-clock.md).
-	clk := g.FromInput.Clock().Copy()
+	clk := g.Clock.Copy()
 
 	// Paced mode: do activities, sleep one human clock cycle, repeat.
 	for {

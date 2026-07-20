@@ -57,14 +57,14 @@ type PortBindings struct {
 	// by "node.handle" so the loader can index Outs by edge for node-move
 	// travel-time updates. Render/run paths leave it nil.
 	outSink map[string]*Out
-	// clock is the loader's monotonic clock, handed out (via inClock/wireInPort/
-	// wireOutPort) to every In/Out constructed here for a ONE-TIME Copy() at
-	// each owning goroutine's start (docs/planning/visual-editor/
-	// per-goroutine-clock.md) — no PacedWire holds a clock of its own.
-	// reflectBuild also injects it directly into nodes that need clock-paced
-	// interior animation (the Input node's refill slide). Test builds without a
-	// loader leave it nil, and such nodes fall back to an instant refill /
-	// inertClock.
+	// clock is the loader's ORIGIN clock, read only by reflectBuild's injectClosures
+	// (never by a port): it seeds a node's bare `Clock Wiring.Clock` field and the
+	// `Tick func() int64` closure at construction. Per per-goroutine-clock.md API
+	// demolition, ports/wires no longer hold or hand out a clock at all — a node's
+	// own goroutine does exactly one Copy() of its Clock field at its own start.
+	// Test builds without a loader leave this nil, and such nodes' Clock/Tick
+	// fields simply stay unset (their own zero-value fallback, e.g. gatecommon's
+	// defaultTick/defaultSleep).
 	clock Clock
 }
 
@@ -150,7 +150,7 @@ var (
 	tEmitBeadsFunc      = reflect.TypeFor[func(working, backup []int)]()
 	tEmitHeldFunc       = reflect.TypeFor[func(held int)]()
 	tEmitInputBeadsFunc = reflect.TypeFor[func(left, right int)]()
-	tRefillSlideFunc    = reflect.TypeFor[func(beads []int)]()
+	tRefillSlideFunc    = reflect.TypeFor[func(clk Clock, beads []int)]()
 	tTickFunc           = reflect.TypeFor[func() int64]()
 )
 
@@ -294,25 +294,36 @@ func injectClosures(ctx context.Context, v reflect.Value, name string, pb PortBi
 		emitInputBeads(tr, name, left, right)
 	})
 
-	// The remaining injections require the loader's shared clock; a test build
-	// without a loader leaves pb.clock nil and these fields stay nil (each node
-	// falls back to its wall-clock / instant behavior).
+	// EmitRefillSlide func(clk Clock, beads []int): the clock-paced refill slide (the
+	// OLD backup beads slide DOWN from row 0 into row 1 at wire-bead speed; a paused
+	// clock freezes it). The clock is a parameter the CALLER supplies at invocation
+	// time (its own already-Copy()'d clock — see input.Node.Update, which calls
+	// n.EmitRefillSlide(clk, beads) with the same copy its own loop paces on) rather
+	// than a value captured here from pb.clock: capturing the loader's origin in this
+	// closure would hand every future call a read into a clock this goroutine never
+	// Copy()'d for itself (per-goroutine-clock.md flagged this as a residual — this
+	// closure no longer needs pb.clock at all, so it is unconditional).
+	injectFunc(v, "EmitRefillSlide", tRefillSlideFunc, func(clk Clock, beads []int) {
+		emitRefillSlide(ctx, tr, name, clk, beads)
+	})
+
+	// The remaining injections seed a node's OWN clock storage from the loader's
+	// origin, once, at construction — a test build without a loader leaves pb.clock
+	// nil and these fields stay unset (each node falls back to its own wall-clock/
+	// no-loader behavior, e.g. gatecommon's defaultTick/defaultSleep).
 	if pb.clock != nil {
 		clk := pb.clock
-		// EmitRefillSlide func(beads []int): the clock-paced refill slide (the OLD
-		// backup beads slide DOWN from row 0 into row 1 at wire-bead speed; a paused
-		// clock freezes it).
-		injectFunc(v, "EmitRefillSlide", tRefillSlideFunc, func(beads []int) {
-			emitRefillSlide(ctx, tr, name, clk, beads)
-		})
-		// Tick func() int64: current tick (pause-aware) off the shared human-speed
-		// clock, so a node timing a window/dwell in ticks freezes on pause.
+		// Tick func() int64: current tick (pause-aware) off the origin clock. Used
+		// only as a chan-mode/no-Out-yet fallback for "now" by gatecommon.GateNode;
+		// the paced path takes its own Copy() of the Clock field below instead.
 		injectFunc(v, "Tick", tTickFunc, func() int64 { return clk.Tick() })
-		// Clock Wiring.Clock: the shared node-level clock, injected directly so a
-		// node's paced Update loop does not have to derive its clock from a
-		// specific wired output port (fragile — the port that happens to carry
-		// the clock varies by topology). Only fields typed exactly Wiring.Clock
-		// (e.g. input.Node.Clock) receive this; other nodes are unaffected.
+		// Clock Wiring.Clock: the node's OWN clock storage, seeded from the loader's
+		// origin so the node's goroutine can Copy() it exactly once at its own
+		// start (docs/planning/visual-editor/per-goroutine-clock.md) — this field is
+		// never read repeatedly by anything outside the node's own goroutine, and it
+		// is never reached through a port. Only fields typed exactly Wiring.Clock
+		// (e.g. input.Node.Clock, gatecommon.GateNode.Clock) receive this; other
+		// nodes are unaffected.
 		tClockType := reflect.TypeFor[Clock]()
 		injectFunc(v, "Clock", tClockType, clk)
 	}
@@ -344,28 +355,18 @@ func wirePorts(ctx context.Context, v reflect.Value, nodePtr any, name string, p
 // wireInPort resolves a single PortIn field: a paced binding (NewInPaced) when
 // pb has one for this port name, otherwise a dead-end chan wrapper.
 //
-// The dead-end In gets the shared clock as well as the placeholder channel: node pacing
-// loops call In.Clock().SleepCycle unguarded, so an unwired In holding no clock is a
-// panic (see In.Clock). With the real clock it paces exactly like a wired node and stays
-// inert by polling a port that never delivers — the precondition-gating validate.go
-// promises.
+// Neither branch carries a clock (per-goroutine-clock.md API demolition item 1: port
+// accessors are gone) — an unwired In just polls a dead-end channel that never
+// delivers, staying inert by precondition-gating (validate.go) exactly like a wired
+// node whose peer never sends; its owning node paces off its OWN Clock field/Copy(),
+// never off this port.
 func wireInPort(f reflect.Value, portName string, ctx context.Context, name string, pb PortBindings, tr *T.Trace) {
 	if b := pb.singlePaced[portName]; b.pw != nil {
-		f.Set(reflect.ValueOf(NewInPaced(b.pw, ctx, name, portName, tr, pb.inClock())))
+		f.Set(reflect.ValueOf(NewInPaced(b.pw, ctx, name, portName, tr)))
 	} else {
 		ch := pb.deadEndIn(portName)
-		f.Set(reflect.ValueOf(&In{ch: ch, node: name, port: portName, trace: tr, clock: pb.inClock()}))
+		f.Set(reflect.ValueOf(&In{ch: ch, node: name, port: portName, trace: tr}))
 	}
-}
-
-// inClock is the Clock an unwired In should hold: the loader's shared clock when there is
-// one (always, in production — loader.go sets pb.clock), else the inert placeholder for a
-// test build with no loader. Never nil.
-func (pb *PortBindings) inClock() Clock {
-	if pb.clock != nil {
-		return pb.clock
-	}
-	return inertClock{}
 }
 
 // wireOutPort resolves a single PortOut field: a paced binding
@@ -375,7 +376,7 @@ func (pb *PortBindings) inClock() Clock {
 // under "node.port" for the loader's node-move travel-time updates.
 func wireOutPort(f reflect.Value, portName string, ctx context.Context, name string, pb PortBindings, tr *T.Trace, sourceOuts *[]*Out) {
 	if b := pb.singlePaced[portName]; b.pw != nil {
-		o := NewOutPaced(b.pw, ctx, name, portName, tr, b.rule, b.arc, b.latency, b.seg, b.label, pb.inClock())
+		o := NewOutPaced(b.pw, ctx, name, portName, tr, b.rule, b.arc, b.latency, b.seg, b.label)
 		*sourceOuts = append(*sourceOuts, o)
 		if pb.outSink != nil {
 			pb.outSink[name+"."+portName] = o
@@ -396,7 +397,7 @@ func wireOutMultiPort(f reflect.Value, portName string, ctx context.Context, nam
 	if bs := pb.multiPaced[portName]; len(bs) > 0 {
 		outs := make(OutMulti, len(bs))
 		for i, b := range bs {
-			outs[i] = NewOutPaced(b.pw, ctx, name, b.handle, tr, b.rule, b.arc, b.latency, b.seg, b.label, pb.inClock())
+			outs[i] = NewOutPaced(b.pw, ctx, name, b.handle, tr, b.rule, b.arc, b.latency, b.seg, b.label)
 			*sourceOuts = append(*sourceOuts, outs[i])
 			if pb.outSink != nil {
 				pb.outSink[name+"."+b.handle] = outs[i]

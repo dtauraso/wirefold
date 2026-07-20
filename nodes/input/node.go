@@ -17,28 +17,32 @@ type Node struct {
 	EmitNodeBeads func(working, backup []int)
 	// EmitRefillSlide runs the clock-paced animated refill: the OLD backup (top
 	// row) slides DOWN into the working (bottom) row at human speed. Injected by
-	// Wiring.reflectBuild (captures this node's id + geometry + the shared clock).
-	// It blocks for the slide duration (pause-aware). nil on test builds without
-	// injection — the caller then falls back to the instant refill. beads is the
-	// OLD backup contents that become the new working row.
-	EmitRefillSlide func(beads []int)
-	// Clock is the shared node-level clock, injected by Wiring.reflectBuild
-	// directly (not derived from any specific wired output port — deriving it
-	// from ToHoldNewSendOld/ToExcitatory/ToPacer was fragile: whichever port
-	// happened to be wired first controlled pacing). reflectBuild injects by
-	// matching struct fields typed exactly `Wiring.Clock` (builders.go
-	// reflectBuild) — a bare field like this is an unguarded nil-interface trap
-	// on any construction path reflectBuild doesn't reach (a type rename that
-	// silently drops the injection, or a test building &Node{} directly),
-	// exactly the hazard ports.go's In.Clock() comment describes for
-	// PORT-derived clocks: an unguarded `clk.Tick()` panics with no recover
-	// over the node goroutine, taking down every other node and the buffer
-	// stream with it. Defaulted to Wiring.NewInertClock() by the Register
+	// Wiring.reflectBuild; the caller supplies the CLOCK at call time (its own
+	// already-Copy()'d clock — see updateFeedbackRing's n.EmitRefillSlide(clk,
+	// *backup) call), so this closure captures only this node's id + geometry,
+	// never a clock — see per-goroutine-clock.md's note on the old shape (a
+	// captured shared clock read on every call) being a residual to close, not
+	// keep. It blocks for the slide duration (pause-aware). nil on test builds
+	// without injection — the caller then falls back to the instant refill.
+	// beads is the OLD backup contents that become the new working row.
+	EmitRefillSlide func(clk Wiring.Clock, beads []int)
+	// Clock is this node's OWN clock storage, seeded by Wiring.reflectBuild
+	// directly from the loader's origin (not derived from any specific wired
+	// output port — deriving it from ToHoldNewSendOld/ToExcitatory/ToPacer was
+	// fragile: whichever port happened to be wired first controlled pacing, and
+	// per-goroutine-clock.md's API demolition removed port-derived clocks
+	// entirely anyway). reflectBuild injects by matching struct fields typed
+	// exactly `Wiring.Clock` (builders.go reflectBuild) — a bare field like this
+	// is an unguarded nil-interface trap on any construction path reflectBuild
+	// doesn't reach (a type rename that silently drops the injection, or a test
+	// building &Node{} directly): an unguarded `clk.Tick()` panics with no
+	// recover over the node goroutine, taking down every other node and the
+	// buffer stream with it. Defaulted to Wiring.NewRealClock() by the Register
 	// factory below so it is NEVER nil even before reflectBuild runs (or on a
 	// test build with no loader); clock() re-guards on every read as a second
 	// line of defense in case some future construction path bypasses the
 	// factory. Production reflectBuild always overwrites this with the real
-	// shared clock.
+	// origin clock.
 	Clock            Wiring.Clock
 	Init             []int `wire:"data.init"`
 	Repeat           bool  `wire:"data.repeat"`
@@ -60,7 +64,7 @@ type Node struct {
 // reintroduce the bare-nil panic hazard described on the Clock field).
 func (n *Node) clock() Wiring.Clock {
 	if n.Clock == nil {
-		return Wiring.NewInertClock()
+		return Wiring.NewRealClock()
 	}
 	return n.Clock
 }
@@ -209,7 +213,7 @@ func (n *Node) updateFeedbackRing(ctx context.Context, working, backup *[]int, i
 			// working row at human speed (clock-paced, pause-aware). After the
 			// slide lands, the new top row appears via the full emitBeads below.
 			if n.EmitRefillSlide != nil {
-				n.EmitRefillSlide(*backup)
+				n.EmitRefillSlide(clk, *backup)
 			}
 			*working = *backup
 			*backup = append([]int(nil), init...)
@@ -311,8 +315,8 @@ func inputCadenceTicks(n *Node) int64 {
 }
 
 func init() {
-	// Seed Clock to the real inert default (never nil) at construction, so it
-	// is safe even before reflectBuild's field-type injection runs (or on a
+	// Seed Clock to a real, live-ticking default (never nil) at construction, so
+	// it is safe even before reflectBuild's field-type injection runs (or on a
 	// test build that registers/builds this kind with no loader at all).
-	Wiring.Register("Input", func() any { return &Node{Clock: Wiring.NewInertClock()} })
+	Wiring.Register("Input", func() any { return &Node{Clock: Wiring.NewRealClock()} })
 }
