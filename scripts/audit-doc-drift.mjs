@@ -17,14 +17,25 @@ const mdFiles = execSync(
 ).toString().trim().split("\n");
 
 // Non-doc source files: comments in these can also cite a doc path (e.g. "see
-// docs/planning/visual-editor/foo.md for why") with no backticks/markdown-link
+// the visual-editor planning doc for why") with no backticks/markdown-link
 // syntax at all, so they need a different, source-shaped regex (below) rather
 // than the markdown link/inline-code regexes. docs/planning/** itself is
 // exempt for the same historical-by-construction reason as above; generated
 // files are exempt because their path mentions are about themselves (e.g. a
 // header comment naming the file it was generated from/into), not citations.
+//
+// File set: `.go`/`.ts`/`.tsx` (the original class) plus `.gitignore`, `*.sh`,
+// `*.mjs`, `*.yml`/`*.yaml` — all comment-bearing non-markdown files where a
+// stray doc citation can rot the same way (this guard's own
+// gap: a `.gitignore` comment cited a stripped branch-local doc and stayed
+// green because `.gitignore` wasn't scanned at all). `*.json` is deliberately
+// excluded: JSON has no comment syntax, so a doc-path-shaped string there is
+// data, not documentation prose, and would be a false-positive source, not a
+// citation to keep in sync. `Makefile` is included by name for the same
+// reason as `.gitignore` (no extension to glob on) even though none exists in
+// this repo today.
 const srcFiles = execSync(
-  `git ls-files '*.go' '*.ts' '*.tsx' ':!:**/node_modules/**' ':!:docs/planning/**' ':!:**/*_generated.go' ':!:**/out/**'`,
+  `git ls-files '*.go' '*.ts' '*.tsx' '*.sh' '*.mjs' '*.yml' '*.yaml' '.gitignore' 'Makefile' '**/.gitignore' '**/Makefile' ':!:**/node_modules/**' ':!:docs/planning/**' ':!:**/*_generated.go' ':!:**/out/**'`,
   { cwd: root },
 ).toString().trim().split("\n");
 

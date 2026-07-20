@@ -51,19 +51,19 @@ func (md *MoveDispatch) flushPendingPersists() {
 
 // EnableViewpointPersist arms gesture-driven camera persistence: every subsequent
 // EmitViewpoint (orbit/zoom/pan/home) debounces a write of the current viewpoint to
-// `<topologyPath>/view/scene.json`'s cameraPolar (scene_camera_persist.go). Call AFTER
+// `<topologyPath>/view/camera.json` (scene_camera_persist.go). Call AFTER
 // SeedInitialViewpoint so the seed's own emit does not write the loaded/default pose back.
 // Go owns this write (MODEL.md); the old path persists the camera via its own TS scene-save.
 func (md *MoveDispatch) EnableViewpointPersist(topologyPath string) {
-	p := &viewpointPersister{path: sceneCameraPath(topologyPath), debounce: viewpointPersistDebounce}
+	p := &viewpointPersister{path: cameraFilePath(topologyPath), debounce: viewpointPersistDebounce}
 	md.persist.vp = p
 	md.vp.persist = p.schedule
 }
 
 // EnableEditPersist arms disk persistence for the FSM-applied topology edits:
-//   - node-drag (RootMove) → the moved node's x/y/z in <root>/nodes/<id>/meta.json
+//   - node-drag (RootMove) → the moved node's position in <root>/nodes/<id>/position.json
 //   - ring-move (applyRingAnchor) → the port's anchorId in the port json file
-//   - overlays (applyUpdate toggle/set) → overlay-visibility keys in view/scene.json
+//   - overlays (applyUpdate toggle/set) → overlay-visibility keys in view/overlays.json
 //
 // Node-position + anchor persistence needs the per-node/per-port files of the directory-tree
 // form; for a monolithic topology.json (no per-node files) their root is "" and those two
@@ -76,7 +76,7 @@ func (md *MoveDispatch) EnableEditPersist(topologyPath string) {
 	root := sceneTreeRoot(topologyPath)
 	md.persist.pos = &nodePosPersister{root: root, debounce: viewpointPersistDebounce}
 	md.persist.anchor = &anchorPersister{root: root, debounce: viewpointPersistDebounce}
-	md.persist.overlays = &overlaysPersister{path: sceneCameraPath(topologyPath), debounce: viewpointPersistDebounce}
-	md.persist.sphere = &sceneSpherePersister{path: sceneCameraPath(topologyPath), debounce: viewpointPersistDebounce}
+	md.persist.overlays = &overlaysPersister{path: overlaysFilePath(topologyPath), debounce: viewpointPersistDebounce}
+	md.persist.sphere = &sceneSpherePersister{path: sphereFilePath(topologyPath), debounce: viewpointPersistDebounce}
 	md.persist.quantOffset = &quantOffsetPersister{root: root, debounce: viewpointPersistDebounce}
 }

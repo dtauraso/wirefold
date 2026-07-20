@@ -3,31 +3,31 @@ package Wiring
 // scene_camera_persist.go — the WRITE side of camera-viewpoint-as-file-data.
 //
 // The read side (scene_camera.go) loads the saved polar camera from
-// `<topologyPath>/view/scene.json` into the gesture-FSM viewpoint on startup. This file
+// `<topologyPath>/view/camera.json` into the gesture-FSM viewpoint on startup. This file
 // is the mirror: whenever a GESTURE changes the FSM viewpoint (orbit/zoom/pan/home), Go
-// persists the current viewpoint back to that same file's `cameraPolar` field, in the
-// EXACT schema loadSceneViewpoint reads, so navigate-then-reload round-trips.
+// persists the current viewpoint back to that same file, in the EXACT schema
+// loadSceneViewpoint reads, so navigate-then-reload round-trips.
 //
 // Go owns persistence (MODEL.md): there is no TS→Go camera-save on the new path. The
 // write is:
 //   - DEBOUNCED: a drag emits a viewpoint every pointermove; we coalesce and write once
 //     the viewpoint has been stable for a beat (viewpointPersistDebounce), off the hot path.
-//   - READ-MODIFY-WRITE: scene.json also holds camera3d, overlay flags, etc. We parse the
-//     existing file, replace ONLY `cameraPolar`, and write it back — other fields survive.
+//   - WHOLE-FILE: camera.json holds ONLY the camera pose (one-file-per-writer,
+//     the one-file-per-writer split) — no other writer touches it,
+//     so each flush marshals the pose fresh and overwrites the file, no read-modify-write.
 //   - FIRE-AND-FORGET: the write runs on the debounce timer's goroutine and logs on error;
 //     it never blocks the gesture.
 //
-// Two writers touch scene.json (this persister for cameraPolar, writeScene for the rest).
-// sceneFileMu (scene_persist.go) serializes their read-modify-write cycles so neither
-// clobbers the other's fields, and writeScene preserves the Go-owned cameraPolar under the
-// new system.
+// Before this split, camera.json's content lived at scene.json's `cameraPolar` key,
+// shared with the overlays and sphere writers under sceneFileMu. That lock is gone
+// (scene_persist.go); an existing pre-split scene.json still loads — see
+// loadSceneViewpoint's legacy fallback in scene_camera.go.
 //
-// The debounce/coalesce timer and the JSON read-modify-write/atomic-write plumbing are
-// shared machinery from scene_persist.go (debouncedPersister, sceneReadModifyWrite,
-// writeJSONAtomic) — this file holds only the camera-specific shape.
+// The debounce/coalesce timer and the atomic-write plumbing are shared machinery from
+// scene_persist.go (debouncedPersister, writeJSONAtomic) — this file holds only the
+// camera-specific shape.
 
 import (
-	"encoding/json"
 	"time"
 )
 
@@ -36,10 +36,10 @@ import (
 // single write at gesture settle.
 const viewpointPersistDebounce = 250 * time.Millisecond
 
-// viewpointPersister coalesces rapid viewpoint changes into a debounced read-modify-write
-// of scene.json's cameraPolar. Owned by MoveDispatch (armed after the startup seed).
+// viewpointPersister coalesces rapid viewpoint changes into a debounced whole-file write of
+// camera.json. Owned by MoveDispatch (armed after the startup seed).
 type viewpointPersister struct {
-	path     string        // scene.json path (sceneCameraPath(topologyPath))
+	path     string        // camera.json path (cameraFilePath(topologyPath))
 	debounce time.Duration // coalescing window
 	debouncedPersister[*scenePolarCamera]
 }
@@ -50,8 +50,8 @@ func (p *viewpointPersister) schedule(v viewpoint) {
 	p.arm(p.debounce, viewpointToPolar(v), p.flush)
 }
 
-// flush writes the pending viewpoint to scene.json (read-modify-write, preserving other
-// fields) and clears the pending value. Fire-and-forget: errors are logged, not returned.
+// flush writes the pending viewpoint to camera.json (whole-file write) and clears the
+// pending value. Fire-and-forget: errors are logged, not returned.
 func (p *viewpointPersister) flush() {
 	cam, has := p.take()
 	if !has || cam == nil {
@@ -85,15 +85,8 @@ func viewpointToPolar(v viewpoint) *scenePolarCamera {
 	return &scenePolarCamera{Pivot: &pivot, R: &r, Pos: &pos, Up: &up}
 }
 
-// writeSceneCameraPolar sets ONLY the cameraPolar field of scene.json, preserving every
-// other field (camera3d, overlay flags, …). If the file/dir is absent it is created with
-// just cameraPolar.
+// writeSceneCameraPolar writes cam as the whole content of path (camera.json) — the sole
+// writer of that file, so no read-modify-write is needed.
 func writeSceneCameraPolar(path string, cam *scenePolarCamera) error {
-	camJSON, err := json.Marshal(cam)
-	if err != nil {
-		return err
-	}
-	return sceneReadModifyWrite(path, func(obj map[string]json.RawMessage) {
-		obj["cameraPolar"] = camJSON
-	})
+	return writeJSONAtomic(path, cam)
 }

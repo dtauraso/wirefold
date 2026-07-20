@@ -9,7 +9,6 @@ package Wiring
 import (
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"testing"
 )
 
@@ -27,13 +26,13 @@ func TestQuantOffsetFlushPendingWritesBeforeDebounceElapses(t *testing.T) {
 	// disk without cancelling+writing, this would still observe the OLD meta.json values.
 	p.flushPending()
 
-	raw, err := os.ReadFile(filepath.Join(root, "nodes", "src", "meta.json"))
+	raw, err := os.ReadFile(positionFilePath(root, "src"))
 	if err != nil {
-		t.Fatalf("read meta.json: %v", err)
+		t.Fatalf("read position.json: %v", err)
 	}
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &obj); err != nil {
-		t.Fatalf("unmarshal meta.json: %v", err)
+		t.Fatalf("unmarshal position.json: %v", err)
 	}
 	var gotR, gotTheta, gotPhi float64
 	if err := json.Unmarshal(obj["scenePolarR"], &gotR); err != nil {
@@ -65,13 +64,13 @@ func TestMoveDispatchFlushPendingPersistsFlushesQuantOffset(t *testing.T) {
 	// Simulate a clean shutdown BEFORE the debounce timer would have fired.
 	md.flushPendingPersists()
 
-	raw, err := os.ReadFile(filepath.Join(root, "nodes", "src", "meta.json"))
+	raw, err := os.ReadFile(positionFilePath(root, "src"))
 	if err != nil {
-		t.Fatalf("read meta.json: %v", err)
+		t.Fatalf("read position.json: %v", err)
 	}
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &obj); err != nil {
-		t.Fatalf("unmarshal meta.json: %v", err)
+		t.Fatalf("unmarshal position.json: %v", err)
 	}
 	var gotR float64
 	if err := json.Unmarshal(obj["scenePolarR"], &gotR); err != nil {

@@ -2,23 +2,27 @@ package Wiring
 
 // scene_camera.go — the initial camera VIEWPOINT is FILE DATA, not a computed seed.
 //
-// The saved camera lives in the scene sidecar `<topologyPath>/view/scene.json`, written
-// by the editor (the same `cameraPolar` shape TS's parseViewerState/serializeSceneState
-// round-trip). On startup Go reads that file itself and installs the parsed pose into the
-// gesture-FSM viewpoint (SetViewpoint + EmitViewpoint), so the buffer camera columns carry
-// a REAL saved pose from the first frame — non-degenerate, so pan works immediately. This
-// replaces the rejected on-load "home" command the webview used to send (a compute-fit
-// seed): the viewpoint is PERSISTED STATE, so Go loads it from the file.
+// The saved camera lives in `<topologyPath>/view/camera.json` (one-file-per-writer,
+// the one-file-per-writer split — the sole successor to the old
+// shared `<topologyPath>/view/scene.json`'s `cameraPolar` field). On startup Go reads that
+// file itself and installs the parsed pose into the gesture-FSM viewpoint (SetViewpoint +
+// EmitViewpoint), so the buffer camera columns carry a REAL saved pose from the first frame
+// — non-degenerate, so pan works immediately. This replaces the rejected on-load "home"
+// command the webview used to send (a compute-fit seed): the viewpoint is PERSISTED STATE,
+// so Go loads it from the file.
 //
-// If the file is absent/empty/malformed (a fresh topology), Go falls back to a fixed,
+// LEGACY FALLBACK: an existing pre-split topology has no camera.json, only the old
+// scene.json with a `cameraPolar` key — loadSceneViewpoint tries camera.json first and
+// falls back to reading that key out of scene.json, so an old topology's saved pose still
+// loads (and the next viewpoint change writes it forward into camera.json).
+//
+// If neither file yields a complete pose (a fresh topology), Go falls back to a fixed,
 // clearly-labelled DEFAULT viewpoint (defaultViewpoint) — a valid non-degenerate basis,
 // NOT a geometry fit. That keeps pan working before the first save without seeding from
 // the scene's node positions.
 
 import (
-	"encoding/json"
 	"math"
-	"os"
 
 	T "github.com/dtauraso/wirefold/Trace"
 )
@@ -61,25 +65,27 @@ type sceneFile struct {
 	CameraPolar *scenePolarCamera `json:"cameraPolar"`
 }
 
-// loadSceneViewpoint reads the saved polar camera from the scene sidecar and converts it
-// to the FSM viewpoint tuple (pivot, r, pos, up). ok is false when the file is
-// absent/empty/malformed or carries no complete cameraPolar — callers then use
-// defaultViewpoint. The mapping is 1:1 with the TS schema:
+// loadSceneViewpoint reads the saved polar camera and converts it to the FSM viewpoint
+// tuple (pivot, r, pos, up). It tries camera.json first; when that is absent/malformed it
+// falls back to the legacy scene.json's `cameraPolar` key (a pre-split topology). ok is
+// false when NEITHER yields a complete pose — callers then use defaultViewpoint. The
+// mapping is 1:1 with the TS schema:
 //
 //	pivot = (pivot[0], pivot[1], pivot[2])   r = r
 //	pos   = {Theta: pos[0], Phi: pos[1]}     up = {Theta: up[0], Phi: up[1]}
 func loadSceneViewpoint(topologyPath string) (pivot vec3, r float64, pos, up dir, ok bool) {
-	raw, err := os.ReadFile(sceneCameraPath(topologyPath))
-	if err != nil {
-		return vec3{}, 0, dir{}, dir{}, false
+	var cp scenePolarCamera
+	readJSONBestEffort(cameraFilePath(topologyPath), &cp)
+	if cp.Pivot == nil || cp.R == nil || cp.Pos == nil || cp.Up == nil {
+		// Legacy fallback: pre-split topology only has scene.json's cameraPolar key.
+		var sf sceneFile
+		readJSONBestEffort(sceneCameraPath(topologyPath), &sf)
+		if sf.CameraPolar != nil {
+			cp = *sf.CameraPolar
+		}
 	}
-	var sf sceneFile
-	if err := json.Unmarshal(raw, &sf); err != nil {
-		return vec3{}, 0, dir{}, dir{}, false
-	}
-	cp := sf.CameraPolar
 	// Require every field (matches parsePolarCamera, which drops a partial object).
-	if cp == nil || cp.Pivot == nil || cp.R == nil || cp.Pos == nil || cp.Up == nil {
+	if cp.Pivot == nil || cp.R == nil || cp.Pos == nil || cp.Up == nil {
 		return vec3{}, 0, dir{}, dir{}, false
 	}
 	pivot = vec3{X: cp.Pivot[0], Y: cp.Pivot[1], Z: cp.Pivot[2]}

@@ -1,7 +1,10 @@
 // scene_sphere_persist.go — persist + load the first-class SCENE SPHERE (sphere_layout.go
 // sceneSphere; the fixed reference every node's scene polar is measured about) to
-// scene.json, mirroring scene_camera_persist.go (read-modify-write of one key,
-// serialized against the other scene writers via sceneFileMu).
+// view/sphere.json, mirroring scene_camera_persist.go. sphere.json has exactly one writer
+// (writeSceneSphere), so each write is a fresh whole-file marshal — no read-modify-write, no
+// sceneFileMu (deleted; one-file-per-writer,
+// the one-file-per-writer split). loadSceneSphere tries sphere.json
+// first and falls back to the legacy scene.json's sceneSphere key for a pre-split topology.
 //
 // The Center is the only PERSISTED, AUTHORITATIVE cartesian value — the world anchor every
 // scene polar is measured about. It is NOT the only cartesian value in the system: the
@@ -20,8 +23,6 @@
 package Wiring
 
 import (
-	"encoding/json"
-	"os"
 	"time"
 )
 
@@ -34,39 +35,36 @@ type sceneSphereFile struct {
 	SceneSphere *sceneSphereJSON `json:"sceneSphere"`
 }
 
-// loadSceneSphere reads the persisted scene sphere from scene.json. ok is false when the
-// file is absent/malformed or carries no complete sceneSphere — callers then content-fit.
+// loadSceneSphere reads the persisted scene sphere. It tries sphere.json first and falls
+// back to the legacy scene.json's sceneSphere key (a pre-split topology) when sphere.json is
+// absent/malformed. ok is false when NEITHER yields a complete sphere — callers then
+// content-fit.
 func loadSceneSphere(topologyPath string) (sceneSphere, bool) {
-	raw, err := os.ReadFile(sceneCameraPath(topologyPath))
-	if err != nil {
-		return sceneSphere{}, false
+	var sj sceneSphereJSON
+	readJSONBestEffort(sphereFilePath(topologyPath), &sj)
+	if sj.Center == nil || sj.Radius == nil {
+		// Legacy fallback: pre-split topology only has scene.json's sceneSphere key.
+		var sf sceneSphereFile
+		readJSONBestEffort(sceneCameraPath(topologyPath), &sf)
+		if sf.SceneSphere != nil {
+			sj = *sf.SceneSphere
+		}
 	}
-	var sf sceneSphereFile
-	if err := json.Unmarshal(raw, &sf); err != nil {
-		return sceneSphere{}, false
-	}
-	s := sf.SceneSphere
-	if s == nil || s.Center == nil || s.Radius == nil {
+	if sj.Center == nil || sj.Radius == nil {
 		return sceneSphere{}, false
 	}
 	return sceneSphere{
-		Center: vec3{X: s.Center[0], Y: s.Center[1], Z: s.Center[2]},
-		Radius: *s.Radius,
+		Center: vec3{X: sj.Center[0], Y: sj.Center[1], Z: sj.Center[2]},
+		Radius: *sj.Radius,
 	}, true
 }
 
-// writeSceneSphere writes the scene sphere into scene.json's "sceneSphere" key, preserving
-// every other field (read-modify-write, serialized via sceneFileMu like the sibling writers).
-func writeSceneSphere(scenePath string, s sceneSphere) error {
+// writeSceneSphere writes the scene sphere as the whole content of sphereJSONPath
+// (sphere.json) — the sole writer of that file, so no read-modify-write is needed.
+func writeSceneSphere(sphereJSONPath string, s sceneSphere) error {
 	center := [3]float64{s.Center.X, s.Center.Y, s.Center.Z}
 	radius := s.Radius
-	rawSphere, err := json.Marshal(sceneSphereJSON{Center: &center, Radius: &radius})
-	if err != nil {
-		return err
-	}
-	return sceneReadModifyWrite(scenePath, func(obj map[string]json.RawMessage) {
-		obj["sceneSphere"] = rawSphere
-	})
+	return writeJSONAtomic(sphereJSONPath, sceneSphereJSON{Center: &center, Radius: &radius})
 }
 
 // LoadSceneSphere installs md.sceneSphere from FILE DATA, or — when scene.json has no
@@ -101,7 +99,7 @@ func (md *MoveDispatch) LoadSceneSphere(topologyPath string) {
 		// Path via sceneCameraPath (scene_paths.go) — the authoritative resolver, per
 		// check-scene-path-resolution.sh; never hand-rolled.
 		if topologyPath != "" {
-			_ = writeSceneSphere(sceneCameraPath(topologyPath), md.sceneSphere)
+			_ = writeSceneSphere(sphereFilePath(topologyPath), md.sceneSphere)
 		}
 	}
 	// Emit the scene sphere ONCE at load, on both paths: it is established here and never

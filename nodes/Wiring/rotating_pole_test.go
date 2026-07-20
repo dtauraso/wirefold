@@ -6,7 +6,6 @@ import (
 	"context"
 	"math"
 	"os"
-	"path/filepath"
 	"testing"
 	"time"
 )
@@ -288,12 +287,12 @@ func TestRotatingPolePersistReload(t *testing.T) {
 	}
 	md.persist.quantOffset.flush()
 
-	raw, err := os.ReadFile(filepath.Join(root, "nodes", "src", "meta.json"))
+	raw, err := os.ReadFile(localPolarsFilePath(root, "src"))
 	if err != nil {
-		t.Fatalf("read src meta: %v", err)
+		t.Fatalf("read src local-polars.json: %v", err)
 	}
 	if !containsKey(raw, "localPoleTheta") || !containsKey(raw, "localPolePhi") {
-		t.Fatalf("src meta.json should persist the local pole (fixed-increment/stored-index model): %s", raw)
+		t.Fatalf("src local-polars.json should persist the local pole (fixed-increment/stored-index model): %s", raw)
 	}
 
 	// Reload into a fresh MoveDispatch.

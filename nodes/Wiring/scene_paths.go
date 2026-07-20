@@ -77,3 +77,38 @@ func sceneJSONPath(topologyPath string) string {
 func sceneCameraPath(topologyPath string) string {
 	return sceneJSONPath(topologyPath)
 }
+
+// sceneViewFilePath resolves <sceneTreeRoot>/view/<name> for topologyPath, using the same
+// root-resolution (and true-monolithic fallback) as sceneJSONPath. Backs the one-file-per-
+// writer split: camera.json,
+// overlays.json and sphere.json each replace one of the three writers that used to share
+// scene.json, and each resolves its path through this one shared helper.
+func sceneViewFilePath(topologyPath, name string) string {
+	root := sceneTreeRoot(topologyPath)
+	if root == "" {
+		base := topologyPath
+		if info, err := os.Stat(topologyPath); err == nil && !info.IsDir() {
+			base = filepath.Dir(topologyPath)
+		}
+		return filepath.Join(base, "view", name)
+	}
+	return filepath.Join(root, "view", name)
+}
+
+// cameraFilePath is the WRITE-side location of the persisted camera pose — the sole
+// successor to scene.json's cameraPolar key. writeSceneCameraPolar is its only writer.
+func cameraFilePath(topologyPath string) string {
+	return sceneViewFilePath(topologyPath, "camera.json")
+}
+
+// overlaysFilePath is the WRITE-side location of the persisted overlay-visibility flags —
+// the sole successor to scene.json's overlay keys. writeSceneOverlays is its only writer.
+func overlaysFilePath(topologyPath string) string {
+	return sceneViewFilePath(topologyPath, "overlays.json")
+}
+
+// sphereFilePath is the WRITE-side location of the persisted scene sphere — the sole
+// successor to scene.json's sceneSphere key. writeSceneSphere is its only writer.
+func sphereFilePath(topologyPath string) string {
+	return sceneViewFilePath(topologyPath, "sphere.json")
+}

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # next.sh — the live "what's next" view, derived from git (no hand-synced doc).
 #
-# Replaces the old docs/planning/visual-editor/handoff.md, which kept drifting
+# Replaced the old handoff.md doc, which kept drifting
 # because it was a manually-updated cache of state that lives authoritatively in
 # git / memory / MODEL.md. This script DERIVES state instead of storing it:
 #
