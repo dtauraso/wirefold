@@ -408,7 +408,6 @@ func (b *buildCtx) allocateWires() {
 			pw.Target = e.Target
 			pw.TargetHandle = e.TargetHandle
 			pw.Trace = b.tr
-			pw.SetClock(b.clk) // one clock shared by every wire; times its own delivery
 			destWire[destKey] = pw
 		}
 		edgeWire[e.Label] = pw
@@ -446,7 +445,7 @@ func (b *buildCtx) buildMoveDispatch() {
 	for i, e := range b.spec.Edges {
 		edgeOrder[i] = e.Label
 	}
-	md := newMoveDispatch(b.nodeGeoms, b.edgeEndpoints, b.tr, nodeOrder, edgeOrder)
+	md := newMoveDispatch(b.nodeGeoms, b.edgeEndpoints, b.tr, nodeOrder, edgeOrder, b.clk)
 	if b.hasScene {
 		// Persisted scene sphere: install it now so md.sceneSphere is consistent straight out
 		// of LoadTopology (a fresh/legacy scene has none — main.go's LoadSceneSphere then

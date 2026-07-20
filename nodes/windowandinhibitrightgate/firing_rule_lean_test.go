@@ -10,11 +10,13 @@ import (
 	"github.com/dtauraso/wirefold/nodes/gatecommon"
 )
 
-// stepWire continuously StepOnces pw on a short wall-clock poll until ctx is
-// cancelled, matching the production per-cycle StepOnce delivery path (no
+// stepWire continuously StepOnceAts pw on a short wall-clock poll until ctx is
+// cancelled, matching the production per-cycle StepOnceAt delivery path (no
 // blocking delivery loop). Only needed for the two INPUT wires here: the
-// gate's own RunGate loop drives ToPassed's StepOnce itself each cycle.
-func stepWire(ctx context.Context, pw *Wiring.PacedWire) {
+// gate's own RunGate loop drives ToPassed's StepOnceAt itself each cycle. clk
+// is this goroutine's OWN clock copy (docs/planning/visual-editor/
+// per-goroutine-clock.md); callers must not share it with another goroutine.
+func stepWire(ctx context.Context, pw *Wiring.PacedWire, clk Wiring.Clock) {
 	go func() {
 		for {
 			select {
@@ -22,7 +24,7 @@ func stepWire(ctx context.Context, pw *Wiring.PacedWire) {
 				return
 			default:
 			}
-			pw.StepOnce(ctx)
+			pw.StepOnceAt(ctx, clk.Tick())
 			time.Sleep(time.Millisecond)
 		}
 	}()
@@ -47,30 +49,27 @@ func runGate(t *testing.T, left, right int) int {
 	clk := Wiring.NewRealClock()
 
 	leftPw := Wiring.NewPacedWire(latMs*Wiring.PulseSpeedWuPerMs, Wiring.PulseSpeedWuPerMs)
-	leftPw.SetClock(clk)
-	stepWire(ctx, leftPw)
+	stepWire(ctx, leftPw, clk.Copy())
 
 	rightPw := Wiring.NewPacedWire(latMs*Wiring.PulseSpeedWuPerMs, Wiring.PulseSpeedWuPerMs)
-	rightPw.SetClock(clk)
-	stepWire(ctx, rightPw)
+	stepWire(ctx, rightPw, clk.Copy())
 
-	// leftSrc/rightSrc are test-only seeding sources: PlaceDriven places a
+	// leftSrc/rightSrc are test-only seeding sources: PlaceDrivenAt places a
 	// bead (no walker) that the stepWire loops above then drive to delivery,
 	// reusing the production placement API to inject the test's input values.
-	leftSrc := Wiring.NewPacedOutNoGeom(leftPw, ctx, "seed", "Out", tr, Wiring.RuleFireAndForget, 0, 0, "")
-	rightSrc := Wiring.NewPacedOutNoGeom(rightPw, ctx, "seed", "Out", tr, Wiring.RuleFireAndForget, 0, 0, "")
+	leftSrc := Wiring.NewPacedOutNoGeom(leftPw, ctx, "seed", "Out", tr, Wiring.RuleFireAndForget, 0, 0, "", clk)
+	rightSrc := Wiring.NewPacedOutNoGeom(rightPw, ctx, "seed", "Out", tr, Wiring.RuleFireAndForget, 0, 0, "", clk)
 
 	outPw := Wiring.NewPacedWire(latMs*Wiring.PulseSpeedWuPerMs, Wiring.PulseSpeedWuPerMs)
-	outPw.SetClock(clk)
 
 	node := &Node{GateNode: gatecommon.GateNode{
 		Fire:      func() {},
-		FromLeft:  Wiring.NewInPaced(leftPw, ctx, "irg", "FromLeft", tr),
-		FromRight: Wiring.NewInPaced(rightPw, ctx, "irg", "FromRight", tr),
+		FromLeft:  Wiring.NewInPaced(leftPw, ctx, "irg", "FromLeft", tr, clk),
+		FromRight: Wiring.NewInPaced(rightPw, ctx, "irg", "FromRight", tr, clk),
 		ToPassed: Wiring.NewPacedOutNoGeom(outPw, ctx, "irg", "ToPassed", tr,
-			Wiring.RuleFireAndForget, latMs*Wiring.PulseSpeedWuPerMs, latMs, ""),
+			Wiring.RuleFireAndForget, latMs*Wiring.PulseSpeedWuPerMs, latMs, "", clk),
 	}}
-	observer := Wiring.NewInPaced(outPw, ctx, "obs", "In", tr)
+	observer := Wiring.NewInPaced(outPw, ctx, "obs", "In", tr, clk)
 
 	done := make(chan struct{})
 	go func() { node.Update(ctx); close(done) }()
@@ -83,11 +82,11 @@ func runGate(t *testing.T, left, right int) int {
 		}
 	}()
 
-	if !leftSrc.PlaceDriven(left).Live() {
-		t.Fatal("PlaceDriven(left) returned false")
+	if !leftSrc.PlaceDrivenAt(left, clk.Tick()).Live() {
+		t.Fatal("PlaceDrivenAt(left) returned false")
 	}
-	if !rightSrc.PlaceDriven(right).Live() {
-		t.Fatal("PlaceDriven(right) returned false")
+	if !rightSrc.PlaceDrivenAt(right, clk.Tick()).Live() {
+		t.Fatal("PlaceDrivenAt(right) returned false")
 	}
 
 	// Both inputs held → window (3000ms) not an issue since both arrive

@@ -10,9 +10,9 @@ import (
 )
 
 // TestDriveHeldChanModePlacesMultipleValues is the red-proof for the
-// DriveItem outcome fix: before the fix, PlaceDriven's chan-mode successful
+// DriveItem outcome fix: before the fix, PlaceDrivenAt's chan-mode successful
 // send returned an inert DriveItem{} indistinguishable from a failed/torn-down
-// placement, so DriveHeld's `if !out.PlaceDriven(...).Live() { return }`
+// placement, so DriveHeld's `if !out.PlaceDrivenAt(...).Live() { return }`
 // treated every chan-mode send as a failure and stopped after exactly one
 // placement. A chan-mode Out driven by DriveHeld must keep placing values
 // across multiple cycles.

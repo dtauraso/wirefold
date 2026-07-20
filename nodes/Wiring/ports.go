@@ -35,11 +35,11 @@ type In struct {
 	node  string
 	port  string
 	trace *T.Trace
-	// clock is the fallback Clock for an UNWIRED In (chan mode), where there is no
-	// PacedWire to read one from. The loader sets it to the same shared clock every
-	// wired node runs on, so an unfed node paces normally and stays inert by polling
-	// a port that never delivers. Never read in paced mode (pw.clock wins). See
-	// In.Clock.
+	// clock is the Clock this port hands to its owning goroutine for a ONE-TIME
+	// Copy() at goroutine start (docs/planning/visual-editor/per-goroutine-clock.md).
+	// Set at construction (NewInPaced for a wired port, the loader's shared clock
+	// for a dead-end/unwired port) and never touched afterward — this port's own
+	// PacedWire holds no clock of its own. See In.Clock.
 	clock Clock
 }
 
@@ -74,9 +74,11 @@ func (i *In) PollRecv() (int, bool) {
 	}
 }
 
-// Clock returns the shared human-speed Clock this port paces on. A node's Update loop
-// reads it to pace off the same clock the wire times delivery on, without owning a clock
-// reference of its own.
+// Clock returns the Clock this port hands to its owning goroutine, for a ONE-TIME
+// Copy() at goroutine start (docs/planning/visual-editor/per-goroutine-clock.md).
+// A node's Update loop calls Clock().Copy() exactly once and paces off the copy
+// from then on — this port (and the wire behind it, if any) holds no clock of
+// its own to read repeatedly.
 //
 // NEVER RETURNS NIL — that is the point, not a convenience. Every caller does
 // `clk := X.In.Clock()` then `clk.SleepCycle(ctx)` with no guard, so a nil here is a nil-
@@ -94,9 +96,6 @@ func (i *In) PollRecv() (int, bool) {
 func (i *In) Clock() Clock {
 	if i == nil {
 		return inertClock{}
-	}
-	if i.pw != nil && i.pw.clock != nil {
-		return i.pw.clock
 	}
 	if i.clock != nil {
 		return i.clock
@@ -205,6 +204,11 @@ type Out struct {
 	// Rule is the per-edge send policy applied by the source node after a
 	// successful TrySend. Empty string defaults to consumeGated (see Gated).
 	Rule SendRule
+	// clock is the Clock this port hands to its owning goroutine for a ONE-TIME
+	// Copy() at goroutine start (docs/planning/visual-editor/per-goroutine-clock.md).
+	// Set at construction (NewOutPaced) from the loader's shared clock; this
+	// port's own PacedWire holds no clock of its own. See Out.Clock.
+	clock Clock
 }
 
 // Geom loads the current per-edge geometry snapshot. Returns the zero outGeom when
@@ -265,15 +269,20 @@ func (o *Out) Paced() bool {
 	return o != nil && o.pw != nil
 }
 
-// Clock returns the shared human-speed Clock this port paces on. NEVER RETURNS NIL —
-// mirrors In.Clock; see its doc for why a nil Clock is a panic waiting to happen.
-// Callers choosing paced vs chan behavior must branch on Paced(), not on this being nil.
-// In chan mode this is the inert placeholder, which Paced() callers never reach.
+// Clock returns the Clock this port hands to its owning goroutine, for a ONE-TIME
+// Copy() at goroutine start (docs/planning/visual-editor/per-goroutine-clock.md).
+// NEVER RETURNS NIL in paced mode — mirrors In.Clock; see its doc for why a nil
+// Clock is a panic waiting to happen. Callers choosing paced vs chan behavior
+// must branch on Paced(), not on this being nil. In chan mode this is the inert
+// placeholder, which Paced() callers never reach.
 func (o *Out) Clock() Clock {
 	if !o.Paced() {
 		return inertClock{}
 	}
-	return o.pw.clock
+	if o.clock != nil {
+		return o.clock
+	}
+	return inertClock{}
 }
 
 // Gated reports whether the source node should wait for consumption after a
@@ -285,23 +294,12 @@ func (o *Out) Gated() bool {
 	return o.Rule != RuleFireAndForget
 }
 
-// placeDrivenNoWalker places one bead on the paced wire WITHOUT spawning a
-// walker goroutine, emitting the SendWire trace at placement time. The placed
-// bead is subsequently driven to delivery by per-cycle StepOnce. Caller must
-// have already checked o.pw != nil.
-func (o *Out) placeDrivenNoWalker(v int) (gen uint64, ok bool) {
-	g := o.Geom()
-	gen, ok = o.pw.placeBeadNoWalker(v, o.placementFrom(g))
-	if !ok {
-		return 0, false
-	}
-	o.trace.SendWire(o.node, o.port, v, g.ArcLength, g.SimLatencyMs, o.pw.Target, o.pw.TargetHandle)
-	return gen, true
-}
-
-// placeDrivenNoWalkerAt is placeDrivenNoWalker with the placement tick PINNED
-// by the caller (see PacedWire.placeBeadNoWalkerAt) instead of a live clock
-// read. Caller must have already checked o.pw != nil.
+// placeDrivenNoWalkerAt places one bead on the paced wire WITHOUT spawning a
+// walker goroutine, emitting the SendWire trace at placement time, with the
+// placement tick PINNED by the caller (see PacedWire.placeBeadNoWalkerAt)
+// instead of a live clock read. The placed bead is subsequently driven to
+// delivery by per-cycle StepOnceAt. Caller must have already checked
+// o.pw != nil.
 func (o *Out) placeDrivenNoWalkerAt(v int, tick int64) (gen uint64, ok bool) {
 	g := o.Geom()
 	gen, ok = o.pw.placeBeadNoWalkerAt(v, o.placementFrom(g), tick)
@@ -323,22 +321,15 @@ func (o *Out) Wired() bool {
 	return o.pw != nil
 }
 
-// StepOnce advances this Out's underlying wire by one non-blocking tick-step
-// (see PacedWire.StepOnce): any in-flight bead due at the current tick moves
-// one position-step, and FIFO-head delivery is attempted if ready. Returns
-// immediately; never parks. No-op in chan mode (o.pw == nil) or for a nil Out.
-// Exported so a node's own continuous-drive goroutine (gatecommon.DriveHeld)
-// can pace itself one tick at a time instead of blocking a full traversal.
-func (o *Out) StepOnce(ctx context.Context) {
-	if o == nil || o.pw == nil {
-		return
-	}
-	o.pw.StepOnce(ctx)
-}
-
-// StepOnceAt is StepOnce with the current tick PINNED by the caller (see
-// PacedWire.StepOnceAt). Use when stepping several Outs in the same cycle
-// so they all observe the same tick. No-op in chan mode or for a nil Out.
+// StepOnceAt advances this Out's underlying wire by one non-blocking tick-step
+// (see PacedWire.StepOnceAt), at the tick PINNED by the caller — read from the
+// CALLER's OWN clock copy (docs/planning/visual-editor/per-goroutine-clock.md):
+// any in-flight bead due at that tick moves one position-step, and FIFO-head
+// delivery is attempted if ready. Returns immediately; never parks. No-op in
+// chan mode (o.pw == nil) or for a nil Out. Exported so a node's own
+// continuous-drive goroutine (gatecommon.DriveHeld) can pace itself one tick
+// at a time instead of blocking a full traversal. Use when stepping several
+// Outs in the same cycle so they all observe the same tick.
 func (o *Out) StepOnceAt(ctx context.Context, tick int64) {
 	if o == nil || o.pw == nil {
 		return
@@ -394,39 +385,18 @@ func (di DriveItem) Failed() bool {
 	return di.outcome == DriveFailed
 }
 
-// PlaceDriven places one bead on this Out WITHOUT spawning a walker, emits the
-// SendWire trace, and returns a DriveItem reporting the outcome. Delivery is
-// driven by the caller's per-cycle StepOnce/StepOnceAt on this Out (or the
+// PlaceDrivenAt places one bead on this Out WITHOUT spawning a walker, emits
+// the SendWire trace, and returns a DriveItem reporting the outcome. Delivery
+// is driven by the caller's per-cycle StepOnceAt on this Out (or the
 // underlying wire) each subsequent cycle. In chan mode (tests) it sends
 // immediately on the raw channel and returns DriveSentChan, so unit tests keep
 // their synchronous chan semantics. A nil Out returns DriveFailed.
-func (o *Out) PlaceDriven(v int) DriveItem {
-	if o == nil {
-		return DriveItem{outcome: DriveFailed}
-	}
-	if o.pw != nil {
-		if _, ok := o.placeDrivenNoWalker(v); !ok {
-			return DriveItem{outcome: DriveFailed}
-		}
-		return DriveItem{outcome: DrivePlaced}
-	}
-	// chan mode (tests): no drive needed, send now and return DriveSentChan.
-	if o.ch != nil {
-		select {
-		case o.ch <- v:
-			o.trace.Send(o.node, o.port, v)
-		default:
-		}
-	}
-	return DriveItem{outcome: DriveSentChan}
-}
-
-// PlaceDrivenAt is PlaceDriven with the placement tick PINNED by the caller
-// (see PacedWire.placeBeadNoWalkerAt) so multiple fan-out wires placed in the
+//
+// tick is PINNED by the caller — read from the CALLER's OWN clock copy (see
+// PacedWire.placeBeadNoWalkerAt) — so multiple fan-out wires placed in the
 // same cycle all stamp the same placementTick instead of each independently
-// re-reading the live shared clock (which can advance mid-cycle and skew
-// equal-latency siblings apart by a tick). Chan mode is unaffected (no
-// placementTick concept there).
+// re-reading a clock (which would skew equal-latency siblings apart by a
+// tick). Chan mode is unaffected (no placementTick concept there).
 func (o *Out) PlaceDrivenAt(v int, tick int64) DriveItem {
 	if o == nil {
 		return DriveItem{outcome: DriveFailed}
@@ -470,20 +440,23 @@ func (outs OutMulti) PlaceDrivenAllAt(v int, tick int64, dst []DriveItem) []Driv
 	return dst
 }
 
-// NewInPaced / NewOutPaced are used by the loader. Uses PacedWire mode.
-func NewInPaced(pw *PacedWire, ctx context.Context, node, port string, tr *T.Trace) *In {
-	return &In{pw: pw, ctx: ctx, node: node, port: port, trace: tr}
+// NewInPaced / NewOutPaced are used by the loader. Uses PacedWire mode. clock is
+// the Clock this port hands to its owning goroutine for a one-time Copy() at
+// goroutine start (docs/planning/visual-editor/per-goroutine-clock.md); the
+// wire itself holds no clock.
+func NewInPaced(pw *PacedWire, ctx context.Context, node, port string, tr *T.Trace, clock Clock) *In {
+	return &In{pw: pw, ctx: ctx, node: node, port: port, trace: tr, clock: clock}
 }
 
 // NewPacedOutNoGeom builds a paced Out with a zero wire segment. Node packages
 // outside Wiring cannot name the unexported wireSegment, so they cannot call
 // NewOutPaced directly — this is the supported entry point for tests that need to
-// exercise the paced OUTPUT drive (PlaceDriven → StepOnce) under a
+// exercise the paced OUTPUT drive (PlaceDrivenAt → StepOnceAt) under a
 // RealClock. Only bead timing is exercised; the zero segment means position
 // traces carry no geometry. Production paced Outs are built by the loader/builders
 // with real segments, not through this.
-func NewPacedOutNoGeom(pw *PacedWire, ctx context.Context, node, port string, tr *T.Trace, rule SendRule, arcLength, simLatencyMs float64, edgeLabel string) *Out {
-	return NewOutPaced(pw, ctx, node, port, tr, rule, arcLength, simLatencyMs, wireSegment{}, edgeLabel)
+func NewPacedOutNoGeom(pw *PacedWire, ctx context.Context, node, port string, tr *T.Trace, rule SendRule, arcLength, simLatencyMs float64, edgeLabel string, clock Clock) *Out {
+	return NewOutPaced(pw, ctx, node, port, tr, rule, arcLength, simLatencyMs, wireSegment{}, edgeLabel, clock)
 }
 
 // NewOutChanForTest builds a chan-mode Out for tests outside the Wiring
@@ -495,11 +468,11 @@ func NewOutChanForTest(ch chan<- int, node, port string, tr *T.Trace) *Out {
 	return &Out{ch: ch, node: node, port: port, trace: tr}
 }
 
-func NewOutPaced(pw *PacedWire, ctx context.Context, node, port string, tr *T.Trace, rule SendRule, arcLength, simLatencyMs float64, seg wireSegment, edgeLabel string) *Out {
+func NewOutPaced(pw *PacedWire, ctx context.Context, node, port string, tr *T.Trace, rule SendRule, arcLength, simLatencyMs float64, seg wireSegment, edgeLabel string, clock Clock) *Out {
 	if rule == "" {
 		rule = RuleConsumeGated
 	}
-	o := &Out{pw: pw, ctx: ctx, node: node, port: port, trace: tr, Rule: rule, EdgeLabel: edgeLabel}
+	o := &Out{pw: pw, ctx: ctx, node: node, port: port, trace: tr, Rule: rule, EdgeLabel: edgeLabel, clock: clock}
 	// Seed the atomic snapshot so the first placement reads valid geometry before any move.
 	o.publishGeom(outGeom{ArcLength: arcLength, SimLatencyMs: simLatencyMs, Start: seg.Start, End: seg.End})
 	return o

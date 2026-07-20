@@ -16,11 +16,10 @@ type deliveredBead struct {
 	// it as nowTick — StepOnceAt's caller-pinned tick for a fan-out cycle, or
 	// driveAdvanceItem's per-step target for the blocking path). It is the
 	// authoritative "what tick did this actually land on" answer. It is
-	// deliberately NOT a live read of pw.clock.Tick(): the shared clock can be
-	// advanced again by another goroutine between this wire's step and a
-	// sibling wire's step in the same fan-out cycle, so re-reading "now" from
-	// the clock at delivery time can record a LATER tick than the one the
-	// caller actually pinned and delivered against.
+	// deliberately NOT a live read of the caller's clock: that clock can
+	// advance again between this wire's step and a sibling wire's step in the
+	// same fan-out cycle, so re-reading "now" at delivery time can record a
+	// LATER tick than the one the caller actually pinned and delivered against.
 	deliverTick int64
 }
 
@@ -93,27 +92,29 @@ func (pw *PacedWire) ticksToCross(arc float64) float64 {
 	return arc / pw.pulseSpeed
 }
 
-// PacedWire is a multi-bead FIFO transport. Beads are placed via placeBeadNoWalker
-// and delivered by the owning node's goroutine driving per-cycle StepOnce — no
-// per-bead goroutine. The source never waits on the destination; each bead is placed
-// immediately and driven to the `delivered` FIFO on the caller's goroutine at its own
-// deadline. Recv pops `delivered` in send order and CONSUMES on read (no separate
-// Done step).
+// PacedWire is a multi-bead FIFO transport. Beads are placed via
+// placeBeadNoWalkerAt and delivered by the owning node's goroutine driving
+// per-cycle StepOnceAt — no per-bead goroutine. The source never waits on the
+// destination; each bead is placed immediately and driven to the `delivered`
+// FIFO on the caller's goroutine at its own deadline. Recv pops `delivered` in
+// send order and CONSUMES on read (no separate Done step).
 //
-// Clock-driven delivery: the wire times its own delivery on the one human-speed
-// clock (MODEL.md), sleep-only — the driven loop paces itself with
-// clock.SleepCycle rather than blocking on a target tick. When a bead is placed,
-// the wire records the placement tick; the driven loop sleeps cycle by cycle
-// until placementTick + ticksToCross is reached, then moves the bead from
-// `inflight` to `delivered`. There is no TS "delivered" signal and no central
-// scheduler — every wire reads the same clock independently. Pause freezes the
-// tick (the clock does not advance while halted).
+// Clock-driven delivery: the wire times its own delivery against a tick each
+// caller supplies from ITS OWN clock copy (docs/planning/visual-editor/
+// per-goroutine-clock.md) — this wire holds no clock of its own. When a bead
+// is placed, the wire records the caller-pinned placement tick; the driven
+// loop sleeps cycle by cycle (on the caller's own clock) until placementTick +
+// ticksToCross is reached, then moves the bead from `inflight` to `delivered`.
+// There is no TS "delivered" signal and no central scheduler. Every caller's
+// clock copy shares the same origin/speed history, so they agree on tick
+// values without sharing memory (per-goroutine-clock.md "Why copies agree").
+// Pause freezes the tick (a clock does not advance while its speed is 0).
 type PacedWire struct {
 	// mu guards inflight/delivered/nextGen against the THREE independent goroutines
 	// that actually touch them in production (traced from every non-test call site,
 	// not asserted from the type's shape alone):
-	//   - the SOURCE node's own driving goroutine: placeBeadNoWalker(At) (via
-	//     Out.PlaceDriven/PlaceDrivenAt) and StepOnce(At) (via Out.StepOnce/StepOnceAt),
+	//   - the SOURCE node's own driving goroutine: placeBeadNoWalkerAt (via
+	//     Out.PlaceDrivenAt) and StepOnceAt (via Out.StepOnceAt),
 	//     e.g. gatecommon/drive.go DriveHeld, holdnewsendold/node.go's Update loop.
 	//   - the DESTINATION node's own goroutine: PollRecv/PollRecvTick (via
 	//     In.PollRecv) — a different goroutine than the source side.
@@ -138,9 +139,7 @@ type PacedWire struct {
 	// teardownGen: a bead whose gen is < teardownGen is invalidated wholesale.
 	// No current caller bumps it above 0 (the Reset path was removed as dead
 	// code); kept because tryDeliverHeadLocked/StepOnce still gate on it.
-	teardownGen uint64
-	// clock is the one monotonic clock this wire reads to time its own delivery.
-	clock        Clock
+	teardownGen  uint64
 	pulseSpeed   float64
 	Target       string   // destination node id — authoritative slot identity
 	TargetHandle string   // destination input-port name — authoritative slot identity
@@ -164,26 +163,8 @@ type PacedWire struct {
 func NewPacedWire(arcLength float64, pulseSpeed float64) *PacedWire {
 	pw := &PacedWire{
 		pulseSpeed: pulseSpeed,
-		clock:      NewRealClock(),
 	}
 	return pw
-}
-
-// SetClock injects the monotonic clock this wire reads to time delivery.
-//
-// LOAD-TIME ONLY, before any node goroutine exists: LoadTopology (which calls
-// this) runs strictly before main.go spawns node goroutines, so there is a
-// happens-before edge from this write to every later pw.clock read — the same
-// reason loader.go's plain `pw.Trace = tr` assignment is safe unlocked. No
-// lock is taken deliberately: every runtime read of pw.clock (placeBeadNoWalker,
-// StepOnceAt, tryDeliverHeadLocked's tick math) is ALSO unlocked, on purpose —
-// those happen continuously on node goroutines during normal operation, not
-// just at load, and are safe only because SetClock has already completed by
-// the time any of them can run. Taking pw.mu here (as a prior version did)
-// implied a concurrent-write/concurrent-read race over pw.clock that does not
-// exist; it protected nothing, since every reader stays unlocked regardless.
-func (pw *PacedWire) SetClock(c Clock) {
-	pw.clock = c
 }
 
 // msToArcWu names the ms→world-units conversion used to reconstruct a bead's
@@ -192,20 +173,17 @@ func (pw *PacedWire) SetClock(c Clock) {
 // means at that call site, without changing the value.
 const msToArcWu = PulseSpeedWuPerMs
 
-// placeBeadNoWalker appends a bead WITHOUT launching a walker goroutine,
-// returning the bead's gen so the caller can drive delivery synchronously.
-func (pw *PacedWire) placeBeadNoWalker(value int, bp beadPlacement) (gen uint64, ok bool) {
-	return pw.placeBeadNoWalkerAt(value, bp, pw.clock.Tick())
-}
-
-// placeBeadNoWalkerAt is placeBeadNoWalker with the current tick PINNED by the
-// caller instead of re-reading pw.clock.Tick() live. Use when placing several
-// beads across different wires in the same fan-out cycle: the shared clock
-// can advance mid-cycle between placements, so each wire must stamp
-// placementTick from ONE snapshot taken once per cycle, not one live read
-// per wire — otherwise fan-out siblings placed on either side of a tick
-// boundary get different placementTicks and deliver a cycle apart despite
-// equal latency.
+// placeBeadNoWalkerAt appends a bead WITHOUT launching a walker goroutine, with
+// the current tick PINNED by the caller — read from the CALLER's OWN clock copy
+// (docs/planning/visual-editor/per-goroutine-clock.md), never re-read from a
+// clock this wire itself would have to hold. Use when placing several beads
+// across different wires in the same fan-out cycle: each goroutine's clock
+// copy can only be read once without introducing skew between wires, so each
+// wire must stamp placementTick from ONE snapshot taken once per cycle, not
+// one live read per wire — otherwise fan-out siblings placed on either side of
+// a tick boundary get different placementTicks and deliver a cycle apart
+// despite equal latency. Returns the bead's gen so the caller can drive
+// delivery synchronously.
 func (pw *PacedWire) placeBeadNoWalkerAt(value int, bp beadPlacement, tick int64) (gen uint64, ok bool) {
 	pw.mu.Lock()
 	pw.nextGen++
@@ -270,34 +248,27 @@ func (pw *PacedWire) tryDeliverHeadLocked(ctx context.Context, gen uint64, nowTi
 	return ai, true, true
 }
 
-// StepOnce is the NON-BLOCKING one-tick step primitive: the only delivery path
+// StepOnceAt is the NON-BLOCKING one-tick step primitive: the only delivery path
 // (MODEL.md "The model is sleep-only"). It advances every in-flight bead
-// on this wire that is due at the CURRENT clock tick by exactly one
+// on this wire that is due at the tick PINNED by the caller by exactly one
 // position-step, attempts any FIFO-head delivery that is now ready, and
 // RETURNS IMMEDIATELY — it never loops over future ticks and never parks
 // (no cond.Wait) on a bead that is not yet due or not yet at the FIFO head;
-// such a bead simply stays in-flight for a future StepOnce call.
+// such a bead simply stays in-flight for a future StepOnceAt call.
 //
-// Calling StepOnce exactly once per tick (paced by the caller's SleepCycle)
-// for N ticks delivers each bead on the tick its deadline is reached.
+// tick is read from the CALLER's OWN clock copy
+// (docs/planning/visual-editor/per-goroutine-clock.md) — this wire holds no
+// clock of its own. When stepping more than one wire per logical cycle
+// (fan-out/fan-in), snapshot clk.Tick() once per cycle and pass it to every
+// wire's StepOnceAt so all wires observe the SAME tick even though the
+// caller's clock can only be read once per cycle without introducing skew.
+//
+// Calling StepOnceAt once per tick (paced by the caller's SleepCycle) for N
+// ticks delivers each bead on the tick its deadline is reached.
 //
 // A bead that reaches its delivery deadline while not yet at the FIFO head is
-// marked finalPending so subsequent StepOnce calls retry ONLY the (cheap)
+// marked finalPending so subsequent StepOnceAt calls retry ONLY the (cheap)
 // delivery handoff for it, without re-running the position-advance math.
-func (pw *PacedWire) StepOnce(ctx context.Context) {
-	if ctx.Err() != nil {
-		return
-	}
-	pw.StepOnceAt(ctx, pw.clock.Tick())
-}
-
-// StepOnceAt is StepOnce but with the current tick PINNED by the caller
-// instead of read from the shared clock inside this call. Use this when
-// stepping more than one wire per logical cycle (fan-out/fan-in) so all
-// wires observe the SAME tick even if the shared clock advances between
-// individual StepOnce calls — snapshot clk.Tick() once per cycle and pass
-// it to every wire's StepOnceAt. Single-wire-per-cycle callers can keep
-// using plain StepOnce.
 func (pw *PacedWire) StepOnceAt(ctx context.Context, tick int64) {
 	if ctx.Err() != nil {
 		return
@@ -409,13 +380,18 @@ func (pw *PacedWire) PollRecvTick() (any, int64, bool) {
 // remaining = (1−t)·newArc/pulseSpeed. The driven loop re-reads each bead's live
 // arc/seg every frame, so the new geometry takes effect without any relaunch.
 // No-op when no bead is in flight.
-func (pw *PacedWire) ReviseInFlightGeometry(newArc float64, newSeg wireSegment) {
+//
+// tick is read from the CALLER's OWN clock copy
+// (docs/planning/visual-editor/per-goroutine-clock.md) — this wire holds no
+// clock of its own. The caller (edgeMover.recomputeGeometry) is a single
+// goroutine per edge, so it reads its own copy's Tick() once per call.
+func (pw *PacedWire) ReviseInFlightGeometry(tick int64, newArc float64, newSeg wireSegment) {
 	pw.mu.Lock()
 	defer pw.mu.Unlock()
 	if len(pw.inflight) == 0 {
 		return
 	}
-	nowTick := float64(pw.clock.Tick())
+	nowTick := float64(tick)
 	for i := range pw.inflight {
 		b := &pw.inflight[i]
 		t := 0.0

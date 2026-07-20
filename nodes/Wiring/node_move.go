@@ -327,7 +327,7 @@ func (md *MoveDispatch) EdgeSeeds() []EdgeGeomSeed { return md.edgeSeeds }
 // later by Bind once node construction has populated them. nodeOrder/edgeOrder are the
 // SPEC order (deterministic directory-sorted order, not map iteration order) used to
 // build md.nodeSeeds/edgeSeeds for buffer row seeding.
-func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEndpoints, tr *T.Trace, nodeOrder, edgeOrder []string) *MoveDispatch {
+func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEndpoints, tr *T.Trace, nodeOrder, edgeOrder []string, clk Clock) *MoveDispatch {
 	// nil order (test call sites that don't care about seed order) falls back to sorted
 	// map keys — still deterministic, just not necessarily spec order.
 	if nodeOrder == nil {
@@ -426,7 +426,7 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 		md.dispatch[id] = nm.inbox
 	}
 	for edgeID, ep := range edgeEndpoints {
-		em := newEdgeMover(ep, edgeID, geoms[ep.Source], geoms[ep.Target], tr)
+		em := newEdgeMover(ep, edgeID, geoms[ep.Source], geoms[ep.Target], tr, clk)
 		md.edgeMovers[edgeID] = em
 		md.dispatch[edgeID] = em.inbox
 	}

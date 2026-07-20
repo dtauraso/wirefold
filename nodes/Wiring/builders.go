@@ -57,10 +57,14 @@ type PortBindings struct {
 	// by "node.handle" so the loader can index Outs by edge for node-move
 	// travel-time updates. Render/run paths leave it nil.
 	outSink map[string]*Out
-	// clock is the single monotonic clock the loader shares with every PacedWire.
-	// reflectBuild injects it into nodes that need clock-paced interior animation
-	// (the Input node's refill slide). Test builds without a loader leave it nil,
-	// and such nodes fall back to an instant refill.
+	// clock is the loader's monotonic clock, handed out (via inClock/wireInPort/
+	// wireOutPort) to every In/Out constructed here for a ONE-TIME Copy() at
+	// each owning goroutine's start (docs/planning/visual-editor/
+	// per-goroutine-clock.md) — no PacedWire holds a clock of its own.
+	// reflectBuild also injects it directly into nodes that need clock-paced
+	// interior animation (the Input node's refill slide). Test builds without a
+	// loader leave it nil, and such nodes fall back to an instant refill /
+	// inertClock.
 	clock Clock
 }
 
@@ -347,7 +351,7 @@ func wirePorts(ctx context.Context, v reflect.Value, nodePtr any, name string, p
 // promises.
 func wireInPort(f reflect.Value, portName string, ctx context.Context, name string, pb PortBindings, tr *T.Trace) {
 	if b := pb.singlePaced[portName]; b.pw != nil {
-		f.Set(reflect.ValueOf(NewInPaced(b.pw, ctx, name, portName, tr)))
+		f.Set(reflect.ValueOf(NewInPaced(b.pw, ctx, name, portName, tr, pb.inClock())))
 	} else {
 		ch := pb.deadEndIn(portName)
 		f.Set(reflect.ValueOf(&In{ch: ch, node: name, port: portName, trace: tr, clock: pb.inClock()}))
@@ -371,7 +375,7 @@ func (pb *PortBindings) inClock() Clock {
 // under "node.port" for the loader's node-move travel-time updates.
 func wireOutPort(f reflect.Value, portName string, ctx context.Context, name string, pb PortBindings, tr *T.Trace, sourceOuts *[]*Out) {
 	if b := pb.singlePaced[portName]; b.pw != nil {
-		o := NewOutPaced(b.pw, ctx, name, portName, tr, b.rule, b.arc, b.latency, b.seg, b.label)
+		o := NewOutPaced(b.pw, ctx, name, portName, tr, b.rule, b.arc, b.latency, b.seg, b.label, pb.inClock())
 		*sourceOuts = append(*sourceOuts, o)
 		if pb.outSink != nil {
 			pb.outSink[name+"."+portName] = o
@@ -392,7 +396,7 @@ func wireOutMultiPort(f reflect.Value, portName string, ctx context.Context, nam
 	if bs := pb.multiPaced[portName]; len(bs) > 0 {
 		outs := make(OutMulti, len(bs))
 		for i, b := range bs {
-			outs[i] = NewOutPaced(b.pw, ctx, name, b.handle, tr, b.rule, b.arc, b.latency, b.seg, b.label)
+			outs[i] = NewOutPaced(b.pw, ctx, name, b.handle, tr, b.rule, b.arc, b.latency, b.seg, b.label, pb.inClock())
 			*sourceOuts = append(*sourceOuts, outs[i])
 			if pb.outSink != nil {
 				pb.outSink[name+"."+b.handle] = outs[i]

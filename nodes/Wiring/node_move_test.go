@@ -67,7 +67,8 @@ func TestDecentralizedNodeMove(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	tr := T.New(256)
-	_, slotReg, md, err := LoadTopology(ctx, path, tr, NewRealClock())
+	clk := NewRealClock()
+	_, slotReg, md, err := LoadTopology(ctx, path, tr, clk)
 	if err != nil {
 		t.Fatalf("LoadTopology: %v", err)
 	}
@@ -79,10 +80,13 @@ func TestDecentralizedNodeMove(t *testing.T) {
 		t.Fatalf("missing Out/wire: out=%v pw=%v", out, pw)
 	}
 
-	// Place a bead on the wire so the move must revise it in flight.
+	// Place a bead on the wire so the move must revise it in flight. This test's own
+	// driving goroutine (placeAndDrive's driveGenToDelivery) gets its own copy of
+	// clk, per-goroutine-clock.md — not the same instance production goroutines
+	// (e.g. the edgeMover) hold.
 	seg0 := wireSegment{Start: out.Geom().Start, End: out.Geom().End}
 	bp := beadPlacement{InFlightMs: out.Geom().SimLatencyMs, Start: seg0.Start, End: seg0.End, Node: "src", Port: "Out"}
-	if !placeAndDrive(pw, 7, bp) {
+	if !placeAndDrive(pw, 7, bp, clk.Copy()) {
 		t.Fatal("placeAndDrive rejected on fresh wire")
 	}
 

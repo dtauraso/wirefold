@@ -171,8 +171,11 @@ func openWindowIfNeeded(g *GateNode, w *gateWindow, now func() int64) {
 // tryFireOnDwell handles the both-inputs-held case: it starts the fire-dwell timer
 // on first entry, and once the dwell has elapsed, fires the AND result and resets
 // the held/window/dwell state. Returns true if it fired (caller should `continue`
-// its loop iteration without also running the window-timeout check).
-func tryFireOnDwell(g *GateNode, w *gateWindow, now func() int64) bool {
+// its loop iteration without also running the window-timeout check). placeTick is
+// the tick to stamp the fire placement with, read by the caller from ITS OWN clock
+// copy (docs/planning/visual-editor/per-goroutine-clock.md) — this function never
+// reads a clock itself.
+func tryFireOnDwell(g *GateNode, w *gateWindow, now func() int64, placeTick int64) bool {
 	if !(g.HasLeft && g.HasRight) {
 		return false
 	}
@@ -208,7 +211,7 @@ func tryFireOnDwell(g *GateNode, w *gateWindow, now func() int64) bool {
 	// per-cycle loop (RunGate) StepOnces it one position per human-clock
 	// cycle (or chan-mode sends immediately) — the gate goroutine is never
 	// parked across the output traversal.
-	g.ToPassed.PlaceDriven(result)
+	g.ToPassed.PlaceDrivenAt(result, placeTick)
 	return true
 }
 
@@ -301,7 +304,7 @@ func RunGate(ctx context.Context, g *GateNode, invertLeft bool) {
 
 		openWindowIfNeeded(g, &w, now)
 
-		fired := tryFireOnDwell(g, &w, now)
+		fired := tryFireOnDwell(g, &w, now, now())
 
 		// A partial combination has been open longer than W → clear it. Only
 		// time out while still waiting for the second input; once both are held
@@ -318,7 +321,7 @@ func RunGate(ctx context.Context, g *GateNode, invertLeft bool) {
 			// the output traversal — StepOnce runs every cycle regardless of
 			// whether this cycle fired, so a bead placed on a previous fire keeps
 			// moving while the window/dwell logic above continues concurrently.
-			g.ToPassed.StepOnce(ctx)
+			g.ToPassed.StepOnceAt(ctx, now())
 		}
 	}
 }

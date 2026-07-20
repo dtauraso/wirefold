@@ -65,7 +65,7 @@ func (p *Node) Update(ctx context.Context) {
 			}
 			p.Held = value
 
-			p.FeedbackOut.PlaceDriven(step)
+			p.FeedbackOut.PlaceDrivenAt(step, clk.Tick())
 		}
 
 		// Single loop, one step per cycle: advance any in-flight output bead
@@ -73,7 +73,7 @@ func (p *Node) Update(ctx context.Context) {
 		// traversal — it returns to the top and sleeps one cycle. (A new
 		// input arriving mid-traversal is not a case; there is no place/step
 		// collision to guard.)
-		p.FeedbackOut.StepOnce(ctx)
+		p.FeedbackOut.StepOnceAt(ctx, clk.Tick())
 	}
 }
 

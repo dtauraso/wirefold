@@ -93,7 +93,7 @@ func DriveHeld(ctx context.Context, out *Wiring.Out, held *atomic.Int64, transfo
 				// else: geometry not yet known — don't place this cycle.
 			}
 			if place {
-				if out.PlaceDriven(transform(held.Load())).Failed() {
+				if out.PlaceDrivenAt(transform(held.Load()), clk.Tick()).Failed() {
 					return
 				}
 				if paced {
@@ -104,7 +104,7 @@ func DriveHeld(ctx context.Context, out *Wiring.Out, held *atomic.Int64, transfo
 			if err := sleep(ctx); err != nil {
 				return
 			}
-			out.StepOnce(ctx)
+			out.StepOnceAt(ctx, clk.Tick())
 		}
 	}()
 }

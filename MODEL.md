@@ -98,7 +98,7 @@ gate — the clock is free-running and the animation never halts.
 
 Each wire times its OWN delivery on the human-speed clock: when its
 `ticksToCross` have elapsed (observed by the owning node's loop driving
-`StepOnce` one cycle at a time) the wire puts the bead on the
+`StepOnceAt` one cycle at a time) the wire puts the bead on the
 channel to the destination node. Delivery is not triggered by the renderer — there is no
 cross-boundary delivery signal. The editor is told where each bead is;
 it is never asked when a bead has arrived.

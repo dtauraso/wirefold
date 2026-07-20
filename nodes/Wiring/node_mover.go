@@ -379,19 +379,33 @@ type edgeMover struct {
 	dest    *PacedWire // dest wire (in-flight revision + latency aggregate)
 	inbox   chan moveMsg
 	tr      *T.Trace
+	// clockSrc is the Clock this edgeMover's own goroutine (run) Copies from
+	// EXACTLY ONCE at its own start (docs/planning/visual-editor/
+	// per-goroutine-clock.md), into clk below. Not read again afterward.
+	clockSrc Clock
+	// clk is this edgeMover's OWN clock copy, set once by run() at goroutine
+	// start. Only this goroutine (handle, called from run's loop) ever reads
+	// it, so no lock is needed. nil until run() has started (tests that call
+	// handle() directly without run() must set it themselves).
+	clk Clock
 }
 
-func newEdgeMover(ep EdgeEndpoints, edgeID string, srcGeom, dstGeom nodeGeom, tr *T.Trace) *edgeMover {
+func newEdgeMover(ep EdgeEndpoints, edgeID string, srcGeom, dstGeom nodeGeom, tr *T.Trace, clockSrc Clock) *edgeMover {
+	// clk defaults to the inert placeholder so a test that calls handle()
+	// directly (without launching run() as a goroutine) never dereferences a
+	// nil Clock; run() overwrites it with a real per-goroutine copy at start.
 	return &edgeMover{
-		edgeID:  edgeID,
-		srcID:   ep.Source,
-		dstID:   ep.Target,
-		srcH:    ep.SourceHandle,
-		dstH:    ep.TargetHandle,
-		srcGeom: srcGeom,
-		dstGeom: dstGeom,
-		inbox:   make(chan moveMsg, 8),
-		tr:      tr,
+		edgeID:   edgeID,
+		srcID:    ep.Source,
+		dstID:    ep.Target,
+		srcH:     ep.SourceHandle,
+		dstH:     ep.TargetHandle,
+		srcGeom:  srcGeom,
+		dstGeom:  dstGeom,
+		inbox:    make(chan moveMsg, 8),
+		tr:       tr,
+		clockSrc: clockSrc,
+		clk:      inertClock{},
 	}
 }
 
@@ -478,7 +492,7 @@ func (m *edgeMover) recomputeGeometry() {
 	// Re-derive an in-flight bead on this edge from the new arc + segment (no-op if
 	// none in flight); the dest wire owns the bead under its own mutex.
 	if m.dest != nil {
-		m.dest.ReviseInFlightGeometry(arc, seg)
+		m.dest.ReviseInFlightGeometry(m.clk.Tick(), arc, seg)
 	}
 	// Emit this edge's own segment so the renderer redraws the wire from Go's endpoints.
 	if m.tr != nil {
@@ -490,6 +504,13 @@ func (m *edgeMover) recomputeGeometry() {
 
 // run is the edge's per-goroutine move loop: drain the inbox until ctx is done.
 func (m *edgeMover) run(ctx context.Context) {
+	// Copy taken ONCE at this goroutine's start (run IS the goroutine) —
+	// docs/planning/visual-editor/per-goroutine-clock.md. If no clockSrc was
+	// given (bare test construction), keep the inert placeholder newEdgeMover
+	// seeded m.clk with.
+	if m.clockSrc != nil {
+		m.clk = m.clockSrc.Copy()
+	}
 	for {
 		select {
 		case <-ctx.Done():

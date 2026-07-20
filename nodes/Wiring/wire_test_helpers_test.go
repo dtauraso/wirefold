@@ -33,24 +33,27 @@ func writeTreeFile(t *testing.T, root, rel, body string) {
 const cascadeSettle = 20 * time.Millisecond
 
 // placeAndDrive places a bead WITHOUT a walker and drives it to delivery on a
-// background goroutine that StepOnces on a short wall-clock poll, matching the
-// production per-cycle StepOnce delivery path (no blocking delivery loop). The
-// real clock advances on its own, so each StepOnce reads a later tick until the
-// bead's deadline is crossed and it lands in the delivered FIFO.
-func placeAndDrive(pw *PacedWire, val int, bp beadPlacement) bool {
-	gen, ok := pw.placeBeadNoWalker(val, bp)
+// background goroutine that StepOnceAts on a short wall-clock poll, matching the
+// production per-cycle StepOnceAt delivery path (no blocking delivery loop). The
+// background goroutine owns its own clock copy (docs/planning/visual-editor/
+// per-goroutine-clock.md) and re-reads its Tick() each poll, so each StepOnceAt
+// observes a later tick until the bead's deadline is crossed and it lands in
+// the delivered FIFO.
+func placeAndDrive(pw *PacedWire, val int, bp beadPlacement, clk Clock) bool {
+	gen, ok := pw.placeBeadNoWalkerAt(val, bp, clk.Tick())
 	if !ok {
 		return false
 	}
-	go driveGenToDelivery(pw, gen)
+	go driveGenToDelivery(pw, gen, clk.Copy())
 	return true
 }
 
-// driveGenToDelivery repeatedly StepOnces pw until the bead identified by gen is
+// driveGenToDelivery repeatedly StepOnceAts pw until the bead identified by gen is
 // no longer in flight (delivered or torn down). It polls on a short wall-clock
-// sleep; each StepOnce reads the live real clock, so the bead advances as real
-// time carries the tick forward.
-func driveGenToDelivery(pw *PacedWire, gen uint64) {
+// sleep; each StepOnceAt reads clk's live Tick(), so the bead advances as real
+// time carries the tick forward. clk must be a copy this goroutine owns
+// exclusively (see placeAndDrive).
+func driveGenToDelivery(pw *PacedWire, gen uint64, clk Clock) {
 	ctx := context.Background()
 	for {
 		pw.mu.Lock()
@@ -59,7 +62,7 @@ func driveGenToDelivery(pw *PacedWire, gen uint64) {
 		if idx < 0 {
 			return
 		}
-		pw.StepOnce(ctx)
+		pw.StepOnceAt(ctx, clk.Tick())
 		time.Sleep(time.Millisecond)
 	}
 }
