@@ -333,7 +333,7 @@ func injectClosures(ctx context.Context, v reflect.Value, name string, pb PortBi
 		injectFunc(v, "Tick", tTickFunc, func() int64 { return clk.Tick() })
 		// Clock Wiring.Clock: the node's OWN clock storage, seeded from the loader's
 		// origin so the node's goroutine can Copy() it exactly once at its own
-		// start (docs/planning/visual-editor/per-goroutine-clock.md) — this field is
+		// start — this field is
 		// never read repeatedly by anything outside the node's own goroutine, and it
 		// is never reached through a port. Only fields typed exactly Wiring.Clock
 		// (e.g. input.Node.Clock, gatecommon.GateNode.Clock) receive this; other
@@ -363,7 +363,7 @@ var speedChanFieldNames = []string{"SpeedCh", "DriveSpeedCh", "Out1SpeedCh", "Ou
 // speedChanFieldNames that the struct pointed to by v actually declares (typed
 // exactly `<-chan float64`), injects its RECEIVE end into that field, and
 // appends its SEND end to *pb.speedSinks — the loader's build-wide accumulator
-// (docs/planning/visual-editor/per-goroutine-clock.md "Delivery"). A no-op
+// of every goroutine's speed channel, broadcast to on a speed change. A no-op
 // when pb.speedSinks is nil (test builds with no loader): such a node's
 // goroutines simply have no speed channel to poll, exactly like they had no
 // shared clock to receive a speed change on before this plan either.

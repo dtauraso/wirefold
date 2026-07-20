@@ -57,7 +57,7 @@ import (
 // STRATEGY (wire-tick-paced vs. per-cycle chan) depends on out.Paced().
 //
 // clk is the ORIGIN clock this goroutine Copies from exactly ONCE at its own start
-// (docs/planning/visual-editor/per-goroutine-clock.md) — the caller's own Clock field
+// — the caller's own Clock field
 // (e.g. Pulse/HoldFlip's Node.Clock, injected by reflectBuild), not derived from out
 // (port accessors are gone: API demolition item 1). nil only on a genuinely
 // clock-less build (unit tests with no loader): DriveHeld then falls back to a
@@ -96,7 +96,7 @@ func DriveHeld(ctx context.Context, out *Wiring.Out, held *atomic.Int64, transfo
 		tick := func() int64 { return 0 }
 		if clk != nil {
 			// Copy taken ONCE at this goroutine's start (the go func() literal above
-			// IS the goroutine) — docs/planning/visual-editor/per-goroutine-clock.md.
+			// IS the goroutine).
 			c = clk.Copy()
 			// Fold the speed-delivery poll into the one blocking point this loop has
 			// (this comment block's own note above it): DriveHeld's only blocking

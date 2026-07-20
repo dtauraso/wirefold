@@ -6,7 +6,7 @@ import (
 )
 
 // clock_copy_test.go — pins the property the whole per-goroutine-clock change rests
-// on (docs/planning/visual-editor/per-goroutine-clock.md): with RealClock.mu deleted,
+// on: with RealClock.mu deleted,
 // RealClock is a plain value type, and a dereference-copy (`c2 := *c1`) is how a
 // goroutine gets its OWN clock rather than reaching a shared one through a pointer.
 // Two properties fall out of "copy, don't share":

@@ -1,8 +1,7 @@
 // node_move.go — decentralized node-move handling.
 //
 // A node-move is NOT handled by a central coordinator. Instead the loader wires each
-// mover's dedicated inbound channels (docs/planning/visual-editor/outbox-two-channels.md):
-// there is no shared many-to-one inbox — every pair of movers that talk (a node and its
+// mover's dedicated inbound channels: there is no shared many-to-one inbox — every pair of movers that talk (a node and its
 // incident edge, or two nodes joined by an edge) gets its OWN directed channel, plus every
 // mover gets one dedicated "external" channel for the stdin/gesture goroutine's rare direct
 // entries. The stdin reader's whole job for a move is to write each entry onto the ONE
@@ -88,7 +87,7 @@ type centerSnap struct {
 }
 
 // moveMsg is one entry routed to one of a mover's own dedicated channels (there is no
-// shared inbox — docs/planning/visual-editor/outbox-two-channels.md). kind selects the
+// shared inbox). kind selects the
 // payload:
 //   - "" or "move": node-move — currently a no-op (polar-layout positions all nodes via "center" messages).
 //
@@ -153,7 +152,7 @@ type moveMsg struct {
 }
 
 // MoveDispatch is the pure registry built at load that owns every mover and wires their
-// dedicated channels together (docs/planning/visual-editor/outbox-two-channels.md) — there
+// dedicated channels together — there
 // is no shared dispatch map anymore; md.nodeMovers/md.edgeMovers themselves are the
 // directories a mover's resolveDest closure and the external-entry helpers below look up.
 // It also retains the per-edge source Outs so out-of-package test/verifier callers can
@@ -328,8 +327,7 @@ func (md *MoveDispatch) EdgeSeeds() []EdgeGeomSeed { return md.edgeSeeds }
 // newMoveDispatch builds the registry from per-node geometry and per-edge endpoints.
 // It creates one nodeMover per node and one edgeMover per edge, registering each under
 // its key (node id / edge id) in md.nodeMovers/md.edgeMovers, and wires the dedicated
-// directed channels between adjacent movers (docs/planning/visual-editor/
-// outbox-two-channels.md). Outs and dest wires are bound later by Bind once node
+// directed channels between adjacent movers. Outs and dest wires are bound later by Bind once node
 // construction has populated them. nodeOrder/edgeOrder are the
 // SPEC order (deterministic directory-sorted order, not map iteration order) used to
 // build md.nodeSeeds/edgeSeeds for buffer row seeding.
@@ -436,8 +434,7 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 		// resolveDest resolves the ONE dedicated directed channel FROM this node
 		// (selfID, captured below) TO destID: another node's own neighborIn[selfID]
 		// slot, or an incident edge's srcIn/dstIn depending on which endpoint this
-		// node is. There is no shared dispatch map to look up (docs/planning/
-		// visual-editor/outbox-two-channels.md) — md.nodeMovers/md.edgeMovers are the
+		// node is. There is no shared dispatch map to look up — md.nodeMovers/md.edgeMovers are the
 		// read-only directories, safe to read from any goroutine once construction
 		// finishes.
 		selfID := id
@@ -535,8 +532,8 @@ func (md *MoveDispatch) Bind(outSink map[string]*Out, slotReg SlotRegistry) {
 }
 
 // Start launches every mover's goroutine — ONE goroutine per node and ONE per edge, no
-// dedicated sender/watcher goroutines (docs/planning/visual-editor/outbox-two-channels.md
-// removed those: each mover's own run loop drains its own inbox AND retries its own
+// dedicated sender/watcher goroutines (an earlier shared-outbox-plus-sender-goroutine
+// design was removed: each mover's own run loop drains its own inbox AND retries its own
 // pending sends, non-blockingly, every cycle).
 func (md *MoveDispatch) Start(ctx context.Context) {
 	md.ctx = ctx
@@ -601,8 +598,7 @@ func (md *MoveDispatch) sendMove(id string, msg moveMsg) {
 	}
 }
 
-// enqueueFor returns nm's own non-blocking send function (docs/planning/visual-editor/
-// outbox-two-channels.md): it fires the msgTap (at enqueue time, so tap-based tests'
+// enqueueFor returns nm's own non-blocking send function: it fires the msgTap (at enqueue time, so tap-based tests'
 // counts/ordering match today's behavior), appends the message to nm's own pending
 // retry queue, and attempts an immediate flush — never blocking the calling handler
 // goroutine. Bound once per node at construction (nm.sendMove = md.enqueueFor(nm)) so

@@ -112,7 +112,7 @@ func (g *Node) Update(ctx context.Context) {
 
 	// Copy taken ONCE at this goroutine's start (Update IS the goroutine); the
 	// DRIVE goroutine above takes its own copy independently inside
-	// gatecommon.DriveHeld (docs/planning/visual-editor/per-goroutine-clock.md).
+	// gatecommon.DriveHeld.
 	clk := g.Clock.Copy()
 
 	// Paced mode: do activities, sleep one human clock cycle, repeat.

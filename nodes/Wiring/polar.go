@@ -3,7 +3,7 @@ package Wiring
 import "math"
 
 // polar.go — spherical (polar) coordinate type and conversions for the
-// polar layout model (docs/planning/visual-editor/polar-coordinate-model.md).
+// polar layout model.
 //
 // Pole = +y (vertical/up). Convention (matches the spec §2):
 //

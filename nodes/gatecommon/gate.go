@@ -53,9 +53,9 @@ type GateNode struct {
 	// Clock is this node's OWN clock storage, seeded by reflectBuild from the
 	// loader's origin (builders.go injectClosures, bare-field injection matched by
 	// exact type Wiring.Clock — see input.Node.Clock for the model this mirrors).
-	// RunGate Copies it exactly ONCE at its own goroutine's start
-	// (docs/planning/visual-editor/per-goroutine-clock.md); ports no longer carry
-	// or hand out a clock (API demolition item 1), so this is the only path in.
+	// RunGate Copies it exactly ONCE at its own goroutine's start; ports no
+	// longer carry or hand out a clock (API demolition item 1), so this is the
+	// only path in.
 	// nil on a test build with no loader — RunGate falls back to Tick/wall-clock
 	// sleep in that case, exactly as before.
 	Clock Wiring.Clock
@@ -265,8 +265,7 @@ func RunGate(ctx context.Context, g *GateNode, invertLeft bool) {
 	}
 
 	// Copy taken ONCE at this goroutine's start (RunGate IS the goroutine, run
-	// once per gate node) — docs/planning/visual-editor/per-goroutine-clock.md.
-	// This copy backs both now() and sleep() whenever the loader provided one
+	// once per gate node). This copy backs both now() and sleep() whenever the loader provided one
 	// (g.Clock != nil). g.Clock is this node's own clock storage (seeded by
 	// reflectBuild from the loader's origin); ports no longer hand out a clock
 	// (API demolition item 1), so this replaces the old g.ToPassed.Clock().Copy().

@@ -134,8 +134,7 @@ func TestEveryDragRecipientLogsAbcDragBreadcrumb(t *testing.T) {
 	// to) can be satisfied by that stale seed value before the drag's
 	// moveMsgKindNeighborSetC has even been delivered — now that each nodeMover
 	// drains its inbox non-blockingly and paces on its own clock cycle instead of
-	// waking instantly on receive (docs/planning/visual-editor/
-	// outbox-two-channels.md), that race is no longer masked by near-instant
+	// waking instantly on receive, that race is no longer masked by near-instant
 	// in-process delivery. Anchoring on the breadcrumb (the causally-later event)
 	// instead of "entry exists" removes the race rather than papering over it with a
 	// longer fixed sleep.

@@ -54,7 +54,7 @@ func (in *Node) Update(ctx context.Context) {
 
 	// Copy taken ONCE at this goroutine's start (Update IS the goroutine): from
 	// here on this loop reads only its own clock, never in.Clock (this node's
-	// origin field) directly again (docs/planning/visual-editor/per-goroutine-clock.md).
+	// origin field) directly again.
 	clk := in.Clock.Copy()
 
 	// Paced mode: single loop, one step per human-clock cycle. windowActive tracks

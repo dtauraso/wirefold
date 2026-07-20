@@ -163,8 +163,7 @@ func (b *buildCtx) computeLocalPolars() {
 		// distance lands on a whole tick of a small grid).
 		t, p, r := LocalPolar{}.effectiveSteps()
 
-		// The measurement pole is a pure function of live geometry
-		// (docs/planning/visual-editor/deterministic-local-pole.md, rotating_pole.go
+		// The measurement pole is a pure function of live geometry (rotating_pole.go
 		// localPole) — resolved from EVERY neighbor's CURRENT world offset. A STORED pole
 		// (persisted by a prior runtime requantize, WriteLocalPolars) is honored verbatim
 		// when present, so a reload reconstructs the exact same pole a live drag last

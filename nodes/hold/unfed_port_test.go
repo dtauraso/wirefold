@@ -12,8 +12,7 @@
 // because the panic lived in the wiring path, not in Node's logic: every other test in
 // this package wires the input port, which is exactly why the crash went unnoticed.
 //
-// Per-goroutine-clock.md's API demolition (docs/planning/visual-editor/
-// per-goroutine-clock.md) removed In.Clock()/Out.Clock() entirely — a node now
+// Per-goroutine-clock's API demolition removed In.Clock()/Out.Clock() entirely — a node now
 // carries its OWN Clock field (seeded by reflectBuild from the loader's origin) and
 // Copies it once at its own goroutine's start, independent of whether any port is
 // wired. The nil-clock hazard this test guards moved from the port to that field;
