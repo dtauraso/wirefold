@@ -47,14 +47,25 @@ import (
 // counter would keep placing at 0 (piling beads at the source) and would not
 // speed up at 2×.
 //
-// Chan mode (!out.Paced(), unit tests) has no shared clock and no wire geometry,
-// so it keeps the OLD unconditional per-cycle placement (wall-clock sleep) — that
-// mode has no tick to read and no wire to visualize.
+// Chan mode (!out.Paced(), unit tests) has no wire to advance, so it keeps the
+// OLD unconditional per-cycle placement (synchronous chan send) — there is no
+// wire geometry (K) to pace placement against. It may still have a REAL clock
+// copy (clk != nil, e.g. a test that constructs one directly, or a production
+// Out that simply has no wire attached in this topology) — see the clk param
+// doc below: the clock is taken and kept speed-aware regardless of out.Paced(),
+// exactly like RunGate (nodes/gatecommon/gate.go) — only the placement/step
+// STRATEGY (wire-tick-paced vs. per-cycle chan) depends on out.Paced().
+//
 // clk is the ORIGIN clock this goroutine Copies from exactly ONCE at its own start
 // (docs/planning/visual-editor/per-goroutine-clock.md) — the caller's own Clock field
 // (e.g. Pulse/HoldFlip's Node.Clock, injected by reflectBuild), not derived from out
-// (port accessors are gone: API demolition item 1). nil in chan mode (unit tests with
-// no loader): fine, because clk is never touched unless out.Paced().
+// (port accessors are gone: API demolition item 1). nil only on a genuinely
+// clock-less build (unit tests with no loader): DriveHeld then falls back to a
+// raw wall-clock sleep and never applies a speed change, because there is no
+// clock to apply one to. Whenever clk is non-nil it is Copied and kept
+// speed-aware UNCONDITIONALLY — out.Paced() must NOT gate this (that was the
+// bug: an Out with no wire fell back to a wall-clock sleep deaf to the
+// playback-speed slider, the same shape RunGate was fixed for in gate.go).
 //
 // speedCh delivers a speed change to THIS goroutine's own clock copy
 // (per-goroutine-clock.md "Delivery"). Each DriveHeld call spawns an
@@ -75,11 +86,14 @@ func DriveHeld(ctx context.Context, out *Wiring.Out, held *atomic.Int64, transfo
 				return nil
 			}
 		}
-		// tick returns the current tick in paced mode (off this goroutine's own
-		// clock copy) or 0 in chan mode, where no caller reads it for anything
+		// tick returns the current tick off this goroutine's own clock copy
+		// whenever one exists (clk != nil), or 0 on a genuinely clock-less build
+		// (unit tests with no loader), where no caller reads it for anything
 		// meaningful (PlaceDrivenAt's chan-mode branch ignores the tick argument).
+		// This must NOT be gated on `paced` — an Out with no wire but a real
+		// clock copy still has to stay speed-aware (see the doc comment above).
 		tick := func() int64 { return 0 }
-		if paced {
+		if clk != nil {
 			// Copy taken ONCE at this goroutine's start (the go func() literal above
 			// IS the goroutine) — docs/planning/visual-editor/per-goroutine-clock.md.
 			c = clk.Copy()
