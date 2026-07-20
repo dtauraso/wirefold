@@ -89,7 +89,7 @@ func TestGateWithUnwiredOutputStillObeysSpeed(t *testing.T) {
 	// gets a chance to start advancing on a not-yet-scaled clock.
 	speedCh <- 0
 
-	if !leftSrc.PlaceDrivenAt(1, clk.Tick()).Live() {
+	if !leftSrc.PlaceDrivenAt(1).Live() {
 		t.Fatal("PlaceDrivenAt(left) returned false")
 	}
 
@@ -124,7 +124,7 @@ func stepPacedWire(ctx context.Context, pw *Wiring.PacedWire, clk Wiring.Clock) 
 			return
 		default:
 		}
-		pw.StepOnceAt(ctx, clk.Tick())
+		pw.DriveOneCycle(ctx, clk.Tick())
 		time.Sleep(time.Millisecond)
 	}
 }

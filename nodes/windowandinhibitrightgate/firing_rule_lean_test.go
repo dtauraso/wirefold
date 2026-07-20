@@ -10,11 +10,11 @@ import (
 	"github.com/dtauraso/wirefold/nodes/gatecommon"
 )
 
-// stepWire continuously StepOnceAts pw on a short wall-clock poll until ctx is
-// cancelled, matching the production per-cycle StepOnceAt delivery path (no
-// blocking delivery loop). Only needed for the two INPUT wires here: the
-// gate's own RunGate loop drives ToPassed's StepOnceAt itself each cycle. clk
-// is this goroutine's OWN clock copy (docs/planning/visual-editor/
+// stepWire continuously DriveOneCycles pw on a short wall-clock poll until ctx
+// is cancelled, matching the production per-cycle drive path a wire's own
+// goroutine (edgeMover.run) would otherwise supply. Needed for every wire here
+// (both inputs and ToPassed): this bare-wire unit test has no edgeMover of its
+// own. clk is this goroutine's OWN clock copy (docs/planning/visual-editor/
 // per-goroutine-clock.md); callers must not share it with another goroutine.
 func stepWire(ctx context.Context, pw *Wiring.PacedWire, clk Wiring.Clock) {
 	go func() {
@@ -24,7 +24,7 @@ func stepWire(ctx context.Context, pw *Wiring.PacedWire, clk Wiring.Clock) {
 				return
 			default:
 			}
-			pw.StepOnceAt(ctx, clk.Tick())
+			pw.DriveOneCycle(ctx, clk.Tick())
 			time.Sleep(time.Millisecond)
 		}
 	}()
@@ -61,6 +61,7 @@ func runGate(t *testing.T, left, right int) int {
 	rightSrc := Wiring.NewPacedOutNoGeom(rightPw, ctx, "seed", "Out", tr, Wiring.RuleFireAndForget, 0, 0, "")
 
 	outPw := Wiring.NewPacedWire(latMs*Wiring.PulseSpeedWuPerMs, Wiring.PulseSpeedWuPerMs)
+	stepWire(ctx, outPw, clk.Copy())
 
 	node := &Node{GateNode: gatecommon.GateNode{
 		Fire:      func() {},
@@ -83,10 +84,10 @@ func runGate(t *testing.T, left, right int) int {
 		}
 	}()
 
-	if !leftSrc.PlaceDrivenAt(left, clk.Tick()).Live() {
+	if !leftSrc.PlaceDrivenAt(left).Live() {
 		t.Fatal("PlaceDrivenAt(left) returned false")
 	}
-	if !rightSrc.PlaceDrivenAt(right, clk.Tick()).Live() {
+	if !rightSrc.PlaceDrivenAt(right).Live() {
 		t.Fatal("PlaceDrivenAt(right) returned false")
 	}
 

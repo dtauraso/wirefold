@@ -21,7 +21,7 @@ func stepWire(ctx context.Context, pw *Wiring.PacedWire, clk Wiring.Clock) {
 				return
 			default:
 			}
-			pw.StepOnceAt(ctx, clk.Tick())
+			pw.DriveOneCycle(ctx, clk.Tick())
 			time.Sleep(time.Millisecond)
 		}
 	}()
@@ -47,6 +47,10 @@ func TestFlipRoundTripLean(t *testing.T) {
 	inSrc := Wiring.NewPacedOutNoGeom(inPw, ctx, "seed", "Out", tr, Wiring.RuleFireAndForget, 0, 0, "")
 
 	outPw := Wiring.NewPacedWire(latMs*Wiring.PulseSpeedWuPerMs, Wiring.PulseSpeedWuPerMs)
+	// Production drives this output wire via its edge's own goroutine
+	// (edgeMover.run); this bare-wire unit test has no edgeMover, so it must
+	// supply the same per-cycle drive itself.
+	stepWire(ctx, outPw, clk.Copy())
 
 	node := &Node{
 		Fire:  func() {},
@@ -72,12 +76,12 @@ func TestFlipRoundTripLean(t *testing.T) {
 		t.Fatalf("timeout waiting for flipped value %d", want)
 	}
 
-	if !inSrc.PlaceDrivenAt(0, clk.Tick()).Live() {
+	if !inSrc.PlaceDrivenAt(0).Live() {
 		t.Fatal("PlaceDrivenAt returned false")
 	}
 	expectFlip(1) // 1-0 = 1
 
-	if !inSrc.PlaceDrivenAt(1, clk.Tick()).Live() {
+	if !inSrc.PlaceDrivenAt(1).Live() {
 		t.Fatal("PlaceDrivenAt returned false")
 	}
 	expectFlip(0) // 1-1 = 0

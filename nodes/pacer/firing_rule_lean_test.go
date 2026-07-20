@@ -21,7 +21,7 @@ func stepWire(ctx context.Context, pw *Wiring.PacedWire, clk Wiring.Clock) {
 				return
 			default:
 			}
-			pw.StepOnceAt(ctx, clk.Tick())
+			pw.DriveOneCycle(ctx, clk.Tick())
 			time.Sleep(time.Millisecond)
 		}
 	}()
@@ -48,6 +48,10 @@ func TestPacerChangeStepFeedbackLean(t *testing.T) {
 	inSrc := Wiring.NewPacedOutNoGeom(inPw, ctx, "seed", "Out", tr, Wiring.RuleFireAndForget, 0, 0, "")
 
 	outPw := Wiring.NewPacedWire(latMs*Wiring.PulseSpeedWuPerMs, Wiring.PulseSpeedWuPerMs)
+	// Production drives this output wire via its edge's own goroutine
+	// (edgeMover.run); this bare-wire unit test has no edgeMover, so it must
+	// supply the same per-cycle drive itself.
+	stepWire(ctx, outPw, clk.Copy())
 
 	node := &Node{
 		Fire:      func() {},
@@ -77,19 +81,19 @@ func TestPacerChangeStepFeedbackLean(t *testing.T) {
 	}
 
 	// First value ever seen -> step=1 (change from noValue).
-	if !inSrc.PlaceDrivenAt(5, clk.Tick()).Live() {
+	if !inSrc.PlaceDrivenAt(5).Live() {
 		t.Fatal("PlaceDrivenAt returned false")
 	}
 	waitFor(1)
 
 	// Same value again -> step=0.
-	if !inSrc.PlaceDrivenAt(5, clk.Tick()).Live() {
+	if !inSrc.PlaceDrivenAt(5).Live() {
 		t.Fatal("PlaceDrivenAt returned false")
 	}
 	waitFor(0)
 
 	// Different value -> step=1.
-	if !inSrc.PlaceDrivenAt(6, clk.Tick()).Live() {
+	if !inSrc.PlaceDrivenAt(6).Live() {
 		t.Fatal("PlaceDrivenAt returned false")
 	}
 	waitFor(1)

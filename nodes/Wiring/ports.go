@@ -48,11 +48,10 @@ func (i *In) PollRecv() (int, bool) {
 		return 0, false
 	}
 	if i.pw != nil {
-		v, ok := i.pw.PollRecv()
+		n, ok := i.pw.Recv()
 		if !ok {
 			return 0, false
 		}
-		n, _ := v.(int)
 		i.trace.Recv(i.node, i.port, n)
 		return n, true
 	}
@@ -233,20 +232,19 @@ func (o *Out) Gated() bool {
 	return o.Rule != RuleFireAndForget
 }
 
-// placeDrivenNoWalkerAt places one bead on the paced wire WITHOUT spawning a
-// walker goroutine, emitting the SendWire trace at placement time, with the
-// placement tick PINNED by the caller (see PacedWire.placeBeadNoWalkerAt)
-// instead of a live clock read. The placed bead is subsequently driven to
-// delivery by per-cycle StepOnceAt. Caller must have already checked
-// o.pw != nil.
-func (o *Out) placeDrivenNoWalkerAt(v int, tick int64) (gen uint64, ok bool) {
+// placeDrivenNoWalker sends one bead placement onto the paced wire's in-channel
+// (PacedWire.Send — non-blocking, never waits on the wire or the destination) and
+// emits the SendWire trace at placement time. The wire's own goroutine stamps the
+// placement tick from its own clock when it drains the send; the source no longer
+// pins one (MODEL.md: "The wire goroutine reads its OWN clock copy and its own
+// tick"). Caller must have already checked o.pw != nil.
+func (o *Out) placeDrivenNoWalker(v int) (ok bool) {
 	g := o.Geom()
-	gen, ok = o.pw.placeBeadNoWalkerAt(v, o.placementFrom(g), tick)
-	if !ok {
-		return 0, false
+	if !o.pw.Send(v, o.placementFrom(g)) {
+		return false
 	}
 	o.trace.SendWire(o.node, o.port, v, g.ArcLength, g.SimLatencyMs, o.pw.Target, o.pw.TargetHandle)
-	return gen, true
+	return true
 }
 
 // Wired reports whether this Out port is bound to a real edge (paced-wire
@@ -258,22 +256,6 @@ func (o *Out) Wired() bool {
 		return false
 	}
 	return o.pw != nil
-}
-
-// StepOnceAt advances this Out's underlying wire by one non-blocking tick-step
-// (see PacedWire.StepOnceAt), at the tick PINNED by the caller — read from the
-// CALLER's OWN clock copy (docs/planning/visual-editor/per-goroutine-clock.md):
-// any in-flight bead due at that tick moves one position-step, and FIFO-head
-// delivery is attempted if ready. Returns immediately; never parks. No-op in
-// chan mode (o.pw == nil) or for a nil Out. Exported so a node's own
-// continuous-drive goroutine (gatecommon.DriveHeld) can pace itself one tick
-// at a time instead of blocking a full traversal. Use when stepping several
-// Outs in the same cycle so they all observe the same tick.
-func (o *Out) StepOnceAt(ctx context.Context, tick int64) {
-	if o == nil || o.pw == nil {
-		return
-	}
-	o.pw.StepOnceAt(ctx, tick)
 }
 
 // DriveOutcome distinguishes the three outcomes a drive placement can have.
@@ -296,9 +278,9 @@ const (
 	DriveFailed
 )
 
-// DriveItem is an exported handle to one placed bead. Delivery is driven by
-// per-cycle StepOnce on the underlying wire, not by the caller directly — this
-// type reports which of the three DriveOutcomes occurred.
+// DriveItem is an exported handle to one placed bead. Delivery is timed by the
+// wire's own goroutine, not by the caller — this type reports which of the
+// three DriveOutcomes occurred.
 type DriveItem struct {
 	outcome DriveOutcome
 }
@@ -325,23 +307,17 @@ func (di DriveItem) Failed() bool {
 }
 
 // PlaceDrivenAt places one bead on this Out WITHOUT spawning a walker, emits
-// the SendWire trace, and returns a DriveItem reporting the outcome. Delivery
-// is driven by the caller's per-cycle StepOnceAt on this Out (or the
-// underlying wire) each subsequent cycle. In chan mode (tests) it sends
-// immediately on the raw channel and returns DriveSentChan, so unit tests keep
-// their synchronous chan semantics. A nil Out returns DriveFailed.
-//
-// tick is PINNED by the caller — read from the CALLER's OWN clock copy (see
-// PacedWire.placeBeadNoWalkerAt) — so multiple fan-out wires placed in the
-// same cycle all stamp the same placementTick instead of each independently
-// re-reading a clock (which would skew equal-latency siblings apart by a
-// tick). Chan mode is unaffected (no placementTick concept there).
-func (o *Out) PlaceDrivenAt(v int, tick int64) DriveItem {
+// the SendWire trace, and returns a DriveItem reporting the outcome. Delivery is
+// timed by the wire's own goroutine (PacedWire, driven by edgeMover.run), not by
+// the caller. In chan mode (tests) it sends immediately on the raw channel and
+// returns DriveSentChan, so unit tests keep their synchronous chan semantics. A
+// nil Out returns DriveFailed.
+func (o *Out) PlaceDrivenAt(v int) DriveItem {
 	if o == nil {
 		return DriveItem{outcome: DriveFailed}
 	}
 	if o.pw != nil {
-		if _, ok := o.placeDrivenNoWalkerAt(v, tick); !ok {
+		if !o.placeDrivenNoWalker(v) {
 			return DriveItem{outcome: DriveFailed}
 		}
 		return DriveItem{outcome: DrivePlaced}
@@ -362,19 +338,15 @@ func (o *Out) PlaceDrivenAt(v int, tick int64) DriveItem {
 type OutMulti []*Out
 
 // PlaceDrivenAllAt places value v (no walker) on EVERY Out in the set, emitting
-// the SendWire trace for each and appending a DriveItem per Out to dst, with
-// the placement tick PINNED by the caller (see PacedWire.placeBeadNoWalkerAt /
-// Out.PlaceDrivenAt) so every element of this fan-out set stamps the SAME
-// placementTick instead of each independently re-reading the live shared clock
-// across sequential placements. Delivery is driven by the caller's per-cycle
-// StepOnce on each wire, so the whole fan-out animates concurrently. Chan-mode
-// Outs send immediately and contribute inert items.
-func (outs OutMulti) PlaceDrivenAllAt(v int, tick int64, dst []DriveItem) []DriveItem {
+// the SendWire trace for each and appending a DriveItem per Out to dst. Delivery
+// is timed by each wire's own goroutine, so the whole fan-out animates
+// concurrently. Chan-mode Outs send immediately and contribute inert items.
+func (outs OutMulti) PlaceDrivenAllAt(v int, dst []DriveItem) []DriveItem {
 	for _, o := range outs {
 		if o == nil {
 			continue
 		}
-		dst = append(dst, o.PlaceDrivenAt(v, tick))
+		dst = append(dst, o.PlaceDrivenAt(v))
 	}
 	return dst
 }
