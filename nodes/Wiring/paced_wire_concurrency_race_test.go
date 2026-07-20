@@ -3,8 +3,7 @@
 // ONE goroutine (the wire's own — driveOneCycle/ReviseInFlightGeometry, folded into
 // edgeMover.run in production), while the SOURCE and DESTINATION goroutines touch
 // only the channel-shaped cross-goroutine surface (Send/RecvTick). No lock guards
-// any of this — ownership replaces locking (docs/planning/visual-editor/
-// wire-owns-itself.md).
+// any of this — ownership replaces locking.
 //
 // This supersedes the old three-goroutine pw.mu contention test (source
 // place+step, dest recv, edge geometry-revise all reaching into one mutex): under

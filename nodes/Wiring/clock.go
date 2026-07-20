@@ -95,8 +95,8 @@ type RealClock struct {
 	// No mutex here on purpose. The mutex this struct used to carry existed for a
 	// contention shape that no longer applies: many pacing-loop readers of Tick()
 	// racing the one SetSpeed writer, all reaching through ONE shared *RealClock.
-	// Per-goroutine-clock (docs/planning/visual-editor/per-goroutine-clock.md)
-	// removes that shape by ownership rather than by locking — a RealClock is now
+	// Per-goroutine ownership removes that shape by ownership rather than by
+	// locking — a RealClock is now
 	// held by exactly ONE goroutine, which is the only thing that ever reads or
 	// writes it. There is no second goroutine to race, so there is nothing left to
 	// guard. A mutex on state nobody else touches is not "extra safety," it is dead

@@ -1,7 +1,6 @@
 package Wiring
 
-// rotating_pole_test.go — tests for the DETERMINISTIC LOCAL POLE
-// (docs/planning/visual-editor/deterministic-local-pole.md, rotating_pole.go).
+// rotating_pole_test.go — tests for the DETERMINISTIC LOCAL POLE (rotating_pole.go).
 
 import (
 	"context"

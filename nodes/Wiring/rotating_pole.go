@@ -1,5 +1,5 @@
 // rotating_pole.go — the ROTATING PER-NODE LOCAL POLE for the local-polar offset
-// quantization (docs/planning/visual-editor/rotating-pole-frame.md).
+// quantization.
 //
 // A node's local-polar entries (layout_holder.go LocalPolar) quantize each neighbor
 // offset as (colatitude,bearing,radius) about a POLE — historically the fixed world +y
@@ -7,8 +7,8 @@
 // azimuth singularity: the φ-cell width collapses to zero as colatitude→0, so a small
 // world nudge crosses unbounded φ-cells and the quantized bearing degrades to noise.
 //
-// This file makes the pole a PURE, DETERMINISTIC FUNCTION OF LIVE GEOMETRY
-// (docs/planning/visual-editor/deterministic-local-pole.md): `pole = localPole(offsets)`,
+// This file makes the pole a PURE, DETERMINISTIC FUNCTION OF LIVE GEOMETRY:
+// `pole = localPole(offsets)`,
 // where `offsets` are the node's CURRENT neighbor offset vectors. Home is world +y. Away
 // from the singularity the pole IS home; when the offset closest to +y falls inside the
 // singular zone (y-component > cos(poleKickTheta)) the pole tilts by a FIXED increment

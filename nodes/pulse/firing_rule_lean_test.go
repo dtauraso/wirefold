@@ -11,8 +11,7 @@ import (
 
 // stepWire continuously StepOnceAts pw on a short wall-clock poll until ctx is
 // cancelled, matching the production per-cycle StepOnceAt delivery path. clk is
-// this goroutine's OWN clock copy (docs/planning/visual-editor/per-goroutine-
-// clock.md); callers must not share it with another goroutine.
+// this goroutine's OWN clock copy; callers must not share it with another goroutine.
 func stepWire(ctx context.Context, pw *Wiring.PacedWire, clk Wiring.Clock) {
 	go func() {
 		for {

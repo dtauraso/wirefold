@@ -1,7 +1,6 @@
 // node_mover.go — the per-node/per-edge mover actor types split out of node_move.go. Pure
-// move: no logic changes beyond the two-channels-no-inbox-no-blocking restructure
-// (docs/planning/visual-editor/outbox-two-channels.md): there is no shared many-to-one
-// inbox anymore. Every pair of movers that talk gets its OWN dedicated directed channel
+// move: no logic changes beyond the two-channels-no-inbox-no-blocking restructure:
+// there is no shared many-to-one inbox anymore. Every pair of movers that talk gets its OWN dedicated directed channel
 // (nodeMover.neighborIn, edgeMover.srcIn/dstIn), plus one dedicated "external" channel per
 // mover (extIn) for the stdin/gesture goroutine's rare direct entries (drag/dragStart/
 // anchor). node_move.go retains the dispatch registry (MoveDispatch) that WIRES these
@@ -24,8 +23,7 @@ import (
 // pendingSend is one (destination, message) pair this node's own goroutine tried to
 // deliver, failed (the target's inbox was momentarily full), and is retrying — see
 // nodeMover.pending's doc comment. There is no separate sender goroutine and no lock:
-// only nm's own goroutine ever reads or writes nm.pending (docs/planning/visual-editor/
-// outbox-two-channels.md).
+// only nm's own goroutine ever reads or writes nm.pending.
 type pendingSend struct {
 	destID string
 	msg    moveMsg
@@ -69,7 +67,7 @@ type nodeMover struct {
 	neighborIn map[string]chan moveMsg
 	tr         *T.Trace
 	// clockSrc is the Clock this nodeMover's own goroutine (run) Copies from EXACTLY
-	// ONCE at its own start (docs/planning/visual-editor/per-goroutine-clock.md), into
+	// ONCE at its own start, into
 	// clk below — the same pattern edgeMover.run and DriveHeld already use, so the
 	// mover is no longer the odd one out pacing on a bare wall-clock timer. Not read
 	// again after that copy.
@@ -152,8 +150,7 @@ type nodeMover struct {
 	// neighbor's holder AND world position are written only by that neighbor's OWN
 	// goroutine. nil in tests that build a bare nodeMover directly.
 	neighborSetC func(selfID, fromID string, fromCenter vec3, deltaA, deltaB, deltaC int)
-	// pending is THIS node's own outbound retry queue (docs/planning/visual-editor/
-	// outbox-two-channels.md): sendMove appends here and attempts an immediate
+	// pending is THIS node's own outbound retry queue: sendMove appends here and attempts an immediate
 	// non-blocking send; an item that can't be delivered right now (the target's
 	// inbox is momentarily full) stays here and is retried — before any newer item to
 	// the SAME destination — on the next flushPending call, which nm's own run loop
@@ -359,7 +356,7 @@ func (m *nodeMover) flushPending() {
 
 // run is the node's per-goroutine move loop. It paces itself on its OWN clock copy the
 // same way every other loop in the system does (edgeMover.run, DriveHeld,
-// emitRefillSlide — docs/planning/visual-editor/per-goroutine-clock.md): a Clock.Copy()
+// emitRefillSlide): a Clock.Copy()
 // taken once here at goroutine start, ApplySpeedNonBlocking polled once per cycle, and
 // SleepCycle(ctx) as the pacing sleep at the bottom of the loop. It used to be the odd
 // loop out, blocking on a reflect.Select over its whole channel set instead; that is
@@ -367,7 +364,7 @@ func (m *nodeMover) flushPending() {
 //
 // Each cycle FIRST drains every one of its OWN dedicated inbound channels (extIn + one
 // per neighbor, see the type's doc comment) — there is no shared inbox to drain
-// (docs/planning/visual-editor/outbox-two-channels.md) — non-blockingly and acts on
+// — non-blockingly and acts on
 // whatever is there, repeating the drain pass until a full pass finds nothing left (so a
 // backlog on any one channel is fully drained before the cycle paces, not throttled to
 // "one message per channel per cycle"), THEN retries any pending sends, THEN sleeps one
@@ -442,15 +439,13 @@ type edgeMover struct {
 	// channels FROM its two endpoint nodes' own goroutines — srcIn written only by
 	// srcID's nodeMover, dstIn only by dstID's — the literal "two channels" the design
 	// specifies, one per direction this edge can be told about a moved endpoint.
-	// Nothing else ever writes on any of the three (docs/planning/visual-editor/
-	// outbox-two-channels.md).
+	// Nothing else ever writes on any of the three.
 	extIn chan moveMsg
 	srcIn chan moveMsg
 	dstIn chan moveMsg
 	tr    *T.Trace
 	// clockSrc is the Clock this edgeMover's own goroutine (run) Copies from
-	// EXACTLY ONCE at its own start (docs/planning/visual-editor/
-	// per-goroutine-clock.md), into clk below. Not read again afterward.
+	// EXACTLY ONCE at its own start, into clk below. Not read again afterward.
 	clockSrc Clock
 	// clk is this edgeMover's OWN clock copy, set once by run() at goroutine
 	// start. Only this goroutine (handle, called from run's loop) ever reads
@@ -599,8 +594,7 @@ func (m *edgeMover) recomputeGeometry() {
 // goroutine) touch pw.inflight with no lock: there is exactly one goroutine
 // on either side of that call.
 func (m *edgeMover) run(ctx context.Context) {
-	// Copy taken ONCE at this goroutine's start (run IS the goroutine) —
-	// docs/planning/visual-editor/per-goroutine-clock.md. If no clockSrc was
+	// Copy taken ONCE at this goroutine's start (run IS the goroutine). If no clockSrc was
 	// given (bare test construction), keep the inert placeholder newEdgeMover
 	// seeded m.clk with.
 	if m.clockSrc != nil {
