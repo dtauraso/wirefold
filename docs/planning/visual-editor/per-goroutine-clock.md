@@ -255,10 +255,42 @@ band, and it is a separate question — three goroutines can each own a private 
 share nothing, pass A/B/C, and still drift apart if the delivery path is lossy. Keep them
 separate; do not let a passing structural test read as a timing guarantee.
 
+## Why — and it is NOT performance
+
+Checked before building, because the plan read as if it had a perf case. It does not:
+
+- Real topology is 9 nodes / 10 edges. At 62.5 Hz with 1-3 `Tick()` calls per wake that is
+  **~500-1700 lock acquisitions/sec** across the whole network. A Go mutex does tens of
+  millions. There is nothing to relieve.
+- No benchmark, profile, or perf-motivated commit exists for this lock anywhere in the repo
+  (`docs/`, `git log -- nodes/Wiring/clock.go`).
+- The sole writer is a human dragging a slider.
+
+"Widest-fan-in lock in the system" is a true STRUCTURAL statement — many readers, one
+writer — and was being misread as a COST statement. It is not one. Do not re-justify this
+work on speed.
+
+The real reasons, both about comprehension rather than cycles:
+
+1. **Shared state costs reading cost.** A clock reached through `In.Clock()`/`Out.Clock()`/
+   `reflectBuild` means understanding one goroutine requires understanding the whole
+   network's clock wiring — who injected it, whether it is inert, who else holds it. A
+   goroutine that constructs its own clock can be read on its own. This is the dominant
+   cost of the current design and it is paid on every visit to this code, by humans and by
+   AI agents alike.
+2. **The mutex encodes a guarantee nobody needs.** It exists to make every reader agree to
+   the millisecond. Nothing in this system requires that — the premise at the top of this
+   doc (~16 ms of stagger is imperceptible on a hand-operated control) says so outright.
+   The lock is defending an exactness requirement that was assumed, never established.
+   Removing it removes the false premise, not just the contention.
+
+That is the justification. The costs below are real and are accepted against THOSE reasons,
+not against a throughput number.
+
 ## What this buys
 
-- Deletes RealClock.mu outright — the widest-fan-in lock in the system, taken on every
-  `Tick()` read by every pacing loop. Not reduced: removed.
+- Deletes RealClock.mu outright — and with it the assumption that every reader must agree
+  to the millisecond. Not reduced: removed.
 - The clock stops being an exception to the rule that nodes own their own state.
 - Deletes an unrepresentable-nil trap: `inertClock` and the `reflectBuild` type-matched
   injection exist only because an injected clock can be absent (API demolition item 3). A
