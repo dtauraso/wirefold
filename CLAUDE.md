@@ -22,8 +22,9 @@ and never tells Go when a bead arrived. There is no JSON-trace render path and n
 
 ## Core concepts
 
-The model's real entities live in [MODEL.md](MODEL.md): bead, wire (`PacedWire` — a
-passive struct, NOT a goroutine), node goroutine, input port, clock. The active node kinds are the structs
+The model's real entities live in [MODEL.md](MODEL.md): bead, wire (`PacedWire` — an
+ACTIVE goroutine that owns its own beads, with a channel on each end), node goroutine,
+input port, clock. The active node kinds are the structs
 under `nodes/<Kind>/` (see the Node kinds section). The "Model" pointer at the top
 of this file is the only entry point you need.
 
@@ -42,8 +43,7 @@ of this file is the only entry point you need.
    imports are what make a package's `init()` — and therefore its `Wiring.Register` call —
    run at all. **Skip this and the kind does not exist in the binary**: it fails at runtime
    with `unknown type "X"` while its SPEC.md, Go package, and `NODE_DEFS` entry all look
-   correct. Guard: `check-kind-imports.sh`; the parity test
-   `kind_registry_parity_test.go` catches it from the registry side.
+   correct. Guard: `check-kind-imports.sh`.
 
 If a new kind needs a **new column in the content buffer**, add it to the hand-authored
 schema (`Buffer/layout.go`, the `buf:"…"` struct tags) and regenerate in the same commit —
@@ -234,7 +234,7 @@ Fix order is code-first: enforce in code (a guard/hook) before adding more prose
 
 ## Posture (post-v0)
 
-Visual editor reached v0. New work is friction-driven, not phase-driven (per-phase plans are archived under `docs/planning/visual-editor/archive/`); justify changes from real-world editor use logged in [session-log.md](docs/planning/visual-editor/session-log.md). Working mode: user drives the editor and narrates; assistant logs and makes changes.
+Visual editor reached v0. New work is friction-driven, not phase-driven (the old per-phase plans were deleted — git history is the archive, not a `docs/planning/visual-editor/archive/` dir); justify changes from real-world editor use logged in [session-log.md](docs/planning/visual-editor/session-log.md). Working mode: user drives the editor and narrates; assistant logs and makes changes.
 
 ## Language / runtime
 
