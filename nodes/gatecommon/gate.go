@@ -248,18 +248,27 @@ func RunGate(ctx context.Context, g *GateNode, invertLeft bool) {
 		g.EmitGeometry()
 	}
 
-	now := g.Tick
-	if now == nil {
-		now = defaultTick()
-	}
-
 	// paced selects paced vs chan mode: paced mode sleeps one cycle on the shared
 	// clock and StepOnces the output below (never parking across the output
 	// traversal); chan mode falls back to a wall-clock sleep.
 	paced := g.ToPassed.Paced()
+
+	// Copy taken ONCE at this goroutine's start (RunGate IS the goroutine, run
+	// once per gate node) — docs/planning/visual-editor/per-goroutine-clock.md.
+	// In paced mode this ONE copy backs both now() and sleep(), replacing what
+	// used to be two independent accesses to the same shared clock (g.Tick,
+	// injected by builders.go from the loader's shared clock, and
+	// g.ToPassed.Clock()). g.Tick is kept only as the chan-mode/no-loader
+	// fallback for now(), matching prior behavior there.
+	now := g.Tick
 	sleep := defaultSleep()
 	if paced {
-		sleep = g.ToPassed.Clock().SleepCycle
+		clk := g.ToPassed.Clock().Copy()
+		now = clk.Tick
+		sleep = clk.SleepCycle
+	}
+	if now == nil {
+		now = defaultTick()
 	}
 
 	var w gateWindow

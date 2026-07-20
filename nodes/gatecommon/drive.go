@@ -53,7 +53,9 @@ import (
 func DriveHeld(ctx context.Context, out *Wiring.Out, held *atomic.Int64, transform func(int64) int) {
 	go func() {
 		paced := out.Paced()
-		clk := out.Clock()
+		// Copy taken ONCE at this goroutine's start (the go func() literal above
+		// IS the goroutine) — docs/planning/visual-editor/per-goroutine-clock.md.
+		clk := out.Clock().Copy()
 		sleep := func(ctx context.Context) error {
 			select {
 			case <-ctx.Done():

@@ -47,7 +47,10 @@ func (in *Node) Update(ctx context.Context) {
 		in.EmitHeldBead(held)
 	}
 
-	clk := in.FromPrevHoldNewSendOldNode.Clock()
+	// Copy taken ONCE at this goroutine's start (Update IS the goroutine): from
+	// here on this loop reads only its own clock, never the shared one behind
+	// FromPrevHoldNewSendOldNode.Clock() (docs/planning/visual-editor/per-goroutine-clock.md).
+	clk := in.FromPrevHoldNewSendOldNode.Clock().Copy()
 
 	// Paced mode: single loop, one step per human-clock cycle. windowActive tracks
 	// whether the current cycle is inside a processing window — the span from

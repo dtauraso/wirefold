@@ -30,7 +30,9 @@ func (p *Node) Update(ctx context.Context) {
 		p.EmitHeldBead(held)
 	}
 
-	clk := p.FromInput.Clock()
+	// Copy taken ONCE at this goroutine's start (Update IS the goroutine) —
+	// docs/planning/visual-editor/per-goroutine-clock.md.
+	clk := p.FromInput.Clock().Copy()
 
 	for {
 		select {

@@ -136,8 +136,11 @@ func popEnd(working, backup *[]int, init []int) int {
 //
 //	s == 1 -> POP the end (the "change the bead" action); refill on empty.
 //	s == 0 -> hold: do nothing, keep sending the same last bead next loop.
-func (n *Node) updateFeedbackRing(ctx context.Context, working, backup *[]int, init []int, emitBeads func()) {
-	clk := n.clock()
+func (n *Node) updateFeedbackRing(ctx context.Context, working, backup *[]int, init []int, emitBeads func(), clk Wiring.Clock) {
+	// clk is this goroutine's own copy, taken once by the caller (Update) at
+	// startup — docs/planning/visual-editor/per-goroutine-clock.md. Do not
+	// re-derive from n.clock() here; that would be a second, independent copy
+	// from the same shared source, defeating "one copy per goroutine".
 
 	// ONE flat loop, identical in shape to the plain source path below: each
 	// cycle does exactly one step of work, with NO nested wait loop. The
@@ -239,8 +242,14 @@ func (n *Node) Update(ctx context.Context) {
 	}
 	emitBeads() // initial full(4) state
 
+	// Copy taken ONCE at this goroutine's start (Update IS the goroutine, run
+	// once per Input node) — docs/planning/visual-editor/per-goroutine-clock.md.
+	// Passed down to both branches below instead of each independently calling
+	// n.clock() again.
+	clk := n.clock().Copy()
+
 	if n.FeedbackIn.Wired() {
-		n.updateFeedbackRing(ctx, &working, &backup, init, emitBeads)
+		n.updateFeedbackRing(ctx, &working, &backup, init, emitBeads, clk)
 		return
 	}
 
@@ -254,7 +263,7 @@ func (n *Node) Update(ctx context.Context) {
 	// drained it simply idles (no fire) but keeps cycling. Layout/drag handling
 	// is NOT here — the node's dedicated always-on layout goroutine owns it
 	// (split-layout-bead-goroutines.md), independent of this pausable bead loop.
-	clk := n.clock()
+	// clk is the same copy taken once above; no second derivation.
 	emitted := 0
 	// Fire cadence is measured in CLOCK TICKS, exactly like a gate's window/dwell
 	// (gatecommon/gate.go: fire when now()-dwellStart >= fireDwellTicks). Tick()

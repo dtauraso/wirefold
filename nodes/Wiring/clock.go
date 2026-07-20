@@ -66,6 +66,18 @@ type Clock interface {
 	// wall time (piecewise-linear across speed changes), so a bead's fractional
 	// progress t=(now−placement)/crossTicks never jumps when the speed changes.
 	SetSpeed(speed float64)
+	// Copy returns a clock a single goroutine can OWN from this point on. Per
+	// per-goroutine-clock.md: a goroutine calls Copy() exactly ONCE, at its own
+	// start, and uses only the returned clock thereafter — never a second call
+	// mid-loop, and the returned clock must never be handed to a second
+	// goroutine (that would just re-share the same object under a new name).
+	// *RealClock returns a pointer to a fresh value-copy of itself, so the two
+	// clocks share no memory: the copy inherits the origin/accScaled/speed by
+	// value and from then on SetSpeed on one is invisible to the other,
+	// correctly, with nothing left to lock. inertClock returns itself — it is
+	// stateless (Tick is a constant 0, SetSpeed a no-op), so "copying" it has
+	// nothing to duplicate and sharing the single value is harmless.
+	Copy() Clock
 }
 
 // RealClock is the production Clock: SCALED wall-clock elapsed since start, floored
@@ -142,6 +154,15 @@ func (c *RealClock) SetSpeed(speed float64) {
 	c.speed = speed
 }
 
+// Copy returns a pointer to a fresh value-copy of c: a plain struct copy (legal
+// now that mu is gone — see the field comment above), inheriting the current
+// speed/accScaled/lastChange by value. The caller goroutine owns the result
+// from here on; nothing is shared with c or any other copy taken from it.
+func (c *RealClock) Copy() Clock {
+	cp := *c
+	return &cp
+}
+
 // SleepCycle blocks for one WALL tickPeriod, or until ctx is done.
 func (c *RealClock) SleepCycle(ctx context.Context) error {
 	select {
@@ -177,6 +198,11 @@ func (inertClock) SleepCycle(ctx context.Context) error {
 	return ctx.Err()
 }
 func (inertClock) SetSpeed(float64) {}
+
+// Copy returns itself: inertClock is stateless (Tick is a constant 0,
+// SetSpeed a no-op), so there is nothing per-instance to duplicate and
+// sharing the single zero-size value across goroutines is harmless.
+func (c inertClock) Copy() Clock { return c }
 
 // Compile-time assertion that inertClock satisfies Clock.
 var _ Clock = inertClock{}
