@@ -27,7 +27,11 @@ type Node struct {
 	// per-goroutine-clock.md API demolition item 1). Update() Copies it exactly
 	// once at its own start.
 	Clock Wiring.Clock
-	In    *Wiring.In
+	// SpeedCh delivers a speed change to THIS goroutine's own clk copy
+	// (per-goroutine-clock.md "Delivery"), seeded by Wiring.reflectBuild
+	// (injectSpeedChans). nil on a test build with no loader.
+	SpeedCh <-chan float64
+	In      *Wiring.In
 }
 
 func (h *Node) Update(ctx context.Context) {
@@ -49,6 +53,7 @@ func (h *Node) Update(ctx context.Context) {
 		default:
 		}
 
+		Wiring.ApplySpeedNonBlocking(clk, h.SpeedCh)
 		if err := clk.SleepCycle(ctx); err != nil {
 			return
 		}

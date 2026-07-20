@@ -69,7 +69,7 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 	// emits its geometry once at startup (below, after this function's node-goroutine
 	// launch loop); see the row-seeding comment there for why the buffer's row tables do
 	// not depend on that emit order.
-	nodes, slotReg, md, err := W.LoadTopology(ctx, topologyPath, tr, clk)
+	nodes, slotReg, md, speedSinks, err := W.LoadTopology(ctx, topologyPath, tr, clk)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "load topology: %v\n", err)
 		os.Exit(1)
@@ -169,7 +169,7 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 	// Read the editor→Go bridge: "edit" JSON lines (op = create/update/delete)
 	// from stdin. When stdin reaches EOF (extension host disconnect), cancel the context.
 	go func() {
-		W.RunStdinReader(ctx, os.Stdin, slotReg, md, tr, clk)
+		W.RunStdinReader(ctx, os.Stdin, slotReg, md, tr, speedSinks)
 		cancel()
 	}()
 

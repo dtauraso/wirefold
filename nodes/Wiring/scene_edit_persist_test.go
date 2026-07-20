@@ -59,7 +59,7 @@ func writeTree(t *testing.T) string {
 func loadTreeMD(t *testing.T, root string) *MoveDispatch {
 	t.Helper()
 	tr := T.New(0)
-	_, _, md, err := LoadTopology(context.Background(), root, tr, NewRealClock())
+	_, _, md, _, err := LoadTopology(context.Background(), root, tr, NewRealClock())
 	if err != nil {
 		t.Fatalf("LoadTopology: %v", err)
 	}

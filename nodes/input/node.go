@@ -43,7 +43,12 @@ type Node struct {
 	// line of defense in case some future construction path bypasses the
 	// factory. Production reflectBuild always overwrites this with the real
 	// origin clock.
-	Clock            Wiring.Clock
+	Clock Wiring.Clock
+	// SpeedCh delivers a speed change to THIS goroutine's own clk copy
+	// (per-goroutine-clock.md "Delivery"), seeded by Wiring.reflectBuild
+	// (injectSpeedChans) with a fresh buffered-1 channel. nil on a test build
+	// with no loader — ApplySpeedNonBlocking is then always a no-op.
+	SpeedCh          <-chan float64
 	Init             []int `wire:"data.init"`
 	Repeat           bool  `wire:"data.repeat"`
 	ToHoldNewSendOld *Wiring.Out
@@ -188,6 +193,7 @@ func (n *Node) updateFeedbackRing(ctx context.Context, working, backup *[]int, i
 		// FeedbackIn non-blocking. Same one-step-per-cycle cadence as
 		// pacer/gatecommon.DriveHeld and the plain source path; the node is
 		// never parked across the traversal.
+		Wiring.ApplySpeedNonBlocking(clk, n.SpeedCh)
 		if err := clk.SleepCycle(ctx); err != nil {
 			return
 		}
@@ -294,6 +300,7 @@ func (n *Node) Update(ctx context.Context) {
 			emitted++
 		}
 
+		Wiring.ApplySpeedNonBlocking(clk, n.SpeedCh)
 		if err := clk.SleepCycle(ctx); err != nil {
 			return
 		}

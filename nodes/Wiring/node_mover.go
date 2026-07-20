@@ -392,6 +392,12 @@ type edgeMover struct {
 	// placeholder (item 3), so the only non-nil default left is a genuine
 	// clock, not a fake stand-in.
 	clk Clock
+	// speedCh delivers a speed change to THIS edgeMover's own clk copy
+	// (per-goroutine-clock.md "Delivery"). Set once, at construction
+	// (newMoveDispatch), from the loader's build-wide speed-sink accumulator;
+	// nil in bare test construction, which is fine — a nil channel is never
+	// selected in run()'s loop below.
+	speedCh chan float64
 }
 
 func newEdgeMover(ep EdgeEndpoints, edgeID string, srcGeom, dstGeom nodeGeom, tr *T.Trace, clockSrc Clock) *edgeMover {
@@ -522,6 +528,14 @@ func (m *edgeMover) run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
+		case sp := <-m.speedCh:
+			// Delivery (per-goroutine-clock.md): apply directly to this
+			// goroutine's own clk copy — nothing else reaches it. Unlike the
+			// sleep-loop goroutines elsewhere, this select IS the wait point,
+			// so there is no separate non-blocking poll to fold this into.
+			if rc, ok := m.clk.(*RealClock); ok {
+				rc.SetSpeed(sp)
+			}
 		case msg := <-m.inbox:
 			m.handle(msg)
 			if msg.testDone != nil {

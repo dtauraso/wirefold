@@ -59,7 +59,7 @@ func TestGateFireAndOutputTraversal(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	nodes, _, nmr, err := W.LoadTopology(ctx, path, tr, W.NewRealClock())
+	nodes, _, nmr, _, err := W.LoadTopology(ctx, path, tr, W.NewRealClock())
 	if err != nil {
 		t.Fatalf("LoadTopology: %v", err)
 	}

@@ -54,7 +54,11 @@ type GateNode struct {
 	// or hand out a clock (API demolition item 1), so this is the only path in.
 	// nil on a test build with no loader — RunGate falls back to Tick/wall-clock
 	// sleep in that case, exactly as before.
-	Clock     Wiring.Clock
+	Clock Wiring.Clock
+	// SpeedCh delivers a speed change to RunGate's own clock copy
+	// (per-goroutine-clock.md "Delivery"), seeded by Wiring.reflectBuild
+	// (injectSpeedChans). nil on a test build with no loader / chan mode.
+	SpeedCh   <-chan float64
 	Left      int
 	HasLeft   bool
 	Right     int
@@ -277,7 +281,13 @@ func RunGate(ctx context.Context, g *GateNode, invertLeft bool) {
 	if paced {
 		clk := g.Clock.Copy()
 		now = clk.Tick
-		sleep = clk.SleepCycle
+		// Fold the speed-delivery poll into the one blocking point this loop
+		// has (per-goroutine-clock.md "Delivery" — DriveHeld's sibling note
+		// applies equally here: RunGate's only blocking point is this sleep).
+		sleep = func(ctx context.Context) error {
+			Wiring.ApplySpeedNonBlocking(clk, g.SpeedCh)
+			return clk.SleepCycle(ctx)
+		}
 	}
 	if now == nil {
 		now = defaultTick()

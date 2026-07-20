@@ -68,7 +68,7 @@ func TestDecentralizedNodeMove(t *testing.T) {
 	defer cancel()
 	tr := T.New(256)
 	clk := NewRealClock()
-	_, slotReg, md, err := LoadTopology(ctx, path, tr, clk)
+	_, slotReg, md, _, err := LoadTopology(ctx, path, tr, clk)
 	if err != nil {
 		t.Fatalf("LoadTopology: %v", err)
 	}
@@ -188,7 +188,7 @@ func TestNodeGeometryLabelSidecar(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	tr := T.New(256)
-	_, _, md, err := LoadTopology(ctx, path, tr, NewRealClock())
+	_, _, md, _, err := LoadTopology(ctx, path, tr, NewRealClock())
 	if err != nil {
 		t.Fatalf("LoadTopology: %v", err)
 	}
@@ -265,7 +265,7 @@ func TestMoverCenterRace(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	tr := T.New(4096)
-	_, _, md, err := LoadTopology(ctx, path, tr, NewRealClock())
+	_, _, md, _, err := LoadTopology(ctx, path, tr, NewRealClock())
 	if err != nil {
 		t.Fatalf("LoadTopology: %v", err)
 	}
@@ -319,7 +319,7 @@ func TestOutGeomRace(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	tr := T.New(4096)
-	_, _, md, err := LoadTopology(ctx, path, tr, NewRealClock())
+	_, _, md, _, err := LoadTopology(ctx, path, tr, NewRealClock())
 	if err != nil {
 		t.Fatalf("LoadTopology: %v", err)
 	}
@@ -387,7 +387,7 @@ func TestRootMoveContinuousPositionLocalPolarRequantize(t *testing.T) {
 	defer cancel()
 	tr := T.New(4096)
 	defer tr.Close()
-	_, _, md, err := LoadTopology(ctx, path, tr, NewRealClock())
+	_, _, md, _, err := LoadTopology(ctx, path, tr, NewRealClock())
 	if err != nil {
 		t.Fatalf("LoadTopology: %v", err)
 	}

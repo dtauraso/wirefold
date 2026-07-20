@@ -66,6 +66,15 @@ type PortBindings struct {
 	// fields simply stay unset (their own zero-value fallback, e.g. gatecommon's
 	// defaultTick/defaultSleep).
 	clock Clock
+	// speedSinks accumulates the SEND end of every speed channel created for
+	// this node during construction (one per clock-owning goroutine the node
+	// spawns — see injectSpeedChans). It points at the loader's build-wide slice
+	// (buildCtx.speedSinks) so every node's channels land in the one list
+	// LoadTopology hands back to stdin_reader. nil in test builds with no
+	// loader — injectSpeedChans then skips channel creation entirely (a node
+	// with no speed channel just never hears a speed change, same as it never
+	// had a clock to speed up before this plan).
+	speedSinks *[]chan float64
 }
 
 // singleBinding is the resolved paced binding for one single port. For an INPUT
@@ -326,6 +335,46 @@ func injectClosures(ctx context.Context, v reflect.Value, name string, pb PortBi
 		// nodes are unaffected.
 		tClockType := reflect.TypeFor[Clock]()
 		injectFunc(v, "Clock", tClockType, clk)
+	}
+
+	injectSpeedChans(v, pb)
+}
+
+// speedChanFieldNames lists every field name a node kind may declare to receive
+// a speed-delivery channel. Most kinds (input/hold/holdnewsendold/pacer,
+// gatecommon.GateNode) run exactly one clock-owning goroutine and declare only
+// SpeedCh. Pulse/HoldFlip split into a main loop plus one-or-two
+// gatecommon.DriveHeld goroutines (one per driven Out) — each is an
+// INDEPENDENT clock copy, so each needs its OWN channel: sharing one channel
+// across two goroutines would silently starve whichever one loses a given
+// receive, which is exactly the "no goroutine left behind" failure item 3 of
+// per-goroutine-clock.md guards against. DriveSpeedCh/Out1SpeedCh/Out2SpeedCh
+// are those extra per-drive-goroutine channels; a struct that doesn't declare
+// a given name simply doesn't get one (injectSpeedChans is a no-op per name
+// when the field is absent, same contract as injectFunc).
+var speedChanFieldNames = []string{"SpeedCh", "DriveSpeedCh", "Out1SpeedCh", "Out2SpeedCh"}
+
+// injectSpeedChans creates one fresh buffered-1 speed channel per field name in
+// speedChanFieldNames that the struct pointed to by v actually declares (typed
+// exactly `<-chan float64`), injects its RECEIVE end into that field, and
+// appends its SEND end to *pb.speedSinks — the loader's build-wide accumulator
+// (docs/planning/visual-editor/per-goroutine-clock.md "Delivery"). A no-op
+// when pb.speedSinks is nil (test builds with no loader): such a node's
+// goroutines simply have no speed channel to poll, exactly like they had no
+// shared clock to receive a speed change on before this plan either.
+func injectSpeedChans(v reflect.Value, pb PortBindings) {
+	if pb.speedSinks == nil {
+		return
+	}
+	tSpeedChan := reflect.TypeFor[<-chan float64]()
+	for _, fname := range speedChanFieldNames {
+		f := v.FieldByName(fname)
+		if !f.IsValid() || !f.CanSet() || f.Type() != tSpeedChan {
+			continue
+		}
+		speedCh := make(chan float64, 1)
+		f.Set(reflect.ValueOf((<-chan float64)(speedCh)))
+		*pb.speedSinks = append(*pb.speedSinks, speedCh)
 	}
 }
 

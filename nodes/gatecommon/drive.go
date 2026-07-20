@@ -55,7 +55,15 @@ import (
 // (e.g. Pulse/HoldFlip's Node.Clock, injected by reflectBuild), not derived from out
 // (port accessors are gone: API demolition item 1). nil in chan mode (unit tests with
 // no loader): fine, because clk is never touched unless out.Paced().
-func DriveHeld(ctx context.Context, out *Wiring.Out, held *atomic.Int64, transform func(int64) int, clk Wiring.Clock) {
+//
+// speedCh delivers a speed change to THIS goroutine's own clock copy
+// (per-goroutine-clock.md "Delivery"). Each DriveHeld call spawns an
+// INDEPENDENT goroutine with its own clock copy, so a node driving two Outs
+// (Pulse's Out/Out2, or any future fan-out) must pass a DIFFERENT channel per
+// call — passing the same channel to two DriveHeld goroutines would starve
+// whichever one loses a given receive. nil is fine (chan mode, or a caller
+// with no speed channel to give): ApplySpeedNonBlocking is then a no-op.
+func DriveHeld(ctx context.Context, out *Wiring.Out, held *atomic.Int64, transform func(int64) int, clk Wiring.Clock, speedCh <-chan float64) {
 	go func() {
 		paced := out.Paced()
 		var c Wiring.Clock
@@ -75,7 +83,13 @@ func DriveHeld(ctx context.Context, out *Wiring.Out, held *atomic.Int64, transfo
 			// Copy taken ONCE at this goroutine's start (the go func() literal above
 			// IS the goroutine) — docs/planning/visual-editor/per-goroutine-clock.md.
 			c = clk.Copy()
-			sleep = c.SleepCycle
+			// Fold the speed-delivery poll into the one blocking point this loop has
+			// (this comment block's own note above it): DriveHeld's only blocking
+			// point is sleep, so that is where the check goes.
+			sleep = func(ctx context.Context) error {
+				Wiring.ApplySpeedNonBlocking(c, speedCh)
+				return c.SleepCycle(ctx)
+			}
 			tick = c.Tick
 		}
 

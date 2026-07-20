@@ -166,7 +166,7 @@ func TestAbcDragLogIsScopedToCurrentDrag(t *testing.T) {
 	snap := B.NewSnapshotState(&frames)
 	tr := T.NewWithSinkHook(0, nil, snap.Update)
 
-	_, _, md, err := LoadTopology(context.Background(), root, tr, NewRealClock())
+	_, _, md, _, err := LoadTopology(context.Background(), root, tr, NewRealClock())
 	if err != nil {
 		t.Fatalf("LoadTopology: %v", err)
 	}
