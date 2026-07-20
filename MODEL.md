@@ -250,14 +250,20 @@ and none is a source of truth.
   node it is doubly-linked to (its lock center). This is the constraint frame.
 - **Locks are offsets.** A node-node lock nudges ONE component of a node's **stored local
   polar** offset (a bounded copy of a neighbor's owned component), carried node-to-node in the
-  decentralized cascade message (`sendMove`, node-to-node over per-node inboxes — there is no
-  central worklist). The offset lives on the node's `LayoutHolder` (`SetLocalPolar` /
-  `LocalPolarsSnapshot`), seeded from the existing movement-link value by
+  decentralized cascade message (`sendMove`, node-to-node over per-pair directed channels — there is no
+  central worklist and no shared inbox). The offset lives on the node's `LayoutHolder`
+  (`SetLocalPolar` / `LocalPolarsSnapshot`), seeded from the existing movement-link value by
   `computeLocalPolars` at load and re-quantized on move by `requantizeLocalPolars` — there is
-  no separate seed step. Each mover enqueues onto its OWN unbounded `outbox`
-  (`md.enqueueFor(nm.outbox)`), drained by a dedicated sender goroutine (`outbox.run`); the
-  cascade never drops a message. (An earlier direct-to-inbox lossy sender dropped ~98% of
-  sends under load and was removed.)
+  no separate seed step. Each `nodeMover` owns one dedicated inbound channel per adjacent
+  node (`neighborIn`, keyed by sender id) plus one `extIn` channel for external entries
+  (drag/gesture); a send is a non-blocking attempt on the destination's own channel, and on a
+  full channel the message is RETAINED on the sender's own `pending` queue and retried next
+  cycle (`sendMove` / `flushPending`) — there is no dedicated sender goroutine and no lock.
+  This preserves FIFO order per destination and the cascade never drops a message. (An
+  earlier direct-to-inbox lossy sender dropped ~98% of sends under load and was removed; a
+  later shared-`outbox`-plus-sender-goroutine design closed that hole but added two
+  goroutines and unbounded queueing per mover, and was itself replaced by today's
+  per-direction channels with bounded retry.)
 - **No blow-up, by construction.** The offset is STORED and only carried through the
   composition or nudged one component — it is NEVER re-derived as `cart2polar(node − center)`
   from a live world during a cascade. That reconstruction against a mid-moving center is the

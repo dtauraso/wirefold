@@ -112,7 +112,7 @@
   <div class="head-inner">
     <p class="eyebrow">wirefold · concurrency</p>
     <h1>Mutex architecture — who touches what</h1>
-    <p class="sub">Four lock groups left. Each diagram names the real goroutines, the real methods,
+    <p class="sub">Three lock groups left. Each diagram names the real goroutines, the real methods,
     and the real line numbers. A lock with one owner is not a lock.</p>
   </div>
 </header>
@@ -209,71 +209,68 @@ owner, period — the wire's own goroutine. See
 <span style="color:var(--muted)">docs/planning/visual-editor/wire-owns-itself.md</span> and MODEL.md.
 <span style="color:var(--muted)">task/mutex-pacedwire-restructure</span></p>
 
-<!-- ═══════════ 2 · outbox ═══════════ -->
-<h2>1 · outbox.mu + cond — single producer, single consumer</h2>
-<p class="cap">The queue exists so a mover's handler <b>never blocks on a neighbour</b>. That is what
-breaks the mutual-adjacency cascade deadlock.</p>
+<!-- ═══════════ gone · outbox.mu ═══════════ -->
+<h2>gone · outbox.mu + cond — deleted by per-direction channels, not a smaller lock</h2>
+<p class="cap">Before, every mover's handler enqueued onto its own <code>outbox</code> (a mutex+cond
+queue) drained by a dedicated sender goroutine. After, each mover owns one plain channel PER
+ADJACENT NODE (<code>neighborIn</code>) plus one <code>extIn</code> for external entries; a send is a
+non-blocking attempt on the destination's own channel, and on a full channel the sender retains the
+message on its own <code>pending</code> slice and retries next cycle. No queue, no lock, no cond, no
+dedicated sender goroutine — two goroutines fewer per mover.</p>
 
 <div class="plate">
-<svg viewBox="0 0 860 300" role="img" aria-label="One node mover's inbox-drain goroutine enqueues into its own outbox; a single dedicated sender goroutine drains it; a third goroutine only flips the closed flag on context cancel.">
+<svg viewBox="0 0 860 260" role="img" aria-label="Before, a node mover's handler enqueued into its own mutex-and-cond outbox, drained by a dedicated sender goroutine. After, the mover sends directly on the destination's own neighborIn channel; a full channel retains the message on the sender's own pending slice, retried next cycle — no queue, no lock, no sender goroutine.">
+  <text class="tl" x="0" y="14">BEFORE</text>
+  <text class="tl" x="450" y="14">NOW</text>
+  <line x1="415" y1="24" x2="415" y2="200" stroke="var(--line)"/>
+
+  <!-- before -->
+  <rect class="gor" x="0" y="34" width="200" height="30" rx="4"/>
+  <text class="tf" x="10" y="53">nodeMover.run — handle()</text>
+  <path class="arrq" d="M100,64 L100,96"/>
+  <rect class="queue" x="0" y="98" width="200" height="52" rx="6"/>
+  <rect x="10" y="106" width="180" height="20" rx="3" class="box"/>
+  <text class="tw" x="18" y="121">mu + cond</text>
+  <text class="tf" x="10" y="144">q []outboxItem — UNBOUNDED</text>
+  <path class="arrq" d="M100,150 L100,182"/>
+  <text class="tq" x="106" y="170">drain</text>
+  <rect class="gor" x="0" y="184" width="200" height="30" rx="4"/>
+  <text class="tf" x="10" y="203">outbox.run — dedicated sender</text>
+
+  <!-- after -->
+  <rect class="gor" x="450" y="34" width="180" height="30" rx="4"/>
+  <text class="tf" x="460" y="53">nodeMover.run — sendMove</text>
+  <path class="arrk" d="M540,64 L540,96"/>
+  <rect class="safe" x="450" y="98" width="180" height="40" rx="6"/>
+  <text class="tk" x="460" y="120">neighbor's own neighborIn chan</text>
+  <text class="tf" x="460" y="132">non-blocking send</text>
+  <path class="dash" d="M630,120 L680,120"/>
+  <rect class="box" x="682" y="98" width="160" height="60" rx="6"/>
+  <text class="ts" x="692" y="118">full? → nm.pending</text>
+  <text class="tf" x="692" y="134">retained on the SENDER'S</text>
+  <text class="tf" x="692" y="146">own goroutine, no lock</text>
+  <path class="arrk" d="M762,158 C762,180 600,180 540,150" marker-end="url(#ak2)"/>
+  <text class="tf" x="600" y="192">flushPending — retried every cycle</text>
+
   <defs>
-    <marker id="aq" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
-      <path d="M0,0 L10,5 L0,10 z" fill="#C06A12"/>
+    <marker id="ak2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#3B7350"/>
     </marker>
   </defs>
 
-  <text class="tl" x="0" y="14">PRODUCER — 1</text>
-  <text class="tl" x="300" y="14">QUEUE</text>
-  <text class="tl" x="640" y="14">CONSUMER — 1</text>
-
-  <rect class="gor" x="0" y="30" width="238" height="76" rx="6"/>
-  <text class="t"  x="12" y="50">nodeMover.run</text>
-  <text class="ts" x="12" y="66">handle() → ob.enqueue</text>
-  <text class="tf" x="12" y="82">node_move.go:574 · spawned :494</text>
-  <text class="tf" x="12" y="96">one per node</text>
-
-  <path class="arrq" d="M238,68 L318,68" marker-end="url(#aq)"/>
-  <text class="tq" x="246" y="60">enqueue</text>
-  <text class="tf" x="246" y="84">:70 — never blocks</text>
-
-  <rect class="queue" x="318" y="30" width="270" height="140" rx="8"/>
-  <text class="t"  x="332" y="52">outbox</text>
-  <text class="tf" x="332" y="67">node_mover.go:57–58</text>
-  <rect x="332" y="80" width="242" height="26" rx="4" class="box"/>
-  <text class="tw" x="344" y="98">mu + cond</text>
-  <rect x="332" y="114" width="242" height="42" rx="4" class="box"/>
-  <text class="ts" x="344" y="130">q []outboxItem — UNBOUNDED</text>
-  <text class="tf" x="344" y="146">closed bool</text>
-
-  <path class="arrq" d="M588,68 L668,68" marker-end="url(#aq)"/>
-  <text class="tq" x="596" y="60">drain</text>
-
-  <rect class="gor" x="668" y="30" width="192" height="76" rx="6"/>
-  <text class="t"  x="680" y="50">outbox.run</text>
-  <text class="ts" x="680" y="66">dedicated sender</text>
-  <text class="tf" x="680" y="82">node_move.go:503</text>
-  <text class="tf" x="680" y="96">one per node</text>
-
-  <!-- shutdown watcher -->
-  <rect class="box" x="318" y="192" width="270" height="52" rx="6"/>
-  <text class="tq" x="332" y="212">ctx-cancel watcher</text>
-  <text class="tf" x="332" y="228">node_mover.go:85 — sets closed, broadcasts</text>
-  <text class="tf" x="332" y="240">never enqueues or dequeues</text>
-  <path class="dash" d="M453,192 L453,170"/>
-
-  <line x1="0" y1="262" x2="860" y2="262" stroke="var(--line)"/>
-  <text class="tw" x="0" y="282">RED-PROVEN</text>
-  <text class="ts" x="86" y="282">bypass the outbox → cascade deadlock, as a timeout</text>
-  <text class="tf" x="0" y="296">outbox_mutual_adjacency_test.go · TestMutuallyAdjacentDragFloodNoDeadlock</text>
+  <line x1="0" y1="222" x2="860" y2="222" stroke="var(--line)"/>
+  <text class="tk" x="0" y="242">STILL HOLDS: FIFO per destination, cascade never drops a message.</text>
+  <text class="tf" x="0" y="256">node_mover.go · nodeMover.pending / flushPending; node_move.go · sendMove</text>
 </svg>
 </div>
 
-<p class="verdict open"><b>OPEN:</b> per instance this is <b>SPSC</b> — exactly the shape with known
-lock-free forms. Unbounded complicates it; does not rule it out. <b>Also unchecked:</b> nothing
-bounds queue growth or drain time. <span style="color:var(--muted)">task/mutex-outbox-restructure</span></p>
+<p class="verdict ok"><b>RESOLVED:</b> the open question below this diagram used to be whether the
+SPSC outbox queue had a lock-free form. It no longer applies — there is no queue and no lock: each
+pair of adjacent movers talks over its own dedicated channel, and a full channel just means "try
+again next cycle," never a block.</p>
 
-<!-- ═══════════ 3 · Trace.mu ═══════════ -->
-<h2>2 · Trace.mu — the hot path is NOT locked</h2>
+<!-- ═══════════ 1 · Trace.mu ═══════════ -->
+<h2>1 · Trace.mu — the hot path is NOT locked</h2>
 <p class="cap">Every emitting goroutine sends on a <b>channel</b>, taking no lock. The mutex guards
 only the single drain goroutine's ledger. This is the most misread lock in the tree.</p>
 
@@ -350,12 +347,12 @@ and no whole picture, so the move that deleted <code>RealClock.mu</code> is unav
 <i>arrival order at the drain</i> — scheduler order, not causal order.</p>
 
 <!-- ═══════════ 4 · LayoutHolder ═══════════ -->
-<h2>3 · LayoutHolder.mu — uncontended; the neighbour path is a message</h2>
+<h2>2 · LayoutHolder.mu — uncontended; the neighbour path is a message</h2>
 <p class="cap">A node never reaches into a neighbour's holder. It <b>sends a message</b>, and the
 neighbour's own goroutine does the write. That is why there is nothing to guard.</p>
 
 <div class="plate">
-<svg viewBox="0 0 860 250" role="img" aria-label="Node A writes only its own layout holder; to affect node B it sends a neighborSetC message through its outbox into B's inbox, and B's own goroutine writes B's holder. No goroutine ever touches another's holder.">
+<svg viewBox="0 0 860 250" role="img" aria-label="Node A writes only its own layout holder; to affect node B it sends a neighborSetC message on B's own dedicated neighborIn channel, and B's own goroutine writes B's holder. No goroutine ever touches another's holder.">
   <defs>
     <marker id="ak" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
       <path d="M0,0 L10,5 L0,10 z" fill="#3B7350"/>
@@ -380,7 +377,7 @@ neighbour's own goroutine does the write. That is why there is nothing to guard.
   <path class="arrk" d="M210,58 L330,58" marker-end="url(#ak)"/>
   <rect class="queue" x="330" y="34" width="300" height="48" rx="6"/>
   <text class="ts" x="342" y="54">moveMsgKindNeighborSetC</text>
-  <text class="tf" x="342" y="70">A's outbox → B's inbox</text>
+  <text class="tf" x="342" y="70">B's own neighborIn[A] channel</text>
   <path class="arrk" d="M630,58 L660,58" marker-end="url(#ak)"/>
 
   <rect class="gor" x="660" y="30" width="200" height="56" rx="6"/>
@@ -410,7 +407,7 @@ neighbour's own goroutine does the write. That is why there is nothing to guard.
 cross-goroutine holder access is expected. It is not.</p>
 
 <!-- ═══════════ 5 · scene_persist ═══════════ -->
-<h2>4 · scene_persist — the second party is a timer goroutine</h2>
+<h2>3 · scene_persist — the second party is a timer goroutine</h2>
 <p class="cap"><code>time.AfterFunc</code> runs every debounced flush in a <b>new goroutine</b>.
 That is the easily-missed racer against a drag-time synchronous write on the same file.</p>
 
