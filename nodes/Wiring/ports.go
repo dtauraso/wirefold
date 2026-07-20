@@ -246,23 +246,23 @@ func (o *Out) placementFrom(g outGeom) beadPlacement {
 	}
 }
 
-// Paced reports whether this Out drives a paced wire on a shared clock. It is the
-// paced-vs-chan MODE predicate: paced mode sleeps on the shared clock and StepOnces the
-// wire; chan mode (unit tests) has no wire to advance and falls back to a wall-clock
-// sleep.
+// Paced reports whether this Out drives a paced wire. It is the paced-vs-chan MODE
+// predicate: paced mode sleeps on the wire's clock and StepOnces the wire; chan mode
+// (unit tests) has no wire to advance and falls back to a wall-clock sleep.
 //
-// This says out loud what `out.Clock() != nil` used to say sideways. Mode was encoded in
-// a nil, so the ONLY thing stopping someone from "fixing" Clock() to never return nil —
-// and silently collapsing both modes into one — was a comment asking them not to. Asking
-// is not a mechanism (CLAUDE.md: enforce in code before adding prose). With the mode in a
-// named predicate, Clock() is free to be non-nil like In.Clock, and nil carries no
-// meaning on either port.
+// This says out loud what `out.Clock() != nil` used to say sideways. Mode used to be
+// encoded in a nil, so the ONLY thing stopping someone from "fixing" Clock() to never
+// return nil — and silently collapsing both modes into one — was a comment asking them
+// not to. Asking is not a mechanism (CLAUDE.md: enforce in code before adding prose).
+// With the mode in a named predicate, Clock() is free to be non-nil like In.Clock, and
+// nil carries no meaning on either port.
 //
-// The condition is exactly what the nil encoded — pw AND a clock on it — not merely
-// Wired(): a paced wire whose clock was never set took the chan-mode branch before, and
-// still does.
+// The condition is now just "does this Out have a PacedWire": NewPacedWire (paced_wire.go)
+// unconditionally seeds a clock at construction and it is the only construction site in
+// the repo, so a paced wire with a nil clock cannot exist — testing the clock for nil on
+// top of pw was a dead conjunct, never false when pw was non-nil.
 func (o *Out) Paced() bool {
-	return o != nil && o.pw != nil && o.pw.clock != nil
+	return o != nil && o.pw != nil
 }
 
 // Clock returns the shared human-speed Clock this port paces on. NEVER RETURNS NIL —
