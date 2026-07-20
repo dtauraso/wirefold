@@ -40,11 +40,15 @@ type GateNode struct {
 	Fire           func()
 	EmitGeometry   func()
 	EmitInputBeads func(left, right int)
-	// Tick returns the current tick (pause-aware) from the same human-speed clock
-	// the PacedWire/train use. Injected by the loader (builders.go) from pb.clock.
-	// The window and dwell are measured in ticks against it so they freeze on pause
-	// and resume on resume — never timing out mid-pause. If unset (unit tests with
-	// no loader), it falls back to a wall-clock-derived tick so timing progresses.
+	// Tick is a fallback "now" used ONLY when this node has no Clock copy at all
+	// (a test build with no loader — Clock is nil in that case). It reads the
+	// loader's ORIGIN clock, which per-goroutine-clock.md nothing ever applies a
+	// speed change to (only per-goroutine copies receive speed sinks), so it is
+	// deaf to the slider. RunGate must NOT fall back to this whenever a Clock
+	// copy is available, even if the gate's output happens to be unwired in this
+	// topology — that was the bug (a gate with no out-wire ran its window/dwell
+	// timing, and therefore its interior-bead flicker, at a frozen speed
+	// regardless of the slider).
 	Tick func() int64
 	// Clock is this node's OWN clock storage, seeded by reflectBuild from the
 	// loader's origin (builders.go injectClosures, bare-field injection matched by
@@ -264,21 +268,34 @@ func RunGate(ctx context.Context, g *GateNode, invertLeft bool) {
 		g.EmitGeometry()
 	}
 
-	// paced selects paced vs chan mode: paced mode sleeps one cycle on this
-	// goroutine's own clock copy and StepOnces the output below (never parking
-	// across the output traversal); chan mode falls back to a wall-clock sleep.
+	// paced selects whether the OUTPUT bead gets StepOnce'd this cycle (there is
+	// an out-wire to advance). It must NOT also gate which time source drives
+	// now()/sleep() below: the window/dwell timing that governs the gate's own
+	// interior-bead animation has to be speed-aware regardless of whether this
+	// gate happens to have a live out-wire in this topology. A gate with an
+	// unconnected ToPassed (Paced()==false) still owns a real Clock copy and
+	// SpeedCh (seeded unconditionally by reflectBuild whenever a loader is
+	// present — builders.go's `if pb.clock != nil` block does not check
+	// Paced()), so using them is free. Tying now()/sleep() to Paced() was the
+	// bug: it silently fell back to g.Tick, which reads the LOADER'S ORIGIN
+	// clock — a clock nothing ever applies a speed change to (only per-
+	// goroutine copies receive speed sinks) — so the window/dwell timers, and
+	// therefore the interior held-bead flicker they drive, ran deaf to the
+	// slider whenever a gate's output happened to be unwired.
 	paced := g.ToPassed.Paced()
 
 	// Copy taken ONCE at this goroutine's start (RunGate IS the goroutine, run
 	// once per gate node) — docs/planning/visual-editor/per-goroutine-clock.md.
-	// In paced mode this ONE copy backs both now() and sleep(). g.Clock is this
-	// node's own clock storage (seeded by reflectBuild from the loader's origin);
-	// ports no longer hand out a clock (API demolition item 1), so this replaces
-	// the old g.ToPassed.Clock().Copy(). g.Tick is kept only as the chan-mode/
-	// no-loader fallback for now(), matching prior behavior there.
-	now := g.Tick
+	// This copy backs both now() and sleep() whenever the loader provided one
+	// (g.Clock != nil), independent of paced. g.Clock is this node's own clock
+	// storage (seeded by reflectBuild from the loader's origin); ports no
+	// longer hand out a clock (API demolition item 1), so this replaces the
+	// old g.ToPassed.Clock().Copy(). g.Tick/defaultTick are kept only as the
+	// no-loader fallback for now() (unit tests with no loader), matching prior
+	// behavior there.
+	var now func() int64
 	sleep := defaultSleep()
-	if paced {
+	if g.Clock != nil {
 		clk := g.Clock.Copy()
 		now = clk.Tick
 		// Fold the speed-delivery poll into the one blocking point this loop
@@ -288,8 +305,9 @@ func RunGate(ctx context.Context, g *GateNode, invertLeft bool) {
 			Wiring.ApplySpeedNonBlocking(clk, g.SpeedCh)
 			return clk.SleepCycle(ctx)
 		}
-	}
-	if now == nil {
+	} else if g.Tick != nil {
+		now = g.Tick
+	} else {
 		now = defaultTick()
 	}
 
