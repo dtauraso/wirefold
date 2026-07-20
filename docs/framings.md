@@ -13,16 +13,44 @@ observer**, which requires knowing what this system is and who is looking at it.
 |---|---|---|---|
 | Identity is write-once, so tearing is unrepresentable | A shared struct must be guarded against concurrent read | `geomMu`, plus a widened read invented to make the guard falsifiable | **Done** — `nodeGeom` split into `nodeIdentity` + mutable state, lock deleted |
 | A holder is written only by its owner | Neighbours reach into each other, so holders need guarding | `LayoutHolder.mu`, and two doc comments naming the wrong goroutines | **Done** — contention refuted, comment corrected, no vacuous test shipped |
-| Skew is ~1 tick; the observer samples at 1/60 s | Every clock must agree exactly | One shared `RealClock`, `RealClock.mu`, and a proposed timestamp-on-transition scheme | Planned — `task/mutex-shared-services` |
-| Stopping within a tick is imperceptible | Pause must take effect simultaneously everywhere | The same shared clock; any barrier or coordinator that would enforce simultaneity | Planned — same branch |
 | Budget is pixels of relative displacement during motion | Every block of a frame must describe the same instant | `SnapshotState`'s accumulate-then-pack, the drain merge | Planned — `task/per-owner-buffer-rows` |
 | Each owner's own event order is the only real one | Events have a global total order | `Trace.mu`, the event channel, the drain's ordering | Planned — same branch. Note the merged log is already only *arrival order at the drain*, which is scheduler order, not causal order |
 | Pack at the rate the consumer consumes | Emission must be driven by change | `emitSnapshot` scattered across `Update`'s arms, tick coalescing | Planned — same branch |
-| *(not yet examined)* | A queue's invariant must be maintained | `outbox.mu` + cond, `PacedWire.mu` | **Contention verified, restructuring NOT examined** — see below |
 
-## The last row is NOT settled
+## Every mutex left in the tree
 
-Two claims were conflated there. Only one is verified.
+The rows above track *framings*. This tracks *locks* — every `sync.Mutex`/`Cond` in
+non-test Go, so "which are left" is answerable without grepping. Verified against the code
+when written; re-grep before trusting it.
+
+| Lock | Where | What it guards | Status |
+|---|---|---|---|
+| `PacedWire.mu` | `paced_wire.go:131` | `inflight`/`delivered` bead slices | Contention **verified** (removing it from `ReviseInFlightGeometry` gives `WARNING: DATA RACE`). Restructuring **unexamined** — see below |
+| `outbox.mu` + `cond` | `node_mover.go:57-58` | the unbounded move queue | Contention **verified** (bypassing it reproduces the cascade deadlock). Restructuring **unexamined** — it is SPSC, a shape with known lock-free forms. Also UNCHECKED: nothing bounds queue growth or drain time |
+| `Trace.mu` | `Trace/Trace.go:294` | `events`/`closed`/sinks | **Staying.** Cannot be copied — every goroutine's events must land in one place to become one buffer; copies give N partial streams. The *ordering* framing above it is still open (`task/per-owner-buffer-rows`) |
+| `LayoutHolder.mu` | `layout_holder.go:118` | `localPolars`/`pole` | **Examined, UNCONTENDED.** Kept as cheap insurance against a future cross-goroutine `md.layoutHolders[m]` call, NOT because it guards a present race. Do not cite it as evidence that cross-goroutine holder access is expected |
+| `sceneFileMu`, `debouncedPersister.mu`, `entityFileMuMu` (+ per-path `entityFileMus`) | `scene_persist.go:44, 58, 168-177` | read-modify-write cycles on the runtime scene JSON and per-entity files, plus debounce state | **Never examined.** These serialize FILE I/O across genuinely distinct writers (camera, overlays, polar locks) — a different problem from the in-memory framings above, since the observer is the filesystem and it has no perceptual threshold |
+
+`RealClock.mu` was the widest-fan-in lock and is **gone** — deleted by
+`task/mutex-shared-services`, replaced by ownership (one clock copy per goroutine) rather
+than by a smaller lock. Its two rows left this table with it.
+
+Worth carrying into the rows above: it was never removed for speed. Measured contention was
+~500-1700 acquisitions/sec against a mutex that does tens of millions, and no benchmark or
+profile in this repo ever motivated it. It went because a shared object forces every reader
+of the code to understand the whole network's clock wiring before understanding one
+goroutine, and because the lock defended an exactness — every reader agrees to the
+millisecond — that nothing here needs. "Widest fan-in" was a structural claim being read as
+a cost claim. Check which kind you are making before pulling on any remaining lock.
+
+## `outbox.mu` and `PacedWire.mu` are NOT settled
+
+These had a row in the framings table for a while, with *(not yet examined)* standing in
+for the correct framing. That was not an item — a framing nobody has worked out is not a
+framing, and the placeholder made the table look like it had an answer it did not. The row
+is gone; the two locks are in the inventory above, and the reasoning is here.
+
+Two claims were conflated in that row. Only one is verified.
 
 **Verified:** the contention is real. Bypassing the outbox reproduces the cascade deadlock
 as a timeout; removing `pw.mu` from `ReviseInFlightGeometry` gives `WARNING: DATA RACE`.
