@@ -203,7 +203,7 @@ Asked here, the throughput case is <b>weak</b>, and the one argument that might 
 different argument entirely — and unmeasured.</p>
 
 <div class="plate">
-<svg viewBox="0 0 860 370" role="img" aria-label="The throughput justification for debouncing does not hold up arithmetically, and the only plausible justification is drag-path latency, which has never been measured.">
+<svg viewBox="0 0 860 370" role="img" aria-label="The throughput justification for debouncing does not hold up arithmetically, and its sibling writer follows a different policy on the same drag, with no measurement behind either.">
   <text class="tl" x="0" y="14">THE THROUGHPUT ARGUMENT — DOES NOT HOLD</text>
 
   <rect class="box" x="0" y="28" width="420" height="120" rx="6"/>
@@ -214,15 +214,15 @@ different argument entirely — and unmeasured.</p>
   <text class="ts" x="12" y="124">≈ 1,000 syscalls/sec total</text>
   <text class="tk" x="12" y="142">an SSD does not notice this</text>
 
-  <text class="tl" x="440" y="14">THE JANK ARGUMENT — REFUTED BY ITS OWN SIBLING</text>
+  <text class="tl" x="440" y="14">WHAT THE SIBLING DOES</text>
 
-  <rect class="state" x="440" y="28" width="420" height="120" rx="6"/>
-  <text class="ts" x="452" y="50">“syscalls on the drag path would cause jank”</text>
-  <text class="tf" x="452" y="70">— but WriteLocalPolars (quantized_move.go:264, :382)</text>
-  <text class="tf" x="452" y="84">is NOT debounced. It writes SYNCHRONOUSLY on the</text>
-  <text class="tf" x="452" y="98">mover goroutine every drag commit, ~60/sec, TODAY.</text>
-  <text class="tw" x="452" y="120">so the un-debounced write is already there</text>
-  <text class="tf" x="452" y="140">and no jank has been reported from it</text>
+  <rect class="box" x="440" y="28" width="420" height="120" rx="6"/>
+  <text class="ts" x="452" y="50">WriteLocalPolars — quantized_move.go:264, :382</text>
+  <text class="tf" x="452" y="70">writes local-polars.json into the SAME per-node</text>
+  <text class="tf" x="452" y="84">directory, on the SAME drag</text>
+  <text class="tw" x="452" y="106">NOT debounced — synchronous, every commit</text>
+  <text class="tf" x="452" y="128">two writers, one drag, two different policies,</text>
+  <text class="tf" x="452" y="142">and no measurement behind either</text>
 
   <rect class="state" x="0" y="164" width="860" height="70" rx="6"/>
   <text class="t"  x="12" y="186">WHAT THE REPO ACTUALLY RECORDS</text>
