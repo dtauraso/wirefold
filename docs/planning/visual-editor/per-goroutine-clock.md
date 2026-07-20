@@ -16,12 +16,22 @@ Everything below follows from accepting that.
 ## The change
 
 Today one `*RealClock` is constructed in `main.go` and injected into every node, port and
-wire. ~16 goroutines call `Tick()` on it continuously; `stdin_reader.go` calls `SetSpeed`
-occasionally. Its mutex exists solely because those two collide — it is the widest-fan-in
-lock in the system and the only one hit on every cycle by nearly every goroutine.
+wire — reached through `In.Clock()` / `Out.Clock()` and `reflectBuild`. Pacing loops call
+`Tick()` continuously; `stdin_reader.go` calls `SetSpeed` occasionally. Its mutex exists
+solely because those two collide — the widest-fan-in lock in the system.
+
+Precisely: the contended surface is **`Tick()` alone**. `SleepCycle` is a bare
+`time.After(tickPeriod)` and never takes the lock, so the lock is not on the per-cycle
+sleep path — it is on every `Tick()` read, which pacing loops do continuously.
 
 New model: **every goroutine holds its own clock, reading the system monotonic clock
-directly.** Nothing shared, nothing to lock.
+directly.** The clock is an object INSIDE the goroutine — not a field on a shared struct
+the goroutine reaches through, which is the same shared-object model wearing a different
+name. Nothing shared, nothing to lock.
+
+The mutex is a few lines. The surface built on the assumption of one injected shared
+object is most of the work — see **API demolition** below, which is the real size of this
+change.
 
 The system clock is already global, already consistent, already safe to read
 concurrently. It is the shared timeline. Wrapping it in a second shared object and then
@@ -84,11 +94,18 @@ A speed change is now just a value each copy applies when it hears it. A copy th
 late is off by the amount already accepted above, so late delivery needs no special
 handling and no timestamp.
 
-Still to settle, and it is plumbing rather than semantics:
+Still to settle. This is plumbing rather than semantics, but it is not small:
 
 - `DriveHeld` goroutines have no inbox — spawned per driven output, holding only an `Out`.
+  Today they get a clock from that `Out` (`drive.go:56`, `clk := out.Clock()`), and it is
+  tempting to read that as "the `Out` is already the delivery path, so no inbox is needed."
+  It is not. Hanging the copy off the `Out` puts it back on a shared struct several
+  goroutines reach through — the shared-object model renamed. Once the clock is inside the
+  goroutine, a received message is the ONLY way in, which is exactly why the inbox is
+  required. Recorded because this wrong turn was taken once.
 - Every paced loop grows a second thing to check. `input/node.go` polls exactly one channel
-  (`FeedbackIn`) today.
+  (`FeedbackIn`) today. `DriveHeld`'s only blocking point is its `sleep`, so the inbox
+  joins that select.
 
 A dropped change is still worse than a late one — that copy runs at the wrong rate with no
 event to correct it — so the path must not be lossy. But this is no longer a correctness
@@ -188,14 +205,23 @@ event streams and no whole picture. That mutex stays, and this plan does not tou
    over the full set, not a sample. This guards the failure mode that is impossible today.
 4. **The mutex is genuinely gone.** `RealClock.mu` deleted; `clock_concurrency_test.go`'s
    race tests deleted or rewritten. They exist to prove a lock is load-bearing, and a test
-   that cannot fail must not outlive the lock it guarded.
-5. `-race` clean at `-count=5`, plus the drag and persistence suites.
+   that cannot fail must not outlive the lock it guarded. `clock_speed_test.go` and
+   `clock_realclock_test.go` move to the new construction shape rather than dying.
+5. **Paced mode survives the demolition.** `Out.Paced()` is a clock-existence test today
+   (API demolition item 2), so a paced wire silently falling back to chan mode is a
+   COMPILE-CLEAN failure. Assert paced wires still report paced after mode is re-encoded —
+   this is the one step whose breakage the compiler will not catch.
+6. `-race` clean at `-count=5`, plus the drag and persistence suites.
 
 ## What this buys
 
-- Deletes RealClock.mu outright — the widest-fan-in lock in the system, hit by ~16
-  goroutines on every cycle. Not reduced: removed.
+- Deletes RealClock.mu outright — the widest-fan-in lock in the system, taken on every
+  `Tick()` read by every pacing loop. Not reduced: removed.
 - The clock stops being an exception to the rule that nodes own their own state.
+- Deletes an unrepresentable-nil trap: `inertClock` and the `reflectBuild` type-matched
+  injection exist only because an injected clock can be absent (API demolition item 3). A
+  goroutine that constructs its own clock cannot have a nil one, so the whole fallback path
+  and its silent-rename panic go with it.
 
 ## What it costs
 
