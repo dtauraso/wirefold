@@ -423,7 +423,11 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 	}
 	for id, g := range geoms {
 		nm := newNodeMover(id, g, tr)
-		nm.sendMove = md.enqueueFor(nm.outbox)
+		nm.resolveDest = func(destID string) (chan moveMsg, bool) {
+			ch, ok := md.dispatch[destID]
+			return ch, ok
+		}
+		nm.sendMove = md.enqueueFor(nm)
 		nm.centerOf = md.centerOfNode
 		nm.commitLocal = md.commitNodeMoveLocal
 		nm.neighborSetC = md.neighborSetCRequantize
@@ -486,21 +490,14 @@ func (md *MoveDispatch) Bind(outSink map[string]*Out, slotReg SlotRegistry) {
 	}
 }
 
-// Start launches every mover's goroutine. Each node and each edge drains its own
-// inbox until ctx is done — per-goroutine ownership, no central coordinator.
+// Start launches every mover's goroutine — ONE goroutine per node and ONE per edge, no
+// dedicated sender/watcher goroutines (docs/planning/visual-editor/outbox-two-channels.md
+// removed those: each mover's own run loop drains its own inbox AND retries its own
+// pending sends, non-blockingly, every cycle).
 func (md *MoveDispatch) Start(ctx context.Context) {
 	md.ctx = ctx
 	for _, nm := range md.nodeMovers {
 		go nm.run(ctx)
-		// Dedicated sender goroutine for this node's outbound queue (see the outbox
-		// type doc comment / cascade-deadlock-fix.md): pops nm's queued messages in
-		// FIFO order and performs the actual blocking delivery, so nm's own
-		// inbox-drain goroutine (nm.run above) never blocks on a send and therefore
-		// always keeps draining its inbox. deliverMove itself selects on ctx.Done()
-		// (closure-captured here, at the goroutine's own spawn site) so a send into
-		// a full/abandoned inbox aborts on shutdown instead of leaking this sender
-		// goroutine forever.
-		go nm.outbox.run(ctx, func(id string, msg moveMsg) { md.deliverMove(ctx, id, msg) })
 	}
 	for _, em := range md.edgeMovers {
 		go em.run(ctx)
@@ -559,57 +556,35 @@ func (md *MoveDispatch) sendMove(id string, msg moveMsg) {
 	}
 }
 
-// enqueueFor returns the ENQUEUE half of the per-mover outbound-queue split
-// (cascade-deadlock-fix.md): it fires the msgTap (at enqueue time, so tap-based tests'
-// counts/ordering match today's synchronous-send behavior) and then appends to ob —
-// never blocking. Bound once per node at construction (nm.sendMove = md.enqueueFor(nm.outbox))
-// so every send a nodeMover's own handle performs — including the ones
-// fanEdgesAndPartners makes on that node's behalf — goes through this node's own
-// outbox, never a raw blocking channel write.
-func (md *MoveDispatch) enqueueFor(ob *outbox) func(id string, msg moveMsg) {
+// enqueueFor returns nm's own non-blocking send function (docs/planning/visual-editor/
+// outbox-two-channels.md): it fires the msgTap (at enqueue time, so tap-based tests'
+// counts/ordering match today's behavior), appends the message to nm's own pending
+// retry queue, and attempts an immediate flush — never blocking the calling handler
+// goroutine. Bound once per node at construction (nm.sendMove = md.enqueueFor(nm)) so
+// every send a nodeMover's own handle performs — including the ones
+// fanEdgesAndPartners/requantizeLocalPolars make on that node's behalf — goes through
+// nm's own retry queue, never a raw blocking channel write and never a second mover's
+// queue (there is no shared outbox to route through anymore).
+func (md *MoveDispatch) enqueueFor(nm *nodeMover) func(id string, msg moveMsg) {
 	return func(id string, msg moveMsg) {
 		if tap := md.msgTap.Load(); tap != nil {
 			(*tap)(id, msg)
 		}
-		ob.enqueue(id, msg)
+		nm.pending = append(nm.pending, pendingSend{destID: id, msg: msg})
+		nm.flushPending()
 	}
 }
 
-// enqueueFuncFor resolves the enqueue closure for nodeID's own outbox (the SELF mover
-// whose handler is doing the sending), for use by MoveDispatch methods (fanEdgesAndPartners)
-// that are not themselves nodeMover methods. Falls back to the blocking md.sendMove only
-// for the (practically unreached in production) case of a nodeID with no live mover —
-// there is no outbox to enqueue onto in that case.
+// enqueueFuncFor resolves the send closure for nodeID's own retry queue (the SELF mover
+// whose handler is doing the sending), for use by MoveDispatch methods (fanEdgesAndPartners,
+// requantizeLocalPolars) that are not themselves nodeMover methods. Falls back to the
+// blocking md.sendMove only for the (practically unreached in production) case of a
+// nodeID with no live mover — there is no retry queue to append to in that case.
 func (md *MoveDispatch) enqueueFuncFor(nodeID string) func(id string, msg moveMsg) {
 	if nm, ok := md.nodeMovers[nodeID]; ok {
 		return nm.sendMove
 	}
 	return md.sendMove
-}
-
-// deliverMove is the DELIVERY half of the per-mover outbound-queue split: the actual
-// blocking channel write into the target's inbox, run only from a mover's dedicated
-// sender goroutine (outbox.run), never from a handler goroutine. No tap here — the tap
-// already fired once, at enqueue (md.enqueueFor), matching the pre-split single-fire
-// contract the tap-based tests assert against.
-//
-// ctx is threaded in from the owning outbox.run's own goroutine (Start closure-captures
-// it at spawn) rather than stored on MoveDispatch: on ctx cancel every mover's inbox-drain
-// goroutine (nm.run) returns and stops draining, so a sender goroutine parked mid-send on
-// `ch <- msg` would otherwise block forever with nothing left to ever read it. The
-// select's ctx.Done() arm is ONLY a cancellation escape — the send itself stays BLOCKING
-// while ctx is live; every deliverMove message carries real committed geometry that a
-// drop would leave stale, and (as of the neighborSetC-drop investigation below) nothing
-// in this package sends a message it is willing to see dropped anymore.
-func (md *MoveDispatch) deliverMove(ctx context.Context, id string, msg moveMsg) {
-	ch, ok := md.dispatch[id]
-	if !ok {
-		return
-	}
-	select {
-	case ch <- msg:
-	case <-ctx.Done():
-	}
 }
 
 // NOTE (neighborSetC drop history): moveMsgKindNeighborSetC (requantizeLocalPolars'
@@ -622,14 +597,14 @@ func (md *MoveDispatch) deliverMove(ctx context.Context, id string, msg moveMsg)
 // drives (TestNeighborSetCDropReachability) showed sendMoveLossy dropping ~98% of
 // NeighborSetC sends (9417/9600 in one run) — the drop path was not a rare backstop,
 // it was silently discarding almost every message. NeighborSetC is now routed through
-// the SENDING node's own outbox (md.enqueueFuncFor(nodeID) in requantizeLocalPolars),
-// the same decoupling every other per-commit fan in this file already uses
-// (fanEdgesAndPartners) — it gets the same deadlock-avoidance property (the enqueue
-// never blocks the handler goroutine) without ever dropping: the outbox's own sender
-// goroutine performs the actual blocking delivery later, off the handler's critical
-// path. TestMutuallyAdjacentDragFloodNoDeadlock still passes with this change (run
-// -count=5), so the deadlock risk sendMoveLossy was guarding against does not require a
-// lossy send — the outbox already solved it for every other message kind.
+// the SENDING node's own retry queue (md.enqueueFuncFor(nodeID) in requantizeLocalPolars,
+// see nodeMover.pending), the same decoupling every other per-commit fan in this file
+// already uses (fanEdgesAndPartners) — it gets the same deadlock-avoidance property (the
+// send never blocks the handler goroutine) without ever dropping: an item that can't be
+// delivered right now stays with the sender and is retried on the sender's own next
+// loop cycle instead of being handed to a separate sender goroutine or dropped.
+// TestMutuallyAdjacentDragFloodNoDeadlock still passes with this change, so the deadlock
+// risk sendMoveLossy was guarding against does not require a lossy send.
 
 // NodeKind returns the kind string for the given node id, or "" if unknown.
 // Used by applyEdit to resolve the node's kind when snapping a port-anchor

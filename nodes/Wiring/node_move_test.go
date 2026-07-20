@@ -459,25 +459,39 @@ func TestRootMoveContinuousPositionLocalPolarRequantize(t *testing.T) {
 		t.Fatalf("src.localPolar[dst] R = %v (iR=%d*step=%v), want within half a cell of measured %v", gotR, found.QuantIR, rStep, wantPol.R)
 	}
 
-	// Both ends updated: dst also carries a fresh local polar back to src.
+	// Both ends updated: dst also carries a fresh local polar back to src. src's
+	// moveMsgKindNeighborSetC to dst is delivered and processed on dst's OWN
+	// nodeMover goroutine, which drains its inbox non-blockingly and paces on its own
+	// clock cycle (docs/planning/visual-editor/outbox-two-channels.md) rather than
+	// waking instantly on receive — poll briefly rather than assuming it has already
+	// landed by the time src's center finished converging above.
 	lhDst, ok := md.layoutHolders["dst"]
 	if !ok {
 		t.Fatal("no LayoutHolder registered for dst")
 	}
-	var foundBack *LocalPolar
-	for _, lp := range lhDst.LocalPolarsSnapshot() {
-		if lp.To == "src" {
-			cp := lp
-			foundBack = &cp
-			break
-		}
-	}
-	if foundBack == nil {
-		t.Fatal("dst has no local polar entry for src after RootMove")
-	}
 	wantPolBack := cart2polar(target.sub(dstCenter))
 	wantIRBack := math.Round(wantPolBack.R / rStep)
-	if float64(foundBack.QuantIR) != wantIRBack {
-		t.Fatalf("dst.localPolar[src].QuantIR = %d, want round(%v/%v) = %v", foundBack.QuantIR, wantPolBack.R, rStep, wantIRBack)
+
+	var foundBack *LocalPolar
+	deadlineBack := time.Now().Add(2 * time.Second)
+	for {
+		for _, lp := range lhDst.LocalPolarsSnapshot() {
+			if lp.To == "src" {
+				cp := lp
+				foundBack = &cp
+				break
+			}
+		}
+		if foundBack != nil && float64(foundBack.QuantIR) == wantIRBack {
+			break
+		}
+		if time.Now().After(deadlineBack) {
+			if foundBack == nil {
+				t.Fatal("dst has no local polar entry for src after RootMove")
+			}
+			t.Fatalf("dst.localPolar[src].QuantIR = %d, want round(%v/%v) = %v", foundBack.QuantIR, wantPolBack.R, rStep, wantIRBack)
+		}
+		foundBack = nil
+		time.Sleep(time.Millisecond)
 	}
 }
