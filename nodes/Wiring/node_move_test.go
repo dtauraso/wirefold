@@ -397,6 +397,20 @@ func TestRootMoveContinuousPositionLocalPolarRequantize(t *testing.T) {
 	}
 	md.Start(ctx) // launch mover goroutines so fanCenters' center messages are drained
 
+	// Sync points for the two LayoutHolder reads below, both racy against a live mover
+	// goroutine if read via a bare poll (data race under -race, not just theoretically):
+	//   - lhSrc is written by src's OWN mover goroutine (requantizeLocalPolars) strictly
+	//     BEFORE that same call enqueues src's moveMsgKindNeighborSetC to dst — waiting
+	//     for the tapped message (captureNeighborSetC, same mechanism drag_anchor_test.go
+	//     uses) establishes a happens-before edge for lhSrc's write.
+	//   - lhDst is written by dst's OWN mover goroutine (neighborSetCRequantize) strictly
+	//     BEFORE that same call logs its "abc-drag" breadcrumb — waiting for the
+	//     breadcrumb (same mechanism time_node_abc_drag_breadcrumb_test.go uses)
+	//     establishes a happens-before edge for lhDst's write.
+	got := captureNeighborSetC(md, "dst")
+	var dbg syncBuffer
+	tr.SetDebugSink(&dbg)
+
 	// A target deliberately off any scene-grid cell.
 	target := vec3{X: 37.3, Y: 12.1, Z: -5.7}
 	if !md.RootMove("src", target) {
@@ -418,6 +432,7 @@ func TestRootMoveContinuousPositionLocalPolarRequantize(t *testing.T) {
 		}
 		time.Sleep(time.Millisecond)
 	}
+	waitForNeighborSetC(t, got, 1)
 
 	// (b) src's local polar to dst reconstructs the distance to a whole tick of the
 	// LOCAL-POLAR grid (localStepR/localStepTheta/localStepPhi — small, uniform cells,
@@ -461,9 +476,10 @@ func TestRootMoveContinuousPositionLocalPolarRequantize(t *testing.T) {
 	// Both ends updated: dst also carries a fresh local polar back to src. src's
 	// moveMsgKindNeighborSetC to dst is delivered and processed on dst's OWN
 	// nodeMover goroutine, which drains its inbox non-blockingly and paces on its own
-	// clock cycle rather than
-	// waking instantly on receive — poll briefly rather than assuming it has already
-	// landed by the time src's center finished converging above.
+	// clock cycle rather than waking instantly on receive — wait for dst's own
+	// "abc-drag" breadcrumb (fired on dst's own goroutine, after dst's own
+	// SetLocalPolar/SetPole write) rather than polling lhDst directly from this
+	// goroutine, which would be a data race against dst's mover goroutine.
 	lhDst, ok := md.layoutHolders["dst"]
 	if !ok {
 		t.Fatal("no LayoutHolder registered for dst")
@@ -471,26 +487,19 @@ func TestRootMoveContinuousPositionLocalPolarRequantize(t *testing.T) {
 	wantPolBack := cart2polar(target.sub(dstCenter))
 	wantIRBack := math.Round(wantPolBack.R / rStep)
 
+	waitForAbcDrag(t, &dbg, "dst")
 	var foundBack *LocalPolar
-	deadlineBack := time.Now().Add(2 * time.Second)
-	for {
-		for _, lp := range lhDst.LocalPolarsSnapshot() {
-			if lp.To == "src" {
-				cp := lp
-				foundBack = &cp
-				break
-			}
-		}
-		if foundBack != nil && float64(foundBack.QuantIR) == wantIRBack {
+	for _, lp := range lhDst.LocalPolarsSnapshot() {
+		if lp.To == "src" {
+			cp := lp
+			foundBack = &cp
 			break
 		}
-		if time.Now().After(deadlineBack) {
-			if foundBack == nil {
-				t.Fatal("dst has no local polar entry for src after RootMove")
-			}
-			t.Fatalf("dst.localPolar[src].QuantIR = %d, want round(%v/%v) = %v", foundBack.QuantIR, wantPolBack.R, rStep, wantIRBack)
-		}
-		foundBack = nil
-		time.Sleep(time.Millisecond)
+	}
+	if foundBack == nil {
+		t.Fatal("dst has no local polar entry for src after RootMove")
+	}
+	if float64(foundBack.QuantIR) != wantIRBack {
+		t.Fatalf("dst.localPolar[src].QuantIR = %d, want round(%v/%v) = %v", foundBack.QuantIR, wantPolBack.R, rStep, wantIRBack)
 	}
 }

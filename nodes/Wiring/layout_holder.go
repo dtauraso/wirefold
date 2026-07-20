@@ -1,5 +1,4 @@
-// layout_holder.go — the per-node LOCAL POLAR list plus the pause-INDEPENDENT
-// layout-update goroutine that owns it.
+// layout_holder.go — the per-node LOCAL POLAR list.
 //
 // Every domain double-link (a bidirectional edge pair A↔B) gives each endpoint
 // its own LOCAL POLAR to the other, measured with ITSELF as center, in the same
@@ -11,21 +10,11 @@
 // LayoutHolder is embedded into every node kind's struct (directly, or via
 // gatecommon.GateNode for the two gate kinds) so loader.go can locate it by
 // reflection (the same field-lookup used for port/data injection) and load the
-// computed list through LoadLocalPolars, and so every kind gets the
-// UpdateLayout loop for free — satisfying the Node interface's second method
-// without per-kind boilerplate.
-//
-// UpdateLayout parks on ctx.Done() the same way every node's Update loop exits
-// on cancellation. It does not pace on SleepCycle — it owns LocalPolars and idles
-// until cancellation. For this slice it
-// does no runtime mutation — it owns LocalPolars and idles; drag-time
-// recomputation is a later slice.
+// computed list through LoadLocalPolars.
 package Wiring
 
 import (
-	"context"
 	"math"
-	"sync"
 )
 
 // Default local-polar quantization cells — SMALL and uniform across every node,
@@ -77,45 +66,20 @@ func (lp LocalPolar) effectiveSteps() (t, p, r float64) {
 }
 
 // LayoutHolder is embedded into every node kind's struct. It owns this node's
-// LocalPolars list (one per domain-edge neighbor) and runs the pause-independent
-// layout-update goroutine (UpdateLayout below is currently a no-op that only
-// waits on ctx.Done()).
+// LocalPolars list (one per domain-edge neighbor).
 //
-// mu does NOT guard against the stdin-reader goroutine: RootMove (node_move.go)
-// routes a drag's moveMsgKindDrag to the DRAGGED NODE'S OWN
-// inbox, so commitLocal -> requantizeLocalPolars runs on that node's own
-// goroutine (nodeMover.handle), never on the stdin reader.
-//
-// REFUTED (a third time — this comment previously named the wrong goroutine
-// pair twice): a prior version of this comment claimed node X's own goroutine
-// calls SetLocalPolar/LocalPolarsSnapshot/Pole DIRECTLY on a NEIGHBOR node M's
-// LayoutHolder while M's own goroutine concurrently mutates the same fields.
-// That is false. requantizeLocalPolars (quantized_move.go) only ever looks up
-// md.layoutHolders[nodeID] — X itself — and never md.layoutHolders[m] for a
-// neighbor m; X reaches M exclusively by sending it a moveMsgKindNeighborSetC
-// message (via X's own retry queue, onto M's own directed neighborIn channel), and it is M's own run/handle
-// goroutine (node_mover.go) that drains that message and calls
-// neighborSetCRequantize -> lh.SetLocalPolar/SetPole on M's OWN holder. Every
-// LayoutHolder in md.layoutHolders is therefore written and read ONLY by its
-// owning node's single per-node goroutine (channel-serialized, one at a time,
-// same pattern as nodeMover.quantOffset) — there is no cross-goroutine writer
-// of a given holder to guard against.
-//
-// NOT CHECKED BY A TEST, deliberately. A test was written to drive the claimed
-// X-writes-M contention concurrently through RootMove and could NOT be made to
-// fail with mu removed (10/10 clean runs under -race) — because the contention
-// does not exist. Every other mutex in this package now carries a test that
-// provably goes red when its guard is removed; this one cannot, so shipping one
-// would have meant shipping a test that can never fail, which is the exact
-// failure mode that discipline exists to prevent. The absence of a test here is
-// the honest signal.
-//
-// So mu is currently UNCONTENDED. It is retained as cheap insurance against a
-// future direct md.layoutHolders[m] call from another node's goroutine, not
-// because it guards a present race. Do not cite it as evidence that
-// cross-goroutine holder access is expected — it is not.
+// Invariant: a LayoutHolder is written and read ONLY by its owning node's own
+// goroutine. RootMove (node_move.go) routes a drag's moveMsgKindDrag to the
+// DRAGGED NODE'S OWN inbox, so commitLocal -> requantizeLocalPolars runs on
+// that node's own goroutine (nodeMover.handle). A node never reaches into a
+// NEIGHBOR's LayoutHolder directly: it sends a moveMsgKindNeighborSetC message
+// (via its own retry queue, onto the neighbor's directed neighborIn channel),
+// and it is the neighbor's own run/handle goroutine that drains that message
+// and calls neighborSetCRequantize -> lh.SetLocalPolar/SetPole on ITS OWN
+// holder. One holder, one owning goroutine, neighbors reached only by
+// message — no cross-goroutine access to guard against, so no lock is needed.
+// Do not re-add one without first breaking this invariant on purpose.
 type LayoutHolder struct {
-	mu          sync.Mutex
 	localPolars []LocalPolar
 	// pole is the measurement pole (rotating_pole.go localPole result) that
 	// localPolars' current QuantITheta/QuantIPhi entries were last quantized about.
@@ -126,21 +90,12 @@ type LayoutHolder struct {
 	pole dir
 }
 
-// UpdateLayout runs this node's layout-update loop until ctx is cancelled. It
-// parks on ctx.Done() only (the same cancellation wait every node's Update loop
-// uses to exit).
-func (lh *LayoutHolder) UpdateLayout(ctx context.Context) {
-	<-ctx.Done()
-}
-
 // localPolarSteps returns the effective step constants of this node's CURRENT
 // stored local polar to the given neighbor (falling back to the local-polar
 // defaults if no entry exists yet), so a re-quantize preserves a neighbor's
 // own step constants across drags exactly like quantizedOffset does for the
 // scene triple.
 func (lh *LayoutHolder) localPolarSteps(to string) (t, p, r float64) {
-	lh.mu.Lock()
-	defer lh.mu.Unlock()
 	for _, lp := range lh.localPolars {
 		if lp.To == to {
 			return lp.effectiveSteps()
@@ -149,13 +104,11 @@ func (lh *LayoutHolder) localPolarSteps(to string) (t, p, r float64) {
 	return LocalPolar{}.effectiveSteps()
 }
 
-// LoadLocalPolars replaces this node's entire local-polar list under lock. Used
+// LoadLocalPolars replaces this node's entire local-polar list. Used
 // exactly once, at load time (loader.go), to attach the freshly-computed list
 // (computeLocalPolars) to the node's own LayoutHolder — the only initial-load
 // writer, distinct from SetLocalPolar's per-neighbor upsert used by drags.
 func (lh *LayoutHolder) LoadLocalPolars(lps []LocalPolar) {
-	lh.mu.Lock()
-	defer lh.mu.Unlock()
 	lh.localPolars = lps
 }
 
@@ -163,8 +116,6 @@ func (lh *LayoutHolder) LoadLocalPolars(lps []LocalPolar) {
 // (updating in place if present, appending otherwise). The sole in-memory
 // writer of LocalPolars outside load-time construction.
 func (lh *LayoutHolder) SetLocalPolar(to string, quantITheta, quantIPhi, quantIR int, stepTheta, stepPhi, stepR float64) {
-	lh.mu.Lock()
-	defer lh.mu.Unlock()
 	for i := range lh.localPolars {
 		if lh.localPolars[i].To == to {
 			lh.localPolars[i].QuantITheta = quantITheta
@@ -185,8 +136,6 @@ func (lh *LayoutHolder) SetLocalPolar(to string, quantITheta, quantIPhi, quantIR
 // LocalPolarsSnapshot returns a defensive copy of this node's current
 // LocalPolars list, safe to hand to a persister running on another goroutine.
 func (lh *LayoutHolder) LocalPolarsSnapshot() []LocalPolar {
-	lh.mu.Lock()
-	defer lh.mu.Unlock()
 	out := make([]LocalPolar, len(lh.localPolars))
 	copy(out, lh.localPolars)
 	return out
@@ -195,8 +144,6 @@ func (lh *LayoutHolder) LocalPolarsSnapshot() []LocalPolar {
 // Pole returns the measurement pole this node's current LocalPolars entries were last
 // quantized about (world +y, dir{0,0}, if never set — the home pole default).
 func (lh *LayoutHolder) Pole() dir {
-	lh.mu.Lock()
-	defer lh.mu.Unlock()
 	return lh.pole
 }
 
@@ -204,7 +151,5 @@ func (lh *LayoutHolder) Pole() dir {
 // about, so a later requantize (or a reload) can reconstruct an unchanged neighbor's
 // direction from its stored indices without re-measuring live cartesian geometry.
 func (lh *LayoutHolder) SetPole(p dir) {
-	lh.mu.Lock()
-	defer lh.mu.Unlock()
 	lh.pole = p
 }

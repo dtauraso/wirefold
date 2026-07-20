@@ -57,6 +57,15 @@ func TestNeighborSetCRequantizesEdgeNeighborStaysPut(t *testing.T) {
 		t.Fatal("src has no pre-drag LocalPolar entry for dst")
 	}
 
+	// Sync point for the post-drag lhSrc read below: src (the neighbor, NOT the dragged
+	// node) writes its own requantized LocalPolar entry (SetLocalPolar/SetPole, on src's
+	// OWN goroutine, inside neighborSetCRequantize) strictly BEFORE it logs its
+	// "abc-drag" breadcrumb in that same call — waiting for the breadcrumb (rather than
+	// polling lhSrc directly, a data race against src's own mover goroutine) establishes
+	// the happens-before edge. See time_node_abc_drag_breadcrumb_test.go.
+	var dbg syncBuffer
+	md.tr.SetDebugSink(&dbg)
+
 	// Tap every routed message so we can assert (3): this drag is exactly one hop —
 	// src receives nothing but the new moveMsgKindNeighborSetC (senderID=dst) — with
 	// no equalize/trigger/gate-place/requantize cascade kind (those kinds no longer
@@ -84,10 +93,16 @@ func TestNeighborSetCRequantizesEdgeNeighborStaysPut(t *testing.T) {
 	}
 	pollDragConverged(t, md, "dst", target)
 
-	// Poll for src's own LocalPolar entry to dst to pick up the new quantized values
-	// (async message-delivery race — the same shape every other test in this package
-	// uses).
-	lpAfter := pollLocalPolarRequantized(t, lhSrc, "dst", lpBefore)
+	// Wait for src's own "abc-drag" breadcrumb (fired after src's own requantize
+	// write, on src's own goroutine — see the sync-point comment above) before reading
+	// its LocalPolar entry to dst.
+	waitForAbcDrag(t, &dbg, "src")
+	var lpAfter LocalPolar
+	for _, lp := range lhSrc.LocalPolarsSnapshot() {
+		if lp.To == "dst" {
+			lpAfter = lp
+		}
+	}
 	time.Sleep(cascadeSettle) // let any (unwanted) further cascade settle
 
 	// (1) src's world center is UNCHANGED — the neighbor stays put; only dst moved.

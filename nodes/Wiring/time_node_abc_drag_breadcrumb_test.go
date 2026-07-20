@@ -74,6 +74,43 @@ type breadcrumbLine struct {
 	Value string `json:"value"`
 }
 
+// waitForAbcDrag blocks until at least one "abc-drag" breadcrumb naming node has
+// appeared in dbg, or fails the test on timeout. neighborSetCRequantize writes the
+// recipient's own LocalPolar entry (SetLocalPolar/SetPole) and THEN logs this
+// breadcrumb, in that order, in the SAME call on the recipient's OWN goroutine — so
+// once the breadcrumb is observed here (through dbg's mutex-guarded buffer), the
+// recipient's LayoutHolder is guaranteed to already reflect that write, and reading it
+// from the calling (test) goroutine afterward is race-free. See
+// TestEveryDragRecipientLogsAbcDragBreadcrumb below for the full argument.
+func waitForAbcDrag(t *testing.T, dbg *syncBuffer, node string) {
+	t.Helper()
+	waitForAbcDragCount(t, dbg, node, 1)
+}
+
+// waitForAbcDragCount blocks until at least want "abc-drag" breadcrumbs naming node
+// have appeared in dbg. Used by tests that drag the same node's neighbor more than
+// once and need to distinguish "the Nth requantize landed" from a stale breadcrumb
+// left over from an earlier drag in the same test.
+func waitForAbcDragCount(t *testing.T, dbg *syncBuffer, node string, want int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		n := 0
+		for _, b := range parseBreadcrumbLines(t, dbg.String()) {
+			if b.Label == "abc-drag" && b.Node == node {
+				n++
+			}
+		}
+		if n >= want {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %d abc-drag breadcrumb(s) for node %q, got %d", want, node, n)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 func parseBreadcrumbLines(t *testing.T, raw string) []breadcrumbLine {
 	t.Helper()
 	var out []breadcrumbLine
