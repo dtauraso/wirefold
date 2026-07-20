@@ -200,7 +200,17 @@ func emitInputBeads(tr *T.Trace, nodeName string, left, right int) {
 //   - row 0, every col: present=false (the top row is empty during the slide).
 //
 // At t=1 the bottom beads sit exactly at their row-1 offset.
-func emitRefillSlide(ctx context.Context, tr *T.Trace, nodeName string, clk Clock, beads []int) {
+//
+// speedCh is the SAME per-goroutine speed channel the caller's own paced loop
+// polls (per-goroutine-clock.md "Delivery"). This loop is a SEPARATE blocking
+// loop from the caller's (it is not just one iteration of the caller's flat
+// loop — it runs its own SleepCycle cycles until the slide lands), so it must
+// poll ApplySpeedNonBlocking itself each cycle; without this a speed change
+// sent mid-slide sits unapplied in the channel until the slide finishes and
+// the caller's own loop resumes and drains it one cycle later — the in-node
+// animation would run at the OLD speed for its entire duration regardless of
+// the slider (the bug this fixes).
+func emitRefillSlide(ctx context.Context, tr *T.Trace, nodeName string, clk Clock, speedCh <-chan float64, beads []int) {
 	if clk == nil || len(beads) == 0 {
 		return
 	}
@@ -227,6 +237,7 @@ func emitRefillSlide(ctx context.Context, tr *T.Trace, nodeName string, clk Cloc
 
 	emitFrame(0) // initial frame: beads at the top, top row cleared
 	for {
+		ApplySpeedNonBlocking(clk, speedCh)
 		if err := clk.SleepCycle(ctx); err != nil {
 			return
 		}

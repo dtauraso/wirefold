@@ -17,15 +17,19 @@ type Node struct {
 	EmitNodeBeads func(working, backup []int)
 	// EmitRefillSlide runs the clock-paced animated refill: the OLD backup (top
 	// row) slides DOWN into the working (bottom) row at human speed. Injected by
-	// Wiring.reflectBuild; the caller supplies the CLOCK at call time (its own
-	// already-Copy()'d clock — see updateFeedbackRing's n.EmitRefillSlide(clk,
-	// *backup) call), so this closure captures only this node's id + geometry,
-	// never a clock — see per-goroutine-clock.md's note on the old shape (a
-	// captured shared clock read on every call) being a residual to close, not
-	// keep. It blocks for the slide duration (pause-aware). nil on test builds
-	// without injection — the caller then falls back to the instant refill.
-	// beads is the OLD backup contents that become the new working row.
-	EmitRefillSlide func(clk Wiring.Clock, beads []int)
+	// Wiring.reflectBuild; the caller supplies the CLOCK and SPEED CHANNEL at call
+	// time (its own already-Copy()'d clock and its own n.SpeedCh — see
+	// updateFeedbackRing's n.EmitRefillSlide(clk, n.SpeedCh, *backup) call), so
+	// this closure captures only this node's id + geometry, never a clock — see
+	// per-goroutine-clock.md's note on the old shape (a captured shared clock read
+	// on every call) being a residual to close, not keep. It blocks for the slide
+	// duration (pause-aware) and polls its own speed channel each cycle so a speed
+	// change mid-slide takes effect immediately rather than waiting for the slide
+	// to finish (the slide runs its own blocking loop separate from this node's
+	// main loop). nil on test builds without injection — the caller then falls
+	// back to the instant refill. beads is the OLD backup contents that become the
+	// new working row.
+	EmitRefillSlide func(clk Wiring.Clock, speedCh <-chan float64, beads []int)
 	// Clock is this node's OWN clock storage, seeded by Wiring.reflectBuild
 	// directly from the loader's origin (not derived from any specific wired
 	// output port — deriving it from ToHoldNewSendOld/ToExcitatory/ToPacer was
@@ -219,7 +223,7 @@ func (n *Node) updateFeedbackRing(ctx context.Context, working, backup *[]int, i
 			// working row at human speed (clock-paced, pause-aware). After the
 			// slide lands, the new top row appears via the full emitBeads below.
 			if n.EmitRefillSlide != nil {
-				n.EmitRefillSlide(clk, *backup)
+				n.EmitRefillSlide(clk, n.SpeedCh, *backup)
 			}
 			*working = *backup
 			*backup = append([]int(nil), init...)

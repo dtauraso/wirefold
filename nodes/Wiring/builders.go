@@ -159,7 +159,7 @@ var (
 	tEmitBeadsFunc      = reflect.TypeFor[func(working, backup []int)]()
 	tEmitHeldFunc       = reflect.TypeFor[func(held int)]()
 	tEmitInputBeadsFunc = reflect.TypeFor[func(left, right int)]()
-	tRefillSlideFunc    = reflect.TypeFor[func(clk Clock, beads []int)]()
+	tRefillSlideFunc    = reflect.TypeFor[func(clk Clock, speedCh <-chan float64, beads []int)]()
 	tTickFunc           = reflect.TypeFor[func() int64]()
 )
 
@@ -303,17 +303,22 @@ func injectClosures(ctx context.Context, v reflect.Value, name string, pb PortBi
 		emitInputBeads(tr, name, left, right)
 	})
 
-	// EmitRefillSlide func(clk Clock, beads []int): the clock-paced refill slide (the
-	// OLD backup beads slide DOWN from row 0 into row 1 at wire-bead speed; a paused
-	// clock freezes it). The clock is a parameter the CALLER supplies at invocation
-	// time (its own already-Copy()'d clock — see input.Node.Update, which calls
-	// n.EmitRefillSlide(clk, beads) with the same copy its own loop paces on) rather
-	// than a value captured here from pb.clock: capturing the loader's origin in this
-	// closure would hand every future call a read into a clock this goroutine never
-	// Copy()'d for itself (per-goroutine-clock.md flagged this as a residual — this
-	// closure no longer needs pb.clock at all, so it is unconditional).
-	injectFunc(v, "EmitRefillSlide", tRefillSlideFunc, func(clk Clock, beads []int) {
-		emitRefillSlide(ctx, tr, name, clk, beads)
+	// EmitRefillSlide func(clk Clock, speedCh <-chan float64, beads []int): the
+	// clock-paced refill slide (the OLD backup beads slide DOWN from row 0 into row
+	// 1 at wire-bead speed; a paused clock freezes it). The clock AND speed channel
+	// are parameters the CALLER supplies at invocation time (its own
+	// already-Copy()'d clock and its own SpeedCh — see input.Node.Update, which
+	// calls n.EmitRefillSlide(clk, n.SpeedCh, beads) with the same copy/channel its
+	// own loop paces on) rather than values captured here from pb.clock: capturing
+	// the loader's origin in this closure would hand every future call a read into
+	// a clock this goroutine never Copy()'d for itself (per-goroutine-clock.md
+	// flagged this as a residual — this closure no longer needs pb.clock at all, so
+	// it is unconditional). The speed channel must be threaded through too: this
+	// slide runs its OWN blocking SleepCycle loop separate from the caller's main
+	// loop, so it must poll ApplySpeedNonBlocking itself each cycle or a speed
+	// change sent mid-slide sits unapplied until the slide finishes.
+	injectFunc(v, "EmitRefillSlide", tRefillSlideFunc, func(clk Clock, speedCh <-chan float64, beads []int) {
+		emitRefillSlide(ctx, tr, name, clk, speedCh, beads)
 	})
 
 	// The remaining injections seed a node's OWN clock storage from the loader's
