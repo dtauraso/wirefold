@@ -190,10 +190,49 @@ coalesces into <b>one</b> write after activity settles.</p>
   <text class="tf" x="572" y="119">take() → write file → recordWrite()</text>
 
   <line x1="0" y1="152" x2="860" y2="152" stroke="var(--line)"/>
-  <text class="tq" x="0" y="172">WHY IT EXISTS</text>
-  <text class="ts" x="106" y="172">without it a drag is ~60 file writes per second per node. The lock is incidental to that goal.</text>
+  <text class="tq" x="0" y="172">WHAT IT DOES</text>
+  <text class="ts" x="106" y="172">collapses ~60 writes/sec per node into one. Whether that is a PROBLEM is diagram 2b.</text>
   <text class="tf" x="0" y="190">Note what this means for the lock: the mutex is not protecting the DEBOUNCE, it is protecting the state the debounce keeps.</text>
   <text class="tf" x="0" y="206">Removing the lock must not remove the coalescing — they are separable concerns that happen to live in one struct.</text>
+</svg>
+</div>
+
+<h2>2b · is 60 writes/sec actually a problem? — nobody has shown it is</h2>
+<p class="cap">The same question that deflated <code>RealClock.mu</code>'s performance premise.
+Asked here, the throughput case is <b>weak</b>, and the one argument that might hold is a
+different argument entirely — and unmeasured.</p>
+
+<div class="plate">
+<svg viewBox="0 0 860 300" role="img" aria-label="The throughput justification for debouncing does not hold up arithmetically, and the only plausible justification is drag-path latency, which has never been measured.">
+  <text class="tl" x="0" y="14">THE THROUGHPUT ARGUMENT — DOES NOT HOLD</text>
+
+  <rect class="box" x="0" y="28" width="420" height="120" rx="6"/>
+  <text class="ts" x="12" y="50">60 writes/sec × a handful of nodes</text>
+  <text class="ts" x="12" y="68">≈ 240 writes/sec</text>
+  <text class="tf" x="12" y="88">each = marshal + MkdirAll + WriteFile + rename</text>
+  <text class="tf" x="12" y="102">≈ 4 syscalls, on ~200-byte files</text>
+  <text class="ts" x="12" y="124">≈ 1,000 syscalls/sec total</text>
+  <text class="tk" x="12" y="142">an SSD does not notice this</text>
+
+  <text class="tl" x="440" y="14">THE ARGUMENT THAT MIGHT HOLD</text>
+
+  <rect class="queue" x="440" y="28" width="420" height="120" rx="6"/>
+  <text class="ts" x="452" y="50">WriteLocalPolars runs SYNCHRONOUSLY</text>
+  <text class="ts" x="452" y="68">on the node's own mover goroutine</text>
+  <text class="tf" x="452" y="88">so without debouncing, filesystem syscalls</text>
+  <text class="tf" x="452" y="102">land on the INTERACTION path at 60 Hz</text>
+  <text class="tf" x="452" y="122">MkdirAll and rename can block unpredictably</text>
+  <text class="tq" x="452" y="142">that is a JANK argument, not a bandwidth one</text>
+
+  <rect class="state" x="0" y="164" width="860" height="70" rx="6"/>
+  <text class="t"  x="12" y="186">WHAT THE REPO ACTUALLY RECORDS</text>
+  <text class="ts" x="12" y="208">No benchmark. No profile. No commit motivated by a measurement. The only stated rationale is a comment</text>
+  <text class="ts" x="12" y="224">saying the write happens “off the hot path” — which asserts the conclusion rather than establishing it.</text>
+
+  <line x1="0" y1="252" x2="860" y2="252" stroke="var(--line)"/>
+  <text class="tw" x="0" y="272">WHAT THIS REFRAMES</text>
+  <text class="ts" x="160" y="272">the question is not only “can the lock go” but “does the debouncer earn its place at all”.</text>
+  <text class="tf" x="0" y="290">If it does not, the lock goes with it and there is nothing to restructure. Measure the drag path before designing an owner goroutine to preserve machinery that may not need to exist.</text>
 </svg>
 </div>
 
