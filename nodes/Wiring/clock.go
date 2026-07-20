@@ -32,7 +32,6 @@ package Wiring
 
 import (
 	"context"
-	"sync"
 	"time"
 )
 
@@ -79,22 +78,24 @@ type Clock interface {
 // a condition variable — pacing loops call SleepCycle (wall time.After) and
 // re-check Tick() themselves.
 type RealClock struct {
-	// mu guards speed/accScaled/lastChange against the real contention shape:
-	// every pacing loop in the system (paced_wire.go StepOnce, input/holdnewsendold/
-	// gatecommon Update loops) calls Tick() continuously and concurrently with the
-	// ONE writer, stdin_reader.go's "speed" message handler, which calls SetSpeed —
-	// many concurrent readers vs. one occasional writer. CHECKED:
-	// TestRealClockConcurrentTickVsSetSpeedRace (clock_concurrency_test.go) drives
-	// exactly that shape under `go test -race` and is RED (reproducible data-race
-	// report on these three fields) with the Lock/Unlock calls removed from Tick
-	// and SetSpeed. TestRealClockConcurrentMonotonic additionally checks the
-	// correctness claim that Tick() never goes backward for a given reader even
-	// while a second goroutine is racing SetSpeed continuously — under the tested
-	// weakenings (removing the lock) this failed via data race before it could be
-	// observed producing a plain backward jump without -race, so the backward-jump
-	// path itself remains UNCHECKED in isolation; the race is the failure mode this
-	// guard actually catches.
-	mu sync.Mutex
+	// No mutex here on purpose. The mutex this struct used to carry existed for a
+	// contention shape that no longer applies: many pacing-loop readers of Tick()
+	// racing the one SetSpeed writer, all reaching through ONE shared *RealClock.
+	// Per-goroutine-clock (docs/planning/visual-editor/per-goroutine-clock.md)
+	// removes that shape by ownership rather than by locking — a RealClock is now
+	// held by exactly ONE goroutine, which is the only thing that ever reads or
+	// writes it. There is no second goroutine to race, so there is nothing left to
+	// guard. A mutex on state nobody else touches is not "extra safety," it is dead
+	// weight documenting a sharing relationship that no longer exists.
+	//
+	// Deleting mu is also what makes RealClock legal to COPY: `sync.Mutex` is a
+	// `go vet` copylocks violation, so as long as it lived here the struct could
+	// only be passed by pointer — which is exactly the "one object, many holders"
+	// shape being removed. With mu gone, `c2 := *c1` is a plain value copy, and
+	// that copy is how a goroutine gets ITS OWN clock: it dereference-copies from
+	// an existing RealClock, inheriting its origin/accScaled/speed by value, and
+	// from then on is independent — SetSpeed on one copy is invisible to the
+	// other, correctly, because nothing is shared to make it otherwise.
 	// speed is the current playback multiplier (>= 0). Default 1.
 	speed float64
 	// accScaled is scaled elapsed accumulated across all PRIOR speed segments, up
@@ -111,9 +112,10 @@ func NewRealClock() *RealClock {
 	return &RealClock{speed: 1, lastChange: time.Now()}
 }
 
-// scaledElapsedLocked returns total scaled elapsed = accumulated prior segments +
-// the live segment (wall time since lastChange × current speed). Caller holds mu.
-func (c *RealClock) scaledElapsedLocked() time.Duration {
+// scaledElapsed returns total scaled elapsed = accumulated prior segments + the
+// live segment (wall time since lastChange × current speed). No locking: only
+// the owning goroutine ever calls this.
+func (c *RealClock) scaledElapsed() time.Duration {
 	live := time.Duration(float64(time.Since(c.lastChange)) * c.speed)
 	total := c.accScaled + live
 	if total < 0 {
@@ -124,9 +126,7 @@ func (c *RealClock) scaledElapsedLocked() time.Duration {
 
 // Tick returns the current tick: scaled elapsed floored to ticks.
 func (c *RealClock) Tick() int64 {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return int64(c.scaledElapsedLocked() / tickPeriod)
+	return int64(c.scaledElapsed() / tickPeriod)
 }
 
 // SetSpeed sets the playback-speed multiplier. It banks the scaled elapsed of the
@@ -136,8 +136,6 @@ func (c *RealClock) SetSpeed(speed float64) {
 	if speed < 0 {
 		speed = 0
 	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	now := time.Now()
 	c.accScaled += time.Duration(float64(now.Sub(c.lastChange)) * c.speed)
 	c.lastChange = now
