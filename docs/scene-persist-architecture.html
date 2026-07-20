@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>wirefold — scene_persist, the last unexamined locks</title>
+<style>
+  :root {
+    --ground:#F2F4F7; --surface:#FFFFFF; --plate:#FAFBFC;
+    --ink:#131A24; --muted:#5B6779; --faint:#8894A6;
+    --line:#D3D9E2; --line-strong:#B7C0CD;
+    --signal:#C06A12; --flow:#2E7D9A; --hazard:#A8443C; --ok:#3B7350;
+    --signal-wash:#F6ECDF; --flow-wash:#E4EFF3; --hazard-wash:#F6E6E4; --ok-wash:#E4EFE8;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground:#0D1219; --surface:#141C26; --plate:#111925;
+      --ink:#E4E9F0; --muted:#94A1B2; --faint:#6C7A8B;
+      --line:#26313F; --line-strong:#3A4859;
+      --signal:#E8A147; --flow:#57AECB; --hazard:#D2685E; --ok:#6FA783;
+      --signal-wash:#241B10; --flow-wash:#0F2029; --hazard-wash:#251413; --ok-wash:#12241A;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:#0D1219; --surface:#141C26; --plate:#111925;
+    --ink:#E4E9F0; --muted:#94A1B2; --faint:#6C7A8B;
+    --line:#26313F; --line-strong:#3A4859;
+    --signal:#E8A147; --flow:#57AECB; --hazard:#D2685E; --ok:#6FA783;
+    --signal-wash:#241B10; --flow-wash:#0F2029; --hazard-wash:#251413; --ok-wash:#12241A;
+  }
+  :root[data-theme="light"] {
+    --ground:#F2F4F7; --surface:#FFFFFF; --plate:#FAFBFC;
+    --ink:#131A24; --muted:#5B6779; --faint:#8894A6;
+    --line:#D3D9E2; --line-strong:#B7C0CD;
+    --signal:#C06A12; --flow:#2E7D9A; --hazard:#A8443C; --ok:#3B7350;
+    --signal-wash:#F6ECDF; --flow-wash:#E4EFF3; --hazard-wash:#F6E6E4; --ok-wash:#E4EFE8;
+  }
+
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--ground); color:var(--ink); font-family:var(--sans); line-height:1.5; -webkit-font-smoothing:antialiased; }
+  .wrap { max-width:1120px; margin:0 auto; padding:0 20px 72px; }
+  header { border-bottom:1px solid var(--line); background:var(--surface); }
+  .head-inner { max-width:1120px; margin:0 auto; padding:24px 20px 20px; }
+  .eyebrow { font-family:var(--mono); font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--faint); margin:0 0 8px; }
+  h1 { font-family:var(--mono); font-weight:600; font-size:clamp(20px,3vw,28px); margin:0 0 6px; }
+  .sub { margin:0; color:var(--muted); max-width:76ch; font-size:14px; }
+  h2 { font-family:var(--mono); font-size:13px; font-weight:600; margin:38px 0 2px; letter-spacing:.02em; }
+  .cap { margin:0 0 10px; color:var(--muted); font-size:13px; max-width:82ch; }
+  .cap b { color:var(--ink); font-weight:600; }
+  .plate { background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:14px; margin:0 0 10px; overflow-x:auto; }
+  .plate svg { display:block; min-width:600px; width:100%; height:auto; }
+
+  .t   { font-family:var(--mono); font-size:12.5px; fill:var(--ink); font-weight:600; }
+  .ts  { font-family:var(--mono); font-size:10.5px; fill:var(--muted); }
+  .tf  { font-family:var(--mono); font-size:9.5px;  fill:var(--faint); }
+  .tl  { font-family:var(--mono); font-size:11px; fill:var(--faint); letter-spacing:.1em; }
+  .tw  { font-family:var(--mono); font-size:10.5px; fill:var(--hazard); font-weight:600; }
+  .tk  { font-family:var(--mono); font-size:10.5px; fill:var(--ok); font-weight:600; }
+  .tq  { font-family:var(--mono); font-size:10.5px; fill:var(--signal); font-weight:600; }
+  .tb  { font-family:var(--mono); font-size:10.5px; fill:var(--flow); font-weight:600; }
+  .big { font-family:var(--mono); font-size:14px; fill:var(--hazard); font-weight:700; }
+
+  .box   { fill:var(--plate); stroke:var(--line-strong); stroke-width:1; }
+  .gor   { fill:var(--flow-wash); stroke:var(--flow); stroke-width:1.2; }
+  .state { fill:var(--hazard-wash); stroke:var(--hazard); stroke-width:1.4; }
+  .safe  { fill:var(--ok-wash); stroke:var(--ok); stroke-width:1.2; }
+  .queue { fill:var(--signal-wash); stroke:var(--signal); stroke-width:1.2; }
+  .dash  { fill:none; stroke:var(--line-strong); stroke-width:1; stroke-dasharray:4 3; }
+  .arr   { fill:none; stroke:var(--hazard); stroke-width:1.4; }
+  .arrb  { fill:none; stroke:var(--flow); stroke-width:1.4; }
+  .arrk  { fill:none; stroke:var(--ok); stroke-width:1.4; }
+  .arrq  { fill:none; stroke:var(--signal); stroke-width:1.4; }
+
+  .legend { display:flex; gap:16px; flex-wrap:wrap; margin:0 0 22px; font-size:12px; color:var(--muted); }
+  .legend span { display:flex; align-items:center; gap:6px; font-family:var(--mono); font-size:11px; }
+  .sw { width:12px; height:12px; border-radius:3px; border:1.4px solid; display:inline-block; }
+  .sw.g { background:var(--flow-wash);   border-color:var(--flow); }
+  .sw.s { background:var(--hazard-wash); border-color:var(--hazard); }
+  .sw.k { background:var(--ok-wash);     border-color:var(--ok); }
+  .sw.q { background:var(--signal-wash); border-color:var(--signal); }
+
+  .verdict { font-size:13px; margin:0 0 26px; padding:9px 12px; border-radius:6px; }
+  .verdict.ok { background:var(--ok-wash); }
+  .verdict.open { background:var(--signal-wash); }
+  .verdict.hazard { background:var(--hazard-wash); }
+  .verdict b { font-family:var(--mono); font-size:11.5px; }
+  code { font-family:var(--mono); font-size:.92em; }
+  footer { margin-top:46px; padding-top:16px; border-top:1px solid var(--line); color:var(--faint); font-size:12px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="head-inner">
+    <p class="eyebrow">wirefold · concurrency</p>
+    <h1>scene_persist — the last locks nobody has looked at</h1>
+    <p class="sub">Four locks guarding file I/O. Every other lock in the tree has been deleted
+    or settled. These are different in kind: the observer is the <b>filesystem</b>, which has
+    no perceptual threshold — so the "who could tell, and at what resolution" test that
+    settled the others does not apply here.</p>
+  </div>
+</header>
+
+<div class="wrap">
+
+<div class="legend">
+  <span><i class="sw g"></i>goroutine</span>
+  <span><i class="sw s"></i>lock / hazard</span>
+  <span><i class="sw q"></i>timer-spawned</span>
+  <span><i class="sw k"></i>file on disk</span>
+</div>
+
+<!-- ══ 1 · THE MAP ══ -->
+<h2>1 · the whole system — five persisters, four locks, two files</h2>
+<p class="cap">Every writer, the goroutine it runs on, the lock it takes, and the file it lands
+in. <b>Five</b> debounced persisters, each with its own independent <code>mu</code>.</p>
+
+<div class="plate">
+<svg viewBox="0 0 860 400" role="img" aria-label="Five debounced persisters and one synchronous writer funnel through either the scene file mutex or a per-path entity mutex before writing scene.json or a node's meta.json.">
+  <defs><marker id="as" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#C06A12"/></marker></defs>
+
+  <text class="tl" x="0" y="14">WRITER · GOROUTINE</text>
+  <text class="tl" x="392" y="14">LOCK</text>
+  <text class="tl" x="672" y="14">FILE</text>
+
+  <rect class="queue" x="0" y="28" width="356" height="34" rx="5"/>
+  <text class="ts" x="10" y="43">viewpointPersister.flush — camera</text>
+  <text class="tf" x="10" y="56">scene_camera_persist.go:55 · TIMER goroutine</text>
+
+  <rect class="queue" x="0" y="68" width="356" height="34" rx="5"/>
+  <text class="ts" x="10" y="83">overlaysPersister.flush — overlays</text>
+  <text class="tf" x="10" y="96">scene_overlays_persist.go:94 · TIMER, or stdin on save</text>
+
+  <rect class="gor" x="0" y="108" width="356" height="34" rx="5"/>
+  <text class="ts" x="10" y="123">sceneSpherePersister.flushNow — sphere</text>
+  <text class="tf" x="10" y="136">scene_sphere_persist.go:128 · STDIN goroutine, synchronous</text>
+
+  <rect class="queue" x="0" y="162" width="356" height="34" rx="5"/>
+  <text class="ts" x="10" y="177">quantOffsetPersister.flush — node position</text>
+  <text class="tf" x="10" y="190">quant_offset_persist.go:68 · TIMER goroutine</text>
+
+  <rect class="gor" x="0" y="202" width="356" height="34" rx="5"/>
+  <text class="ts" x="10" y="217">WriteLocalPolars — local polars</text>
+  <text class="tf" x="10" y="230">quant_offset_persist.go:143 · node's OWN mover goroutine, SYNC</text>
+
+  <rect class="queue" x="0" y="242" width="356" height="34" rx="5"/>
+  <text class="ts" x="10" y="257">anchorPersister.flush — port anchor</text>
+  <text class="tf" x="10" y="270">scene_anchor_persist.go:53 · TIMER goroutine</text>
+
+  <path class="arrq" d="M356,45 L456,60" marker-end="url(#as)"/>
+  <path class="arrq" d="M356,85 L456,70" marker-end="url(#as)"/>
+  <path class="arrq" d="M356,125 L456,80" marker-end="url(#as)"/>
+  <path class="arrq" d="M356,179 L456,178" marker-end="url(#as)"/>
+  <path class="arrq" d="M356,219 L456,188" marker-end="url(#as)"/>
+  <path class="arrq" d="M356,259 L456,250" marker-end="url(#as)"/>
+
+  <rect class="state" x="456" y="40" width="200" height="52" rx="6"/>
+  <text class="tw" x="468" y="60">sceneFileMu</text>
+  <text class="tf" x="468" y="76">scene_persist.go:44</text>
+  <text class="tf" x="468" y="88">one package-level lock</text>
+
+  <rect class="state" x="456" y="158" width="200" height="52" rx="6"/>
+  <text class="tw" x="468" y="178">entityFileMus[path]</text>
+  <text class="tf" x="468" y="194">:168–181 — striped per file</text>
+  <text class="tf" x="468" y="206">entityFileMuMu guards the map</text>
+
+  <rect class="state" x="456" y="228" width="200" height="44" rx="6"/>
+  <text class="tw" x="468" y="248">entityFileMus[port path]</text>
+  <text class="tf" x="468" y="264">a different striped path</text>
+
+  <path class="arrq" d="M656,66 L672,66" marker-end="url(#as)"/>
+  <path class="arrq" d="M656,184 L672,184" marker-end="url(#as)"/>
+  <path class="arrq" d="M656,250 L672,250" marker-end="url(#as)"/>
+
+  <rect class="safe" x="672" y="44" width="188" height="44" rx="6"/>
+  <text class="ts" x="682" y="62">view/scene.json</text>
+  <text class="tf" x="682" y="78">3 disjoint keys, 1 document</text>
+
+  <rect class="safe" x="672" y="162" width="188" height="44" rx="6"/>
+  <text class="ts" x="682" y="180">nodes/&lt;id&gt;/meta.json</text>
+  <text class="tf" x="682" y="196">position + localPolars</text>
+
+  <rect class="safe" x="672" y="228" width="188" height="44" rx="6"/>
+  <text class="ts" x="682" y="246">nodes/&lt;id&gt;/…/&lt;port&gt;.json</text>
+  <text class="tf" x="682" y="262">anchorId</text>
+
+  <rect class="box" x="0" y="296" width="856" height="42" rx="6"/>
+  <text class="tq" x="12" y="314">debouncedPersister.mu ×5</text>
+  <text class="tf" x="150" y="314">scene_persist.go:58 — guards pending · has · timer · writes. One INDEPENDENT instance per persister.</text>
+  <text class="tf" x="12" y="330">Contends: the goroutine calling schedule/arm vs the timer goroutine calling take/recordWrite. No file I/O is held under it.</text>
+
+  <line x1="0" y1="358" x2="860" y2="358" stroke="var(--line)"/>
+  <text class="tq" x="0" y="378">time.AfterFunc runs every flush on a BRAND NEW GOROUTINE</text>
+  <text class="ts" x="470" y="378">— that is the second party in every race below.</text>
+  <text class="tf" x="0" y="394">Debounce window ~250ms, shared by all persisters (move_persist.go:77-81).</text>
+</svg>
+</div>
+
+<!-- ══ 2 · THE REAL RACE ══ -->
+<h2>2 · the race that is reachable today</h2>
+<p class="cap">Node X was dragged, so its position flush is <b>pending on a timer</b>. Within that
+~250 ms window a different node Y is dragged, and X is Y's neighbour — so X's own mover
+goroutine synchronously rewrites X's <code>meta.json</code> while the timer goroutine is
+flushing the <i>same file</i>.</p>
+
+<div class="plate">
+<svg viewBox="0 0 860 300" role="img" aria-label="A timer goroutine flushing node X's queued position write collides with node X's own mover goroutine synchronously writing local polars, both to the same meta.json file.">
+  <defs><marker id="ah3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#A8443C"/></marker></defs>
+
+  <text class="tl" x="0" y="14">t = 0 — X IS DRAGGED</text>
+  <text class="tl" x="330" y="14">t &lt; 250ms — Y IS DRAGGED, X IS ITS NEIGHBOUR</text>
+
+  <rect class="gor" x="0" y="30" width="290" height="48" rx="6"/>
+  <text class="ts" x="12" y="49">commitNodeMoveLocal on X's mover</text>
+  <text class="tf" x="12" y="65">schedules quantOffset flush — quantized_move.go:297</text>
+
+  <path class="arrq" d="M145,78 L145,104" marker-end="url(#as)"/>
+  <rect class="queue" x="0" y="110" width="290" height="46" rx="6"/>
+  <text class="tq" x="12" y="129">timer armed — fires in ~250ms</text>
+  <text class="tf" x="12" y="145">on a NEW goroutine</text>
+
+  <rect class="gor" x="330" y="30" width="300" height="48" rx="6"/>
+  <text class="ts" x="342" y="49">neighborSetC arrives at X</text>
+  <text class="tf" x="342" y="65">X's OWN mover goroutine handles it</text>
+
+  <path class="arr" d="M480,78 L480,104" marker-end="url(#ah3)"/>
+  <rect class="state" x="330" y="110" width="300" height="46" rx="6"/>
+  <text class="tw" x="342" y="129">WriteLocalPolars — SYNCHRONOUS</text>
+  <text class="tf" x="342" y="145">quantized_move.go:264 · no debounce</text>
+
+  <path class="arr" d="M145,156 C145,196 300,200 380,206" marker-end="url(#ah3)"/>
+  <path class="arr" d="M480,156 C480,186 520,200 560,206" marker-end="url(#ah3)"/>
+
+  <rect class="state" x="380" y="192" width="300" height="56" rx="8"/>
+  <text class="big" x="392" y="214">SAME FILE, TWO GOROUTINES</text>
+  <text class="ts"  x="392" y="232">nodes/X/meta.json</text>
+  <text class="tf"  x="392" y="244">both route through entityReadModifyWrite :187–197</text>
+
+  <line x1="0" y1="266" x2="860" y2="266" stroke="var(--line)"/>
+  <text class="tw" x="0" y="286">REAL, NOT THEORETICAL</text>
+  <text class="ts" x="176" y="286">reachable for any node with an edge to a node being dragged. The per-path lock is what stops it.</text>
+</svg>
+</div>
+
+<!-- ══ 3 · WHY RENAME IS NOT ENOUGH ══ -->
+<h2>3 · atomic rename does not make these locks redundant</h2>
+<p class="cap">The obvious objection: <code>writeJSONAtomic</code> writes a temp file then renames,
+so readers never see a torn file. True — and irrelevant to what these locks prevent. Two
+distinct failures survive it, and <b>both writers share one literal tmp filename</b>.</p>
+
+<div class="plate">
+<svg viewBox="0 0 860 300" role="img" aria-label="Two concurrent writers both read the same snapshot and both write the same temp filename, so one update is lost and the second rename can fail outright.">
+  <text class="tl" x="0" y="14">writeJSONAtomic — scene_persist.go:201–214</text>
+
+  <rect class="box" x="0" y="28" width="860" height="34" rx="5"/>
+  <text class="ts" x="12" y="49">json.Marshal → os.MkdirAll → os.WriteFile(path + ".tmp") → os.Rename(tmp, path)</text>
+  <text class="tw" x="600" y="49">← ONE shared tmp name</text>
+
+  <text class="tl" x="0" y="88">FAILURE 1 · LOST UPDATE</text>
+  <rect class="state" x="0" y="100" width="410" height="112" rx="6"/>
+  <text class="ts" x="12" y="120">A reads whole object</text>
+  <text class="ts" x="12" y="138">B reads whole object   ← same snapshot</text>
+  <text class="ts" x="12" y="156">A writes {…, keyA}</text>
+  <text class="ts" x="12" y="174">B writes {…, keyB}     ← A's key is gone</text>
+  <text class="tf" x="12" y="196">disjoint KEYS do not help: the unit of write is the whole map</text>
+
+  <text class="tl" x="450" y="88">FAILURE 2 · RENAME ERRORS OUT</text>
+  <rect class="state" x="450" y="100" width="410" height="112" rx="6"/>
+  <text class="ts" x="462" y="120">A writes meta.json.tmp</text>
+  <text class="ts" x="462" y="138">B writes meta.json.tmp  ← same path</text>
+  <text class="ts" x="462" y="156">A renames tmp → meta.json</text>
+  <text class="tw" x="462" y="174">B renames tmp → no such file or directory</text>
+  <text class="tf" x="462" y="196">this exact error has been observed in test output</text>
+
+  <line x1="0" y1="234" x2="860" y2="234" stroke="var(--line)"/>
+  <text class="tk" x="0" y="254">WHAT RENAME DOES SOLVE</text>
+  <text class="ts" x="192" y="254">a READER never observes a half-written file. That is upstream of, not overlapping with, the locks.</text>
+  <text class="tf" x="0" y="272">These are plain sync.Mutex, not flock — in-process only. Cross-process writers are out of the model (Go owns persistence).</text>
+  <text class="tf" x="0" y="288">Note the shared tmp name is a hazard the lock HIDES rather than removes: unlock it and the bug is a failed write, not a torn one.</text>
+</svg>
+</div>
+
+<!-- ══ 4 · SINGLE OWNER? ══ -->
+<h2>4 · the question that killed the other four locks</h2>
+<p class="cap">Every lock removed so far fell to the same move: the state turned out to have, or
+could be given, <b>exactly one owner</b>. Asking it here gives three different answers.</p>
+
+<div class="plate">
+<svg viewBox="0 0 860 240" role="img" aria-label="Applying the single-owner test to each lock gives three answers: the debounce state has two genuine parties, the scene file has whole-document overlap, and the entity path could plausibly be routed through one goroutine.">
+  <rect class="queue" x="0" y="24" width="278" height="150" rx="6"/>
+  <text class="t"  x="12" y="44">debouncedPersister.mu</text>
+  <text class="tf" x="12" y="64">Two parties by construction:</text>
+  <text class="tf" x="12" y="78">the goroutine that arms it, and</text>
+  <text class="tf" x="12" y="92">the timer goroutine that fires.</text>
+  <text class="tq" x="12" y="116">COULD be one owner</text>
+  <text class="tf" x="12" y="132">if schedules were routed to a</text>
+  <text class="tf" x="12" y="146">persister-owning goroutine —</text>
+  <text class="tf" x="12" y="160">the shape used everywhere else.</text>
+
+  <rect class="state" x="292" y="24" width="278" height="150" rx="6"/>
+  <text class="t"  x="304" y="44">sceneFileMu</text>
+  <text class="tf" x="304" y="64">Three writers, DISJOINT keys —</text>
+  <text class="tf" x="304" y="78">cameraPolar, overlays, sceneSphere.</text>
+  <text class="tf" x="304" y="92">But each reads and writes the</text>
+  <text class="tf" x="304" y="106">WHOLE document.</text>
+  <text class="tw" x="304" y="130">NOT reducible by ownership</text>
+  <text class="tf" x="304" y="146">without splitting the file, i.e.</text>
+  <text class="tf" x="304" y="160">a format change. Real overlap.</text>
+
+  <rect class="queue" x="584" y="24" width="276" height="150" rx="6"/>
+  <text class="t"  x="596" y="44">entityFileMus[path]</text>
+  <text class="tf" x="596" y="64">Second party is a timer goroutine</text>
+  <text class="tf" x="596" y="78">spawned from an EARLIER call by</text>
+  <text class="tf" x="596" y="92">the same mover — it contends</text>
+  <text class="tf" x="596" y="106">with itself across time.</text>
+  <text class="tq" x="596" y="130">COULD be one owner</text>
+  <text class="tf" x="596" y="146">route the flush through the node's</text>
+  <text class="tf" x="596" y="160">own channel instead of AfterFunc.</text>
+
+  <line x1="0" y1="196" x2="860" y2="196" stroke="var(--line)"/>
+  <text class="tk" x="0" y="216">FOUR FOR FOUR SO FAR</text>
+  <text class="ts" x="164" y="216">geomMu · LayoutHolder.mu · PacedWire.mu · outbox.mu — each removed by giving state one owner.</text>
+  <text class="tf" x="0" y="232">Two of the three above have a plausible owner. The middle one may genuinely not — which would be the first.</text>
+</svg>
+</div>
+
+<!-- ══ 5 · WHAT IS NOT TRUE ══ -->
+<h2>5 · findings — one stale claim, one missing guard</h2>
+
+<div class="plate">
+<svg viewBox="0 0 860 200" role="img" aria-label="The doc comment names a polar-locks writer that does not exist; the real third writer is sceneSphere. And no test fails if any of these four locks is deleted.">
+  <rect class="state" x="0" y="24" width="420" height="118" rx="6"/>
+  <text class="t"  x="12" y="44">STALE CLAIM</text>
+  <text class="ts" x="12" y="66">scene_persist.go:42–43 names three</text>
+  <text class="ts" x="12" y="82">scene.json writers: camera, overlays,</text>
+  <text class="tw" x="12" y="98">“polar locks” — which does not exist.</text>
+  <text class="tf" x="12" y="118">The real third writer is writeSceneSphere</text>
+  <text class="tf" x="12" y="132">(scene_sphere_persist.go:60). Name is wrong,</text>
+  <text class="tf" x="12" y="146">count is right.</text>
+
+  <rect class="state" x="440" y="24" width="420" height="118" rx="6"/>
+  <text class="t"  x="452" y="44">NO RED PROOF</text>
+  <text class="ts" x="452" y="66">NOT ONE of these four locks has a test</text>
+  <text class="ts" x="452" y="82">that fails when the lock is removed.</text>
+  <text class="tf" x="452" y="104">Existing tests cover sequential key-preservation</text>
+  <text class="tf" x="452" y="118">and functional persistence. The e2e drag test</text>
+  <text class="tf" x="452" y="132">calls flush() synchronously — so it never</text>
+  <text class="tf" x="452" y="146">forces the two-writer collision.</text>
+
+  <line x1="0" y1="164" x2="860" y2="164" stroke="var(--line)"/>
+  <text class="tw" x="0" y="184">START HERE</text>
+  <text class="ts" x="86" y="184">a lock with no red proof is a lock nobody has shown to be load-bearing. Prove it before removing it — or find it isn't.</text>
+</svg>
+</div>
+
+<footer>
+  Verified against the tree on <span style="font-family:var(--mono)">task/mutex-scene-persist</span>.
+  Line numbers drift — re-grep before trusting them. Companion to
+  <span style="font-family:var(--mono)">docs/mutex-architecture.html</span> (all locks) and
+  <span style="font-family:var(--mono)">docs/framings.md</span> (why each exists).
+</footer>
+
+</div>
+</body>
+</html>
