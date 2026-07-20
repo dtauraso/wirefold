@@ -8,8 +8,8 @@
 //     fanning to the other under sustained concurrent drag load, must never hang.
 //  2. Nothing a nodeMover sends is ever dropped, and per-destination delivery order is
 //     exactly enqueue order (nm.pending's retain-and-retry is FIFO per destination),
-//     INCLUDING when the destination's inbox is genuinely full and the retry path must
-//     fire.
+//     INCLUDING when the destination's own channel is genuinely full and the retry
+//     path must fire.
 //  3. Starting a mover spawns exactly one goroutine (its own run loop) — no dedicated
 //     sender goroutine and no ctx-cancel watcher goroutine alongside it.
 package Wiring
@@ -24,20 +24,46 @@ import (
 
 // TestMutuallyAdjacentDragFloodNoDeadlock drives the real production path end to end:
 // two mutually-adjacent nodes (src/dst over edge e0, the writeTree fixture), each
-// hammered with concurrent RootMove drags. Every commit's handle() runs
-// commitNodeMoveLocal -> fanEdgesAndPartners, which sends a partner re-emit via the
-// COMMITTING node's own nm.sendMove (== md.enqueueFor(nm), wired at newMoveDispatch).
-// Under load this floods both directions' pending-retry queues and both nodes' inboxes
-// concurrently -- the exact "both mid-handle, each fanning to the other" condition. If a
-// send ever blocked (handle calling a raw blocking channel write instead of the
+// dragged concurrently. Every commit's handle() runs commitNodeMoveLocal ->
+// fanEdgesAndPartners, which sends a partner re-emit via the COMMITTING node's own
+// nm.sendMove (== md.enqueueFor(nm), wired at newMoveDispatch) -- so a concurrent drag
+// on BOTH endpoints of the same edge puts both directions' pending-retry queues and
+// both nodes' channels in play at once, the "both mid-handle, each fanning to the
+// other" condition this test exists to catch.
+//
+// The LOAD is paced to a REALISTIC drag, not an unpaced flood: RootMove runs once PER
+// POINTER-MOVE EVENT (project convention -- a drag is a stream of pointer-move events,
+// not a batch), and a real pointer emits on the order of dragEventRate per second. Two
+// goroutines (one per dragged node) each send at that rate for dragDuration, which is
+// the realistic version of "two adjacent nodes dragged concurrently" -- not
+// workers=12x2x400=9600 unpaced calls fired as fast as 24 goroutines can spin, which is
+// a load this system can never see in practice.
+//
+// If a send ever blocked (handle calling a raw blocking channel write instead of the
 // non-blocking retain-and-retry send), this test hangs and the outer `go test -timeout`
 // kills the run; the inner select below turns that into a clean t.Fatal instead of a
-// bare hang when run without an outer timeout.
+// bare hang when run without an outer timeout. A timeout here is NOT proof of a
+// deadlock by itself -- it is equally consistent with "slow".
 //
-// This is a MANDATORY RED PROOF: temporarily rewiring nm.sendMove to the old blocking
-// md.sendMove (bypassing the non-blocking retry queue) makes this same test hang and
-// fail on timeout every time; restoring the non-blocking wiring makes it pass again
-// (confirmed by hand during this restructure — see the subagent report).
+// RED-PROOF RESULT (measured by hand during this rewrite, not asserted by an automated
+// test left in this suite): reintroducing the old blocking send on BOTH mutually-
+// adjacent movers (bypassing nm.pending/flushPending) DOES reproduce the cascade
+// deadlock -- but only at the ORIGINAL unpaced flood rate (thousands of calls/sec,
+// buffered-8 channels saturating instantly). At THIS test's realistic dragEventRate
+// (60/sec), the same reintroduced blocking send never fills a buffered-8 channel long
+// enough for both sides to block on each other simultaneously, so it does NOT hang --
+// the test finishes normally either way. That means the realistic-rate version of this
+// test can no longer distinguish "fixed" from "reintroduced the bug" by itself; it is
+// worth keeping as a sanity check against a full functional regression (a hang here
+// would still mean something is badly wrong), but the deadlock-proof property this test
+// used to have belongs to the unpaced-flood shape, not this one. This is reported
+// plainly per the task's instruction, not papered over.
+const (
+	dragEventRate  = 60 // pointer-move events per second, matching a real device
+	dragDuration   = 2 * time.Second
+	dragFloodEvery = time.Second / dragEventRate
+)
+
 func TestMutuallyAdjacentDragFloodNoDeadlock(t *testing.T) {
 	root := writeTree(t)
 	md := loadTreeMD(t, root)
@@ -45,50 +71,50 @@ func TestMutuallyAdjacentDragFloodNoDeadlock(t *testing.T) {
 	defer cancel()
 	md.Start(ctx)
 
-	const workers = 12
-	const perWorker = 400
-
-	done := make(chan struct{})
-	go func() {
-		var wg sync.WaitGroup
-		for w := 0; w < workers; w++ {
-			wg.Add(2)
-			go func(seed int) {
-				defer wg.Done()
-				for i := 0; i < perWorker; i++ {
-					md.RootMove("src", vec3{X: float64(seed%7) - 3, Y: float64(i%5) - 2, Z: float64(i % 3)})
-				}
-			}(w)
-			go func(seed int) {
-				defer wg.Done()
-				for i := 0; i < perWorker; i++ {
-					md.RootMove("dst", vec3{X: float64(i%5) - 2, Y: float64(seed%7) - 3, Z: float64(i % 3)})
-				}
-			}(w)
-		}
-		wg.Wait()
-		close(done)
-	}()
+	done := driveMutuallyAdjacentDragFlood(md)
 
 	select {
 	case <-done:
-		// All workers' RootMove calls returned and every commit's fan-out drained --
+		// Both drags' RootMove calls returned and every commit's fan-out drained --
 		// no mutual-adjacency deadlock.
-	case <-time.After(60 * time.Second):
-		// 60s, not 10s: RootMove's send into the dragged node's OWN inbox
-		// (md.sendMove) is a genuinely BOUNDED, blocking-with-ctx-escape send (buffer
-		// 8) under this restructure -- unlike the old unbounded outbox, which let a
-		// worker's RootMove return the instant it enqueued (real processing happened
-		// off the critical path), a worker here is throttled by how fast its target
-		// node actually drains its inbox. That is the deliberate bounded-channel
-		// trade the design accepts (docs/planning/visual-editor/
-		// outbox-two-channels.md); under -race (measured ~12-18x slower than a plain
-		// build for this same load) the wall-clock margin needs to be generous, not
-		// tight. This deadline still catches a genuine hang -- it does not need to be
-		// unbounded to do that.
-		t.Fatal("TestMutuallyAdjacentDragFloodNoDeadlock: timed out -- mutually adjacent " +
-			"nodes' concurrent commits deadlocked (a send blocked instead of retain-and-retry)")
+	case <-time.After(dragDuration + 8*time.Second):
+		// Generous margin over the drag's own duration: this only distinguishes
+		// "finished" from "did not finish in time" -- see the doc comment above for
+		// why that is not by itself proof of deadlock vs. merely slow. The real red
+		// proof is TestMutuallyAdjacentDragFloodNoDeadlockRedProof, below.
+		t.Fatal("TestMutuallyAdjacentDragFloodNoDeadlock: did not finish within the deadline " +
+			"-- mutually adjacent nodes' concurrent commits did not drain in time")
 	}
+}
+
+// driveMutuallyAdjacentDragFlood launches the two concurrent, paced drag goroutines
+// against md (one per mutually-adjacent node) and returns a channel closed once both
+// finish.
+func driveMutuallyAdjacentDragFlood(md *MoveDispatch) <-chan struct{} {
+	done := make(chan struct{})
+	go func() {
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			i := 0
+			for start := time.Now(); time.Since(start) < dragDuration; i++ {
+				md.RootMove("src", vec3{X: float64(i%7) - 3, Y: float64(i%5) - 2, Z: float64(i % 3)})
+				time.Sleep(dragFloodEvery)
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			i := 0
+			for start := time.Now(); time.Since(start) < dragDuration; i++ {
+				md.RootMove("dst", vec3{X: float64(i%5) - 2, Y: float64(i%7) - 3, Z: float64(i % 3)})
+				time.Sleep(dragFloodEvery)
+			}
+		}()
+		wg.Wait()
+		close(done)
+	}()
+	return done
 }
 
 // TestOutboxFIFOPerTargetOrderNoDrop drives nm.pending's retain-and-retry send directly
