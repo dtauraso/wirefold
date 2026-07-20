@@ -1,0 +1,546 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>wirefold — mutex architecture</title>
+<style>
+  :root {
+    --ground:#F2F4F7; --surface:#FFFFFF; --plate:#FAFBFC;
+    --ink:#131A24; --muted:#5B6779; --faint:#8894A6;
+    --line:#D3D9E2; --line-strong:#B7C0CD;
+    --signal:#C06A12; --flow:#2E7D9A; --hazard:#A8443C; --ok:#3B7350;
+    --signal-wash:#F6ECDF; --flow-wash:#E4EFF3; --hazard-wash:#F6E6E4; --ok-wash:#E4EFE8;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground:#0D1219; --surface:#141C26; --plate:#111925;
+      --ink:#E4E9F0; --muted:#94A1B2; --faint:#6C7A8B;
+      --line:#26313F; --line-strong:#3A4859;
+      --signal:#E8A147; --flow:#57AECB; --hazard:#D2685E; --ok:#6FA783;
+      --signal-wash:#241B10; --flow-wash:#0F2029; --hazard-wash:#251413; --ok-wash:#12241A;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:#0D1219; --surface:#141C26; --plate:#111925;
+    --ink:#E4E9F0; --muted:#94A1B2; --faint:#6C7A8B;
+    --line:#26313F; --line-strong:#3A4859;
+    --signal:#E8A147; --flow:#57AECB; --hazard:#D2685E; --ok:#6FA783;
+    --signal-wash:#241B10; --flow-wash:#0F2029; --hazard-wash:#251413; --ok-wash:#12241A;
+  }
+  :root[data-theme="light"] {
+    --ground:#F2F4F7; --surface:#FFFFFF; --plate:#FAFBFC;
+    --ink:#131A24; --muted:#5B6779; --faint:#8894A6;
+    --line:#D3D9E2; --line-strong:#B7C0CD;
+    --signal:#C06A12; --flow:#2E7D9A; --hazard:#A8443C; --ok:#3B7350;
+    --signal-wash:#F6ECDF; --flow-wash:#E4EFF3; --hazard-wash:#F6E6E4; --ok-wash:#E4EFE8;
+  }
+
+  * { box-sizing:border-box; }
+  body {
+    margin:0; background:var(--ground); color:var(--ink);
+    font-family:var(--sans); line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap { max-width:1120px; margin:0 auto; padding:0 20px 72px; }
+
+  header { border-bottom:1px solid var(--line); background:var(--surface); }
+  .head-inner { max-width:1120px; margin:0 auto; padding:24px 20px 20px; }
+  .eyebrow {
+    font-family:var(--mono); font-size:11px; letter-spacing:.14em;
+    text-transform:uppercase; color:var(--faint); margin:0 0 8px;
+  }
+  h1 { font-family:var(--mono); font-weight:600; font-size:clamp(20px,3vw,28px); margin:0 0 6px; }
+  .sub { margin:0; color:var(--muted); max-width:72ch; font-size:14px; }
+
+  h2 {
+    font-family:var(--mono); font-size:13px; font-weight:600;
+    margin:38px 0 2px; letter-spacing:.02em;
+  }
+  .cap { margin:0 0 10px; color:var(--muted); font-size:13px; max-width:78ch; }
+  .cap b { color:var(--ink); font-weight:600; }
+
+  .plate {
+    background:var(--surface); border:1px solid var(--line);
+    border-radius:10px; padding:14px; margin:0 0 10px; overflow-x:auto;
+  }
+  .plate svg { display:block; min-width:600px; width:100%; height:auto; }
+
+  /* SVG type scale */
+  .t   { font-family:var(--mono); font-size:12.5px; fill:var(--ink); font-weight:600; }
+  .ts  { font-family:var(--mono); font-size:10.5px; fill:var(--muted); }
+  .tf  { font-family:var(--mono); font-size:9.5px;  fill:var(--faint); }
+  .tl  { font-family:var(--mono); font-size:11px; fill:var(--faint); letter-spacing:.1em; }
+  .tw  { font-family:var(--mono); font-size:10.5px; fill:var(--hazard); font-weight:600; }
+  .tk  { font-family:var(--mono); font-size:10.5px; fill:var(--ok); font-weight:600; }
+  .tq  { font-family:var(--mono); font-size:10.5px; fill:var(--signal); font-weight:600; }
+  .tb  { font-family:var(--mono); font-size:10.5px; fill:var(--flow); font-weight:600; }
+
+  .box   { fill:var(--plate); stroke:var(--line-strong); stroke-width:1; }
+  .gor   { fill:var(--flow-wash); stroke:var(--flow); stroke-width:1.2; }
+  .state { fill:var(--hazard-wash); stroke:var(--hazard); stroke-width:1.4; }
+  .safe  { fill:var(--ok-wash); stroke:var(--ok); stroke-width:1.2; }
+  .queue { fill:var(--signal-wash); stroke:var(--signal); stroke-width:1.2; }
+  .dash  { fill:none; stroke:var(--line-strong); stroke-width:1; stroke-dasharray:4 3; }
+  .arr   { fill:none; stroke:var(--hazard); stroke-width:1.4; }
+  .arrb  { fill:none; stroke:var(--flow); stroke-width:1.4; }
+  .arrk  { fill:none; stroke:var(--ok); stroke-width:1.4; }
+  .arrq  { fill:none; stroke:var(--signal); stroke-width:1.4; }
+
+  .legend { display:flex; gap:16px; flex-wrap:wrap; margin:0 0 22px; font-size:12px; color:var(--muted); }
+  .legend span { display:flex; align-items:center; gap:6px; font-family:var(--mono); font-size:11px; }
+  .sw { width:12px; height:12px; border-radius:3px; border:1.4px solid; display:inline-block; }
+  .sw.g { background:var(--flow-wash);   border-color:var(--flow); }
+  .sw.s { background:var(--hazard-wash); border-color:var(--hazard); }
+  .sw.k { background:var(--ok-wash);     border-color:var(--ok); }
+  .sw.q { background:var(--signal-wash); border-color:var(--signal); }
+
+  .verdict { font-size:13px; margin:0 0 26px; padding:9px 12px; border-radius:6px; }
+  .verdict.ok     { background:var(--ok-wash); }
+  .verdict.open   { background:var(--signal-wash); }
+  .verdict.hazard { background:var(--hazard-wash); }
+  .verdict b { font-family:var(--mono); font-size:11.5px; }
+  code { font-family:var(--mono); font-size:.92em; }
+  footer { margin-top:46px; padding-top:16px; border-top:1px solid var(--line); color:var(--faint); font-size:12px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="head-inner">
+    <p class="eyebrow">wirefold · concurrency</p>
+    <h1>Mutex architecture — who touches what</h1>
+    <p class="sub">Five lock groups left. Each diagram names the real goroutines, the real methods,
+    and the real line numbers. A lock with one owner is not a lock.</p>
+  </div>
+</header>
+
+<div class="wrap">
+
+<div class="legend">
+  <span><i class="sw g"></i>goroutine</span>
+  <span><i class="sw s"></i>locked state</span>
+  <span><i class="sw q"></i>queue / buffer</span>
+  <span><i class="sw k"></i>no lock needed</span>
+</div>
+
+<!-- ═══════════ 1 · PacedWire.mu ═══════════ -->
+<h2>1 · PacedWire.mu — three goroutines, one wire</h2>
+<p class="cap">Three <b>independently scheduled</b> goroutine roles reach a single
+<code>PacedWire</code>. This is the clearest real contention in the system.</p>
+
+<div class="plate">
+<svg viewBox="0 0 860 330" role="img" aria-label="Three goroutines — the source node's drive loop, the destination node's update loop, and the per-edge mover — all lock the same PacedWire mutex to reach its inflight and delivered bead slices.">
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#A8443C"/>
+    </marker>
+  </defs>
+
+  <text class="tl" x="0" y="14">GOROUTINES</text>
+  <text class="tl" x="560" y="14">ONE SHARED OBJECT</text>
+
+  <!-- goroutine boxes -->
+  <rect class="gor" x="0" y="30" width="250" height="62" rx="6"/>
+  <text class="t"  x="12" y="50">source node · drive loop</text>
+  <text class="ts" x="12" y="66">DriveHeld · node Update</text>
+  <text class="tf" x="12" y="82">Out.PlaceDrivenAt / Out.StepOnceAt</text>
+
+  <rect class="gor" x="0" y="112" width="250" height="62" rx="6"/>
+  <text class="t"  x="12" y="132">dest node · Update loop</text>
+  <text class="ts" x="12" y="148">In.PollRecv</text>
+  <text class="tf" x="12" y="164">one per destination node</text>
+
+  <rect class="gor" x="0" y="194" width="250" height="62" rx="6"/>
+  <text class="t"  x="12" y="214">edgeMover.run</text>
+  <text class="ts" x="12" y="230">recomputeGeometry</text>
+  <text class="tf" x="12" y="246">node_move.go:506 · one per edge</text>
+
+  <!-- arrows with call labels -->
+  <path class="arr" d="M250,61 L560,95" marker-end="url(#ah)"/>
+  <text class="tw" x="292" y="62">placeBeadNoWalkerAt</text>
+  <text class="tf" x="292" y="74">:188 — append to inflight</text>
+
+  <path class="arr" d="M250,72 L560,118" marker-end="url(#ah)"/>
+  <text class="tw" x="300" y="103">StepOnceAt</text>
+  <text class="tf" x="300" y="115">:280 :294 :310 :318 :328</text>
+
+  <path class="arr" d="M250,143 L560,160" marker-end="url(#ah)"/>
+  <text class="tw" x="310" y="145">PollRecvTick</text>
+  <text class="tf" x="310" y="157">:365 — pop delivered</text>
+
+  <path class="arr" d="M250,225 L560,196" marker-end="url(#ah)"/>
+  <text class="tw" x="300" y="215">ReviseInFlightGeometry</text>
+  <text class="tf" x="300" y="227">:389 — rewrite t of every bead</text>
+
+  <!-- the wire -->
+  <rect class="state" x="560" y="30" width="290" height="226" rx="8"/>
+  <text class="t"  x="574" y="52">PacedWire</text>
+  <text class="tf" x="574" y="67">nodes/Wiring/paced_wire.go:131</text>
+
+  <rect x="574" y="80" width="262" height="30" rx="4" class="box"/>
+  <text class="tw" x="586" y="99">mu sync.Mutex</text>
+
+  <rect x="574" y="118" width="262" height="34" rx="4" class="box"/>
+  <text class="ts" x="586" y="132">inflight []inflightBead</text>
+  <text class="tf" x="586" y="146">beads mid-crossing, each with its own t</text>
+
+  <rect x="574" y="160" width="262" height="34" rx="4" class="box"/>
+  <text class="ts" x="586" y="174">delivered []deliveredBead</text>
+  <text class="tf" x="586" y="188">arrived, awaiting In.PollRecv</text>
+
+  <rect x="574" y="202" width="262" height="26" rx="4" class="box"/>
+  <text class="ts" x="586" y="219">nextGen · teardownGen</text>
+
+  <text class="tf" x="574" y="246">holds NO clock — every caller passes its own tick</text>
+
+  <!-- verdict strip -->
+  <line x1="0" y1="284" x2="860" y2="284" stroke="var(--line)"/>
+  <text class="tw" x="0" y="304">RED-PROVEN</text>
+  <text class="ts" x="86" y="304">drop mu in ReviseInFlightGeometry → WARNING: DATA RACE</text>
+  <text class="tf" x="0" y="320">paced_wire_concurrency_race_test.go</text>
+</svg>
+</div>
+
+<p class="verdict open"><b>OPEN:</b> <code>inflight</code> and <code>delivered</code> are guarded as
+one pair. Whether they split by owner — placement + stepping on one side, delivery handoff on the
+other — has never been traced. <span style="color:var(--muted)">task/mutex-pacedwire-restructure</span></p>
+
+<!-- ═══════════ 2 · outbox ═══════════ -->
+<h2>2 · outbox.mu + cond — single producer, single consumer</h2>
+<p class="cap">The queue exists so a mover's handler <b>never blocks on a neighbour</b>. That is what
+breaks the mutual-adjacency cascade deadlock.</p>
+
+<div class="plate">
+<svg viewBox="0 0 860 300" role="img" aria-label="One node mover's inbox-drain goroutine enqueues into its own outbox; a single dedicated sender goroutine drains it; a third goroutine only flips the closed flag on context cancel.">
+  <defs>
+    <marker id="aq" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#C06A12"/>
+    </marker>
+  </defs>
+
+  <text class="tl" x="0" y="14">PRODUCER — 1</text>
+  <text class="tl" x="300" y="14">QUEUE</text>
+  <text class="tl" x="640" y="14">CONSUMER — 1</text>
+
+  <rect class="gor" x="0" y="30" width="238" height="76" rx="6"/>
+  <text class="t"  x="12" y="50">nodeMover.run</text>
+  <text class="ts" x="12" y="66">handle() → ob.enqueue</text>
+  <text class="tf" x="12" y="82">node_move.go:574 · spawned :494</text>
+  <text class="tf" x="12" y="96">one per node</text>
+
+  <path class="arrq" d="M238,68 L318,68" marker-end="url(#aq)"/>
+  <text class="tq" x="246" y="60">enqueue</text>
+  <text class="tf" x="246" y="84">:70 — never blocks</text>
+
+  <rect class="queue" x="318" y="30" width="270" height="140" rx="8"/>
+  <text class="t"  x="332" y="52">outbox</text>
+  <text class="tf" x="332" y="67">node_mover.go:57–58</text>
+  <rect x="332" y="80" width="242" height="26" rx="4" class="box"/>
+  <text class="tw" x="344" y="98">mu + cond</text>
+  <rect x="332" y="114" width="242" height="42" rx="4" class="box"/>
+  <text class="ts" x="344" y="130">q []outboxItem — UNBOUNDED</text>
+  <text class="tf" x="344" y="146">closed bool</text>
+
+  <path class="arrq" d="M588,68 L668,68" marker-end="url(#aq)"/>
+  <text class="tq" x="596" y="60">drain</text>
+
+  <rect class="gor" x="668" y="30" width="192" height="76" rx="6"/>
+  <text class="t"  x="680" y="50">outbox.run</text>
+  <text class="ts" x="680" y="66">dedicated sender</text>
+  <text class="tf" x="680" y="82">node_move.go:503</text>
+  <text class="tf" x="680" y="96">one per node</text>
+
+  <!-- shutdown watcher -->
+  <rect class="box" x="318" y="192" width="270" height="52" rx="6"/>
+  <text class="tq" x="332" y="212">ctx-cancel watcher</text>
+  <text class="tf" x="332" y="228">node_mover.go:85 — sets closed, broadcasts</text>
+  <text class="tf" x="332" y="240">never enqueues or dequeues</text>
+  <path class="dash" d="M453,192 L453,170"/>
+
+  <line x1="0" y1="262" x2="860" y2="262" stroke="var(--line)"/>
+  <text class="tw" x="0" y="282">RED-PROVEN</text>
+  <text class="ts" x="86" y="282">bypass the outbox → cascade deadlock, as a timeout</text>
+  <text class="tf" x="0" y="296">outbox_mutual_adjacency_test.go · TestMutuallyAdjacentDragFloodNoDeadlock</text>
+</svg>
+</div>
+
+<p class="verdict open"><b>OPEN:</b> per instance this is <b>SPSC</b> — exactly the shape with known
+lock-free forms. Unbounded complicates it; does not rule it out. <b>Also unchecked:</b> nothing
+bounds queue growth or drain time. <span style="color:var(--muted)">task/mutex-outbox-restructure</span></p>
+
+<!-- ═══════════ 3 · Trace.mu ═══════════ -->
+<h2>3 · Trace.mu — the hot path is NOT locked</h2>
+<p class="cap">Every emitting goroutine sends on a <b>channel</b>, taking no lock. The mutex guards
+only the single drain goroutine's ledger. This is the most misread lock in the tree.</p>
+
+<div class="plate">
+<svg viewBox="0 0 860 340" role="img" aria-label="Many goroutines emit into a buffered channel with no lock; a single drain goroutine takes the mutex to append events and write sinks; Close and the readers contend with the drain, not with the emitters.">
+  <defs>
+    <marker id="ab" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#2E7D9A"/>
+    </marker>
+    <marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#A8443C"/>
+    </marker>
+  </defs>
+
+  <text class="tl" x="0" y="14">MANY EMITTERS — NO LOCK</text>
+  <text class="tl" x="336" y="14">HANDOFF</text>
+  <text class="tl" x="620" y="14">LEDGER — LOCKED</text>
+
+  <rect class="safe" x="0" y="30" width="230" height="150" rx="6"/>
+  <text class="tk" x="12" y="50">node Update loops (one per node)</text>
+  <text class="tk" x="12" y="70">gate loops · DriveHeld</text>
+  <text class="tk" x="12" y="90">nodeMover.run · edgeMover.run</text>
+  <text class="tk" x="12" y="110">RunStdinReader</text>
+  <text class="tk" x="12" y="130">main (Breadcrumb, pre-spawn)</text>
+  <text class="tf" x="12" y="156">emit() = bare select send</text>
+  <text class="tf" x="12" y="170">Trace.go:341–346 — mu untouched</text>
+
+  <path class="arrb" d="M230,86 L336,86" marker-end="url(#ab)"/>
+  <text class="tb" x="240" y="78">send</text>
+
+  <rect class="queue" x="336" y="52" width="180" height="66" rx="6"/>
+  <text class="t"  x="348" y="74">t.ch</text>
+  <text class="ts" x="348" y="90">buffered chan Event</text>
+  <text class="tf" x="348" y="106">Trace.go:278</text>
+
+  <path class="arrb" d="M516,86 L620,86" marker-end="url(#ab)"/>
+
+  <rect class="gor" x="620" y="30" width="240" height="60" rx="6"/>
+  <text class="t"  x="632" y="50">Trace.drain</text>
+  <text class="ts" x="632" y="66">record() — the ONLY writer</text>
+  <text class="tf" x="632" y="82">spawned once · Trace.go:332</text>
+
+  <path class="arr" d="M740,90 L740,116" marker-end="url(#ah2)"/>
+
+  <rect class="state" x="620" y="122" width="240" height="126" rx="8"/>
+  <text class="t"  x="632" y="144">Trace</text>
+  <text class="tf" x="632" y="158">Trace/Trace.go:294</text>
+  <rect x="632" y="170" width="216" height="24" rx="4" class="box"/>
+  <text class="tw" x="644" y="187">mu sync.Mutex</text>
+  <rect x="632" y="202" width="216" height="38" rx="4" class="box"/>
+  <text class="ts" x="644" y="217">events · closed</text>
+  <text class="ts" x="644" y="232">sink · onEvent · debugSink</text>
+
+  <!-- contenders on the ledger -->
+  <rect class="gor" x="336" y="176" width="180" height="34" rx="6"/>
+  <text class="ts" x="348" y="197">Close — flips closed</text>
+  <path class="arr" d="M516,193 L620,193" marker-end="url(#ah2)"/>
+
+  <rect class="gor" x="336" y="220" width="180" height="46" rx="6"/>
+  <text class="ts" x="348" y="238">Events · WriteJSONL</text>
+  <text class="tf" x="348" y="253">readers · drain.go:38–58</text>
+  <path class="arr" d="M516,240 L620,225" marker-end="url(#ah2)"/>
+
+  <line x1="0" y1="288" x2="860" y2="288" stroke="var(--line)"/>
+  <text class="tk" x="0" y="308">THE POINT</text>
+  <text class="ts" x="86" y="308">producers contend on the CHANNEL, never on mu. mu serializes drain vs Close vs readers.</text>
+  <text class="tf" x="0" y="324">Trace/trace_concurrency_test.go</text>
+</svg>
+</div>
+
+<p class="verdict ok"><b>STAYING.</b> An accumulator cannot be copied — copies give N partial streams
+and no whole picture, so the move that deleted <code>RealClock.mu</code> is unavailable here.
+<b style="color:var(--signal)">But the framing above it is open:</b> the merged log is already only
+<i>arrival order at the drain</i> — scheduler order, not causal order.</p>
+
+<!-- ═══════════ 4 · LayoutHolder ═══════════ -->
+<h2>4 · LayoutHolder.mu — uncontended; the neighbour path is a message</h2>
+<p class="cap">A node never reaches into a neighbour's holder. It <b>sends a message</b>, and the
+neighbour's own goroutine does the write. That is why there is nothing to guard.</p>
+
+<div class="plate">
+<svg viewBox="0 0 860 250" role="img" aria-label="Node A writes only its own layout holder; to affect node B it sends a neighborSetC message through its outbox into B's inbox, and B's own goroutine writes B's holder. No goroutine ever touches another's holder.">
+  <defs>
+    <marker id="ak" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#3B7350"/>
+    </marker>
+  </defs>
+
+  <text class="tl" x="0" y="14">NODE A</text>
+  <text class="tl" x="330" y="14">THE ONLY PATH BETWEEN THEM</text>
+  <text class="tl" x="660" y="14">NODE B</text>
+
+  <rect class="gor" x="0" y="30" width="210" height="56" rx="6"/>
+  <text class="t"  x="12" y="50">A's mover goroutine</text>
+  <text class="tf" x="12" y="68">requantizeLocalPolars</text>
+
+  <path class="arrk" d="M105,86 L105,116" marker-end="url(#ak)"/>
+  <rect class="safe" x="0" y="122" width="210" height="66" rx="6"/>
+  <text class="t"  x="12" y="142">A's LayoutHolder</text>
+  <text class="ts" x="12" y="158">localPolars · pole</text>
+  <text class="tf" x="12" y="174">written by A only</text>
+
+  <!-- message path -->
+  <path class="arrk" d="M210,58 L330,58" marker-end="url(#ak)"/>
+  <rect class="queue" x="330" y="34" width="300" height="48" rx="6"/>
+  <text class="ts" x="342" y="54">moveMsgKindNeighborSetC</text>
+  <text class="tf" x="342" y="70">A's outbox → B's inbox</text>
+  <path class="arrk" d="M630,58 L660,58" marker-end="url(#ak)"/>
+
+  <rect class="gor" x="660" y="30" width="200" height="56" rx="6"/>
+  <text class="t"  x="672" y="50">B's mover goroutine</text>
+  <text class="tf" x="672" y="68">neighborSetCRequantize</text>
+
+  <path class="arrk" d="M760,86 L760,116" marker-end="url(#ak)"/>
+  <rect class="safe" x="660" y="122" width="200" height="66" rx="6"/>
+  <text class="t"  x="672" y="142">B's LayoutHolder</text>
+  <text class="ts" x="672" y="158">SetLocalPolar / SetPole</text>
+  <text class="tf" x="672" y="174">written by B only</text>
+
+  <!-- the crossed-out direct path -->
+  <path class="dash" d="M210,155 L660,155"/>
+  <text class="tf" x="330" y="148">no direct md.layoutHolders[m] access exists</text>
+  <line x1="425" y1="145" x2="455" y2="165" stroke="var(--hazard)" stroke-width="2"/>
+  <line x1="455" y1="145" x2="425" y2="165" stroke="var(--hazard)" stroke-width="2"/>
+
+  <line x1="0" y1="206" x2="860" y2="206" stroke="var(--line)"/>
+  <text class="tk" x="0" y="226">REFUTED</text>
+  <text class="ts" x="72" y="226">a test written to force contention could not be made to fail with mu removed — 10/10 clean</text>
+  <text class="tf" x="0" y="242">layout_holder.go:77–115 records the retraction. No vacuous test ships.</text>
+</svg>
+</div>
+
+<p class="verdict ok"><b>KEPT AS INSURANCE ONLY.</b> Do not cite this lock as evidence that
+cross-goroutine holder access is expected. It is not.</p>
+
+<!-- ═══════════ 5 · scene_persist ═══════════ -->
+<h2>5 · scene_persist — the second party is a timer goroutine</h2>
+<p class="cap"><code>time.AfterFunc</code> runs every debounced flush in a <b>new goroutine</b>.
+That is the easily-missed racer against a drag-time synchronous write on the same file.</p>
+
+<div class="plate">
+<svg viewBox="0 0 860 310" role="img" aria-label="Camera, overlays and drag-time writers plus a debounce timer goroutine all funnel through per-file locks before touching the scene JSON and per-entity meta files.">
+  <defs>
+    <marker id="as" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#C06A12"/>
+    </marker>
+  </defs>
+
+  <text class="tl" x="0" y="14">WRITERS</text>
+  <text class="tl" x="330" y="14">LOCKS</text>
+  <text class="tl" x="640" y="14">FILES</text>
+
+  <rect class="gor" x="0" y="30" width="250" height="40" rx="6"/>
+  <text class="ts" x="12" y="47">viewpointPersister.flush</text>
+  <text class="tf" x="12" y="62">camera · scene_camera_persist.go:55</text>
+
+  <rect class="gor" x="0" y="78" width="250" height="40" rx="6"/>
+  <text class="ts" x="12" y="95">overlaysPersister.flush</text>
+  <text class="tf" x="12" y="110">overlays · scene_overlays_persist.go:94</text>
+
+  <rect class="gor" x="0" y="126" width="250" height="40" rx="6"/>
+  <text class="ts" x="12" y="143">WriteLocalPolars</text>
+  <text class="tf" x="12" y="158">drag-time, synchronous, mover goroutine</text>
+
+  <rect class="queue" x="0" y="174" width="250" height="52" rx="6"/>
+  <text class="tq" x="12" y="192">time.AfterFunc flush</text>
+  <text class="tf" x="12" y="207">A NEW GOROUTINE PER TIMER POP</text>
+  <text class="tf" x="12" y="220">writeQuantOffset</text>
+
+  <path class="arrq" d="M250,50 L330,58" marker-end="url(#as)"/>
+  <path class="arrq" d="M250,98 L330,68" marker-end="url(#as)"/>
+  <path class="arrq" d="M250,146 L330,150" marker-end="url(#as)"/>
+  <path class="arrq" d="M250,200 L330,162" marker-end="url(#as)"/>
+
+  <rect class="state" x="330" y="34" width="280" height="52" rx="6"/>
+  <text class="tw" x="342" y="54">sceneFileMu</text>
+  <text class="tf" x="342" y="70">scene_persist.go:44 — read-modify-write</text>
+
+  <rect class="state" x="330" y="126" width="280" height="52" rx="6"/>
+  <text class="tw" x="342" y="146">entityFileMus[path]</text>
+  <text class="tf" x="342" y="162">:168–177 — one lock per file path</text>
+
+  <rect class="box" x="330" y="192" width="280" height="40" rx="6"/>
+  <text class="ts" x="342" y="209">debouncedPersister.mu ×4</text>
+  <text class="tf" x="342" y="224">:58 — pending · has · timer · writes</text>
+
+  <path class="arrq" d="M610,60 L640,60" marker-end="url(#as)"/>
+  <path class="arrq" d="M610,152 L640,152" marker-end="url(#as)"/>
+
+  <rect class="safe" x="640" y="36" width="220" height="48" rx="6"/>
+  <text class="ts" x="652" y="56">runtime scene JSON</text>
+  <text class="tf" x="652" y="72">camera + overlays</text>
+
+  <rect class="safe" x="640" y="128" width="220" height="48" rx="6"/>
+  <text class="ts" x="652" y="148">nodes/&lt;id&gt;/meta.json</text>
+  <text class="tf" x="652" y="164">port anchors, quant offsets</text>
+
+  <line x1="0" y1="252" x2="860" y2="252" stroke="var(--line)"/>
+  <text class="tq" x="0" y="272">NEVER EXAMINED</text>
+  <text class="ts" x="140" y="272">observer is the FILESYSTEM — no perceptual threshold, so the other rows' logic does not transfer</text>
+  <text class="tf" x="0" y="290">scene_persist.go:42–43 also names a third scene-JSON writer ("polar locks") that does not exist in non-test code — UNVERIFIED</text>
+</svg>
+</div>
+
+<!-- ═══════════ GONE ═══════════ -->
+<h2>gone · RealClock.mu — deleted by ownership, not by a smaller lock</h2>
+<p class="cap">Before, one object with a lock. After, a copy each and no lock. Nothing replaced it:
+the speed channels are built at load time and only the stdin reader's goroutine holds the send ends.</p>
+
+<div class="plate">
+<svg viewBox="0 0 860 280" role="img" aria-label="Before, sixteen goroutines read one shared RealClock guarded by a mutex while one writer set its speed. After, each goroutine owns a private clock copy and receives speed changes on its own buffered channel.">
+  <text class="tl" x="0" y="14">BEFORE</text>
+  <text class="tl" x="450" y="14">NOW</text>
+  <line x1="415" y1="24" x2="415" y2="240" stroke="var(--line)"/>
+
+  <!-- before -->
+  <rect class="gor" x="0" y="34" width="120" height="26" rx="4"/><text class="tf" x="10" y="51">node Update ×9</text>
+  <rect class="gor" x="0" y="66" width="120" height="26" rx="4"/><text class="tf" x="10" y="83">DriveHeld ×n</text>
+  <rect class="gor" x="0" y="98" width="120" height="26" rx="4"/><text class="tf" x="10" y="115">edgeMover ×10</text>
+  <rect class="gor" x="0" y="130" width="120" height="26" rx="4"/><text class="tf" x="10" y="147">snapshot tick</text>
+  <rect class="gor" x="0" y="170" width="120" height="26" rx="4"/><text class="tf" x="10" y="187">stdin SetSpeed</text>
+
+  <path class="arr" d="M120,47 L250,88"/><path class="arr" d="M120,79 L250,94"/>
+  <path class="arr" d="M120,111 L250,100"/><path class="arr" d="M120,143 L250,106"/>
+  <path class="arr" d="M120,183 L250,120"/>
+  <text class="tf" x="132" y="66">Tick()</text>
+  <text class="tw" x="132" y="176">SetSpeed</text>
+
+  <rect class="state" x="250" y="70" width="150" height="80" rx="6"/>
+  <text class="t"  x="262" y="92">RealClock</text>
+  <rect x="262" y="102" width="126" height="22" rx="3" class="box"/>
+  <text class="tw" x="272" y="118">mu</text>
+  <text class="tf" x="262" y="140">one object, all readers</text>
+
+  <!-- after -->
+  <rect class="safe" x="450" y="34" width="180" height="30" rx="4"/>
+  <text class="tf" x="460" y="53">node Update + own clock copy</text>
+  <rect class="safe" x="450" y="72" width="180" height="30" rx="4"/>
+  <text class="tf" x="460" y="91">DriveHeld + own clock copy</text>
+  <rect class="safe" x="450" y="110" width="180" height="30" rx="4"/>
+  <text class="tf" x="460" y="129">edgeMover + own clock copy</text>
+  <rect class="safe" x="450" y="148" width="180" height="30" rx="4"/>
+  <text class="tf" x="460" y="167">Trace drain + own clock copy</text>
+
+  <rect class="gor" x="450" y="196" width="180" height="30" rx="4"/>
+  <text class="tf" x="460" y="215">RunStdinReader</text>
+
+  <path class="arrq" d="M630,211 C700,211 700,49 660,49"/>
+  <path class="arrq" d="M630,211 C700,205 700,87 660,87"/>
+  <path class="arrq" d="M630,211 C700,190 700,125 660,125"/>
+  <path class="arrq" d="M630,211 C700,180 700,163 660,163"/>
+  <text class="tq" x="712" y="120">one buffered-1 chan</text>
+  <text class="tf" x="712" y="134">per goroutine, built</text>
+  <text class="tf" x="712" y="146">at LOAD TIME</text>
+  <text class="tf" x="712" y="164">latest-wins · never blocks</text>
+
+  <line x1="0" y1="252" x2="860" y2="252" stroke="var(--line)"/>
+  <text class="ts" x="0" y="272">NOT removed for speed: ~500–1700 acq/sec against a mutex that does tens of millions, and no profile ever motivated it.</text>
+</svg>
+</div>
+
+<footer>
+  Verified against the tree on <span style="font-family:var(--mono)">task/framing-event-order</span>.
+  Line numbers drift — re-grep before trusting them. Companion to
+  <span style="font-family:var(--mono)">docs/framings.md</span>, which records <i>why</i> each lock
+  exists; this page records <i>who touches it</i>.
+</footer>
+
+</div>
+</body>
+</html>
