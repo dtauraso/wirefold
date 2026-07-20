@@ -16,7 +16,6 @@ observer**, which requires knowing what this system is and who is looking at it.
 | Budget is pixels of relative displacement during motion | Every block of a frame must describe the same instant | `SnapshotState`'s accumulate-then-pack, the drain merge | Planned — `task/per-owner-buffer-rows` |
 | Each owner's own event order is the only real one | Events have a global total order | `Trace.mu`, the event channel, the drain's ordering | Planned — same branch. Note the merged log is already only *arrival order at the drain*, which is scheduler order, not causal order |
 | Pack at the rate the consumer consumes | Emission must be driven by change | `emitSnapshot` scattered across `Update`'s arms, tick coalescing | Planned — same branch |
-| *(not yet examined)* | A queue's invariant must be maintained | `outbox.mu` + cond, `PacedWire.mu` | **Contention verified, restructuring NOT examined** — see below |
 
 ## Every mutex left in the tree
 
@@ -44,9 +43,14 @@ goroutine, and because the lock defended an exactness — every reader agrees to
 millisecond — that nothing here needs. "Widest fan-in" was a structural claim being read as
 a cost claim. Check which kind you are making before pulling on any remaining lock.
 
-## The last row is NOT settled
+## `outbox.mu` and `PacedWire.mu` are NOT settled
 
-Two claims were conflated there. Only one is verified.
+These had a row in the framings table for a while, with *(not yet examined)* standing in
+for the correct framing. That was not an item — a framing nobody has worked out is not a
+framing, and the placeholder made the table look like it had an answer it did not. The row
+is gone; the two locks are in the inventory above, and the reasoning is here.
+
+Two claims were conflated in that row. Only one is verified.
 
 **Verified:** the contention is real. Bypassing the outbox reproduces the cascade deadlock
 as a timeout; removing `pw.mu` from `ReviseInFlightGeometry` gives `WARNING: DATA RACE`.
