@@ -1,11 +1,12 @@
 // node_move.go — decentralized node-move handling.
 //
-// A node-move is NOT handled by a central coordinator. Instead the loader builds
-// a pure dispatch registry (key → inbox channel) whose keys are BOTH node ids AND
-// edge ids (the edge label, which encodes the two connected nodes). The stdin
-// reader's whole job for a move is a mail-sort: for each (key,value) entry in the
-// message, push value onto channels[key]. No recompute, no topology logic lives in
-// the reader.
+// A node-move is NOT handled by a central coordinator. Instead the loader wires each
+// mover's dedicated inbound channels (docs/planning/visual-editor/outbox-two-channels.md):
+// there is no shared many-to-one inbox — every pair of movers that talk (a node and its
+// incident edge, or two nodes joined by an edge) gets its OWN directed channel, plus every
+// mover gets one dedicated "external" channel for the stdin/gesture goroutine's rare direct
+// entries. The stdin reader's whole job for a move is to write each entry onto the ONE
+// channel that entry addresses. No recompute, no topology logic lives in the reader.
 //
 // Two kinds of mover own the work, each in its own goroutine (MODEL.md: each node
 // and each wire is a goroutine; geometry emission is per-goroutine —
@@ -43,8 +44,8 @@ const (
 	moveMsgKindCenter  = "center"  // polar-layout re-propagated world center for one node
 	moveMsgKindCenters = "centers" // batched centers for an edge: update both endpoints, recompute ONCE
 	// moveMsgKindDrag is a node's own-goroutine drag entry: the drag itself is routed
-	// to the dragged node's OWN inbox instead of the stdin reader committing on its
-	// behalf. The receiver commits its OWN new position via the owner-goroutine commit
+	// to the dragged node's OWN dedicated extIn channel instead of the stdin reader
+	// committing on its behalf. The receiver commits its OWN new position via the owner-goroutine commit
 	// path (commitNodeMoveLocal, which publishes its snap SYNCHRONOUSLY via
 	// applyCenter). A drag is always a FREE move -- no equal-radii solve, no
 	// self-trigger cascade.
@@ -86,11 +87,13 @@ type centerSnap struct {
 	reach float64
 }
 
-// moveMsg is one entry routed to a mover's inbox. kind selects the payload:
+// moveMsg is one entry routed to one of a mover's own dedicated channels (there is no
+// shared inbox — docs/planning/visual-editor/outbox-two-channels.md). kind selects the
+// payload:
 //   - "" or "move": node-move — currently a no-op (polar-layout positions all nodes via "center" messages).
 //
-// Every PRODUCTION send is fire-and-forget: the sender drops the message in an inbox
-// and returns. No production path observes the receiver finishing — a node does its own
+// Every PRODUCTION send is fire-and-forget: the sender drops the message onto the
+// destination's own channel and returns. No production path observes the receiver finishing — a node does its own
 // local work on its own goroutine and drives its own outputs (MODEL.md: no ack, no
 // send-gating, no delivery signal).
 //
@@ -149,12 +152,13 @@ type moveMsg struct {
 	testDone chan struct{}
 }
 
-// MoveDispatch is the pure key→inbox dispatch registry built at load. Keys are BOTH
-// node ids AND edge ids; the stdin reader mail-sorts each move entry to channels[key].
+// MoveDispatch is the pure registry built at load that owns every mover and wires their
+// dedicated channels together (docs/planning/visual-editor/outbox-two-channels.md) — there
+// is no shared dispatch map anymore; md.nodeMovers/md.edgeMovers themselves are the
+// directories a mover's resolveDest closure and the external-entry helpers below look up.
 // It also retains the per-edge source Outs so out-of-package test/verifier callers can
 // read an edge's loaded geometry (EdgeOut) without going through a central coordinator.
 type MoveDispatch struct {
-	dispatch   map[string]chan moveMsg
 	nodeMovers map[string]*nodeMover
 	edgeMovers map[string]*edgeMover
 	// edgeOut: edgeId → source *Out, for read-only access by tests/verifiers.
@@ -322,17 +326,19 @@ func (md *MoveDispatch) NodeSeeds() []NodeGeomSeed { return md.nodeSeeds }
 func (md *MoveDispatch) EdgeSeeds() []EdgeGeomSeed { return md.edgeSeeds }
 
 // newMoveDispatch builds the registry from per-node geometry and per-edge endpoints.
-// It creates one nodeMover per node and one edgeMover per edge, registering each in
-// the dispatch map under its key (node id / edge id). Outs and dest wires are bound
-// later by Bind once node construction has populated them. nodeOrder/edgeOrder are the
+// It creates one nodeMover per node and one edgeMover per edge, registering each under
+// its key (node id / edge id) in md.nodeMovers/md.edgeMovers, and wires the dedicated
+// directed channels between adjacent movers (docs/planning/visual-editor/
+// outbox-two-channels.md). Outs and dest wires are bound later by Bind once node
+// construction has populated them. nodeOrder/edgeOrder are the
 // SPEC order (deterministic directory-sorted order, not map iteration order) used to
 // build md.nodeSeeds/edgeSeeds for buffer row seeding.
 //
 // speedSinks, when non-nil, is the loader's build-wide accumulator
-// (buildCtx.speedSinks): each edgeMover created below gets its own fresh
-// buffered-1 speed channel (per-goroutine-clock.md "Delivery" — an edgeMover
-// owns its own clock copy, same as any other clock-owning goroutine, so it
-// must not be left behind), and that channel's SEND end is appended here.
+// (buildCtx.speedSinks): each nodeMover AND each edgeMover created below gets its own
+// fresh buffered-1 speed channel (per-goroutine-clock.md "Delivery" — every
+// clock-owning goroutine must not be left behind), and that channel's SEND end is
+// appended here.
 // nil in test call sites that construct a MoveDispatch directly with no
 // loader — those edgeMovers then simply have no speed channel to poll.
 func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEndpoints, tr *T.Trace, nodeOrder, edgeOrder []string, clk Clock, speedSinks *[]chan float64) *MoveDispatch {
@@ -353,7 +359,6 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 		sort.Strings(edgeOrder)
 	}
 	md := &MoveDispatch{
-		dispatch:      map[string]chan moveMsg{},
 		nodeMovers:    map[string]*nodeMover{},
 		edgeMovers:    map[string]*edgeMover{},
 		edgeOut:       map[string]*Out{},
@@ -422,10 +427,36 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 		})
 	}
 	for id, g := range geoms {
-		nm := newNodeMover(id, g, tr)
+		nm := newNodeMover(id, g, tr, clk)
+		if speedSinks != nil {
+			nodeSpeedCh := make(chan float64, 1)
+			nm.speedCh = nodeSpeedCh
+			*speedSinks = append(*speedSinks, nodeSpeedCh)
+		}
+		// resolveDest resolves the ONE dedicated directed channel FROM this node
+		// (selfID, captured below) TO destID: another node's own neighborIn[selfID]
+		// slot, or an incident edge's srcIn/dstIn depending on which endpoint this
+		// node is. There is no shared dispatch map to look up (docs/planning/
+		// visual-editor/outbox-two-channels.md) — md.nodeMovers/md.edgeMovers are the
+		// read-only directories, safe to read from any goroutine once construction
+		// finishes.
+		selfID := id
 		nm.resolveDest = func(destID string) (chan moveMsg, bool) {
-			ch, ok := md.dispatch[destID]
-			return ch, ok
+			if em, ok := md.edgeMovers[destID]; ok {
+				switch selfID {
+				case em.srcID:
+					return em.srcIn, true
+				case em.dstID:
+					return em.dstIn, true
+				}
+				return nil, false
+			}
+			if other, ok := md.nodeMovers[destID]; ok {
+				if ch, ok := other.neighborIn[selfID]; ok {
+					return ch, true
+				}
+			}
+			return nil, false
 		}
 		nm.sendMove = md.enqueueFor(nm)
 		nm.centerOf = md.centerOfNode
@@ -435,7 +466,6 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 		// captures THIS iteration's id (no shared-variable capture bug).
 		nm.layoutHolderFn = func() *LayoutHolder { return md.layoutHolders[id] }
 		md.nodeMovers[id] = nm
-		md.dispatch[id] = nm.inbox
 	}
 	for edgeID, ep := range edgeEndpoints {
 		em := newEdgeMover(ep, edgeID, geoms[ep.Source], geoms[ep.Target], tr, clk)
@@ -445,7 +475,20 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 			*speedSinks = append(*speedSinks, edgeSpeedCh)
 		}
 		md.edgeMovers[edgeID] = em
-		md.dispatch[edgeID] = em.inbox
+		// This edge's two nodes each get a dedicated channel TO this edge (already
+		// created above, srcIn/dstIn) — and each other's own dedicated channel for
+		// node-to-node traffic (neighborIn, the plain-neighbor/partner-reemit fan):
+		// two directed channels per ordered pair, never a shared inbox.
+		if srcNM, ok := md.nodeMovers[ep.Source]; ok {
+			if dstNM, ok := md.nodeMovers[ep.Target]; ok {
+				if _, exists := dstNM.neighborIn[ep.Source]; !exists {
+					dstNM.neighborIn[ep.Source] = make(chan moveMsg, 8)
+				}
+				if _, exists := srcNM.neighborIn[ep.Target]; !exists {
+					srcNM.neighborIn[ep.Target] = make(chan moveMsg, 8)
+				}
+			}
+		}
 	}
 	// Wire each nodeMover's aimed-port lookup: for (port,isInput) on nodeID, find its one
 	// edge (edgeEndpoints) and read the partner's CURRENT center off the partner
@@ -464,7 +507,8 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 		})
 	}
 	// Give every nodeMover the ids of its OWN incident edges, so a lock-driven move can
-	// notify its edges via sendMove (dispatch-map lookup) — no cached channel slice.
+	// notify its edges via sendMove (resolveDest's per-pair channel lookup) — no cached
+	// channel slice.
 	for id, nm := range md.nodeMovers {
 		for edgeID, em := range md.edgeMovers {
 			if em.srcID == id || em.dstID == id {
@@ -524,34 +568,35 @@ func (md *MoveDispatch) centerOfNode(id string) (vec3, bool) {
 	return vec3{}, false
 }
 
-// sendMove routes one moveMsg to another node's (or edge's) inbox by id, if known.
-// Used by the decentralized lock-propagation cascade so a nodeMover can re-broadcast
-// to its own lock-neighbors without any central worklist — the dispatch map is the
-// only "directory" involved, and it's read-only lookup, not a queue.
+// sendMove routes one moveMsg to a node's dedicated external-entry channel (extIn), if
+// the id is a known node. This is the EXTERNAL-caller path — RootMove (drag) and
+// gesture.go's dragStart send — not a mover-to-mover send (those go through a mover's
+// own nm.pending/flushPending onto its OWN dedicated channel, never through this
+// function). md.nodeMovers is a read-only directory once construction finishes, safe to
+// read from any goroutine.
 func (md *MoveDispatch) sendMove(id string, msg moveMsg) {
 	if tap := md.msgTap.Load(); tap != nil {
 		(*tap)(id, msg)
 	}
-	ch, ok := md.dispatch[id]
+	nm, ok := md.nodeMovers[id]
 	if !ok {
 		return
 	}
-	// Blocking send with a ctx-cancel escape hatch: this is the bare directory
-	// send used by external entry points (RootMove) that have no owning mover
-	// goroutine to thread a ctx from. Without the
-	// ctx.Done() arm, a send into a torn-down/full inbox on shutdown parks this
-	// goroutine forever (the target's inbox-drain goroutine has already
-	// returned on the same ctx cancel, so nothing will ever drain it). md.ctx is
-	// nil only in tests that build a bare MoveDispatch without Start — a nil
-	// Context's Done() channel would panic, so guard it and fall back to a
-	// plain blocking send there (matches prior test behavior; no shutdown path
-	// exists in that setting anyway).
+	// Blocking send with a ctx-cancel escape hatch: this is the bare external-entry
+	// send used by callers (RootMove, gesture.go) that have no owning mover goroutine
+	// to thread a ctx from. Without the ctx.Done() arm, a send into a torn-down/full
+	// extIn on shutdown parks this goroutine forever (the target's own run loop has
+	// already returned on the same ctx cancel, so nothing will ever drain it). md.ctx
+	// is nil only in tests that build a bare MoveDispatch without Start — a nil
+	// Context's Done() channel would panic, so guard it and fall back to a plain
+	// blocking send there (matches prior test behavior; no shutdown path exists in
+	// that setting anyway).
 	if md.ctx == nil {
-		ch <- msg
+		nm.extIn <- msg
 		return
 	}
 	select {
-	case ch <- msg:
+	case nm.extIn <- msg:
 	case <-md.ctx.Done():
 	}
 }

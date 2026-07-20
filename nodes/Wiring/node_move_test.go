@@ -4,8 +4,8 @@
 // applyNodeMove result per-goroutine: the moved node re-emits its node-geometry, and
 // each incident edge recomputes its own segment/arc, re-emits its edge geometry,
 // revises any in-flight bead, and updates the dest port's latency aggregate. The
-// move is delivered exactly as the live bridge does — by mail-sorting each entry to
-// the node's inbox and every incident edge's inbox via MoveDispatch.dispatch.
+// move is delivered exactly as the live bridge does — by mail-sorting each entry onto
+// the node's own extIn channel and every incident edge's own extIn channel.
 
 package Wiring
 
@@ -21,24 +21,23 @@ import (
 	T "github.com/dtauraso/wirefold/Trace"
 )
 
-// deliver mail-sorts a node-move to the node's inbox + every incident edge's inbox,
-// each with an ack the mover closes when done, then waits — mirroring the live
-// stdin-reader dispatch but blocking so the test can assert deterministically.
-// deliver sends "center" messages (the sphere-chain position model) to the node's
-// inbox + every incident edge's inbox, blocking on acks.
+// deliver mail-sorts a node-move to the node's extIn channel + every incident edge's
+// extIn channel, each with an ack the mover closes when done, then waits — mirroring the
+// live stdin-reader's direct external entries but blocking so the test can assert
+// deterministically. deliver sends "center" messages (the sphere-chain position model)
+// to the node's extIn + every incident edge's extIn, blocking on acks.
 func deliver(md *MoveDispatch, nodeID string, x, y, z float64) {
 	center := &vec3{X: x, Y: y, Z: z}
-	var keys []string
-	keys = append(keys, nodeID)
-	for edgeID, em := range md.edgeMovers {
-		if em.srcID == nodeID || em.dstID == nodeID {
-			keys = append(keys, edgeID)
+	acks := make([]chan struct{}, 0, len(md.edgeMovers)+1)
+	nodeAck := make(chan struct{})
+	md.nodeMovers[nodeID].extIn <- moveMsg{Kind: moveMsgKindCenter, NodeID: nodeID, Center: center, testDone: nodeAck}
+	acks = append(acks, nodeAck)
+	for _, em := range md.edgeMovers {
+		if em.srcID != nodeID && em.dstID != nodeID {
+			continue
 		}
-	}
-	acks := make([]chan struct{}, 0, len(keys))
-	for _, kk := range keys {
 		ack := make(chan struct{})
-		md.dispatch[kk] <- moveMsg{Kind: moveMsgKindCenter, NodeID: nodeID, Center: center, testDone: ack}
+		em.extIn <- moveMsg{Kind: moveMsgKindCenter, NodeID: nodeID, Center: center, testDone: ack}
 		acks = append(acks, ack)
 	}
 	for _, ack := range acks {
