@@ -15,6 +15,13 @@
 # Scope is deliberately narrow: it fires only on invocations of the sim binary
 # (./wirefold) or `go run` of the repo's main package. Everything else is allowed
 # silently. Exit 0 always; the decision is carried in the emitted JSON.
+#
+# The match is anchored to COMMAND POSITION (start of line, or right after a
+# `;` / `&&` / `||` / `|` / `(` separator). Matching the bare word anywhere in the
+# string produced false positives on every MENTION of the name — `cd wirefold`,
+# a path, or README prose written via a heredoc all read as sim runs and blocked
+# an unrelated edit. Mentioning the sim is not running it; only the head of a
+# command is.
 set -uo pipefail
 
 input="$(cat)"
@@ -33,7 +40,10 @@ if [ -z "$cmd" ]; then emit allow "no command string"; exit 0; fi
 # editing, and `go run` of a subpackage tool (e.g. `go run ./tools/gen-node-defs`)
 # are exempt. The main package is the module root, so only `go run .`, `go run ./`,
 # or `go run github.com/dtauraso/wirefold` count as sim runs.
-SIM_RE='(^|[^[:alnum:]_./-])(\./)?wirefold([[:space:]]|$)|go[[:space:]]+run[[:space:]]+(\./?|github\.com/dtauraso/wirefold)([[:space:]]|$)'
+# CMD_HEAD: start of a command — line start, or after a shell separator. grep is
+# line-based, so `^` already covers embedded newlines in a multi-line command.
+CMD_HEAD='(^|[;&|(])[[:space:]]*'
+SIM_RE="${CMD_HEAD}(\./)?wirefold([[:space:]]|\$)|${CMD_HEAD}go[[:space:]]+run[[:space:]]+(\./?|github\.com/dtauraso/wirefold)([[:space:]]|\$)"
 if ! printf '%s' "$cmd" | grep -Eq "$SIM_RE"; then
   emit allow "not a sim run"; exit 0
 fi
