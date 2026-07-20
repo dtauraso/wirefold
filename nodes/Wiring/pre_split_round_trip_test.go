@@ -104,14 +104,14 @@ func TestPreSplitTopologyRoundTrips(t *testing.T) {
 	if !md.RootMove("src", target) {
 		t.Fatal("RootMove(src) returned false")
 	}
+	// pollDragConverged only waits for the dragged node's CENTER to publish (applyCenter's
+	// atomic snap store) — commitNodeMoveLocal schedules the quantOffset persist write a few
+	// lines LATER on that same node-mover goroutine (quantized_move.go), so a single
+	// flushPendingPersists() right after convergence can race ahead of that schedule() call
+	// and flush an empty pending set. Poll flush+read-back instead of a one-shot flush, the
+	// same deadline-bound retry shape pollDragConverged itself uses.
 	pollDragConverged(t, md, "src", target)
-	md.flushPendingPersists()
-
-	// The drag's position write must have landed in the NEW position.json — the sole
-	// writer of that file — not in the legacy meta.json (which is never rewritten).
-	if !readJSONIfExists(positionFilePath(root, "src"), &positionFileJSON{}) {
-		t.Fatalf("drag did not write the new position.json for src")
-	}
+	pollFlushedPositionFile(t, md, root, "src")
 
 	// ---- Load 2: a completely fresh MoveDispatch over the now-partially-migrated tree. ----
 	tr2 := T.New(0)

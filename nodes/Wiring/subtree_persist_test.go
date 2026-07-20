@@ -31,6 +31,30 @@ func pollDragConverged(t *testing.T, md *MoveDispatch, nodeID string, target vec
 	}
 }
 
+// pollFlushedPositionFile waits until a flushPendingPersists() actually produces
+// <root>/nodes/<id>/position.json. pollDragConverged only guarantees the dragged node's
+// CENTER has published (applyCenter's atomic snap store); commitNodeMoveLocal's
+// md.persist.quantOffset.schedule() call — the one that arms the debounced write
+// flushPendingPersists flushes — runs a few statements LATER on that SAME node-mover
+// goroutine (quantized_move.go commitNodeMoveLocal), so a single flush right after
+// convergence can race ahead of schedule() and flush an empty pending set. Retrying the
+// flush+read-back under a deadline (same shape as pollDragConverged) makes the wait for
+// "schedule() has run" observable without reaching into persister internals.
+func pollFlushedPositionFile(t *testing.T, md *MoveDispatch, root, nodeID string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		md.flushPendingPersists()
+		if readJSONIfExists(positionFilePath(root, nodeID), &positionFileJSON{}) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("drag never wrote the new position.json for %s", nodeID)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 // pollLocalPolarRequantized waits until lh's own stored LocalPolar entry to the given
 // neighbor id picks up a fresh QuantIR (async moveMsgKindNeighborSetC delivery race) and
 // returns the converged entry. Shared by every test in this package that drives a real
