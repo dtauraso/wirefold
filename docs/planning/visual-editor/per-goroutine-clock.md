@@ -94,6 +94,81 @@ A dropped change is still worse than a late one — that copy runs at the wrong 
 event to correct it — so the path must not be lossy. But this is no longer a correctness
 cliff needing its own mechanism.
 
+## API demolition
+
+The plan above settles the semantics and understates the edit. The mutex is a few lines;
+the surface built ON the assumption of one injected shared object is most of the work.
+Everything here was read out of the code, not inferred.
+
+**The clock is an object INSIDE the goroutine.** Not a field on a shared struct the
+goroutine reaches through — that is the same shared-object model wearing a different name.
+This is the line that decides every item below.
+
+### 1. Port accessors go away
+
+`In.Clock()` and `Out.Clock()` (ports.go) are how goroutines fetch the shared clock today —
+`drive.go:56` is `clk := out.Clock()`. A goroutine that constructs its own clock does not
+ask a port for one. Both accessors, and `PortBindings.clock` / `PacedWire.clock` behind
+them, are removed rather than rewired.
+
+### 2. `Out.Paced()` is a clock-existence test — this is the trap
+
+    func (o *Out) Paced() bool { return o != nil && o.pw != nil && o.pw.clock != nil }
+
+The paced-vs-chan MODE predicate is `a clock exists on the wire`. `DriveHeld` and
+`gatecommon.RunGate` branch on it to choose clock pacing vs. wall-clock pacing. Delete
+`pw.clock` naively and every paced wire silently reports chan mode — no compile error, the
+network just stops being clock-paced. **Mode must be re-encoded on something that is not a
+clock before `pw.clock` is touched.** Nothing else in this demolition can fail this quietly.
+
+### 3. `inertClock` deletes itself
+
+`inertClock` / `NewInertClock` exist ONLY because an injected clock can be absent: an
+unwired `In` needs a non-nil thing to return, and `reflectBuild` matches
+`input.Node.Clock` by exact type, so a rename silently injects nothing and the first
+unguarded `clk.Tick()` panics with no recover over the node goroutine. A goroutine that
+constructs its own clock cannot have a nil one. The whole fallback path, its two doc
+comments, and `PortBindings.inClock()` go — an unrepresentable-nil trap removed, not
+relocated. Claim it as a win of this change.
+
+### 4. `SetSpeed` leaves the interface
+
+`Clock` today is `Tick / SleepCycle / SetSpeed`. In the new model nothing outside the
+goroutine can call `SetSpeed` — the transition arrives as a received message and the
+goroutine applies it to its own object. The interface LOSES a method. `stdin_reader.go:322`
+(`clk.SetSpeed(...)`) becomes a send, not a call.
+
+Note `SleepCycle` never touched `mu` — it is a bare `time.After(tickPeriod)`, wall time
+regardless of speed. So the contended surface is `Tick()` alone, and the "lock hit by every
+goroutine every cycle" framing above is about `Tick`, not all clock traffic.
+
+### 5. `reflectBuild` injection
+
+`builders.go` injects the shared clock three ways: `EmitRefillSlide`, `Tick`, and a bare
+`Wiring.Clock` field. All three are the shared object arriving from outside. They become
+construction inside the goroutine, and the type-matched injection (item 3's rename hazard)
+goes with them.
+
+### 6. `Buffer/snapshot.go` is NOT a node goroutine
+
+`SetTickSource(func() int64)` injects one tick reader to coalesce the high-volume
+`KindPosition` stream to one emit per tick. This is a consumer outside the node set, and
+"every goroutine holds its own" does not answer it. It needs its own copy like anything
+else — but it is the one clock whose reading the EDITOR sees directly, so decide it
+deliberately rather than by default.
+
+### 7. Test surface
+
+Item 4 of "What must be proven" names `clock_concurrency_test.go` for deletion. Also
+present: `clock_speed_test.go`, `clock_realclock_test.go`, and ~20 files constructing
+clocks via the port/loader path. Most do not die — they move to the new construction shape.
+
+### Order
+
+Item 2 first (re-encode mode off clock-existence), then the accessors, then `pw.clock` and
+`PortBindings.clock`, then `inertClock`, then the interface. Deleting `mu` is last and is
+the smallest edit in the list.
+
 ## Trace.mu is NOT affected
 
 `Trace` cannot be copied. It is an accumulator: every event from every goroutine has to
