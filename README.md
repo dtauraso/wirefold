@@ -8,6 +8,8 @@ Animated networks of different nodes showing the process of `1 * 2 = 2 * 1`.
 
 Both sides produce the same number, but they are not the same process: one is two taken once, the other is one taken twice. Each is a different topology of nodes, wired differently and animating differently, arriving at the same result.
 
+Each side is its own hierarchy of nodes, and the `=` is where they meet. The nodes that span both halves run a process of their own, and when it finishes the network has settled into a shape that looks like what `=` means. Nothing declares the two sides equal — the equality is the shape.
+
 ## What this is
 
 Two things in one repo:
