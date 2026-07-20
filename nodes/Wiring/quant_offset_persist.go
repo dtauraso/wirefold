@@ -10,7 +10,7 @@ package Wiring
 // mirror: RootMove calls schedule() for the dragged (and equalized) nodes; this persister
 // coalesces rapid updates (a drag) into one write per node after motion settles, writing
 // scenePolarR/Theta/Phi + the quant cache to `<root>/nodes/<id>/position.json` — one-file-
-// per-writer (docs/planning/visual-editor/one-file-per-goroutine.md): this file has exactly
+// per-writer: this file has exactly
 // one writer (writeQuantOffset), so each write is a fresh whole-file marshal, no
 // read-modify-write, no entityFileMu (deleted). Static node identity (id/type/r/gate) stays
 // in meta.json, which this persister never touches. WriteLocalPolars below is the OTHER

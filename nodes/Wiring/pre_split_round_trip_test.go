@@ -1,7 +1,7 @@
 package Wiring
 
 // pre_split_round_trip_test.go — THE load-bearing test for the one-file-per-goroutine split
-// (docs/planning/visual-editor/one-file-per-goroutine.md): a topology written in the OLD,
+//: a topology written in the OLD,
 // pre-split on-disk format (meta.json carrying scenePolar/quant/localPolars inline; a single
 // shared view/scene.json carrying cameraPolar/overlay-flags/sceneSphere inline — no
 // position.json, local-polars.json, camera.json, overlays.json or sphere.json anywhere on

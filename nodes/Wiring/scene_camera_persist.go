@@ -13,7 +13,7 @@ package Wiring
 //   - DEBOUNCED: a drag emits a viewpoint every pointermove; we coalesce and write once
 //     the viewpoint has been stable for a beat (viewpointPersistDebounce), off the hot path.
 //   - WHOLE-FILE: camera.json holds ONLY the camera pose (one-file-per-writer,
-//     docs/planning/visual-editor/one-file-per-goroutine.md) — no other writer touches it,
+//     the one-file-per-writer split) — no other writer touches it,
 //     so each flush marshals the pose fresh and overwrites the file, no read-modify-write.
 //   - FIRE-AND-FORGET: the write runs on the debounce timer's goroutine and logs on error;
 //     it never blocks the gesture.

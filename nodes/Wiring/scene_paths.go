@@ -80,7 +80,7 @@ func sceneCameraPath(topologyPath string) string {
 
 // sceneViewFilePath resolves <sceneTreeRoot>/view/<name> for topologyPath, using the same
 // root-resolution (and true-monolithic fallback) as sceneJSONPath. Backs the one-file-per-
-// writer split (docs/planning/visual-editor/one-file-per-goroutine.md): camera.json,
+// writer split: camera.json,
 // overlays.json and sphere.json each replace one of the three writers that used to share
 // scene.json, and each resolves its path through this one shared helper.
 func sceneViewFilePath(topologyPath, name string) string {

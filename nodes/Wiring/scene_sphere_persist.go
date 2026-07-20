@@ -3,7 +3,7 @@
 // view/sphere.json, mirroring scene_camera_persist.go. sphere.json has exactly one writer
 // (writeSceneSphere), so each write is a fresh whole-file marshal — no read-modify-write, no
 // sceneFileMu (deleted; one-file-per-writer,
-// docs/planning/visual-editor/one-file-per-goroutine.md). loadSceneSphere tries sphere.json
+// the one-file-per-writer split). loadSceneSphere tries sphere.json
 // first and falls back to the legacy scene.json's sceneSphere key for a pre-split topology.
 //
 // The Center is the only PERSISTED, AUTHORITATIVE cartesian value — the world anchor every

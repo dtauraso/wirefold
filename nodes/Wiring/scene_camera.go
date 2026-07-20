@@ -3,7 +3,7 @@ package Wiring
 // scene_camera.go — the initial camera VIEWPOINT is FILE DATA, not a computed seed.
 //
 // The saved camera lives in `<topologyPath>/view/camera.json` (one-file-per-writer,
-// docs/planning/visual-editor/one-file-per-goroutine.md — the sole successor to the old
+// the one-file-per-writer split — the sole successor to the old
 // shared `<topologyPath>/view/scene.json`'s `cameraPolar` field). On startup Go reads that
 // file itself and installs the parsed pose into the gesture-FSM viewpoint (SetViewpoint +
 // EmitViewpoint), so the buffer camera columns carry a REAL saved pose from the first frame

@@ -1,7 +1,7 @@
 package Wiring
 
 // one_writer_per_file_test.go — pins fact #2 of the one-file-per-goroutine split
-// (docs/planning/visual-editor/one-file-per-goroutine.md): each of the five NEW files this
+//: each of the five NEW files this
 // split introduced (camera.json, overlays.json, sphere.json, position.json,
 // local-polars.json) has its ON-DISK NAME literal spelled out in exactly ONE place in
 // production (non-test) source — the single path-building function for that file

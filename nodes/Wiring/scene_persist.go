@@ -6,7 +6,7 @@ package Wiring
 // atomic (tmp+rename) write. This file factors that machinery out once so the per-domain
 // files hold only their domain-specific shape (which fields they own, how to marshal them).
 //
-// One-file-per-writer (docs/planning/visual-editor/one-file-per-goroutine.md): every lock
+// One-file-per-writer: every lock
 // that used to live here (sceneFileMu, entityFileMus/entityFileMuMu) existed because TWO
 // WRITERS shared ONE file — three writers read-modify-wrote view/scene.json, and two
 // writers read-modify-wrote nodes/<id>/meta.json. Splitting each shared file into one file

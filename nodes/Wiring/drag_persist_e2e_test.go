@@ -49,7 +49,7 @@ func writeStar3(t *testing.T) string {
 
 // persistedMeta reads and merges <root>/nodes/<id>/{meta,position,local-polars}.json into
 // one raw map, for asserting on the RE-PERSISTED bytes rather than in-memory state. Since
-// the one-file-per-writer split (docs/planning/visual-editor/one-file-per-goroutine.md) the
+// the one-file-per-writer split the
 // position/local-polars fields live in their OWN files, not meta.json; merging here keeps
 // every existing by-key assertion in this test unchanged.
 func persistedMeta(t *testing.T, root, id string) map[string]json.RawMessage {

@@ -14,7 +14,7 @@
 // It tries overlays.json first and falls back to the legacy scene.json's overlay keys (a
 // pre-split topology) — see loadSceneOverlays.
 //
-// WHOLE-FILE write (one-file-per-writer, docs/planning/visual-editor/one-file-per-goroutine.md):
+// WHOLE-FILE write (one-file-per-writer, the one-file-per-writer split):
 // overlays.json holds ONLY these flags and has exactly one writer, so each flush marshals the
 // current overlayState fresh — no read-modify-write, no sceneFileMu (deleted). The key names
 // + polarity + default-omission mirror TS's serializeSceneState (webview/state/viewer/types.ts):
