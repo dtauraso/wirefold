@@ -258,7 +258,7 @@
   <div class="layout">
     <div>
       <div class="plate">
-        <svg viewBox="0 0 860 800" role="img" aria-label="The four mutex patterns shown as the specific calls each goroutine makes: identity reads versus position writes, message enqueue and bead handling, clock ticks and trace emissions, and the refuted holder access.">
+        <svg viewBox="0 0 860 800" role="img" aria-label="The four mutex patterns shown as the specific calls each goroutine makes: identity reads versus position writes, message enqueue and bead handling, why the clock is no longer a shared bus while trace still is, and the refuted holder access.">
           <!-- ── 1 anti-tearing ── -->
           <text class="d-tl" x="0" y="12">1 · ANTI-TEARING — geomMu, now deleted</text>
           <rect class="d-group" x="0" y="22" width="860" height="120" rx="6"/>
@@ -316,42 +316,22 @@
           <line class="d-arrow-sig" x1="392" y1="284" x2="420" y2="284"/>
           <text class="d-ts" x="590" y="284">three goroutines, one bead list</text>
 
-          <!-- ── 3 shared services: two buses, service left, owners tapped right ── -->
-          <text class="d-tl" x="0" y="360">3 · SHARED SERVICES — the service, who owns each tap, and the wiring</text>
+          <!-- ── 3 shared services: the clock stopped being a bus, Trace is the one left ── -->
+          <text class="d-tl" x="0" y="360">3 · SHARED SERVICE — the clock is no longer one; Trace still is</text>
           <rect class="d-group" x="0" y="370" width="860" height="282" rx="6"/>
 
-          <!-- ── bus A: the clock ── -->
-          <text class="d-tl" x="20" y="392">SHARED STATE — asks “when?”</text>
-          <rect class="d-box-passive" x="20" y="402" width="140" height="196" rx="5"/>
-          <text class="d-t"  x="34" y="426">RealClock</text>
-          <text class="d-ts" x="34" y="444">passive object —</text>
-          <text class="d-ts" x="34" y="462">NOT a goroutine</text>
-          <text class="d-ts" x="34" y="486">Tick() computes</text>
-          <text class="d-ts" x="34" y="500">on demand; nobody</text>
-          <text class="d-ts" x="34" y="514">is driven by it</text>
-          <text class="d-ts" x="34" y="574">mu</text>
-
-          <line class="d-arrow-flow" x1="160" y1="428" x2="204" y2="428"/>
-          <rect class="d-box-flow" x="214" y="402" width="196" height="38" rx="4" opacity=".35"/>
-          <rect class="d-box-flow" x="210" y="406" width="196" height="38" rx="4" opacity=".6"/>
-          <rect class="d-box-flow" x="206" y="410" width="196" height="38" rx="4"/>
-          <text class="d-t"  x="218" y="427">node's own loop</text>
-          <text class="d-ts" x="218" y="441">× 9  —  SleepCycle · StepOnce</text>
-
-          <line class="d-arrow-flow" x1="160" y1="486" x2="204" y2="486"/>
-          <rect class="d-box-flow" x="214" y="460" width="196" height="38" rx="4" opacity=".35"/>
-          <rect class="d-box-flow" x="210" y="464" width="196" height="38" rx="4" opacity=".6"/>
-          <rect class="d-box-flow" x="206" y="468" width="196" height="38" rx="4"/>
-          <text class="d-t"  x="218" y="485">DriveHeld</text>
-          <text class="d-ts" x="218" y="499">× ~7  —  one per driven output</text>
-
-          <line class="d-arrow-x" x1="160" y1="544" x2="204" y2="544"/>
-          <path class="d-arrow-x" d="M168 540 L158 544 L168 548"/>
-          <rect class="d-box" x="206" y="526" width="196" height="38" rx="4"/>
-          <text class="d-t"  x="218" y="543">stdin goroutine</text>
-          <text class="d-ts" x="218" y="557">one · SetSpeed — only writer</text>
-
-          <text class="d-ts" x="20" y="614">≈16 goroutines read it · 1 writes it · no scheduler</text>
+          <!-- ── left: the clock, once shared, now per-goroutine ── -->
+          <text class="d-tl" x="20" y="392">NO LONGER SHARED — the clock</text>
+          <rect class="d-box-passive" x="20" y="402" width="390" height="196" rx="5"/>
+          <text class="d-t"  x="34" y="428">RealClock</text>
+          <text class="d-ts" x="34" y="448">deleted: RealClock.mu, the one shared</text>
+          <text class="d-ts" x="34" y="464">clock object, and the shared Tick() bus</text>
+          <text class="d-ts" x="34" y="480">a goroutine could contend on</text>
+          <text class="d-ts" x="34" y="506">now: every goroutine holds its OWN</text>
+          <text class="d-ts" x="34" y="522">RealClock value-copy — nothing to lock</text>
+          <text class="d-ts" x="34" y="548">speed changes travel on per-goroutine</text>
+          <text class="d-ts" x="34" y="564">buffered-1 latest-wins channels, not a bus</text>
+          <text class="d-ts" x="34" y="588">see “the clock question” tab</text>
 
           <!-- ── bus B: the trace ── -->
           <text class="d-tl" x="450" y="392">SHARED STATE — says “what happened”</text>
@@ -427,8 +407,8 @@
           </tr>
           <tr>
             <td>RealClock.mu</td>
-            <td>many Tick readers vs one SetSpeed writer</td>
-            <td><span class="verdict v-ok">confirmed</span></td>
+            <td>was: many Tick readers vs one SetSpeed writer</td>
+            <td><span class="verdict v-gone">deleted</span></td>
           </tr>
           <tr>
             <td>Trace.mu</td>
