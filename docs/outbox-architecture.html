@@ -1,0 +1,726 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>wirefold — outbox.mu, resolved: the lock is gone</title>
+  <style>
+    :root {
+      --ground: #F2F4F7;
+      --surface: #FFFFFF;
+      --plate: #FAFBFC;
+      --ink: #131A24;
+      --muted: #5B6779;
+      --faint: #8894A6;
+      --line: #D3D9E2;
+      --line-strong: #B7C0CD;
+      --signal: #C06A12;
+      --flow: #2E7D9A;
+      --hazard: #A8443C;
+      --ok: #3B7350;
+      --signal-wash: #F6ECDF;
+      --flow-wash: #E4EFF3;
+      --hazard-wash: #F6E6E4;
+      --ok-wash: #E4EFE8;
+      --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+      --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --ground: #0D1219;
+        --surface: #141C26;
+        --plate: #111925;
+        --ink: #E4E9F0;
+        --muted: #94A1B2;
+        --faint: #6C7A8B;
+        --line: #26313F;
+        --line-strong: #3A4859;
+        --signal: #E8A147;
+        --flow: #57AECB;
+        --hazard: #D2685E;
+        --ok: #6FA783;
+        --signal-wash: #241B10;
+        --flow-wash: #0F2029;
+        --hazard-wash: #251413;
+        --ok-wash: #12241A;
+      }
+    }
+
+    :root[data-theme="dark"] {
+      --ground: #0D1219;
+      --surface: #141C26;
+      --plate: #111925;
+      --ink: #E4E9F0;
+      --muted: #94A1B2;
+      --faint: #6C7A8B;
+      --line: #26313F;
+      --line-strong: #3A4859;
+      --signal: #E8A147;
+      --flow: #57AECB;
+      --hazard: #D2685E;
+      --ok: #6FA783;
+      --signal-wash: #241B10;
+      --flow-wash: #0F2029;
+      --hazard-wash: #251413;
+      --ok-wash: #12241A;
+    }
+
+    :root[data-theme="light"] {
+      --ground: #F2F4F7;
+      --surface: #FFFFFF;
+      --plate: #FAFBFC;
+      --ink: #131A24;
+      --muted: #5B6779;
+      --faint: #8894A6;
+      --line: #D3D9E2;
+      --line-strong: #B7C0CD;
+      --signal: #C06A12;
+      --flow: #2E7D9A;
+      --hazard: #A8443C;
+      --ok: #3B7350;
+      --signal-wash: #F6ECDF;
+      --flow-wash: #E4EFF3;
+      --hazard-wash: #F6E6E4;
+      --ok-wash: #E4EFE8;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--ground);
+      color: var(--ink);
+      font-family: var(--sans);
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .wrap {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 0 20px 72px;
+    }
+
+    header {
+      border-bottom: 1px solid var(--line);
+      background: var(--surface);
+    }
+
+    .head-inner {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 24px 20px 20px;
+    }
+
+    .eyebrow {
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: .14em;
+      text-transform: uppercase;
+      color: var(--faint);
+      margin: 0 0 8px;
+    }
+
+    h1 {
+      font-family: var(--mono);
+      font-weight: 600;
+      font-size: clamp(20px, 3vw, 28px);
+      margin: 0 0 6px;
+    }
+
+    .sub {
+      margin: 0;
+      color: var(--muted);
+      max-width: 74ch;
+      font-size: 14px;
+    }
+
+    h2 {
+      font-family: var(--mono);
+      font-size: 13px;
+      font-weight: 600;
+      margin: 38px 0 2px;
+      letter-spacing: .02em;
+    }
+
+    .cap {
+      margin: 0 0 10px;
+      color: var(--muted);
+      font-size: 13px;
+      max-width: 80ch;
+    }
+
+    .cap b {
+      color: var(--ink);
+      font-weight: 600;
+    }
+
+    .plate {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 14px;
+      margin: 0 0 10px;
+      overflow-x: auto;
+    }
+
+    .plate svg {
+      display: block;
+      min-width: 600px;
+      width: 100%;
+      height: auto;
+    }
+
+    .t {
+      font-family: var(--mono);
+      font-size: 12.5px;
+      fill: var(--ink);
+      font-weight: 600;
+    }
+
+    .ts {
+      font-family: var(--mono);
+      font-size: 10.5px;
+      fill: var(--muted);
+    }
+
+    .tf {
+      font-family: var(--mono);
+      font-size: 9.5px;
+      fill: var(--faint);
+    }
+
+    .tl {
+      font-family: var(--mono);
+      font-size: 11px;
+      fill: var(--faint);
+      letter-spacing: .1em;
+    }
+
+    .tw {
+      font-family: var(--mono);
+      font-size: 10.5px;
+      fill: var(--hazard);
+      font-weight: 600;
+    }
+
+    .tk {
+      font-family: var(--mono);
+      font-size: 10.5px;
+      fill: var(--ok);
+      font-weight: 600;
+    }
+
+    .tq {
+      font-family: var(--mono);
+      font-size: 10.5px;
+      fill: var(--signal);
+      font-weight: 600;
+    }
+
+    .tb {
+      font-family: var(--mono);
+      font-size: 10.5px;
+      fill: var(--flow);
+      font-weight: 600;
+    }
+
+    .big {
+      font-family: var(--mono);
+      font-size: 15px;
+      fill: var(--hazard);
+      font-weight: 700;
+    }
+
+    .box {
+      fill: var(--plate);
+      stroke: var(--line-strong);
+      stroke-width: 1;
+    }
+
+    .gor {
+      fill: var(--flow-wash);
+      stroke: var(--flow);
+      stroke-width: 1.2;
+    }
+
+    .state {
+      fill: var(--hazard-wash);
+      stroke: var(--hazard);
+      stroke-width: 1.4;
+    }
+
+    .safe {
+      fill: var(--ok-wash);
+      stroke: var(--ok);
+      stroke-width: 1.2;
+    }
+
+    .queue {
+      fill: var(--signal-wash);
+      stroke: var(--signal);
+      stroke-width: 1.2;
+    }
+
+    .dash {
+      fill: none;
+      stroke: var(--line-strong);
+      stroke-width: 1;
+      stroke-dasharray: 4 3;
+    }
+
+    .arr {
+      fill: none;
+      stroke: var(--hazard);
+      stroke-width: 1.4;
+    }
+
+    .arrb {
+      fill: none;
+      stroke: var(--flow);
+      stroke-width: 1.4;
+    }
+
+    .arrk {
+      fill: none;
+      stroke: var(--ok);
+      stroke-width: 1.4;
+    }
+
+    .arrq {
+      fill: none;
+      stroke: var(--signal);
+      stroke-width: 1.4;
+    }
+
+    .legend {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      margin: 0 0 22px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .legend span {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-family: var(--mono);
+      font-size: 11px;
+    }
+
+    .sw {
+      width: 12px;
+      height: 12px;
+      border-radius: 3px;
+      border: 1.4px solid;
+      display: inline-block;
+    }
+
+    .sw.g {
+      background: var(--flow-wash);
+      border-color: var(--flow);
+    }
+
+    .sw.s {
+      background: var(--hazard-wash);
+      border-color: var(--hazard);
+    }
+
+    .sw.k {
+      background: var(--ok-wash);
+      border-color: var(--ok);
+    }
+
+    .sw.q {
+      background: var(--signal-wash);
+      border-color: var(--signal);
+    }
+
+    .verdict {
+      font-size: 13px;
+      margin: 0 0 26px;
+      padding: 9px 12px;
+      border-radius: 6px;
+    }
+
+    .verdict.ok {
+      background: var(--ok-wash);
+    }
+
+    .verdict.open {
+      background: var(--signal-wash);
+    }
+
+    .verdict.hazard {
+      background: var(--hazard-wash);
+    }
+
+    .verdict b {
+      font-family: var(--mono);
+      font-size: 11.5px;
+    }
+
+    code {
+      font-family: var(--mono);
+      font-size: .92em;
+    }
+
+    footer {
+      margin-top: 46px;
+      padding-top: 16px;
+      border-top: 1px solid var(--line);
+      color: var(--faint);
+      font-size: 12px;
+    }
+  </style>
+</head>
+
+<body>
+
+  <header>
+    <div class="head-inner">
+      <p class="eyebrow">wirefold · concurrency · RESOLVED</p>
+      <h1>outbox.mu — the record of a question that closed</h1>
+      <p class="sub">
+        <code>geomMu</code> was removed, <code>LayoutHolder.mu</code> was removed, and
+        <code>PacedWire.mu</code> was removed — each was called necessary first. This page
+        argued <code>outbox.mu</code> was the fourth and still standing. It is now gone too:
+        <code>task/mutex-outbox-restructure</code> deleted the outbox struct entirely — no
+        queue, no <code>mu</code>, no <code>cond</code>, no dedicated sender goroutine, no
+        ctx-watcher goroutine. What's below is kept as the argument that led there, not as a
+        description of the code that runs today (see diagram 6 for that).
+      </p>
+    </div>
+  </header>
+
+  <div class="wrap">
+
+    <div class="legend">
+      <span><i class="sw g"></i>goroutine</span>
+      <span><i class="sw s"></i>locked / blocked</span>
+      <span><i class="sw q"></i>queue</span>
+      <span><i class="sw k"></i>free to proceed</span>
+    </div>
+
+    <!-- ══ 1 · THE DEADLOCK (HISTORY) ══ -->
+    <h2>1 · history — why the outbox was built in the first place</h2>
+    <p class="cap">Two <b>mutually adjacent</b> movers, both mid-<code>handle</code>, both with full
+      inboxes. Each blocks writing into the other's inbox; neither returns to drain its own. Nothing
+      breaks the cycle. <b>This is the deadlock the outbox was built to prevent</b> — still true of
+      the old synchronous send, still the reason ANY fix was needed.</p>
+
+    <div class="plate">
+      <svg viewBox="0 0 860 270" role="img"
+        aria-label="Without the outbox, mover A blocks sending into mover B's full inbox while mover B blocks sending into A's full inbox, and neither returns to drain its own inbox, so the pair deadlocks.">
+        <defs>
+          <marker id="ax" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M0,0 L10,5 L0,10 z" fill="#A8443C" />
+          </marker>
+        </defs>
+
+        <text class="tl" x="0" y="14">WITHOUT THE OUTBOX — the old synchronous send</text>
+
+        <rect class="state" x="20" y="34" width="300" height="150" rx="8" />
+        <text class="t" x="34" y="56">mover A</text>
+        <text class="tf" x="34" y="71">inside handle() — has NOT returned</text>
+        <rect class="box" x="34" y="84" width="272" height="34" rx="4" />
+        <text class="ts" x="46" y="98">A's inbox</text>
+        <text class="tw" x="46" y="112">FULL — nobody draining it</text>
+        <rect class="state" x="34" y="128" width="272" height="40" rx="4" />
+        <text class="tw" x="46" y="145">BLOCKED in send → B</text>
+        <text class="tf" x="46" y="159">waiting for room in B's inbox</text>
+
+        <rect class="state" x="540" y="34" width="300" height="150" rx="8" />
+        <text class="t" x="554" y="56">mover B</text>
+        <text class="tf" x="554" y="71">inside handle() — has NOT returned</text>
+        <rect class="box" x="554" y="84" width="272" height="34" rx="4" />
+        <text class="ts" x="566" y="98">B's inbox</text>
+        <text class="tw" x="566" y="112">FULL — nobody draining it</text>
+        <rect class="state" x="554" y="128" width="272" height="40" rx="4" />
+        <text class="tw" x="566" y="145">BLOCKED in send → A</text>
+        <text class="tf" x="566" y="159">waiting for room in A's inbox</text>
+
+        <path class="arr" d="M320,120 C420,100 440,100 540,100" marker-end="url(#ax)" />
+        <path class="arr" d="M540,150 C440,170 420,170 320,150" marker-end="url(#ax)" />
+        <text class="big" x="392" y="132">DEADLOCK</text>
+
+        <line x1="0" y1="212" x2="860" y2="212" stroke="var(--line)" />
+        <text class="tw" x="0" y="232">RED-PROVEN</text>
+        <text class="ts" x="86" y="232">rewire nm.sendMove to the old blocking md.sendMove → this test hangs, every
+          time</text>
+        <text class="tf" x="0" y="248">outbox_mutual_adjacency_test.go · TestMutuallyAdjacentDragFloodNoDeadlock</text>
+        <text class="tf" x="0" y="262">the drag path makes mutual adjacency ordinary, not exotic: two neighbours dragged
+          into each other</text>
+      </svg>
+    </div>
+
+    <!-- ══ 2 · THE FIRST FIX (SUPERSEDED) ══ -->
+    <h2>2 · the shape that was replaced — outbox + dedicated sender</h2>
+    <p class="cap">This was the first fix, and it shipped for a while. The enqueue was an
+      <b>unbounded slice append</b> guarded by <code>mu</code>/<code>cond</code>; it could not block,
+      so <code>handle</code> always returned. The blocking send was moved onto a SEPARATE goroutine
+      per mover (plus a third ctx-watcher goroutine). <b>This whole box — the queue, the mutex, the
+      condvar, both extra goroutines — is what diagram 6 deletes.</b></p>
+
+    <div class="plate">
+      <svg viewBox="0 0 860 250" role="img"
+        aria-label="The mover's handler enqueues into an unbounded slice, which never blocks, so it returns to drain its own inbox; a separate sender goroutine does the blocking write into the target inbox.">
+        <defs>
+          <marker id="ak2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M0,0 L10,5 L0,10 z" fill="#3B7350" />
+          </marker>
+          <marker id="aq2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M0,0 L10,5 L0,10 z" fill="#C06A12" />
+          </marker>
+        </defs>
+
+        <text class="tl" x="0" y="14">PRODUCER · 1</text>
+        <text class="tl" x="300" y="14">QUEUE</text>
+        <text class="tl" x="620" y="14">CONSUMER · 1</text>
+
+        <rect class="safe" x="0" y="30" width="250" height="86" rx="6" />
+        <text class="t" x="12" y="50">nodeMover.run → handle()</text>
+        <text class="tk" x="12" y="68">NEVER BLOCKS</text>
+        <text class="tf" x="12" y="84">ob.enqueue — unbounded append</text>
+        <text class="tf" x="12" y="98">node_mover.go:70 · node_move.go:574</text>
+        <text class="tf" x="12" y="110">returns → drains its own inbox again</text>
+
+        <path class="arrk" d="M250,60 L300,60" marker-end="url(#ak2)" />
+        <text class="tk" x="256" y="52">append</text>
+
+        <rect class="queue" x="300" y="30" width="270" height="120" rx="8" />
+        <text class="t" x="314" y="52">outbox</text>
+        <text class="tf" x="314" y="66">node_mover.go:57–58</text>
+        <rect class="box" x="314" y="78" width="242" height="26" rx="4" />
+        <text class="tw" x="326" y="96">mu + cond</text>
+        <rect class="box" x="314" y="110" width="242" height="28" rx="4" />
+        <text class="ts" x="326" y="128">q []outboxItem — UNBOUNDED</text>
+
+        <path class="arrq" d="M570,60 L620,60" marker-end="url(#aq2)" />
+        <text class="tq" x="576" y="52">FIFO pop</text>
+
+        <rect class="gor" x="620" y="30" width="240" height="86" rx="6" />
+        <text class="t" x="632" y="50">outbox.run</text>
+        <text class="tw" x="632" y="68">BLOCKS — and that is fine</text>
+        <text class="tf" x="632" y="84">cond.Wait when empty</text>
+        <text class="tf" x="632" y="98">send() = blocking write to target inbox</text>
+        <text class="tf" x="632" y="110">node_move.go:503</text>
+
+        <line x1="0" y1="178" x2="860" y2="178" stroke="var(--line)" />
+        <text class="tk" x="0" y="198">THE MOVE</text>
+        <text class="ts" x="76" y="198">blocking did not disappear — it MOVED, onto a goroutine with nothing else to
+          do.</text>
+        <text class="tf" x="0" y="214">FIFO order per destination is also load-bearing: popping LIFO fails
+          TestOutboxFIFOPerTargetOrderNoDrop, every time.</text>
+        <text class="tf" x="0" y="230">UNCHECKED: nothing bounds queue growth or drain time. Only "a bounded stress run
+          completes within a timeout" is asserted.</text>
+      </svg>
+    </div>
+
+    <!-- ══ 3 · SPSC (WHY THE LOCK WAS EXAMINABLE AT ALL) ══ -->
+    <h2>3 · why the lock was even worth examining — it was SPSC</h2>
+    <p class="cap">Per instance, every mover's outbox had exactly <b>one</b> enqueuer and <b>one</b>
+      drainer; the third goroutine touched <code>mu</code> but never the queue — it only flipped
+      <code>closed</code>. SPSC is the one shape a mutex can be replaced by ownership rather than by a
+      cleverer lock. That is the property diagram 6's per-direction channels exploit directly: a Go
+      channel IS an SPSC queue, so once the shape was SPSC the mutex was never load-bearing — it was
+      guarding an invariant a channel already gives you for free.</p>
+
+    <div class="plate">
+      <svg viewBox="0 0 860 220" role="img"
+        aria-label="Each mover owns one outbox with exactly one producer goroutine and one consumer goroutine, plus a shutdown watcher that touches the mutex but never the queue.">
+        <text class="tl" x="0" y="14">ONE OUTBOX PER MOVER — N movers, N independent outboxes</text>
+
+        <rect class="box" x="0" y="30" width="410" height="120" rx="8" />
+        <text class="ts" x="14" y="50">mover “3”</text>
+        <rect class="safe" x="14" y="62" width="110" height="34" rx="4" /><text class="tf" x="24"
+          y="83">run/handle</text>
+        <rect class="queue" x="140" y="62" width="120" height="34" rx="4" /><text class="tf" x="150" y="83">its own
+          outbox</text>
+        <rect class="gor" x="276" y="62" width="120" height="34" rx="4" /><text class="tf" x="286" y="83">its own
+          sender</text>
+        <text class="tf" x="14" y="118">1 producer · 1 consumer · no sharing with any other mover</text>
+        <text class="tf" x="14" y="134">the mutex is INSIDE one instance — it is not a cross-mover lock</text>
+
+        <rect class="box" x="440" y="30" width="420" height="120" rx="8" />
+        <text class="ts" x="454" y="50">the third goroutine</text>
+        <rect class="gor" x="454" y="62" width="392" height="34" rx="4" />
+        <text class="tf" x="464" y="83">ctx-cancel watcher — node_mover.go:85</text>
+        <text class="tf" x="454" y="118">takes mu and Broadcasts to set closed = true</text>
+        <text class="tw" x="454" y="134">never enqueues, never pops — does NOT break SPSC</text>
+
+        <line x1="0" y1="178" x2="860" y2="178" stroke="var(--line)" />
+        <text class="tq" x="0" y="198">WHY THIS MATTERS</text>
+        <text class="ts" x="150" y="198">SPSC + unbounded is the precise combination that decides whether the lock can
+          go.</text>
+      </svg>
+    </div>
+
+    <!-- ══ 4 · WHY NOT A CHANNEL (WRONG CONCLUSION AT THE TIME — RESOLVED IN DIAGRAM 6) ══ -->
+    <h2>4 · "just use a channel" — the argument that was wrong here</h2>
+    <p class="cap">This diagram's ORIGINAL conclusion was: a Go channel is bounded, a full buffer
+      blocks the sender, and a blocking sender in <code>handle</code> is <i>exactly</i> diagram 1 —
+      so a channel alone can't replace the outbox. <b>That conclusion was wrong</b>, or at least
+      incomplete: it only checked two shapes (block-on-full, drop-on-full) and missed the third,
+      which is what actually shipped. <b>Retain-and-retry</b> — non-blocking send, and on failure
+      the item stays with the SENDER to retry next cycle instead of blocking OR dropping — neither
+      blocks <code>handle</code> nor loses a message. See diagram 6.</p>
+
+    <div class="plate">
+      <svg viewBox="0 0 860 240" role="img"
+        aria-label="A buffered channel blocks the producer when full, which reintroduces the deadlock; a non-blocking send that drops on full loses messages; the third option, retain-and-retry, neither blocks nor drops and is what shipped.">
+        <text class="tl" x="0" y="14">THREE CANDIDATES — TWO REJECTED, ONE SHIPPED</text>
+
+        <rect class="state" x="0" y="30" width="275" height="130" rx="8" />
+        <text class="t" x="14" y="52">chan, blocking send</text>
+        <text class="tf" x="14" y="72">full → producer BLOCKS in handle</text>
+        <text class="tw" x="14" y="92">= diagram 1 again</text>
+        <text class="tf" x="14" y="112">bigger buffer only makes it rarer,</text>
+        <text class="tf" x="14" y="126">not impossible — the cascade</text>
+        <text class="tf" x="14" y="140">is what generates the flood</text>
+        <text class="tw" x="14" y="154">REJECTED</text>
+
+        <rect class="state" x="292" y="30" width="275" height="130" rx="8" />
+        <text class="t" x="306" y="52">chan, drop-on-full send</text>
+        <text class="tf" x="306" y="72">full → DROP the message</text>
+        <text class="tw" x="306" y="92">measured: ~98% dropped under load</text>
+        <text class="tf" x="306" y="112">(TestNeighborSetCDropReachability,</text>
+        <text class="tf" x="306" y="126">9417/9600 in one run) — a node's</text>
+        <text class="tf" x="306" y="140">layout goes permanently stale</text>
+        <text class="tw" x="306" y="154">REJECTED</text>
+
+        <rect class="safe" x="584" y="30" width="276" height="130" rx="8" />
+        <text class="t" x="598" y="52">chan, retain-and-retry send</text>
+        <text class="tf" x="598" y="72">full → item STAYS on sender's own</text>
+        <text class="tf" x="598" y="86">pending queue (nm.pending), retried</text>
+        <text class="tf" x="598" y="100">next cycle of the sender's OWN</text>
+        <text class="tf" x="598" y="114">clock-paced run loop — never blocks,</text>
+        <text class="tf" x="598" y="128">never drops</text>
+        <text class="tk" x="598" y="150">SHIPPED — see diagram 6</text>
+
+        <line x1="0" y1="188" x2="860" y2="188" stroke="var(--line)" />
+        <text class="tk" x="0" y="208">RESOLVED</text>
+        <text class="ts" x="90" y="208">the outbox's queue+mutex was solving a problem a channel plus
+          retain-and-retry solves without either</text>
+      </svg>
+    </div>
+
+    <!-- ══ 5 · THE PATTERN ══ -->
+    <h2>5 · the track record on “this lock must stay”</h2>
+    <p class="cap">Each of these was described in <code>framings.md</code> as needing its lock. Each was
+      wrong, including — as of this branch — the one this page itself argued for.</p>
+
+    <div class="plate">
+      <svg viewBox="0 0 860 200" role="img"
+        aria-label="geomMu, LayoutHolder.mu, PacedWire.mu and outbox.mu were each said to be necessary and each was removed by a restructuring; it is now four for four.">
+        <text class="tl" x="0" y="14">CLAIMED NECESSARY → ACTUAL OUTCOME</text>
+
+        <rect class="safe" x="0" y="30" width="205" height="94" rx="6" />
+        <text class="t" x="12" y="50">geomMu</text>
+        <text class="tf" x="12" y="68">“shared struct needs</text>
+        <text class="tf" x="12" y="82">guarding against reads”</text>
+        <text class="tk" x="12" y="104">GONE — split identity</text>
+        <text class="tf" x="12" y="118">from mutable state</text>
+
+        <rect class="safe" x="218" y="30" width="205" height="94" rx="6" />
+        <text class="t" x="230" y="50">LayoutHolder.mu</text>
+        <text class="tf" x="230" y="68">“neighbours reach into</text>
+        <text class="tf" x="230" y="82">each other”</text>
+        <text class="tk" x="230" y="104">REFUTED — they never</text>
+        <text class="tf" x="230" y="118">did; it is a message</text>
+
+        <rect class="safe" x="436" y="30" width="205" height="94" rx="6" />
+        <text class="t" x="448" y="50">PacedWire.mu</text>
+        <text class="tf" x="448" y="68">“three goroutines</text>
+        <text class="tf" x="448" y="82">genuinely mutate it”</text>
+        <text class="tk" x="448" y="104">GONE — the wire</text>
+        <text class="tf" x="448" y="118">became its own owner</text>
+
+        <rect class="safe" x="654" y="30" width="206" height="94" rx="6" />
+        <text class="t" x="666" y="50">outbox.mu</text>
+        <text class="tf" x="666" y="68">“a queue's invariant</text>
+        <text class="tf" x="666" y="82">must be maintained”</text>
+        <text class="tk" x="666" y="104">GONE — retain-and-</text>
+        <text class="tf" x="666" y="118">retry needs no queue</text>
+
+        <line x1="0" y1="152" x2="860" y2="152" stroke="var(--line)" />
+        <text class="tk" x="0" y="172">4 FOR 4</text>
+        <text class="ts" x="90" y="172">every “this one must stay” has fallen to a restructuring that gave the state ONE
+          OWNER.</text>
+        <text class="tf" x="0" y="188">Ownership, not cleverness: geomMu split it, LayoutHolder already had it, PacedWire
+          took it, outbox's queue was replaced by per-direction channels each mover already owned one end of.</text>
+      </svg>
+    </div>
+
+    <!-- ══ 6 · THE SHAPE THAT SHIPPED ══ -->
+    <h2>6 · what actually shipped — two directed channels, no lock</h2>
+    <p class="cap">No shared inbox, no outbox, no <code>mu</code>, no <code>cond</code>, no dedicated
+      sender goroutine, no ctx-watcher goroutine. Every pair of adjacent movers gets <b>two plain Go
+      channels</b>, one per direction; each mover's own <code>run</code> loop (paced on its own
+      <code>Clock.Copy()</code> + <code>SleepCycle</code>, same as every other pacing loop in the
+      system) drains its inbound channels and retries its own outbound sends every cycle. Nothing is
+      shared, so nothing needs a lock.</p>
+
+    <div class="plate">
+      <svg viewBox="0 0 860 260" role="img"
+        aria-label="Each mover pair gets two directed channels, one per direction, no shared inbox. Each mover's own clock-paced run loop drains its inbound channels and retries any outbound send that could not be delivered non-blockingly, retaining the item on its own pending queue instead of blocking or dropping. Goroutine count drops by two per mover versus the outbox shape.">
+        <defs>
+          <marker id="ak6" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M0,0 L10,5 L0,10 z" fill="#3B7350" />
+          </marker>
+        </defs>
+
+        <text class="tl" x="0" y="14">TWO DIRECTED CHANNELS PER PAIR — NO SHARED INBOX</text>
+
+        <rect class="safe" x="0" y="30" width="330" height="130" rx="8" />
+        <text class="t" x="14" y="52">mover A — run(ctx)</text>
+        <text class="tf" x="14" y="70">clock-paced loop: drain extIn +</text>
+        <text class="tf" x="14" y="84">neighborIn[·] non-blockingly, then</text>
+        <text class="tf" x="14" y="98">flush A's OWN nm.pending, then</text>
+        <text class="tf" x="14" y="112">clk.SleepCycle(ctx)</text>
+        <text class="tk" x="14" y="134">NEVER BLOCKS on a send</text>
+        <text class="tf" x="14" y="148">full/not-ready target → item stays on A's pending, retried next cycle</text>
+
+        <rect class="safe" x="530" y="30" width="330" height="130" rx="8" />
+        <text class="t" x="544" y="52">mover B — run(ctx)</text>
+        <text class="tf" x="544" y="70">clock-paced loop: drain extIn +</text>
+        <text class="tf" x="544" y="84">neighborIn[·] non-blockingly, then</text>
+        <text class="tf" x="544" y="98">flush B's OWN nm.pending, then</text>
+        <text class="tf" x="544" y="112">clk.SleepCycle(ctx)</text>
+        <text class="tk" x="544" y="134">NEVER BLOCKS on a send</text>
+        <text class="tf" x="544" y="148">full/not-ready target → item stays on B's pending, retried next cycle</text>
+
+        <path class="arrk" d="M330,70 C400,70 430,70 500,70 C520,70 520,70 530,70" marker-end="url(#ak6)" />
+        <text class="tk" x="366" y="62">A → B.neighborIn[A]</text>
+
+        <path class="arrk" d="M530,120 C460,120 430,120 360,120 C340,120 340,120 330,120" marker-end="url(#ak6)" />
+        <text class="tk" x="366" y="134">B → A.neighborIn[B]</text>
+
+        <line x1="0" y1="186" x2="860" y2="186" stroke="var(--line)" />
+        <text class="tk" x="0" y="206">GOROUTINE COUNT</text>
+        <text class="ts" x="140" y="206">DOWN two per mover vs. the outbox shape — no dedicated sender
+          goroutine, no ctx-watcher goroutine</text>
+        <text class="tf" x="0" y="222">retain-and-retry (nm.pending) is the mechanism from diagram 4's third
+          candidate — it neither blocks handle nor drops a message</text>
+        <text class="tf" x="0" y="238">nodeMover.go / node_move.go / quantized_move.go — no outbox.go, no outbox
+          struct, no q/mu/cond fields anywhere in the tree</text>
+      </svg>
+    </div>
+
+    <footer>
+      Verified against the tree on <span style="font-family:var(--mono)">task/mutex-outbox-restructure</span>.
+      Line numbers drift — re-grep before trusting them. Companion to
+      <span style="font-family:var(--mono)">docs/mutex-architecture.html</span> (all remaining locks)
+      and <span style="font-family:var(--mono)">docs/framings.md</span> (why each exists).
+    </footer>
+
+  </div>
+</body>
+
+</html>

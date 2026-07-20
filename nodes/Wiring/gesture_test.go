@@ -415,9 +415,9 @@ func TestGestureConnectedPortRingMove(t *testing.T) {
 	if md.gest.phase != gestPortMove {
 		t.Fatalf("phase=%v want portMove", md.gest.phase)
 	}
-	// The N1 mover inbox (buffered) must have received an anchor update.
+	// The N1 mover's extIn channel (buffered) must have received an anchor update.
 	select {
-	case msg := <-md.nodeMovers["N1"].inbox:
+	case msg := <-md.nodeMovers["N1"].extIn:
 		if msg.Kind != moveMsgKindAnchor || msg.NodeID != "N1" || msg.Port != "out" || msg.IsInput {
 			t.Fatalf("anchor msg mismatch: %+v", msg)
 		}

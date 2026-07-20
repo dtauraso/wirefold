@@ -61,9 +61,13 @@ const speedFullSetTopo = `{
 //	WindowAndInhibitLeftGate (gatecommon.RunGate)       = 1   (SpeedCh)
 //	Pulse: SpeedCh + Out1SpeedCh + Out2SpeedCh          = 3   (main loop + 2 drive goroutines)
 //	edgeMover, one per edge (exactly 1 edge above)      = 1
+//	nodeMover, one per node (exactly 7 nodes above)     = 7   (docs/planning/visual-editor/
+//	                                                            outbox-two-channels.md: the mover
+//	                                                            is no longer the odd one out
+//	                                                            pacing on a bare wall timer)
 //
-// Total = 4 + 2 + 1 + 3 + 1 = 11.
-const expectedSpeedSinkCount = 11
+// Total = 4 + 2 + 1 + 3 + 1 + 7 = 18.
+const expectedSpeedSinkCount = 18
 
 // TestSpeedSinksCoverEveryClockOwningGoroutine asserts LoadTopology's speed-sink list
 // has EXACTLY the expected count for this fixture — over the FULL set, not a sample.

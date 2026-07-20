@@ -638,32 +638,30 @@ func (g *gestureState) reset(vp *viewpoint) {
 // every incident edge mover — the SAME dispatch the op=update kind=node attr=anchor path
 // uses (applyUpdate). Live-only (no disk persistence), matching the FSM node-drag path.
 //
-// This sends `ch <- msg` DIRECTLY into the target inboxes, bypassing the
-// enqueueFor/outbox split every mover's OWN handler goroutine must use for its
-// sends (cascade-deadlock-fix.md). That split exists to prevent two mutually-
-// adjacent MOVER goroutines from deadlocking each other — both mid-handle, each
-// blocked sending into the other's full inbox, while neither is draining its
-// own (draining only resumes after handle returns). applyRingAnchor runs on the
-// stdin/gesture goroutine, not on any mover's own handler: it is never itself
-// the target of one of these sends, so it cannot be a link in that cycle — a
-// block here can only ever be "wait for the target's drain goroutine to read",
-// never "wait for a goroutine that is itself waiting on us". That is a real,
-// structural reason this exemption holds, not just "it hasn't happened yet".
+// This sends directly into the targets' dedicated extIn channels, bypassing the
+// enqueueFor/pending-retry split every mover's OWN handler goroutine must use for its
+// sends (docs/planning/visual-editor/outbox-two-channels.md). That split exists to
+// prevent two mutually-adjacent MOVER goroutines from deadlocking each other — both
+// mid-handle, each blocked sending into the other's full channel, while neither is
+// draining its own (draining only resumes after handle returns). applyRingAnchor runs on
+// the stdin/gesture goroutine, not on any mover's own handler: it is never itself the
+// target of one of these sends, so it cannot be a link in that cycle — a block here can
+// only ever be "wait for the target's own run loop to read", never "wait for a goroutine
+// that is itself waiting on us". That is a real, structural reason this exemption holds,
+// not just "it hasn't happened yet".
 func (md *MoveDispatch) applyRingAnchor(node, port string, isInput bool, dir vec3) {
 	anchorID := snapToRingAnchorIndex(md.NodeKind(node), dir)
 	msg := moveMsg{Kind: moveMsgKindAnchor, NodeID: node, Port: port, IsInput: isInput, AnchorId: anchorID}
-	if ch, ok := md.dispatch[node]; ok {
-		ch <- msg
+	if nm, ok := md.nodeMovers[node]; ok {
+		nm.extIn <- msg
 	}
-	for edgeID, em := range md.edgeMovers {
+	for _, em := range md.edgeMovers {
 		incident := (isInput && em.dstID == node && em.dstH == port) ||
 			(!isInput && em.srcID == node && em.srcH == port)
 		if !incident {
 			continue
 		}
-		if ch, ok := md.dispatch[edgeID]; ok {
-			ch <- msg
-		}
+		em.extIn <- msg
 	}
 	// Persist the snapped anchor index to the port file (debounced, fire-and-forget).
 	if md.persist.anchor != nil {

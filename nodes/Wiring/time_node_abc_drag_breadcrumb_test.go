@@ -124,32 +124,57 @@ func TestEveryDragRecipientLogsAbcDragBreadcrumb(t *testing.T) {
 		t.Fatal("RootMove(x) returned false")
 	}
 	pollDragConverged(t, md, "x", target)
-	// Let the neighborSetC messages to both t and n (and their requantize + breadcrumb)
-	// settle before reading the debug sink.
+	// Wait for BOTH recipients' "abc-drag" breadcrumb lines to land in the debug sink
+	// before reading their LayoutHolders. neighborSetCRequantize writes the local
+	// polar (SetLocalPolar) and THEN logs the breadcrumb, in that order, in the SAME
+	// call on the recipient's own goroutine — so once both lines are visible here,
+	// each recipient's LocalPolarsSnapshot is guaranteed to already reflect that same
+	// write. t/n each already carry a local-polar entry to "x" from LOAD time (the
+	// initial layout), so polling for the entry's mere EXISTENCE (as this test used
+	// to) can be satisfied by that stale seed value before the drag's
+	// moveMsgKindNeighborSetC has even been delivered — now that each nodeMover
+	// drains its inbox non-blockingly and paces on its own clock cycle instead of
+	// waking instantly on receive (docs/planning/visual-editor/
+	// outbox-two-channels.md), that race is no longer masked by near-instant
+	// in-process delivery. Anchoring on the breadcrumb (the causally-later event)
+	// instead of "entry exists" removes the race rather than papering over it with a
+	// longer fixed sleep.
 	deadline := time.Now().Add(2 * time.Second)
-	var lpTAfter, lpNAfter LocalPolar
+	var lines []breadcrumbLine
 	for {
-		for _, lp := range lhT.LocalPolarsSnapshot() {
-			if lp.To == "x" {
-				lpTAfter = lp
+		lines = parseBreadcrumbLines(t, dbg.String())
+		haveT, haveN := false, false
+		for _, b := range lines {
+			if b.Label != "abc-drag" {
+				continue
+			}
+			if b.Node == "t" {
+				haveT = true
+			}
+			if b.Node == "n" {
+				haveN = true
 			}
 		}
-		for _, lp := range lhN.LocalPolarsSnapshot() {
-			if lp.To == "x" {
-				lpNAfter = lp
-			}
-		}
-		if lpTAfter.To == "x" && lpNAfter.To == "x" {
+		if haveT && haveN {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("t's and/or n's local polar to x never appeared")
+			t.Fatal("t's and/or n's abc-drag breadcrumb never appeared")
 		}
 		time.Sleep(time.Millisecond)
 	}
-	time.Sleep(20 * time.Millisecond)
 
-	lines := parseBreadcrumbLines(t, dbg.String())
+	var lpTAfter, lpNAfter LocalPolar
+	for _, lp := range lhT.LocalPolarsSnapshot() {
+		if lp.To == "x" {
+			lpTAfter = lp
+		}
+	}
+	for _, lp := range lhN.LocalPolarsSnapshot() {
+		if lp.To == "x" {
+			lpNAfter = lp
+		}
+	}
 
 	var tLines, nLines []breadcrumbLine
 	for _, b := range lines {

@@ -1,112 +1,34 @@
-// node_mover.go — the outbox + per-node/per-edge mover actor types split out of node_move.go.
-// Pure move: no logic changes. node_move.go retains the dispatch registry (MoveDispatch) that
-// routes messages to these actors; this file owns the actors themselves — outbox (per-mover
-// unbounded FIFO decoupling enqueue from send), nodeMover (owns one node's geometry), and
+// node_mover.go — the per-node/per-edge mover actor types split out of node_move.go. Pure
+// move: no logic changes beyond the two-channels-no-inbox-no-blocking restructure
+// (docs/planning/visual-editor/outbox-two-channels.md): there is no shared many-to-one
+// inbox anymore. Every pair of movers that talk gets its OWN dedicated directed channel
+// (nodeMover.neighborIn, edgeMover.srcIn/dstIn), plus one dedicated "external" channel per
+// mover (extIn) for the stdin/gesture goroutine's rare direct entries (drag/dragStart/
+// anchor). node_move.go retains the dispatch registry (MoveDispatch) that WIRES these
+// channels together at load time; this file owns the actors themselves — nodeMover (owns
+// one node's geometry, its own inbound channel set, and its own outbound retry queue) and
 // edgeMover (owns one edge's segment/arc + in-flight bead revision). Each mover touches
-// MoveDispatch only via an injected enqueue func — no back-reference to the dispatch registry.
+// MoveDispatch only via an injected enqueue func — no back-reference to the dispatch
+// registry, and no shared queue/lock between movers.
 
 package Wiring
 
 import (
 	"context"
 	"fmt"
-	"sync"
 	"sync/atomic"
 
 	T "github.com/dtauraso/wirefold/Trace"
 )
 
-// outboxItem is one queued (destination, message) pair awaiting delivery by a mover's
-// dedicated sender goroutine.
-type outboxItem struct {
+// pendingSend is one (destination, message) pair this node's own goroutine tried to
+// deliver, failed (the target's inbox was momentarily full), and is retrying — see
+// nodeMover.pending's doc comment. There is no separate sender goroutine and no lock:
+// only nm's own goroutine ever reads or writes nm.pending (docs/planning/visual-editor/
+// outbox-two-channels.md).
+type pendingSend struct {
 	destID string
 	msg    moveMsg
-}
-
-// outbox is a per-mover UNBOUNDED FIFO of outgoing messages, decoupling *enqueue* (done
-// by the mover's own inbox-drain goroutine, inside handle — must never
-// block) from *delivery* (done by a dedicated sender goroutine, which blocks on the
-// target's inbox exactly like the old synchronous send did). Two mutually-adjacent
-// movers, both mid-handle with full inboxes, would otherwise deadlock each blocking a
-// send into the other's full inbox while neither drains (the planning doc that first
-// diagnosed this, cascade-deadlock-fix.md, was branch-local and has since been
-// stripped per this repo's branch-local-docs convention — the claim below is checked
-// by tests, not by that doc).
-//
-// CHECKED BY CODE:
-//   - TestMutuallyAdjacentDragFloodNoDeadlock (outbox_mutual_adjacency_test.go) drives
-//     two real mutually-adjacent nodeMovers (src/dst) under sustained concurrent drag
-//     load and asserts completion within a timeout. Confirmed as a MANDATORY RED PROOF:
-//     temporarily rewiring nm.sendMove to the old blocking md.sendMove (bypassing this
-//     outbox) makes this same test hang and fail on timeout every time; restoring the
-//     outbox wiring makes it pass again.
-//   - TestOutboxFIFOPerTargetOrderNoDrop (outbox_mutual_adjacency_test.go) drives a
-//     single enqueuer (matching the real one-handler-goroutine-per-mover shape)
-//     interleaving thousands of sequenced items across several destination ids, and
-//     asserts every item is delivered (no drops) and each destination's own
-//     subsequence arrives in exactly enqueue order. Confirmed as a MANDATORY RED
-//     PROOF: temporarily popping the queue LIFO instead of FIFO makes this same test
-//     fail on out-of-order delivery every time; restoring FIFO pop makes it pass again.
-//
-// Unbounded by design — a bounded queue reintroduces the same blocking-enqueue
-// deadlock; this is asserted by the same red-proof rewiring above, not by a separate
-// bounded-queue test. Cascades are finite (idempotent quiescence) so the queue drains
-// in practice — UNCHECKED: no test asserts a bound on queue growth or drain time,
-// only that a bounded stress run completes within a timeout.
-type outbox struct {
-	mu     sync.Mutex
-	cond   *sync.Cond
-	q      []outboxItem
-	closed bool
-}
-
-func newOutbox() *outbox {
-	ob := &outbox{}
-	ob.cond = sync.NewCond(&ob.mu)
-	return ob
-}
-
-// enqueue appends one item to the tail of the queue. Never blocks (unbounded slice
-// append) — this is what keeps the calling handler goroutine free to return to draining
-// its own inbox.
-func (ob *outbox) enqueue(destID string, msg moveMsg) {
-	ob.mu.Lock()
-	ob.q = append(ob.q, outboxItem{destID: destID, msg: msg})
-	ob.cond.Signal()
-	ob.mu.Unlock()
-}
-
-// run is the mover's dedicated sender goroutine: pop items in FIFO order and deliver
-// each via send (the existing BLOCKING channel write into the target's inbox). Exits
-// promptly on ctx cancellation (process shutdown — no need to flush; draining a queue on
-// a dying process delivers into inboxes nobody will ever read again).
-func (ob *outbox) run(ctx context.Context, send func(destID string, msg moveMsg)) {
-	cancelWatcherDone := make(chan struct{})
-	go func() {
-		select {
-		case <-ctx.Done():
-			ob.mu.Lock()
-			ob.closed = true
-			ob.cond.Broadcast()
-			ob.mu.Unlock()
-		case <-cancelWatcherDone:
-		}
-	}()
-	defer close(cancelWatcherDone)
-	for {
-		ob.mu.Lock()
-		for len(ob.q) == 0 && !ob.closed {
-			ob.cond.Wait()
-		}
-		if len(ob.q) == 0 && ob.closed {
-			ob.mu.Unlock()
-			return
-		}
-		item := ob.q[0]
-		ob.q = ob.q[1:]
-		ob.mu.Unlock()
-		send(item.destID, item.msg)
-	}
 }
 
 // setPortAnchorId sets the AnchorId on the named port within the given geom,
@@ -128,13 +50,41 @@ func setPortAnchorId(g *nodeGeom, port string, isInput bool, anchorId int) bool 
 	return false
 }
 
-// nodeMover owns one node's geometry. It reads its inbox in its own goroutine and,
-// on a move for itself, updates its held position and re-emits its node-geometry.
+// nodeMover owns one node's geometry. It drains its own dedicated inbound channels
+// (extIn + one per neighbor — there is no single shared inbox) in its own goroutine
+// and, on a move for itself, updates its held position and re-emits its node-geometry.
 type nodeMover struct {
-	id    string
-	geom  nodeGeom
-	inbox chan moveMsg
-	tr    *T.Trace
+	id   string
+	geom nodeGeom
+	// extIn is this node's dedicated channel for EXTERNAL entries — the stdin/gesture
+	// goroutine's drag/dragStart/anchor sends (md.sendMove, gesture.go's
+	// applyRingAnchor). Nothing else ever writes here: no other mover shares it.
+	extIn chan moveMsg
+	// neighborIn holds one dedicated inbound channel PER ADJACENT NODE (keyed by that
+	// neighbor's id) — the "two channels, A→B and B→A" topology generalized to this
+	// node's whole neighbor set. Built once at construction (newMoveDispatch) from edge
+	// adjacency and never mutated afterward, so it's safe for run() to snapshot into a
+	// fixed select-case list at goroutine start. A neighbor M's own goroutine is the only
+	// writer of neighborIn[M]; nothing else ever sends on it.
+	neighborIn map[string]chan moveMsg
+	tr         *T.Trace
+	// clockSrc is the Clock this nodeMover's own goroutine (run) Copies from EXACTLY
+	// ONCE at its own start (docs/planning/visual-editor/per-goroutine-clock.md), into
+	// clk below — the same pattern edgeMover.run and DriveHeld already use, so the
+	// mover is no longer the odd one out pacing on a bare wall-clock timer. Not read
+	// again after that copy.
+	clockSrc Clock
+	// clk is this nodeMover's OWN clock copy, set once by run() at goroutine start.
+	// Only this goroutine ever reads it. Defaults to a fresh, real, live-ticking
+	// RealClock (see newNodeMover) so a test that never launches run() (e.g. a bare
+	// nodeMover literal driving flushPending directly) never dereferences a nil Clock.
+	clk Clock
+	// speedCh delivers a speed change to THIS nodeMover's own clk copy
+	// (per-goroutine-clock.md "Delivery"), polled via ApplySpeedNonBlocking every
+	// cycle of run's loop. Set once, at construction (newMoveDispatch), from the
+	// loader's build-wide speed-sink accumulator; nil in bare test construction, which
+	// is fine — ApplySpeedNonBlocking is a no-op on a nil channel.
+	speedCh chan float64
 	// There is no geomMu. m.geom (port_geometry.go) splits into an embedded, write-once
 	// nodeIdentity (Kind/Label/R/SceneCenter — set once at construction in loader.go,
 	// grepped clean of any later write anywhere in this package) and MUTABLE state
@@ -162,8 +112,10 @@ type nodeMover struct {
 	// update; read by any goroutine (stdin reader) to observe the current position
 	// without crossing into the mover's live geom.
 	snap atomic.Pointer[centerSnap]
-	// sendMove routes a moveMsg to another id's inbox by id-lookup against md.dispatch (a
-	// read-only directory after construction — no queue, no shared mutable state).
+	// sendMove routes a moveMsg to another id's OWN dedicated channel (resolveDest, above)
+	// — no shared inbox, no shared mutable state.
+	// Bound to md.enqueueFor(nm): it appends to nm.pending and immediately attempts a
+	// non-blocking flush (never blocks the calling handler goroutine).
 	sendMove func(id string, msg moveMsg)
 	edgeIDs  []string
 	// centerOf resolves another node's current world center, bound to
@@ -200,12 +152,26 @@ type nodeMover struct {
 	// neighbor's holder AND world position are written only by that neighbor's OWN
 	// goroutine. nil in tests that build a bare nodeMover directly.
 	neighborSetC func(selfID, fromID string, fromCenter vec3, deltaA, deltaB, deltaC int)
-	// outbox is this node's own outbound-message queue (see the outbox type doc
-	// comment). sendMove enqueues onto it (never blocks); a dedicated sender goroutine
-	// (spawned in MoveDispatch.Start) pops it in FIFO order and does the actual
-	// blocking delivery. This is what lets handle's sends stay non-blocking while
-	// every OTHER send-in-handle property (order, no drops) is unchanged.
-	outbox *outbox
+	// pending is THIS node's own outbound retry queue (docs/planning/visual-editor/
+	// outbox-two-channels.md): sendMove appends here and attempts an immediate
+	// non-blocking send; an item that can't be delivered right now (the target's
+	// inbox is momentarily full) stays here and is retried — before any newer item to
+	// the SAME destination — on the next flushPending call, which nm's own run loop
+	// makes every cycle. There is no dedicated sender goroutine and no lock: only
+	// nm's own goroutine ever touches nm.pending (every sendMove call originates from
+	// nm.handle, which only ever runs on nm's own run-loop goroutine). This is the
+	// same retain-and-retry shape PacedWire already uses for its outCh delivery
+	// handoff (full → retry next cycle, bead stays in inflight) — reused rather than
+	// a second invented pattern.
+	pending []pendingSend
+	// resolveDest looks up the ONE dedicated directed channel FROM this node TO the
+	// given destination id — the destination's neighborIn[this node's id] if destID is
+	// another node, or the destination edge's srcIn/dstIn depending on which endpoint
+	// this node is (md.nodeMovers/md.edgeMovers are read-only directories after
+	// construction, safe to read from any goroutine). There is no shared inbox to look
+	// up: every (sender, destination) pair resolves to its OWN channel. nil only in
+	// tests that build a bare nodeMover directly, in which case flushPending is a no-op.
+	resolveDest func(id string) (chan moveMsg, bool)
 	// layoutHolderFn resolves THIS node's own LocalPolar holder (md.layoutHolders[id])
 	// at CALL TIME rather than caching the *LayoutHolder at nodeMover construction:
 	// buildMoveDispatch (which constructs nodeMovers) runs BEFORE buildNodes (which is
@@ -228,8 +194,16 @@ type nodeMover struct {
 	dragAnchorArmed bool
 }
 
-func newNodeMover(id string, geom nodeGeom, tr *T.Trace) *nodeMover {
-	nm := &nodeMover{id: id, geom: geom, inbox: make(chan moveMsg, 8), tr: tr, outbox: newOutbox()}
+func newNodeMover(id string, geom nodeGeom, tr *T.Trace, clockSrc Clock) *nodeMover {
+	// clk defaults to a fresh RealClock (its own independent origin — fine here: this
+	// default is only ever read by a test that never launches run() as a goroutine;
+	// production always overwrites it below with clockSrc.Copy() before the goroutine
+	// does anything else), matching newEdgeMover's same default for the same reason.
+	nm := &nodeMover{
+		id: id, geom: geom,
+		extIn: make(chan moveMsg, 8), neighborIn: map[string]chan moveMsg{}, tr: tr,
+		clockSrc: clockSrc, clk: NewRealClock(),
+	}
 	// Seed the atomic snapshot from the initial geometry (even when !HasPos, in which case
 	// nodeWorldPos falls back to the origin) so readers — including another node's aimed-port
 	// partnerCenter lookup — always have a valid center to read before the first center
@@ -349,24 +323,110 @@ func (m *nodeMover) emitGeometry() {
 	emitNodeGeometryLocked(m.tr, m.id, m.geom, m.partnerCenter)
 }
 
-// run is the node's per-goroutine move loop: drain the inbox until ctx is done.
-func (m *nodeMover) run(ctx context.Context) {
-	for {
+// flushPending retries every message in m.pending in order, attempting a non-blocking
+// send to its destination's inbox. A destination whose channel is momentarily full
+// stays in the queue (retried next call) — and so does every LATER item addressed to
+// that SAME destination, even if its own channel isn't full, so per-destination FIFO
+// is preserved (a retained item is never overtaken by a newer one to the same
+// destination). An item whose destination doesn't resolve (unknown id) is dropped,
+// matching the old deliverMove no-op for an unknown id. Called only from m's own
+// goroutine (sendMove, at enqueue time, and run's own loop, every cycle) — no lock
+// needed.
+func (m *nodeMover) flushPending() {
+	if len(m.pending) == 0 || m.resolveDest == nil {
+		return
+	}
+	blocked := map[string]bool{}
+	kept := m.pending[:0]
+	for _, item := range m.pending {
+		if blocked[item.destID] {
+			kept = append(kept, item)
+			continue
+		}
+		ch, ok := m.resolveDest(item.destID)
+		if !ok {
+			continue
+		}
 		select {
-		case <-ctx.Done():
-			return
-		case msg := <-m.inbox:
-			m.handle(msg)
-			if msg.testDone != nil {
-				close(msg.testDone)
+		case ch <- item.msg:
+		default:
+			blocked[item.destID] = true
+			kept = append(kept, item)
+		}
+	}
+	m.pending = kept
+}
+
+// run is the node's per-goroutine move loop. It paces itself on its OWN clock copy the
+// same way every other loop in the system does (edgeMover.run, DriveHeld,
+// emitRefillSlide — docs/planning/visual-editor/per-goroutine-clock.md): a Clock.Copy()
+// taken once here at goroutine start, ApplySpeedNonBlocking polled once per cycle, and
+// SleepCycle(ctx) as the pacing sleep at the bottom of the loop. It used to be the odd
+// loop out, blocking on a reflect.Select over its whole channel set instead; that is
+// gone.
+//
+// Each cycle FIRST drains every one of its OWN dedicated inbound channels (extIn + one
+// per neighbor, see the type's doc comment) — there is no shared inbox to drain
+// (docs/planning/visual-editor/outbox-two-channels.md) — non-blockingly and acts on
+// whatever is there, repeating the drain pass until a full pass finds nothing left (so a
+// backlog on any one channel is fully drained before the cycle paces, not throttled to
+// "one message per channel per cycle"), THEN retries any pending sends, THEN sleeps one
+// clock cycle. Nothing here ever blocks on a receive OR a send: an empty channel just
+// falls through its `default`, exactly the "read non-blockingly at the top, act on what's
+// there, pace on the clock" shape the design calls for. This does not busy-wait (the
+// pacing sleep bounds every cycle to one clock tick regardless of whether the drain pass
+// found anything), and does not throttle a real backlog (a full pass draining every
+// channel to empty runs entirely within the cycle, before the sleep — a burst of incoming
+// messages is drained as fast as it arrives, not capped at one per channel per tick).
+func (m *nodeMover) run(ctx context.Context) {
+	if m.clockSrc != nil {
+		m.clk = m.clockSrc.Copy()
+	}
+	for {
+		ApplySpeedNonBlocking(m.clk, m.speedCh)
+		// Drain every dedicated inbound channel non-blockingly, repeating until a
+		// full pass yields nothing — this is the "drain to empty, don't throttle a
+		// backlog" half of the shape.
+		for {
+			progressed := false
+			select {
+			case <-ctx.Done():
+				return
+			case msg := <-m.extIn:
+				m.handle(msg)
+				if msg.testDone != nil {
+					close(msg.testDone)
+				}
+				progressed = true
+			default:
 			}
+			for _, ch := range m.neighborIn {
+				select {
+				case msg := <-ch:
+					m.handle(msg)
+					if msg.testDone != nil {
+						close(msg.testDone)
+					}
+					progressed = true
+				default:
+				}
+			}
+			if !progressed {
+				break
+			}
+		}
+		// Retry any pending sends (nm.pending/flushPending) every cycle — a
+		// destination that was full earlier may have drained since.
+		m.flushPending()
+		if err := m.clk.SleepCycle(ctx); err != nil {
+			return
 		}
 	}
 }
 
 // edgeMover owns one edge. It holds both endpoint geometries and recomputes its own
-// segment/arc on an endpoint move (the edge label, which keys its inbox, encodes the
-// two connected nodes).
+// segment/arc on an endpoint move (the edge label, which keys its channels below,
+// encodes the two connected nodes).
 type edgeMover struct {
 	edgeID  string
 	srcID   string
@@ -377,8 +437,17 @@ type edgeMover struct {
 	dstGeom nodeGeom
 	out     *Out       // source Out for this edge (per-edge segment/arc/latency)
 	dest    *PacedWire // dest wire (in-flight revision + latency aggregate)
-	inbox   chan moveMsg
-	tr      *T.Trace
+	// extIn is this edge's dedicated channel for EXTERNAL entries (gesture.go's
+	// applyRingAnchor anchor mail-sort). srcIn/dstIn are this edge's two dedicated
+	// channels FROM its two endpoint nodes' own goroutines — srcIn written only by
+	// srcID's nodeMover, dstIn only by dstID's — the literal "two channels" the design
+	// specifies, one per direction this edge can be told about a moved endpoint.
+	// Nothing else ever writes on any of the three (docs/planning/visual-editor/
+	// outbox-two-channels.md).
+	extIn chan moveMsg
+	srcIn chan moveMsg
+	dstIn chan moveMsg
+	tr    *T.Trace
 	// clockSrc is the Clock this edgeMover's own goroutine (run) Copies from
 	// EXACTLY ONCE at its own start (docs/planning/visual-editor/
 	// per-goroutine-clock.md), into clk below. Not read again afterward.
@@ -415,7 +484,9 @@ func newEdgeMover(ep EdgeEndpoints, edgeID string, srcGeom, dstGeom nodeGeom, tr
 		dstH:     ep.TargetHandle,
 		srcGeom:  srcGeom,
 		dstGeom:  dstGeom,
-		inbox:    make(chan moveMsg, 8),
+		extIn:    make(chan moveMsg, 8),
+		srcIn:    make(chan moveMsg, 8),
+		dstIn:    make(chan moveMsg, 8),
 		tr:       tr,
 		clockSrc: clockSrc,
 		clk:      NewRealClock(),
@@ -536,8 +607,10 @@ func (m *edgeMover) run(ctx context.Context) {
 		m.clk = m.clockSrc.Copy()
 	}
 	for {
-		// Drain any pending move/speed messages without blocking, so a cycle
-		// always reaches the wire-drive step below even with nothing queued.
+		// Drain extIn/srcIn/dstIn/speedCh without blocking, so a cycle always reaches
+		// the wire-drive step below even with nothing queued. Three dedicated channels,
+		// not one shared inbox: extIn (external gesture entries), srcIn (this edge's
+		// source node's own goroutine), dstIn (this edge's target node's own goroutine).
 	drain:
 		for {
 			select {
@@ -549,7 +622,17 @@ func (m *edgeMover) run(ctx context.Context) {
 				if rc, ok := m.clk.(*RealClock); ok {
 					rc.SetSpeed(sp)
 				}
-			case msg := <-m.inbox:
+			case msg := <-m.extIn:
+				m.handle(msg)
+				if msg.testDone != nil {
+					close(msg.testDone)
+				}
+			case msg := <-m.srcIn:
+				m.handle(msg)
+				if msg.testDone != nil {
+					close(msg.testDone)
+				}
+			case msg := <-m.dstIn:
 				m.handle(msg)
 				if msg.testDone != nil {
 					close(msg.testDone)
