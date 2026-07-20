@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>wirefold — LayoutHolder.mu</title>
+<title>wirefold — LayoutHolder</title>
 <style>
   :root {
     --ground:#F2F4F7; --surface:#FFFFFF; --plate:#FAFBFC;
@@ -96,11 +96,13 @@
 <header>
   <div class="head-inner">
     <p class="eyebrow">wirefold · concurrency</p>
-    <h1>LayoutHolder.mu — a lock with nothing to guard</h1>
-    <p class="sub">One instance per node, at <code>layout_holder.go:118</code>. In production
-    every access is the owning node's own goroutine, so nothing shares it. The only concurrent
-    reader anywhere is a <b>test</b>. That makes this different in kind from every other lock
-    in the repo — the sharing is not something to restructure away, it was never there.</p>
+    <h1>LayoutHolder — one owner, no lock</h1>
+    <p class="sub">One instance per node, embedded in every node kind's struct
+    (<code>layout_holder.go:82</code>). It used to carry a <code>sync.Mutex</code> (<code>mu</code>);
+    that lock was removed (task/mutex-layout-holder) once every non-test caller was confirmed
+    to run on the holder's own node's goroutine — the only concurrent reader anywhere was a
+    <b>test</b> polling live state it did not own. The test was the one that had to change; the
+    production model already had no second party.</p>
   </div>
 </header>
 
@@ -156,27 +158,27 @@ in polar terms, quantized to integer steps. Real values below are node 9's, read
   <line x1="0" y1="262" x2="860" y2="262" stroke="var(--line)"/>
   <text class="tk" x="0" y="282">WHY IT IS STORED AS INTEGERS</text>
   <text class="ts" x="222" y="282">a drag updates position by arithmetic on step counts, so repeated drags do not accumulate float drift.</text>
-  <text class="tf" x="0" y="296">That is the whole point of the type — the mutex below is incidental to it.</text>
+  <text class="tf" x="0" y="296">That is the whole point of the type — no locking was ever part of what makes it work.</text>
 </svg>
 </div>
 
 <!-- ══ L1 · THE STATE ══ -->
-<h2>1 · what the lock guards — two fields, six methods</h2>
+<h2>1 · what the struct holds now — two fields, six plain methods</h2>
 <p class="cap">One <code>LayoutHolder</code> is embedded in EVERY node kind's struct — one
-instance per node, not a package-wide singleton. Every accessor takes <code>mu</code>;
-none holds it across anything but a slice/field read or write.</p>
+instance per node, not a package-wide singleton. There is no <code>mu</code> anymore: every
+accessor just reads or writes the two fields directly.</p>
 
 <div class="plate">
-<svg viewBox="0 0 860 268" role="img" aria-label="LayoutHolder holds localPolars and pole under one mutex, with six short accessor methods that each lock and unlock it.">
+<svg viewBox="0 0 860 268" role="img" aria-label="LayoutHolder holds localPolars and pole with no mutex, and six short accessor methods that read or write them directly.">
   <text class="tl" x="0" y="14">THE STRUCT</text>
-  <text class="tl" x="440" y="14">EVERY METHOD THAT TAKES mu</text>
+  <text class="tl" x="440" y="14">EVERY ACCESSOR — no lock, no unlock</text>
 
-  <rect class="state" x="0" y="28" width="400" height="150" rx="8"/>
+  <rect class="safe" x="0" y="28" width="400" height="150" rx="8"/>
   <text class="t"  x="14" y="50">LayoutHolder</text>
-  <text class="tf" x="14" y="65">nodes/Wiring/layout_holder.go:117</text>
+  <text class="tf" x="14" y="65">nodes/Wiring/layout_holder.go:82</text>
 
   <rect class="box" x="14" y="78" width="372" height="24" rx="4"/>
-  <text class="tw" x="26" y="95">mu sync.Mutex</text>
+  <text class="tk" x="26" y="95">no mutex — removed</text>
 
   <rect class="box" x="14" y="108" width="372" height="26" rx="4"/>
   <text class="ts" x="26" y="125">localPolars []LocalPolar</text>
@@ -187,63 +189,64 @@ none holds it across anything but a slice/field read or write.</p>
   <text class="tf" x="90" y="157">measurement pole entries were quantized about</text>
 
   <rect class="gor" x="440" y="28" width="420" height="24" rx="5"/>
-  <text class="ts" x="452" y="44">localPolarSteps(to) :141</text>
+  <text class="ts" x="452" y="44">localPolarSteps(to)</text>
 
   <rect class="gor" x="440" y="56" width="420" height="24" rx="5"/>
-  <text class="ts" x="452" y="72">LoadLocalPolars(lps) :156 — load-time, once</text>
+  <text class="ts" x="452" y="72">LoadLocalPolars(lps) — load-time, once</text>
 
   <rect class="gor" x="440" y="84" width="420" height="24" rx="5"/>
-  <text class="ts" x="452" y="100">SetLocalPolar(to, ...) :165 — the drag writer</text>
+  <text class="ts" x="452" y="100">SetLocalPolar(to, ...) — the drag writer</text>
 
   <rect class="gor" x="440" y="112" width="420" height="24" rx="5"/>
-  <text class="ts" x="452" y="128">LocalPolarsSnapshot() :187 — defensive copy out</text>
+  <text class="ts" x="452" y="128">LocalPolarsSnapshot() — defensive copy out</text>
 
   <rect class="gor" x="440" y="140" width="420" height="24" rx="5"/>
-  <text class="ts" x="452" y="156">Pole() :197 / SetPole(p) :206</text>
+  <text class="ts" x="452" y="156">Pole() / SetPole(p)</text>
 
   <line x1="0" y1="196" x2="860" y2="196" stroke="var(--line)"/>
-  <text class="tk" x="0" y="216">ONE PER NODE, NOT SHARED</text>
-  <text class="ts" x="230" y="216">every node kind embeds its own LayoutHolder — contention would be within one node's holder, never across two.</text>
+  <text class="tk" x="0" y="216">ONE PER NODE, NEVER SHARED</text>
+  <text class="ts" x="230" y="216">every node kind embeds its own LayoutHolder; a neighbour is reached by MESSAGE, never by touching its holder.</text>
   <text class="tf" x="0" y="234">Unlike the five persisters (one purpose each), every node in the graph gets one of these — dozens of instances, not five.</text>
-  <text class="tf" x="0" y="250">recordWrite/writes has no equivalent here — there is no debounce, no timer, no disk write in this file at all.</text>
+  <text class="tf" x="0" y="250">UpdateLayout (the &lt;-ctx.Done()-only stub once required by the Node interface) was also deleted — nothing ever spawned it.</text>
 </svg>
 </div>
 
-<!-- ══ L2 · THE ISSUE ══ -->
-<h2>2 · the issue — every production caller is the owning node's own goroutine</h2>
-<p class="cap">Grepped every non-test caller of all six accessors. <b>Every one runs on the
+<!-- ══ L2 · THE RESOLUTION ══ -->
+<h2>2 · what was found, and what was removed</h2>
+<p class="cap">Grepped every non-test caller of all six accessors. <b>Every one ran on the
 holder's own node's goroutine.</b> A node never reaches into a neighbour's holder — it sends
-a message and that neighbour's goroutine writes its own. So in production this is
-single-owner state carrying a mutex.</p>
+a message and that neighbour's own goroutine writes its own. The only concurrent second
+party the race detector ever found was a <b>test</b> polling live state from its own
+goroutine while a mover goroutine wrote it. <code>mu</code> was deleted, not narrowed —
+see <code>layout_holder.go</code>'s doc comment for the invariant that makes that safe.</p>
 
 <div class="plate">
-<svg viewBox="0 0 860 264" role="img" aria-label="Every production caller of the six LayoutHolder accessors runs on the owning node's own goroutine, so the only second party found by the race detector is a test's polling goroutine.">
+<svg viewBox="0 0 860 264" role="img" aria-label="Every production caller of the six LayoutHolder accessors runs on the owning node's own goroutine; the lock was deleted and the tests that polled live state were fixed to read only after a happens-before edge instead.">
   <text class="tl" x="0" y="14">EVERY PRODUCTION CALLER — all on the owning node's goroutine</text>
 
   <rect class="safe" x="0" y="28" width="420" height="128" rx="6"/>
   <text class="ts" x="12" y="48">requantizeLocalPolars   quantized_move.go:358</text>
   <text class="tf" x="12" y="62">“X requantizes its OWN holder … on its own goroutine”</text>
-  <text class="ts" x="12" y="82">neighborSetCRequantize  :246 :264</text>
-  <text class="ts" x="12" y="98">commitNodeMoveLocal     :382</text>
-  <text class="ts" x="12" y="114">armDragAnchor           node_mover.go:289</text>
+  <text class="ts" x="12" y="82">neighborSetCRequantize  :222 :246</text>
+  <text class="ts" x="12" y="98">commitNodeMoveLocal     node_mover.go:254</text>
+  <text class="ts" x="12" y="114">armDragAnchor           node_mover.go:285</text>
   <text class="tf" x="12" y="128">“Runs only on this node’s own goroutine”</text>
-  <text class="ts" x="12" y="148">LoadLocalPolars/SetPole loader.go:637,645 — load-time</text>
+  <text class="ts" x="12" y="148">LoadLocalPolars/SetPole loader.go — load-time, once</text>
 
-  <rect class="state" x="440" y="28" width="420" height="128" rx="6"/>
-  <text class="t"  x="452" y="50">THE ONLY SECOND PARTY IS A TEST</text>
-  <text class="ts" x="452" y="74">Delete the locking from all six accessors and run</text>
-  <text class="ts" x="452" y="90">the package under -race: RED, 5/5 runs.</text>
-  <text class="tf" x="452" y="112">SetLocalPolar (the node’s own mover goroutine)</text>
-  <text class="tf" x="452" y="126">races LocalPolarsSnapshot — called from</text>
-  <text class="tf" x="452" y="140">TestIndividualSnap_OnlyDraggedNodePersists’ own</text>
-  <text class="tf" x="452" y="152">polling goroutine, not from any production path.</text>
+  <rect class="safe" x="440" y="28" width="420" height="128" rx="6"/>
+  <text class="t"  x="452" y="50">THE TESTS WERE FIXED, NOT THE PRODUCTION MODEL</text>
+  <text class="ts" x="452" y="72">Nine tests polled a live LayoutHolder from their</text>
+  <text class="ts" x="452" y="86">own goroutine while a mover goroutine wrote it.</text>
+  <text class="tf" x="452" y="106">Fix: wait for a happens-before edge production</text>
+  <text class="tf" x="452" y="120">ALREADY emits — the “abc-drag” breadcrumb, or a</text>
+  <text class="tf" x="452" y="134">tapped moveMsgKindNeighborSetC send — then read</text>
+  <text class="tf" x="452" y="148">once. No new synchronization added to production.</text>
 
   <line x1="0" y1="182" x2="860" y2="182" stroke="var(--line)"/>
-  <text class="tw" x="0" y="202">SO THE QUESTION IS</text>
-  <text class="ts" x="150" y="202">is this lock load-bearing, or is it holding a test’s hand?</text>
-  <text class="tf" x="0" y="222">A red proof that only fires because a TEST reaches into live state is not evidence the production model needs a lock —</text>
-  <text class="tf" x="0" y="236">it is evidence the test observes state it does not own. Those want different fixes: keep the mutex, or give the test a safe read.</text>
-  <text class="tf" x="0" y="256">Decide which before touching it. Removing the lock without addressing the test turns a green suite red for the wrong reason.</text>
+  <text class="tk" x="0" y="202">go test -race -count=3 ./... — clean</text>
+  <text class="ts" x="320" y="202">the single-owner invariant is now the only thing preventing the race, and it holds.</text>
+  <text class="tf" x="0" y="222">Confirmed load-bearing: removing one test's wait (temporarily, to check) reproduced the exact race, 3/3 runs, before the wait was restored.</text>
+  <text class="tf" x="0" y="238">A lock with no genuine second party is not “cheap insurance” — it is dead weight a future reader has to re-derive the absence of a race around.</text>
 </svg>
 </div>
 <footer>
