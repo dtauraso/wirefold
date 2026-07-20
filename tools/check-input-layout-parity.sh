@@ -27,12 +27,26 @@ for f in "$GO_FILE" "$TS_FILE"; do
   fi
 done
 
-# Extract the value after the "INPUT_LAYOUT_FINGERPRINT:" marker comment (present in both
-# files). Take the first match only.
-fingerprint() { # file
+# Two values live in each file and BOTH are checked:
+#
+#   comment — the "INPUT_LAYOUT_FINGERPRINT:" marker line (human-readable)
+#   const   — the actual string constant the codec compiles against (the wire contract)
+#
+# Reading only the comment was the original bug: the comments could agree while the
+# CONSTANTS diverged, and the guard reported clean. A comment is not the contract.
+# Verified by injecting drift into each field independently — both now fail.
+fingerprint_comment() { # file
   grep -a 'INPUT_LAYOUT_FINGERPRINT:' "$1" \
     | head -n1 \
     | sed 's/.*INPUT_LAYOUT_FINGERPRINT: //'
+}
+
+# The const spans a line break in TS (`export const X =\n  "v18 …";`) and is single-line in
+# Go, so join lines before extracting the first quoted string after the identifier.
+fingerprint_const() { # file
+  tr '\n' ' ' < "$1" \
+    | sed -E 's/.*(INPUT_LAYOUT_FINGERPRINT|InputLayoutFingerprint)[[:space:]]*=[[:space:]]*"//; s/".*//' \
+    | head -n1
 }
 
 assert_nonempty() { # value label
@@ -42,11 +56,29 @@ assert_nonempty() { # value label
   fi
 }
 
-FP_GO=$(fingerprint "$GO_FILE")
-FP_TS=$(fingerprint "$TS_FILE")
+FP_GO=$(fingerprint_comment "$GO_FILE")
+FP_TS=$(fingerprint_comment "$TS_FILE")
+CONST_GO=$(fingerprint_const "$GO_FILE")
+CONST_TS=$(fingerprint_const "$TS_FILE")
 
-assert_nonempty "$FP_GO" "input_codec.go"
-assert_nonempty "$FP_TS" "input-layout.ts"
+assert_nonempty "$FP_GO" "input_codec.go comment"
+assert_nonempty "$FP_TS" "input-layout.ts comment"
+assert_nonempty "$CONST_GO" "input_codec.go const"
+assert_nonempty "$CONST_TS" "input-layout.ts const"
+
+# A file whose comment contradicts its own const is already broken, regardless of whether
+# the two files happen to agree — catch it before the cross-file compare.
+for pair in "input_codec.go|$FP_GO|$CONST_GO" "input-layout.ts|$FP_TS|$CONST_TS"; do
+  IFS='|' read -r label c k <<< "$pair"
+  if [[ "$c" != "$k" ]]; then
+    echo "check-input-layout-parity: $label — marker COMMENT and CONST disagree"
+    echo "    comment: $c"
+    echo "    const:   $k"
+    echo ""
+    echo "The const is the wire contract; bump the comment to match it."
+    exit 1
+  fi
+done
 
 if [[ "$FP_GO" != "$FP_TS" ]]; then
   echo "check-input-layout-parity: Go and TS input-record fingerprints DIVERGE"

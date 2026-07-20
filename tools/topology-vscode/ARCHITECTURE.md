@@ -34,6 +34,15 @@ content buffer and nothing else; TS → Go is framed binary records
 (addressed `edit` ops, or the bare `save` command) — see CLAUDE.md
 for the full bridge-surface model, not duplicated here.
 
+**Do not restate the kind list here.** The authority is
+`INPUT_LAYOUT_FINGERPRINT` — one string encoding every kind byte, update kind,
+attr, and overlay flag, defined in `nodes/Wiring/input_codec.go` and mirrored in
+`src/schema/input-layout.ts`. `tools/check-input-layout-parity.sh` compares the
+two, so drift fails a check instead of silently outliving a doc paragraph. Read the fingerprint to learn the
+current surface; prose copied into this file cannot fail and so cannot be
+trusted. (Removed kind bytes are preserved as GAPS in `input_codec.go` and never
+renumbered.)
+
 ## Extension side — what lives where
 
 | File | Owns |
