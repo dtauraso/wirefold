@@ -176,17 +176,15 @@
           <rect class="d-group" x="0" y="22" width="270" height="216" rx="6"/>
           <rect class="d-box-flow" x="18" y="42" width="234" height="34" rx="4"/>
           <text class="d-t" x="30" y="63">nodeMover.run</text>
-          <text class="d-ts" x="196" y="63">inbox</text>
+          <text class="d-ts" x="176" y="63">extIn + neighborIn</text>
           <rect class="d-box-flow" x="18" y="88" width="234" height="34" rx="4"/>
-          <text class="d-t" x="30" y="109">outbox.run</text>
-          <text class="d-ts" x="176" y="109">sender</text>
-          <rect class="d-box-flow" x="18" y="134" width="234" height="34" rx="4"/>
-          <text class="d-t" x="30" y="155">node kind loop</text>
-          <text class="d-ts" x="186" y="155">fires</text>
-          <rect class="d-box-flow" x="18" y="176" width="234" height="30" rx="4"/>
-          <text class="d-t" x="30" y="195">DriveHeld</text>
-          <text class="d-ts" x="120" y="195">one per driven output</text>
-          <text class="d-ts" x="18" y="224">writes only its own position</text>
+          <text class="d-t" x="30" y="109">node kind loop</text>
+          <text class="d-ts" x="186" y="109">fires</text>
+          <rect class="d-box-flow" x="18" y="134" width="234" height="30" rx="4"/>
+          <text class="d-t" x="30" y="153">DriveHeld</text>
+          <text class="d-ts" x="120" y="153">one per driven output</text>
+          <text class="d-ts" x="18" y="176">writes only its own position</text>
+          <text class="d-ts" x="18" y="202">no dedicated sender goroutine — retry lives in nodeMover.run</text>
 
           <text class="d-tl" x="300" y="12">PER EDGE  × 10</text>
           <rect class="d-group" x="300" y="22" width="250" height="216" rx="6"/>
@@ -216,7 +214,7 @@
           <path class="d-arrow" d="M426 272 L430 280 L434 272"/>
 
           <rect class="d-box" x="150" y="282" width="560" height="62" rx="5"/>
-          <text class="d-t" x="176" y="308">≈ 45 long-lived goroutines</text>
+          <text class="d-t" x="176" y="308">≈ 36 long-lived goroutines</text>
           <text class="d-ts" x="176" y="328">for a 9-node / 10-edge graph — all running continuously, all session</text>
 
           <text class="d-tl" x="150" y="376">SCALING</text>
@@ -285,22 +283,17 @@
           <text class="d-ts" x="548" y="110">goroutines via snap atomic.Pointer</text>
 
           <!-- ── 2 queues ── -->
-          <text class="d-tl" x="0" y="176">2 · QUEUES — outbox.mu + cond; PacedWire.mu deleted, now ownership</text>
+          <text class="d-tl" x="0" y="176">2 · QUEUES — outbox.mu + cond deleted, now per-direction channels; PacedWire.mu deleted, now ownership</text>
           <rect class="d-group" x="0" y="186" width="860" height="140" rx="6"/>
 
           <rect class="d-box-flow" x="18" y="204" width="150" height="28" rx="4"/>
-          <text class="d-ts" x="30" y="223">X.handle()</text>
-          <line class="d-arrow-sig" x1="170" y1="218" x2="222" y2="218"/>
-          <path class="d-arrow-sig" d="M214 214 L224 218 L214 222"/>
-          <text class="d-ts" x="172" y="211">enqueue</text>
-          <rect class="d-box-sig" x="226" y="204" width="140" height="28" rx="4"/>
-          <text class="d-ts" x="238" y="223">X's outbox queue</text>
-          <line class="d-arrow-sig" x1="368" y1="218" x2="420" y2="218"/>
+          <text class="d-ts" x="30" y="223">X.sendMove()</text>
+          <line class="d-arrow-sig" x1="170" y1="218" x2="420" y2="218"/>
           <path class="d-arrow-sig" d="M412 214 L422 218 L412 222"/>
-          <text class="d-ts" x="372" y="211">sender</text>
+          <text class="d-ts" x="200" y="211">non-blocking send</text>
           <rect class="d-box-flow" x="424" y="204" width="150" height="28" rx="4"/>
-          <text class="d-ts" x="436" y="223">M.inbox</text>
-          <text class="d-ts" x="590" y="223">handler never blocks → no deadlock</text>
+          <text class="d-ts" x="436" y="223">M.neighborIn[X]</text>
+          <text class="d-ts" x="590" y="223">full chan → X.pending, retried next cycle — no lock</text>
 
           <rect class="d-box-flow" x="18" y="256" width="150" height="28" rx="4"/>
           <text class="d-ts" x="30" y="275">source: Out.PlaceDrivenAt</text>
@@ -398,8 +391,8 @@
           </tr>
           <tr>
             <td>outbox.mu</td>
-            <td>handler enqueues; dedicated sender delivers</td>
-            <td><span class="verdict v-ok">confirmed</span></td>
+            <td>was: handler enqueues; dedicated sender delivers</td>
+            <td><span class="verdict v-gone">deleted</span></td>
           </tr>
           <tr>
             <td>PacedWire.mu</td>
@@ -453,7 +446,7 @@
   <div class="layout">
     <div>
       <div class="plate">
-        <svg viewBox="0 0 860 470" role="img" aria-label="What happens when a node is dragged: the gesture goroutine routes a message to the dragged node, which commits its own position and fans neighbour messages through its outbox.">
+        <svg viewBox="0 0 860 470" role="img" aria-label="What happens when a node is dragged: the gesture goroutine routes a message to the dragged node, which commits its own position and fans neighbour messages directly onto each neighbour's own dedicated channel, retrying on its own pending queue if a channel is full.">
           <text class="d-tl" x="0" y="12">GESTURE GOROUTINE</text>
           <line class="d-arrow" x1="80" y1="26" x2="80" y2="440" stroke-dasharray="2 4"/>
           <text class="d-tl" x="300" y="12">NODE X — OWN GOROUTINE</text>
@@ -481,7 +474,7 @@
           <text class="d-ts" x="312" y="247">requantizeLocalPolars</text>
 
           <rect class="d-box" x="300" y="286" width="160" height="30" rx="4"/>
-          <text class="d-ts" x="312" y="305">X’s own outbox</text>
+          <text class="d-ts" x="312" y="305">X's own sendMove</text>
           <line class="d-arrow" x1="380" y1="258" x2="380" y2="284"/>
           <path class="d-arrow" d="M376 278 L380 286 L384 278"/>
 
@@ -501,8 +494,10 @@
       </div>
       <div class="note">
         <b>9,345 of 9,600</b> — neighbour messages that were being silently dropped under load,
-        before this fan was routed through the outbox. The drop path was the common case, not
-        the exception. It is now zero.
+        under an earlier direct-to-inbox lossy sender. That was fixed first by routing the fan
+        through a shared outbox drained by a dedicated sender goroutine, and later by today's
+        per-direction channels with sender-side retain-and-retry — no queue, no lock, no
+        dedicated sender. The drop is still zero.
       </div>
     </div>
     <aside class="rail">

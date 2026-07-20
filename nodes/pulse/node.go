@@ -82,8 +82,7 @@ func (g *Node) Update(ctx context.Context) {
 
 	// DRIVE goroutine: continuously pulse the current held value to Out. g.Clock is
 	// the ORIGIN clock; DriveHeld Copies it independently at its own goroutine's start
-	// (docs/planning/visual-editor/per-goroutine-clock.md) — never hand a copy to a
-	// second goroutine.
+	// — never hand a copy to a second goroutine.
 	driveOutput(ctx, g.Out, &held, g.Clock, g.Out1SpeedCh)
 
 	// Optional SECOND drive goroutine for Out2.
@@ -112,7 +111,7 @@ func (g *Node) Update(ctx context.Context) {
 
 	// Copy taken ONCE at this goroutine's start (Update IS the goroutine); each
 	// DRIVE goroutine above takes its own copy independently inside
-	// gatecommon.DriveHeld (docs/planning/visual-editor/per-goroutine-clock.md).
+	// gatecommon.DriveHeld.
 	clk := g.Clock.Copy()
 
 	// Paced mode: do activities, sleep one human clock cycle, repeat.

@@ -14,8 +14,7 @@ import (
 // is cancelled, matching the production per-cycle drive path a wire's own
 // goroutine (edgeMover.run) would otherwise supply. Needed for every wire here
 // (both inputs and ToPassed): this bare-wire unit test has no edgeMover of its
-// own. clk is this goroutine's OWN clock copy (docs/planning/visual-editor/
-// per-goroutine-clock.md); callers must not share it with another goroutine.
+// own. clk is this goroutine's OWN clock copy; callers must not share it with another goroutine.
 func stepWire(ctx context.Context, pw *Wiring.PacedWire, clk Wiring.Clock) {
 	go func() {
 		for {

@@ -461,7 +461,7 @@ func TestRootMoveContinuousPositionLocalPolarRequantize(t *testing.T) {
 	// Both ends updated: dst also carries a fresh local polar back to src. src's
 	// moveMsgKindNeighborSetC to dst is delivered and processed on dst's OWN
 	// nodeMover goroutine, which drains its inbox non-blockingly and paces on its own
-	// clock cycle (docs/planning/visual-editor/outbox-two-channels.md) rather than
+	// clock cycle rather than
 	// waking instantly on receive — poll briefly rather than assuming it has already
 	// landed by the time src's center finished converging above.
 	lhDst, ok := md.layoutHolders["dst"]

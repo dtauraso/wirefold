@@ -1,6 +1,6 @@
-// paced_wire_rebase_tolerance_test.go — docs/planning/visual-editor/
-// wire-owns-itself.md settled the two-copy skew question this file used to
-// document: before the restructure, a bead's placementTick was stamped by the
+// paced_wire_rebase_tolerance_test.go — the wire-owns-itself restructure settled
+// the two-copy skew question this file used to document: before the restructure,
+// a bead's placementTick was stamped by the
 // SOURCE goroutine's own clock copy while ReviseInFlightGeometry read nowTick
 // from the EDGE MOVER's own (different) clock copy, so the two subtracted
 // readings could disagree by about one speed-change's worth of skew. After the

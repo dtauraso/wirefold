@@ -1,5 +1,4 @@
-// outbox_mutual_adjacency_test.go — CHECKS BY CODE the claims
-// docs/planning/visual-editor/outbox-two-channels.md makes about the two-channels,
+// outbox_mutual_adjacency_test.go — CHECKS BY CODE the two-channels,
 // no-inbox(-shared-queue), no-blocking mover restructure:
 //
 //  1. The restructure is load-bearing against the cascade deadlock described in the
@@ -327,8 +326,7 @@ func TestOutboxFIFOPerTargetOrderNoDrop(t *testing.T) {
 // TestNodeMoverGoroutineCountDropsByTwo asserts (rather than assumes) that starting the
 // movers for the writeTree fixture (2 nodes, 1 edge) spawns exactly 3 goroutines — one
 // per mover, no dedicated sender goroutine and no ctx-cancel watcher goroutine alongside
-// each node mover (the two goroutines per node mover docs/planning/visual-editor/
-// outbox-two-channels.md says must go away).
+// each node mover (the two goroutines per node mover the restructure removed).
 func TestNodeMoverGoroutineCountDropsByTwo(t *testing.T) {
 	root := writeTree(t)
 	md := loadTreeMD(t, root)

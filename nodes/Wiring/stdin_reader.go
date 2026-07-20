@@ -323,8 +323,7 @@ func applyUpdate(msg stdinMsg, md *MoveDispatch, tr *T.Trace, speedSinks []chan 
 		switch msg.Attr {
 		case "speed":
 			// The playback multiplier (0/1/2 from the slider). SetSpeed left the Clock
-			// INTERFACE in the per-goroutine-clock demolition (docs/planning/visual-
-			// editor/per-goroutine-clock.md item 4): nothing outside a goroutine's own
+			// INTERFACE in the per-goroutine-clock demolition (item 4): nothing outside a goroutine's own
 			// copy may mutate it anymore, since a copy is owned by exactly one goroutine.
 			// Delivery (per-goroutine-clock.md "Delivery"): broadcast the new speed to
 			// EVERY clock-owning goroutine's own channel (collected once, at load,

@@ -640,7 +640,7 @@ func (g *gestureState) reset(vp *viewpoint) {
 //
 // This sends directly into the targets' dedicated extIn channels, bypassing the
 // enqueueFor/pending-retry split every mover's OWN handler goroutine must use for its
-// sends (docs/planning/visual-editor/outbox-two-channels.md). That split exists to
+// sends. That split exists to
 // prevent two mutually-adjacent MOVER goroutines from deadlocking each other — both
 // mid-handle, each blocked sending into the other's full channel, while neither is
 // draining its own (draining only resumes after handle returns). applyRingAnchor runs on
