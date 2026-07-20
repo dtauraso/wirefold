@@ -88,6 +88,13 @@
   .verdict b { font-family:var(--mono); font-size:11.5px; }
   code { font-family:var(--mono); font-size:.92em; }
   footer { margin-top:46px; padding-top:16px; border-top:1px solid var(--line); color:var(--faint); font-size:12px; }
+
+  .tabs { display:flex; gap:6px; margin:20px 0 28px; border-bottom:1px solid var(--line); }
+  .tab-btn { font-family:var(--mono); font-size:12.5px; font-weight:600; color:var(--muted); background:none; border:none; border-bottom:2px solid transparent; padding:9px 4px 10px; margin-bottom:-1px; cursor:pointer; }
+  .tab-btn.active { color:var(--ink); border-bottom-color:var(--hazard); }
+  .tab-btn:hover { color:var(--ink); }
+  .panel { display:none; }
+  .panel.active { display:block; }
 </style>
 </head>
 <body>
@@ -95,14 +102,25 @@
 <header>
   <div class="head-inner">
     <p class="eyebrow">wirefold · concurrency</p>
-    <h1>debouncedPersister.mu — the last one</h1>
-    <p class="sub">Five instances, one mutex each, at <code>scene_persist.go:64</code>. Every
-    other lock in this repo has been deleted or settled. This one survived the file split
-    because what it guards is <b>in memory</b>, not on disk — splitting files cannot reach it.</p>
+    <h1>the two unsettled locks</h1>
+    <p class="sub">Most locks in this repo have been deleted — <code>sceneFileMu</code> and
+    <code>entityFileMu</code> are both gone — or settled with a red-proof test
+    (<code>Trace.mu</code>).
+    Two remain unsettled: <code>debouncedPersister.mu</code> (<code>scene_persist.go:63</code>,
+    five instances) and <code>LayoutHolder.mu</code> (<code>layout_holder.go:118</code>, one
+    instance per node). Both survived the file split because what they guard is
+    <b>in memory</b>, not on disk — splitting files cannot reach either.</p>
   </div>
 </header>
 
 <div class="wrap">
+
+<div class="tabs" role="tablist">
+  <button class="tab-btn active" data-tab="persister" role="tab" aria-selected="true">debouncedPersister.mu</button>
+  <button class="tab-btn" data-tab="layoutholder" role="tab" aria-selected="false">LayoutHolder.mu</button>
+</div>
+
+<div class="panel active" id="panel-persister" role="tabpanel">
 
 <div class="legend">
   <span><i class="sw g"></i>goroutine</span>
@@ -123,7 +141,7 @@ holds it across a write to disk.</p>
 
   <rect class="state" x="0" y="28" width="400" height="164" rx="8"/>
   <text class="t"  x="14" y="50">debouncedPersister[T]</text>
-  <text class="tf" x="14" y="65">nodes/Wiring/scene_persist.go:64</text>
+  <text class="tf" x="14" y="65">nodes/Wiring/scene_persist.go:63</text>
 
   <rect class="box" x="14" y="78" width="372" height="24" rx="4"/>
   <text class="tw" x="26" y="95">mu sync.Mutex</text>
@@ -147,7 +165,7 @@ holds it across a write to disk.</p>
 
   <rect class="gor" x="440" y="68" width="420" height="34" rx="5"/>
   <text class="ts" x="452" y="83">take() (T, bool)</text>
-  <text class="tf" x="452" y="96">:90 — read pending, ZERO it, clear has</text>
+  <text class="tf" x="452" y="96">:91 — read pending, ZERO it, clear has</text>
 
   <rect class="gor" x="440" y="108" width="420" height="34" rx="5"/>
   <text class="ts" x="452" y="123">stop()</text>
@@ -155,7 +173,7 @@ holds it across a write to disk.</p>
 
   <rect class="gor" x="440" y="148" width="420" height="34" rx="5"/>
   <text class="ts" x="452" y="163">recordWrite()</text>
-  <text class="tf" x="452" y="176">:117 — writes++</text>
+  <text class="tf" x="452" y="176">:114 — writes++</text>
 
   <line x1="0" y1="212" x2="860" y2="212" stroke="var(--line)"/>
   <text class="tk" x="0" y="232">NO I/O UNDER THE LOCK</text>
@@ -255,10 +273,10 @@ this two-party rather than one-owner.</p>
 
   <rect class="gor" x="0" y="30" width="250" height="90" rx="6"/>
   <text class="ts" x="12" y="49">node's own mover goroutine</text>
-  <text class="tf" x="12" y="64">quantOffset · anchor</text>
-  <text class="ts" x="12" y="84">gesture / camera path</text>
-  <text class="tf" x="12" y="99">viewpoint · sphere</text>
-  <text class="ts" x="12" y="114">stdin reader — overlays, save</text>
+  <text class="tf" x="12" y="64">quantOffset (via commitNodeMoveLocal)</text>
+  <text class="ts" x="12" y="84">stdin-reader / gesture goroutine</text>
+  <text class="tf" x="12" y="99">anchor · viewpoint</text>
+  <text class="ts" x="12" y="114">same goroutine — overlays, save</text>
 
   <path class="arr" d="M250,72 L370,110" marker-end="url(#ah4)"/>
   <text class="tw" x="264" y="86">arm()</text>
@@ -338,8 +356,8 @@ would write into the very map <code>flush</code> is iterating.</p>
   <text class="tf" x="620" y="180">Any replacement must preserve that</text>
   <text class="tf" x="620" y="194">handoff, not just the mutual exclusion.</text>
   <text class="tf" x="620" y="218">Affected: the map-valued persisters</text>
-  <text class="tf" x="620" y="232">(anchor, node-pos). The scalar ones</text>
-  <text class="tf" x="620" y="246">do not care.</text>
+  <text class="tf" x="620" y="232">(anchor, quantOffset). The scalar/</text>
+  <text class="tf" x="620" y="246">pointer ones do not care.</text>
   <text class="tw" x="620" y="266">This is the trap in this lock.</text>
 </svg>
 </div>
@@ -414,28 +432,151 @@ that already exists.</p>
 </div>
 
 <!-- ══ 7 · WHAT WOULD PROVE IT ══ -->
-<h2>7 · no red proof exists</h2>
+<h2>7 · measured: deleting mu is red, not clean</h2>
+<p class="cap">Unlike <code>sceneFileMu</code>, this one was actually tried. Removing the
+locking from <code>arm</code>/<code>take</code>/<code>stop</code>/<code>recordWrite</code>
+and re-running the package tests under <code>-race</code> produces a genuine data race —
+not a hypothetical one.</p>
 
 <div class="plate">
-<svg viewBox="0 0 860 170" role="img" aria-label="No test fails if this mutex is deleted, so nothing currently demonstrates it is load-bearing.">
+<svg viewBox="0 0 860 170" role="img" aria-label="Deleting the locking from arm, take, stop and recordWrite and running the package tests under -race produces a real data race between quantOffsetPersister.schedule and quantOffsetPersister.flush.">
   <rect class="state" x="0" y="24" width="420" height="96" rx="6"/>
-  <text class="t"  x="12" y="46">TODAY</text>
-  <text class="ts" x="12" y="68">Delete mu and every test still passes.</text>
-  <text class="tf" x="12" y="88">Nothing demonstrates it is load-bearing.</text>
-  <text class="tf" x="12" y="104">Same state sceneFileMu was in — and that</text>
-  <text class="tf" x="12" y="116">one turned out to be removable.</text>
+  <text class="t"  x="12" y="46">MEASURED</text>
+  <text class="ts" x="12" y="68">go test ./nodes/Wiring/... -race after deleting</text>
+  <text class="ts" x="12" y="82">the locking: TestDragPositionRoundTripsExactly</text>
+  <text class="tf" x="12" y="100">goes RED — a real WARNING: DATA RACE between</text>
+  <text class="tf" x="12" y="112">quantOffsetPersister.schedule (nodeMover's own</text>
+  <text class="tf" x="12" y="124">goroutine) and .flush (the AfterFunc goroutine).</text>
 
   <rect class="safe" x="440" y="24" width="420" height="96" rx="6"/>
-  <text class="t"  x="452" y="46">WHAT WOULD PROVE IT</text>
-  <text class="ts" x="452" y="68">Hammer arm() from one goroutine while</text>
-  <text class="ts" x="452" y="84">a timer fires flush() repeatedly, under -race.</text>
-  <text class="tf" x="452" y="104">For the MAP persisters, assert the flushed</text>
-  <text class="tf" x="452" y="116">map is not mutated mid-write.</text>
+  <text class="t"  x="452" y="46">WHY THIS ONE IS DIFFERENT FROM sceneFileMu</text>
+  <text class="ts" x="452" y="68">sceneFileMu's removal was provably clean because</text>
+  <text class="ts" x="452" y="82">the file split removed the second writer entirely.</text>
+  <text class="tf" x="452" y="100">Here the second party (the timer goroutine) still</text>
+  <text class="tf" x="452" y="112">exists, and an existing test already exercises the</text>
+  <text class="tf" x="452" y="124">exact schedule-vs-flush race this lock prevents.</text>
 
   <line x1="0" y1="140" x2="860" y2="140" stroke="var(--line)"/>
-  <text class="tw" x="0" y="160">DO THIS FIRST</text>
-  <text class="ts" x="106" y="160">write the failing test before removing anything — otherwise you cannot tell removal from breakage.</text>
+  <text class="tw" x="0" y="160">SO THIS ONE IS LOAD-BEARING</text>
+  <text class="ts" x="230" y="160">a red proof already exists for the map persisters; it just was not run until this audit.</text>
 </svg>
+</div>
+
+</div>
+
+<div class="panel" id="panel-layoutholder" role="tabpanel">
+
+<!-- ══ L1 · THE STATE ══ -->
+<h2>1 · what it guards — two fields, six methods</h2>
+<p class="cap">One <code>LayoutHolder</code> is embedded in EVERY node kind's struct — one
+instance per node, not a package-wide singleton. Every accessor takes <code>mu</code>;
+none holds it across anything but a slice/field read or write.</p>
+
+<div class="plate">
+<svg viewBox="0 0 860 268" role="img" aria-label="LayoutHolder holds localPolars and pole under one mutex, with six short accessor methods that each lock and unlock it.">
+  <text class="tl" x="0" y="14">THE STRUCT</text>
+  <text class="tl" x="440" y="14">EVERY METHOD THAT TAKES mu</text>
+
+  <rect class="state" x="0" y="28" width="400" height="150" rx="8"/>
+  <text class="t"  x="14" y="50">LayoutHolder</text>
+  <text class="tf" x="14" y="65">nodes/Wiring/layout_holder.go:117</text>
+
+  <rect class="box" x="14" y="78" width="372" height="24" rx="4"/>
+  <text class="tw" x="26" y="95">mu sync.Mutex</text>
+
+  <rect class="box" x="14" y="108" width="372" height="26" rx="4"/>
+  <text class="ts" x="26" y="125">localPolars []LocalPolar</text>
+  <text class="tf" x="230" y="125">one entry per neighbor</text>
+
+  <rect class="box" x="14" y="140" width="372" height="26" rx="4"/>
+  <text class="ts" x="26" y="157">pole dir</text>
+  <text class="tf" x="90" y="157">measurement pole entries were quantized about</text>
+
+  <rect class="gor" x="440" y="28" width="420" height="24" rx="5"/>
+  <text class="ts" x="452" y="44">localPolarSteps(to) :141</text>
+
+  <rect class="gor" x="440" y="56" width="420" height="24" rx="5"/>
+  <text class="ts" x="452" y="72">LoadLocalPolars(lps) :156 — load-time, once</text>
+
+  <rect class="gor" x="440" y="84" width="420" height="24" rx="5"/>
+  <text class="ts" x="452" y="100">SetLocalPolar(to, ...) :165 — the drag writer</text>
+
+  <rect class="gor" x="440" y="112" width="420" height="24" rx="5"/>
+  <text class="ts" x="452" y="128">LocalPolarsSnapshot() :187 — defensive copy out</text>
+
+  <rect class="gor" x="440" y="140" width="420" height="24" rx="5"/>
+  <text class="ts" x="452" y="156">Pole() :197 / SetPole(p) :206</text>
+
+  <line x1="0" y1="196" x2="860" y2="196" stroke="var(--line)"/>
+  <text class="tk" x="0" y="216">ONE PER NODE, NOT SHARED</text>
+  <text class="ts" x="230" y="216">every node kind embeds its own LayoutHolder — contention would be within one node's holder, never across two.</text>
+  <text class="tf" x="0" y="234">Unlike the five persisters (one purpose each), every node in the graph gets one of these — dozens of instances, not five.</text>
+  <text class="tf" x="0" y="250">recordWrite/writes has no equivalent here — there is no debounce, no timer, no disk write in this file at all.</text>
+</svg>
+</div>
+
+<!-- ══ L2 · WHY IT'S DIFFERENT FROM THE PERSISTER ══ -->
+<h2>2 · why this lock's own comment says it is uncontended</h2>
+<p class="cap">This is not a debounce-vs-timer race. The code comment argues the ONE
+cross-goroutine access pattern that would matter — node X reaching directly into
+neighbor M's holder — never happens: X only ever sends M a message; M's own goroutine
+is the one that calls <code>SetLocalPolar</code> on itself.</p>
+
+<div class="plate">
+<svg viewBox="0 0 860 210" role="img" aria-label="Node X never writes directly into neighbor M's LayoutHolder; it sends M a message and M's own goroutine writes its own holder, so mu guards only within one node, not across two.">
+  <defs><marker id="ah5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#3B7350"/></marker></defs>
+  <text class="tl" x="0" y="14">THE REFUTED CLAIM (comment says: false, checked 3x)</text>
+  <rect class="state" x="0" y="24" width="420" height="60" rx="6"/>
+  <text class="ts" x="12" y="46">X's goroutine calls M.SetLocalPolar directly</text>
+  <text class="tf" x="12" y="64">while M's own goroutine also mutates M's holder</text>
+
+  <text class="tl" x="440" y="14">WHAT THE CODE ACTUALLY DOES</text>
+  <rect class="safe" x="440" y="24" width="420" height="60" rx="6"/>
+  <text class="ts" x="452" y="46">X sends moveMsgKindNeighborSetC to M's channel</text>
+  <text class="tf" x="452" y="64">M's OWN goroutine drains it, calls SetLocalPolar on itself</text>
+
+  <path class="arrk" d="M650,88 L650,110" marker-end="url(#ah5)"/>
+  <rect class="box" x="0" y="110" width="860" height="46" rx="6"/>
+  <text class="t" x="12" y="132">RESULT: every LayoutHolder is written/read only by its OWNING node's single goroutine</text>
+  <text class="tf" x="12" y="148">(channel-serialized, one message at a time) — the SAME pattern nodeMover.quantOffset already relies on.</text>
+
+  <line x1="0" y1="172" x2="860" y2="172" stroke="var(--line)"/>
+  <text class="tw" x="0" y="192">SO THE MODEL CLAIMS: mu GUARDS NOTHING TODAY</text>
+  <text class="ts" x="330" y="192">kept as insurance against a FUTURE direct md.layoutHolders[m] call, not a present race.</text>
+</svg>
+</div>
+
+<!-- ══ L3 · MEASURED ══ -->
+<h2>3 · measured: a race exists, but not the one the comment tested for</h2>
+<p class="cap">The comment's own claim is narrower than the one this audit tested: it says a
+prior test could not make node-X-writes-node-M contention go red (10/10 clean). Deleting
+the locking from all six accessors and running the FULL package suite under
+<code>-race</code> (5/5 runs) finds a DIFFERENT race the comment does not mention.</p>
+
+<div class="plate">
+<svg viewBox="0 0 860 190" role="img" aria-label="Deleting the locking from all six LayoutHolder accessors and running the full package test suite under -race produces a real data race between SetLocalPolar on the node's own mover goroutine and a test's own LocalPolarsSnapshot polling loop.">
+  <rect class="state" x="0" y="24" width="420" height="110" rx="6"/>
+  <text class="t"  x="12" y="46">MEASURED</text>
+  <text class="ts" x="12" y="68">go test ./nodes/Wiring/... -race after deleting</text>
+  <text class="ts" x="12" y="82">the locking: TestIndividualSnap_OnlyDraggedNodePersists</text>
+  <text class="tf" x="12" y="100">goes RED (5/5 runs) — SetLocalPolar (the node's</text>
+  <text class="tf" x="12" y="112">own mover goroutine) races LocalPolarsSnapshot,</text>
+  <text class="tf" x="12" y="124">called by the TEST's own polling goroutine.</text>
+
+  <rect class="safe" x="440" y="24" width="420" height="110" rx="6"/>
+  <text class="t"  x="452" y="46">NOT THE SAME CLAIM AS THE COMMENT</text>
+  <text class="ts" x="452" y="68">The comment's own X-writes-M scenario may still</text>
+  <text class="ts" x="452" y="82">be genuinely absent from production code paths.</text>
+  <text class="tf" x="452" y="100">But "mu guards nothing today" overstates it: a</text>
+  <text class="tf" x="452" y="112">TEST goroutine reaching into a live node's holder</text>
+  <text class="tf" x="452" y="124">while its mover goroutine writes IS a real race.</text>
+
+  <line x1="0" y1="150" x2="860" y2="150" stroke="var(--line)"/>
+  <text class="tw" x="0" y="170">SAME UNSETTLED SHAPE AS debouncedPersister.mu</text>
+  <text class="ts" x="330" y="170">a red proof exists here too; the in-code comment just never ran this exact test.</text>
+</svg>
+</div>
+
 </div>
 
 <footer>
@@ -447,5 +588,21 @@ that already exists.</p>
 </footer>
 
 </div>
+
+<script>
+  document.querySelectorAll('.tab-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var target = btn.getAttribute('data-tab');
+      document.querySelectorAll('.tab-btn').forEach(function (b) {
+        var active = b === btn;
+        b.classList.toggle('active', active);
+        b.setAttribute('aria-selected', String(active));
+      });
+      document.querySelectorAll('.panel').forEach(function (p) {
+        p.classList.toggle('active', p.id === 'panel-' + target);
+      });
+    });
+  });
+</script>
 </body>
 </html>
