@@ -44,9 +44,30 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 	}
 	snapState := B.NewSnapshotState(snapOut)
 	// Coalesce the high-volume KindPosition stream to at most one emit per tick (clock.go: "the
-	// tick IS the animation clock", not per-bead-event). clk already exists here (runTopology's
-	// parameter), so wire it in directly rather than reordering construction.
-	snapState.SetTickSource(clk.Tick)
+	// tick IS the animation clock", not per-bead-event).
+	//
+	// DELIBERATE per-goroutine-clock.md item 6 decision (was previously an accidental default:
+	// `clk.Tick` read the ORIGIN clock directly, which nothing ever applies speed changes to
+	// post-demolition, so this cadence was silently pinned to speed 1 forever regardless of the
+	// slider). snapshot.go's own doc comment already claims "the tick IS the animation clock" —
+	// the SAME scaled, speed-aware notion of tick used everywhere else in the network (paced
+	// wires, node windows). A frozen stand-in silently redefines "tick" here to mean literal wall
+	// tick, contradicting that claim, so this is a correctness/consistency fix, not a cosmetic
+	// one (this file's justification is comprehension, never performance).
+	//
+	// The Trace DRAIN goroutine (Trace/drain.go) is the sole caller of snapState.Update, hence
+	// the sole caller of the tickSource func below, hence a legitimate SINGLE owner for its own
+	// clock copy plus its own speed channel — exactly the shape every other clock-holder in the
+	// network uses (per-goroutine-clock.md), not a second shared object. snapClk is Copy()'d ONCE
+	// here (never handed to a second goroutine) and snapSpeedCh is appended to speedSinks below
+	// so stdin_reader's speed broadcast reaches it exactly like every node/edge goroutine's own
+	// channel.
+	snapClk := clk.Copy()
+	snapSpeedCh := make(chan float64, 1)
+	snapState.SetTickSource(func() int64 {
+		W.ApplySpeedNonBlocking(snapClk, snapSpeedCh)
+		return snapClk.Tick()
+	})
 	// sink=nil: the JSON-trace-on-stdout emitter is REMOVED. Trace still assigns Step, buffers
 	// events (WriteJSONL -trace file), and drives snapState.Update (the onEvent hook) which packs
 	// the binary content buffer's EVENT block. The .probe log is now the ext-host DECODE of that
@@ -74,6 +95,9 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 		fmt.Fprintf(os.Stderr, "load topology: %v\n", err)
 		os.Exit(1)
 	}
+	// Register the snapshot tick source's own speed channel alongside every other
+	// clock-holder's, so a speed change reaches it too (see the SetTickSource comment above).
+	speedSinks = append(speedSinks, snapSpeedCh)
 	// One example startup breadcrumb — proves the debug channel end-to-end and is genuinely
 	// useful (which topology loaded, how many nodes). Sparse: once per run.
 	tr.Breadcrumb("topology-loaded", topologyPath, "", fmt.Sprintf("nodes=%d", len(nodes)))
