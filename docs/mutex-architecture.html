@@ -1,0 +1,434 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>wirefold — mutex architecture</title>
+<style>
+  :root {
+    --ground:#F2F4F7; --surface:#FFFFFF; --plate:#FAFBFC;
+    --ink:#131A24; --muted:#5B6779; --faint:#8894A6;
+    --line:#D3D9E2; --line-strong:#B7C0CD;
+    --signal:#C06A12; --flow:#2E7D9A; --hazard:#A8443C; --ok:#3B7350;
+    --signal-wash:#F6ECDF; --flow-wash:#E4EFF3; --hazard-wash:#F6E6E4; --ok-wash:#E4EFE8;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground:#0D1219; --surface:#141C26; --plate:#111925;
+      --ink:#E4E9F0; --muted:#94A1B2; --faint:#6C7A8B;
+      --line:#26313F; --line-strong:#3A4859;
+      --signal:#E8A147; --flow:#57AECB; --hazard:#D2685E; --ok:#6FA783;
+      --signal-wash:#241B10; --flow-wash:#0F2029; --hazard-wash:#251413; --ok-wash:#12241A;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:#0D1219; --surface:#141C26; --plate:#111925;
+    --ink:#E4E9F0; --muted:#94A1B2; --faint:#6C7A8B;
+    --line:#26313F; --line-strong:#3A4859;
+    --signal:#E8A147; --flow:#57AECB; --hazard:#D2685E; --ok:#6FA783;
+    --signal-wash:#241B10; --flow-wash:#0F2029; --hazard-wash:#251413; --ok-wash:#12241A;
+  }
+  :root[data-theme="light"] {
+    --ground:#F2F4F7; --surface:#FFFFFF; --plate:#FAFBFC;
+    --ink:#131A24; --muted:#5B6779; --faint:#8894A6;
+    --line:#D3D9E2; --line-strong:#B7C0CD;
+    --signal:#C06A12; --flow:#2E7D9A; --hazard:#A8443C; --ok:#3B7350;
+    --signal-wash:#F6ECDF; --flow-wash:#E4EFF3; --hazard-wash:#F6E6E4; --ok-wash:#E4EFE8;
+  }
+
+  * { box-sizing:border-box; }
+  body {
+    margin:0; background:var(--ground); color:var(--ink);
+    font-family:var(--sans); line-height:1.55;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap { max-width:1180px; margin:0 auto; padding:0 24px 80px; }
+
+  header { border-bottom:1px solid var(--line); background:var(--surface); }
+  .head-inner { max-width:1180px; margin:0 auto; padding:28px 24px 26px; }
+  .eyebrow {
+    font-family:var(--mono); font-size:11px; letter-spacing:.14em;
+    text-transform:uppercase; color:var(--faint); margin:0 0 10px;
+  }
+  h1 {
+    font-family:var(--mono); font-weight:600; font-size:clamp(22px,3.2vw,31px);
+    margin:0 0 8px; letter-spacing:-.01em; text-wrap:balance;
+  }
+  .sub { margin:0; color:var(--muted); max-width:70ch; font-size:15px; }
+
+  h2 {
+    font-family:var(--mono); font-size:15px; font-weight:600;
+    margin:44px 0 4px; letter-spacing:-.01em;
+  }
+  h2 .qual { color:var(--faint); font-weight:400; }
+  .lede { margin:0 0 18px; color:var(--muted); font-size:14.5px; max-width:74ch; }
+
+  code, .m { font-family:var(--mono); font-size:.92em; }
+  .src { font-family:var(--mono); font-size:11.5px; color:var(--faint); }
+
+  .card {
+    background:var(--surface); border:1px solid var(--line);
+    border-radius:10px; padding:20px 22px; margin:0 0 14px;
+  }
+  .card.hazard { border-left:3px solid var(--hazard); }
+  .card.ok     { border-left:3px solid var(--ok); }
+  .card.signal { border-left:3px solid var(--signal); }
+  .card.flow   { border-left:3px solid var(--flow); }
+
+  .card h3 {
+    font-family:var(--mono); font-size:14.5px; margin:0 0 2px; font-weight:600;
+  }
+  .card .where { font-family:var(--mono); font-size:11.5px; color:var(--faint); margin:0 0 14px; }
+
+  .row { display:grid; grid-template-columns:132px 1fr; gap:6px 16px; margin:0 0 10px; }
+  .row dt {
+    font-family:var(--mono); font-size:11px; letter-spacing:.09em;
+    text-transform:uppercase; color:var(--faint); padding-top:3px;
+  }
+  .row dd { margin:0; font-size:14.5px; }
+
+  ul.owners { list-style:none; margin:0; padding:0; }
+  ul.owners li {
+    padding:5px 0 5px 0; border-bottom:1px dashed var(--line);
+    font-size:14px; display:flex; gap:10px; align-items:baseline; flex-wrap:wrap;
+  }
+  ul.owners li:last-child { border-bottom:0; }
+  .who { font-family:var(--mono); font-weight:600; }
+  .does { color:var(--muted); }
+
+  .pill {
+    display:inline-block; font-family:var(--mono); font-size:10.5px;
+    letter-spacing:.06em; text-transform:uppercase;
+    padding:2px 8px; border-radius:99px; border:1px solid var(--line-strong);
+    color:var(--muted); white-space:nowrap;
+  }
+  .pill.w { background:var(--hazard-wash); border-color:var(--hazard); color:var(--hazard); }
+  .pill.r { background:var(--flow-wash);   border-color:var(--flow);   color:var(--flow); }
+  .pill.k { background:var(--ok-wash);     border-color:var(--ok);     color:var(--ok); }
+  .pill.q { background:var(--signal-wash); border-color:var(--signal); color:var(--signal); }
+
+  .verdict { font-size:14px; margin:12px 0 0; padding:11px 14px; border-radius:7px; }
+  .verdict.ok     { background:var(--ok-wash); }
+  .verdict.open   { background:var(--signal-wash); }
+  .verdict.hazard { background:var(--hazard-wash); }
+  .verdict b { font-family:var(--mono); font-size:12.5px; }
+
+  table { width:100%; border-collapse:collapse; margin:8px 0 0; font-size:13.5px; }
+  th, td { text-align:left; padding:8px 12px 8px 0; border-bottom:1px solid var(--line); vertical-align:top; }
+  th {
+    font-family:var(--mono); font-size:10.5px; letter-spacing:.09em;
+    text-transform:uppercase; color:var(--faint); font-weight:600;
+  }
+  td.m { font-family:var(--mono); font-size:12.5px; white-space:nowrap; }
+  .scroll { overflow-x:auto; }
+
+  .note {
+    background:var(--plate); border:1px solid var(--line); border-left:3px solid var(--signal);
+    border-radius:8px; padding:16px 18px; margin:18px 0 0; font-size:14px; color:var(--muted);
+  }
+  .note b { color:var(--ink); }
+  .gone {
+    background:var(--plate); border:1px dashed var(--line-strong);
+    border-radius:10px; padding:18px 20px; margin:0 0 14px; color:var(--muted); font-size:14.5px;
+  }
+  .gone h3 { font-family:var(--mono); font-size:14.5px; margin:0 0 8px; color:var(--ink); font-weight:600; }
+  .gone s { color:var(--faint); }
+  footer { margin-top:52px; padding-top:18px; border-top:1px solid var(--line); color:var(--faint); font-size:12.5px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="head-inner">
+    <p class="eyebrow">wirefold · concurrency</p>
+    <h1>Mutex architecture — what is left, and who owns it</h1>
+    <p class="sub">
+      Every <code>sync.Mutex</code> and <code>sync.Cond</code> in non-test Go, the exact state each
+      one guards, and the specific goroutines that touch it. Owners are named by the function that
+      <em>runs as</em> the goroutine, because &ldquo;which goroutine&rdquo; is the whole question — a
+      lock with one owner is not a lock, it is a leftover.
+    </p>
+  </div>
+</header>
+
+<div class="wrap">
+
+<h2>1 · <code>PacedWire.mu</code> <span class="qual">— the one with three genuine contenders</span></h2>
+<p class="lede">One wire object is reached by three different goroutine roles. This is the clearest
+real contention in the system.</p>
+
+<div class="card hazard">
+  <h3>PacedWire.mu</h3>
+  <p class="where">nodes/Wiring/paced_wire.go:131 · locks at 188, 280, 294, 310, 318, 328, 365, 389</p>
+
+  <dl class="row">
+    <dt>Guards</dt>
+    <dd><code>inflight []inflightBead</code>, <code>delivered []deliveredBead</code>,
+        <code>nextGen</code>, <code>teardownGen</code> <span class="src">(paced_wire.go:132–141)</span></dd>
+  </dl>
+
+  <dl class="row">
+    <dt>Owners</dt>
+    <dd>
+      <ul class="owners">
+        <li><span class="pill w">writer</span><span class="who">source node's drive loop</span>
+            <span class="does">— <code>placeBeadNoWalkerAt</code> (:188) and <code>StepOnceAt</code>
+            (:280–328), via <code>Out.PlaceDrivenAt</code>/<code>Out.StepOnceAt</code>. E.g. the
+            <code>DriveHeld</code> goroutine, or a node's own <code>Update</code> loop.</span></li>
+        <li><span class="pill w">writer</span><span class="who">destination node's Update loop</span>
+            <span class="does">— <code>PollRecvTick</code> (:365), via <code>In.PollRecv</code>.</span></li>
+        <li><span class="pill w">writer</span><span class="who">edgeMover.run</span>
+            <span class="does">— <code>ReviseInFlightGeometry</code> (:389), from
+            <code>recomputeGeometry</code>. One such goroutine per edge, spawned at
+            node_move.go:506.</span></li>
+      </ul>
+    </dd>
+  </dl>
+
+  <p class="verdict hazard"><b>CONTENTION VERIFIED.</b> Three genuinely distinct, independently
+  scheduled goroutines touch one <code>PacedWire</code>. Red-proven: removing the lock in
+  <code>ReviseInFlightGeometry</code> yields <code>WARNING: DATA RACE</code>
+  (<span class="src">paced_wire_concurrency_race_test.go</span>).</p>
+
+  <p class="verdict open"><b>RESTRUCTURING UNEXAMINED.</b> <code>inflight</code> and
+  <code>delivered</code> are guarded as one pair. Whether they separate by owner — placement and
+  stepping on one side, delivery handoff on the other — has never been traced. The lock is needed
+  <em>as currently structured</em>; that is a narrower claim than &ldquo;needed&rdquo;.</p>
+</div>
+
+<h2>2 · <code>outbox.mu</code> + <code>cond</code> <span class="qual">— the queue that prevents a deadlock</span></h2>
+<p class="lede">One outbox per node mover. The lock exists so a mover's handler never blocks on a
+neighbour, which is what breaks the mutual-adjacency cascade deadlock.</p>
+
+<div class="card hazard">
+  <h3>outbox.mu + outbox.cond</h3>
+  <p class="where">nodes/Wiring/node_mover.go:57–58 · methods on receiver <code>ob</code> at :70 (enqueue), :83 (run)</p>
+
+  <dl class="row">
+    <dt>Guards</dt>
+    <dd><code>q []outboxItem</code>, <code>closed bool</code> — the unbounded send queue</dd>
+  </dl>
+
+  <dl class="row">
+    <dt>Owners</dt>
+    <dd>
+      <ul class="owners">
+        <li><span class="pill w">producer</span><span class="who">nodeMover.run</span>
+            <span class="does">— the mover's own inbox-drain goroutine calls <code>ob.enqueue</code>
+            from inside <code>handle</code> <span class="src">(node_move.go:574, goroutine at :494)</span></span></li>
+        <li><span class="pill r">consumer</span><span class="who">outbox.run</span>
+            <span class="does">— one dedicated sender goroutine per mover
+            <span class="src">(spawned node_move.go:503)</span></span></li>
+        <li><span class="pill q">shutdown</span><span class="who">ctx-cancel watcher</span>
+            <span class="does">— anonymous closure at node_mover.go:85; sets <code>closed</code> and
+            broadcasts only. Does not enqueue or dequeue.</span></li>
+      </ul>
+    </dd>
+  </dl>
+
+  <p class="verdict hazard"><b>CONTENTION VERIFIED.</b> Bypassing the outbox reproduces the cascade
+  deadlock as a timeout <span class="src">(outbox_mutual_adjacency_test.go —
+  TestMutuallyAdjacentDragFloodNoDeadlock, TestOutboxFIFOPerTargetOrderNoDrop)</span>.</p>
+
+  <p class="verdict open"><b>RESTRUCTURING UNEXAMINED.</b> Per instance this is
+  <strong>single-producer, single-consumer</strong> — verified above — which is precisely the shape
+  with well-known lock-free forms. The unbounded requirement complicates that; it does not rule it
+  out. <em>Also unchecked:</em> nothing bounds queue growth or drain time. Cascades are finite in
+  practice, but only a bounded stress run completing within a timeout is asserted.</p>
+</div>
+
+<h2>3 · <code>Trace.mu</code> <span class="qual">— guards the ledger, not the handoff</span></h2>
+<p class="lede">The distinction here is the point: producers never touch this lock on the hot path.
+They send on a channel. The mutex only serializes the single drain goroutine's bookkeeping.</p>
+
+<div class="card flow">
+  <h3>Trace.mu</h3>
+  <p class="where">Trace/Trace.go:294 · drain at Trace/drain.go:78 · spawned Trace/Trace.go:332</p>
+
+  <dl class="row">
+    <dt>Guards</dt>
+    <dd><code>events</code>, <code>closed</code>, <code>sink</code>, <code>onEvent</code>,
+        <code>debugSink</code> <span class="src">(Trace.go:295–299)</span></dd>
+  </dl>
+  <dl class="row">
+    <dt>Does NOT guard</dt>
+    <dd>event delivery. That is <code>t.ch</code>, a buffered channel — <code>emit()</code> does a
+        bare <code>select</code> send with no lock <span class="src">(Trace.go:341–346)</span></dd>
+  </dl>
+
+  <dl class="row">
+    <dt>Owners</dt>
+    <dd>
+      <ul class="owners">
+        <li><span class="pill w">writer</span><span class="who">Trace.drain</span>
+            <span class="does">— the single drain goroutine; appends <code>events</code>, writes
+            <code>sink</code> in <code>record()</code></span></li>
+        <li><span class="pill w">writer</span><span class="who">Close</span>
+            <span class="does">— flips <code>closed</code> <span class="src">(drain.go:24–32)</span></span></li>
+        <li><span class="pill r">readers</span><span class="who">Events / WriteJSONL / SetDebugSink</span>
+            <span class="does"><span class="src">(drain.go:38–58)</span></span></li>
+        <li><span class="pill k">no lock</span><span class="who">every emitting goroutine</span>
+            <span class="does">— node Update loops, gate loops, nodeMover, edgeMover, stdin reader,
+            main. They touch the channel, never the mutex.</span></li>
+      </ul>
+    </dd>
+  </dl>
+
+  <p class="verdict ok"><b>STAYING.</b> <code>Trace</code> is an accumulator: every goroutine's events
+  must land in one place to become one buffer for the editor. Copies would give N partial streams and
+  no whole picture — the move that removed <code>RealClock.mu</code> is not available here. Red-proven
+  <span class="src">(trace_concurrency_test.go)</span>.</p>
+
+  <p class="verdict open"><b>THE FRAMING ABOVE IT IS STILL OPEN.</b> The merged log is already only
+  <em>arrival order at the drain</em> — scheduler order, not causal order. Whether events need a
+  global total order at all is the open row
+  <span class="src">(task/framing-event-order)</span>.</p>
+</div>
+
+<h2>4 · <code>LayoutHolder.mu</code> <span class="qual">— uncontended; kept as insurance</span></h2>
+
+<div class="card ok">
+  <h3>LayoutHolder.mu</h3>
+  <p class="where">nodes/Wiring/layout_holder.go:118 · acquired at :141 (localPolarSteps), :161 (LoadLocalPolars)</p>
+
+  <dl class="row">
+    <dt>Guards</dt>
+    <dd><code>localPolars</code>, <code>pole</code></dd>
+  </dl>
+  <dl class="row">
+    <dt>Owners</dt>
+    <dd>
+      <ul class="owners">
+        <li><span class="pill k">single</span><span class="who">that node's own mover goroutine</span>
+            <span class="does">— and nothing else. A neighbour is reached by sending
+            <code>moveMsgKindNeighborSetC</code> through the sender's outbox into the neighbour's
+            inbox; the <em>neighbour's own</em> goroutine then calls
+            <code>SetLocalPolar</code>/<code>SetPole</code> on its own holder.</span></li>
+      </ul>
+    </dd>
+  </dl>
+
+  <p class="verdict ok"><b>CONTENTION REFUTED.</b> The doc comment
+  <span class="src">(layout_holder.go:77–115)</span> records a retraction: an earlier version claimed
+  cross-goroutine contention and was wrong three times. A test written to force it could not be made
+  to fail with <code>mu</code> removed — 10/10 clean <code>-race</code> runs — so no vacuous test
+  ships. This is the one lock here with no red-proof, deliberately.</p>
+
+  <div class="note"><b>Do not cite this lock as evidence</b> that cross-goroutine holder access is
+  expected. It is not. It is retained only against a future direct
+  <code>md.layoutHolders[m]</code> call.</div>
+</div>
+
+<h2>5 · <code>scene_persist</code>'s four <span class="qual">— file I/O, never examined</span></h2>
+<p class="lede">These are a different problem from everything above. The observer is the filesystem,
+and it has no perceptual threshold — so the &ldquo;who could tell, and at what resolution&rdquo; test
+that settled the other rows does not apply.</p>
+
+<div class="card signal">
+  <h3>sceneFileMu · debouncedPersister.mu · entityFileMuMu (+ per-path entityFileMus)</h3>
+  <p class="where">nodes/Wiring/scene_persist.go:44, 58, 168–169 · per-path helper at :172</p>
+
+  <dl class="row">
+    <dt>Guards</dt>
+    <dd><code>sceneFileMu</code> — read-modify-write on the runtime scene JSON<br>
+        <code>debouncedPersister[T].mu</code> — <code>pending</code>, <code>has</code>,
+        <code>timer</code>, <code>writes</code>; one independent instance per persister kind<br>
+        <code>entityFileMuMu</code> — the lazy per-path mutex map itself</dd>
+  </dl>
+
+  <dl class="row">
+    <dt>Owners</dt>
+    <dd>
+      <ul class="owners">
+        <li><span class="pill w">writer</span><span class="who">viewpointPersister.flush</span>
+            <span class="does">— camera <span class="src">(scene_camera_persist.go:55)</span></span></li>
+        <li><span class="pill w">writer</span><span class="who">overlaysPersister.flush</span>
+            <span class="does">— overlays <span class="src">(scene_overlays_persist.go:94)</span></span></li>
+        <li><span class="pill w">writer</span><span class="who">drag-time synchronous write</span>
+            <span class="does">— <code>WriteLocalPolars</code>, on the mover's own goroutine</span></li>
+        <li><span class="pill q">timer</span><span class="who">time.AfterFunc flush</span>
+            <span class="does">— <strong>a new goroutine per timer pop.</strong> This is the real race
+            the per-path lock defends: <code>writeQuantOffset</code> firing from the debounce timer
+            against a drag-time write on the same <code>meta.json</code>.</span></li>
+      </ul>
+    </dd>
+  </dl>
+
+  <p class="verdict open"><b>NEVER EXAMINED.</b> No branch has ever analysed these for contention.
+  Their history is feature and fix work only. They should not inherit the in-memory rows' conclusions
+  in either direction <span class="src">(task/mutex-scene-persist)</span>.</p>
+
+  <div class="note"><b>One comment is unverified.</b> <code>scene_persist.go:42–43</code> names
+  &ldquo;polar locks&rdquo; as a third scene-JSON writer, but only camera and overlays were found in
+  non-test code. Node positions appear to go through the <em>entity</em> path instead.</div>
+</div>
+
+<h2>Gone — and why it is not coming back</h2>
+
+<div class="gone">
+  <h3><s>RealClock.mu</s></h3>
+  <p>Deleted. Replaced by <strong>ownership</strong>, not by a smaller lock: each goroutine holds one
+  <code>Clock.Copy()</code>, so the only thing that reads or writes a clock is the goroutine that owns
+  it. Speed changes travel on per-goroutine buffered-1 channels built at load time — the send ends are
+  touched only by the stdin reader's goroutine, so nothing replaced the lock.</p>
+  <p style="margin-bottom:0"><strong>It was never removed for speed.</strong> Measured ~500–1700
+  acquisitions/sec against a mutex that does tens of millions, with no benchmark or profile in the
+  repo ever motivating it. &ldquo;Widest fan-in lock in the system&rdquo; is a <em>structural</em>
+  claim; it was being read as a <em>cost</em> claim. It went because a shared object forces every
+  reader of the code to understand the whole network's clock wiring before understanding one
+  goroutine — and because it defended an exactness (every reader agrees to the millisecond) that
+  nothing here needs.</p>
+</div>
+
+<div class="gone">
+  <h3><s>geomMu</s></h3>
+  <p style="margin-bottom:0">Deleted by splitting <code>nodeGeom</code> into write-once identity plus
+  mutable state, making the property structural rather than maintained. Zero non-comment references
+  remain.</p>
+</div>
+
+<h2>Long-lived goroutines</h2>
+<p class="lede">Who exists at runtime, so &ldquo;owner&rdquo; above means something concrete.</p>
+
+<div class="card">
+  <div class="scroll">
+  <table>
+    <thead><tr><th>Spawned at</th><th>Runs</th><th>Role</th><th>Count</th></tr></thead>
+    <tbody>
+      <tr><td class="m">main.go:202–207</td><td class="m">node.Update(ctx)</td><td>every node kind's own loop</td><td>one per node</td></tr>
+      <tr><td class="m">main.go:195–198</td><td class="m">RunStdinReader</td><td>editor bridge; the only speed writer</td><td>1</td></tr>
+      <tr><td class="m">Trace.go:332</td><td class="m">Trace.drain</td><td>the single event accumulator</td><td>1</td></tr>
+      <tr><td class="m">drive.go:78</td><td class="m">DriveHeld closure</td><td>per-driven-output pacing</td><td>one per driven Out</td></tr>
+      <tr><td class="m">node_move.go:494</td><td class="m">nodeMover.run</td><td>inbox drain / outbox producer</td><td>one per node</td></tr>
+      <tr><td class="m">node_move.go:503</td><td class="m">outbox.run</td><td>dedicated sender</td><td>one per node</td></tr>
+      <tr><td class="m">node_move.go:506</td><td class="m">edgeMover.run</td><td>edge geometry</td><td>one per edge</td></tr>
+      <tr><td class="m">node_mover.go:85</td><td class="m">ctx watcher closure</td><td>outbox shutdown</td><td>one per outbox</td></tr>
+      <tr><td class="m">time.AfterFunc</td><td class="m">persister flush</td><td>debounced file write</td><td>one per timer pop</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="note"><b><code>LayoutHolder.UpdateLayout</code> is never spawned.</b> main.go:187–192
+  documents that nothing calls it today — a vestigial no-op, not an owner.</div>
+</div>
+
+<div class="note" style="margin-top:34px">
+  <b>docs/concurrency-map.html is stale and contradicts itself.</b> Its &ldquo;mutex patterns&rdquo;
+  tab still draws <code>RealClock</code> as a shared bus with a <code>mu</code> label
+  (lines 319–356, esp. 326 and 334) and its summary table still carries
+  <code>RealClock.mu — many Tick readers vs one SetSpeed writer — confirmed</code> (line 429).
+  All of that is false now. Its own &ldquo;the clock question&rdquo; tab already says the opposite and
+  is correct (line 680: &ldquo;<code>RealClock.mu</code> is deleted, not reduced&rdquo;). Every other
+  row in that table still checks out.
+</div>
+
+<footer>
+  Facts verified against the tree on <span class="m">task/framing-event-order</span>. Line numbers
+  drift — re-grep before trusting any of them. Companion to <span class="m">docs/framings.md</span>,
+  which records <em>why</em> each lock exists; this page records <em>who touches it</em>.
+</footer>
+
+</div>
+</body>
+</html>
