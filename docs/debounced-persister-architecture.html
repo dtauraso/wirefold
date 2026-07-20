@@ -466,8 +466,55 @@ not a hypothetical one.</p>
 
 <div class="panel" id="panel-layoutholder" role="tabpanel">
 
+<!-- ══ L0 · WHAT THE THING IS ══ -->
+<h2>0 · what a LayoutHolder actually is</h2>
+<p class="cap">Before the lock: this is <b>one node's record of where its neighbours are</b>,
+in polar terms, quantized to integer steps. Real values below are node 9's, read from
+<code>topology/nodes/9/local-polars.json</code>.</p>
+
+<div class="plate">
+<svg viewBox="0 0 860 300" role="img" aria-label="A LayoutHolder stores one quantized polar direction per neighbour plus the pole those directions were measured against, so node 9 records integer steps toward node 3 and node 6.">
+  <defs><marker id="alh" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#2E7D9A"/></marker></defs>
+
+  <text class="tl" x="0" y="14">THE PICTURE — node 9 and its two neighbours</text>
+
+  <circle cx="150" cy="120" r="26" fill="var(--flow-wash)" stroke="var(--flow)" stroke-width="1.6"/>
+  <text class="t" x="141" y="125">9</text>
+  <circle cx="330" cy="56" r="20" fill="var(--plate)" stroke="var(--line-strong)" stroke-width="1.2"/>
+  <text class="ts" x="324" y="61">3</text>
+  <circle cx="330" cy="192" r="20" fill="var(--plate)" stroke="var(--line-strong)" stroke-width="1.2"/>
+  <text class="ts" x="324" y="197">6</text>
+
+  <path class="arrb" d="M176,110 L306,64" marker-end="url(#alh)"/>
+  <path class="arrb" d="M176,132 L306,184" marker-end="url(#alh)"/>
+  <text class="tb" x="196" y="80">θ=145 · φ=0 · r=28</text>
+  <text class="tb" x="196" y="172">θ=114 · φ=157 · r=25</text>
+  <text class="tf" x="150" y="234">these are INTEGER step counts, not angles —</text>
+  <text class="tf" x="150" y="248">multiply by the step constant to get radians / world units</text>
+
+  <text class="tl" x="470" y="14">WHAT THAT IS IN THE STRUCT</text>
+
+  <rect class="box" x="470" y="28" width="390" height="86" rx="6"/>
+  <text class="ts" x="482" y="48">localPolars []LocalPolar</text>
+  <text class="tf" x="482" y="66">one entry per neighbour: To, QuantITheta,</text>
+  <text class="tf" x="482" y="80">QuantIPhi, QuantIR + per-neighbour step constants</text>
+  <text class="tf" x="482" y="100">layout_holder.go:47 — “where node 3 is, from 9”</text>
+
+  <rect class="box" x="470" y="124" width="390" height="72" rx="6"/>
+  <text class="ts" x="482" y="144">pole dir</text>
+  <text class="tf" x="482" y="162">the measurement pole those integers were</text>
+  <text class="tf" x="482" y="176">quantized ABOUT — without it the same integers</text>
+  <text class="tf" x="482" y="190">mean a different direction on reload</text>
+
+  <line x1="0" y1="262" x2="860" y2="262" stroke="var(--line)"/>
+  <text class="tk" x="0" y="282">WHY IT IS STORED AS INTEGERS</text>
+  <text class="ts" x="222" y="282">a drag updates position by arithmetic on step counts, so repeated drags do not accumulate float drift.</text>
+  <text class="tf" x="0" y="296">That is the whole point of the type — the mutex below is incidental to it.</text>
+</svg>
+</div>
+
 <!-- ══ L1 · THE STATE ══ -->
-<h2>1 · what it guards — two fields, six methods</h2>
+<h2>1 · what the lock guards — two fields, six methods</h2>
 <p class="cap">One <code>LayoutHolder</code> is embedded in EVERY node kind's struct — one
 instance per node, not a package-wide singleton. Every accessor takes <code>mu</code>;
 none holds it across anything but a slice/field read or write.</p>
