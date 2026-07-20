@@ -26,7 +26,7 @@ when written; re-grep before trusting it.
 | Lock | Where | What it guards | Status |
 |---|---|---|---|
 | ~~`PacedWire.mu`~~ | — | was `inflight`/`delivered` | **DELETED.** The wire became its own goroutine, so it has one owner and nothing to guard — see below |
-| `outbox.mu` + `cond` | `node_mover.go:57-58` | the unbounded move queue | Contention **verified** (bypassing it reproduces the cascade deadlock). Restructuring **unexamined** — it is SPSC, a shape with known lock-free forms. Also UNCHECKED: nothing bounds queue growth or drain time |
+| ~~`outbox.mu` + `cond`~~ | — | was the unbounded move queue | **DELETED.** Per-direction channels replaced the shared queue; with no blocking send there is nothing to hold — see below |
 | `Trace.mu` | `Trace/Trace.go:294` | `events`/`closed`/sinks | **Staying.** Cannot be copied — every goroutine's events must land in one place to become one buffer; copies give N partial streams. The *ordering* framing above it is still open (`task/per-owner-buffer-rows`) |
 | `LayoutHolder.mu` | `layout_holder.go:118` | `localPolars`/`pole` | **Examined, UNCONTENDED.** Kept as cheap insurance against a future cross-goroutine `md.layoutHolders[m]` call, NOT because it guards a present race. Do not cite it as evidence that cross-goroutine holder access is expected |
 | `sceneFileMu`, `debouncedPersister.mu`, `entityFileMuMu` (+ per-path `entityFileMus`) | `scene_persist.go:44, 58, 168-177` | read-modify-write cycles on the runtime scene JSON and per-entity files, plus debounce state | **Never examined.** These serialize FILE I/O across genuinely distinct writers (camera, overlays, polar locks) — a different problem from the in-memory framings above, since the observer is the filesystem and it has no perceptual threshold |
@@ -57,17 +57,27 @@ with a channel on each end, and the per-edge `edgeMover.run` that used to reach 
 lock to revise geometry IS that goroutine. One owner, nothing to guard, lock deleted. It
 cost no new goroutines, because that edge goroutine already existed.
 
-That is three for three. **Treat "no restructuring removes this lock" as unproven whenever
-you meet it here**, including in the one remaining row below.
+**`outbox.mu` went the same way, immediately after.** Its contention was real — bypassing
+the outbox reproduced the cascade deadlock — but the deadlock had exactly one cause:
+`handle` blocked while sending, so it never returned to drain, so its peer (blocked sending
+into it) never returned either. Movers now have **two directed channels per pair** (A→B and
+B→A, no shared inbox), a non-blocking send that **retains and retries** rather than blocking
+or dropping, and a loop paced on the human-speed clock like every other loop in the system.
+With no blocked senders there is nothing for a queue to hold, so the queue, its mutex, its
+cond, its dedicated sender goroutine and that goroutine's ctx-watcher are all gone —
+goroutine count went **down** by two per mover.
 
-**`outbox.mu` is still unexamined.** Its contention is real — bypassing the outbox
-reproduces the cascade deadlock as a timeout, red-proven and guarded by tests. But the
-restructuring question is open, and there is a specific reason to think it is live:
+**That is four for four.** `geomMu`, `LayoutHolder.mu`, `PacedWire.mu`, `outbox.mu` — every
+lock this table ever described as necessary has been removed by a restructuring, and in
+every case the restructuring was *giving the state one owner*, not being clever about
+locking. **Treat "no restructuring removes this lock" as unproven wherever you meet it**,
+including in the rows that remain. The question to ask is never "is this lock correct" but
+"who could own this outright".
 
-- `outbox` is **single-producer, single-consumer** — the mover's own handler enqueues, one
-  dedicated sender drains. SPSC is precisely the shape with well-known lock-free
-  implementations. The unbounded requirement complicates it; it does not obviously rule it
-  out.
+What is left is genuinely different in kind: `Trace.mu` guards an accumulator that cannot be
+copied without producing N partial streams; `LayoutHolder.mu` is already single-owner and
+uncontended; `scene_persist`'s four serialize file I/O, where the observer is the filesystem
+and has no perceptual threshold. None of those is "a lock nobody has thought about".
 
 What IS categorical, and does not depend on any of the above: a torn slice header is wrong
 at any resolution. There is no observer threshold below which corrupted memory is
@@ -82,8 +92,13 @@ The distinction that sorts the other rows is not global-vs-local. It is:
   function. These cost nothing and do not break.
 
 `geomMu` went away because a split made the property structural. `PacedWire.mu` went away
-because giving the wire its own goroutine made ownership structural. Both were once
-described as staying. `outbox.mu` is the last one still described that way.
+because giving the wire its own goroutine made ownership structural. `outbox.mu` went away
+because removing blocking sends left its queue with nothing to hold. All three were once
+described as staying, as was `LayoutHolder.mu` before them.
+
+Every one of those was a **maintained** guarantee wearing the costume of a necessary one.
+The tell is the same each time: the lock is defending an invariant across goroutines that
+did not need to share in the first place.
 
 ## The test to apply next time
 
