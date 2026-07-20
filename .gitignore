@@ -94,9 +94,10 @@ tools/topology-vscode/gen-node-defs
 /topology/view/scene.json
 /topology/view/scene.json.tmp
 
-# One-file-per-writer split of the scene sidecar above
-# (docs/planning/visual-editor/one-file-per-goroutine.md): camera/overlays/sphere are the
-# same kind of auto-written, locally-preferred view state scene.json was — not for VCS.
+# One-file-per-writer split of the scene sidecar above: each of these has exactly ONE
+# writer, which is what let sceneFileMu be deleted rather than narrowed. camera/overlays/
+# sphere are the same kind of auto-written, locally-preferred view state scene.json was —
+# not for VCS.
 # nodes/<id>/position.json and local-polars.json are NOT listed here: they carry the same
 # authoritative per-node data meta.json does (which IS tracked), so they stay trackable too.
 /topology/view/camera.json
