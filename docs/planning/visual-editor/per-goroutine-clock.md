@@ -213,6 +213,48 @@ event streams and no whole picture. That mutex stays, and this plan does not tou
    this is the one step whose breakage the compiler will not catch.
 6. `-race` clean at `-count=5`, plus the drag and persistence suites.
 
+### Proving each goroutine has its own clock, and shares nothing
+
+The four items above prove the SEMANTICS survive. These prove the STRUCTURE is what we
+say it is — that there is a real clock per goroutine and no two goroutines are secretly
+on the same object. Three independent angles, because each misses what the others catch.
+
+**A. Non-sharing, behavioral — the load-bearing one.** Give one goroutine's clock a speed
+change and assert **no other goroutine's tick rate moves**. A shared object fails this
+immediately: every reader would shift together. This is the only test that distinguishes
+"N copies" from "one object handed out N times", and it cannot be satisfied by a fake —
+which is exactly the property [[feedback_check_the_signal_the_check_emits]] asks for.
+Make it fail once, deliberately, by handing two goroutines the same clock; if it still
+passes, the test is not measuring what it claims.
+
+**B. Non-sharing, mechanical — the deleted mutex IS the detector.** Once `RealClock.mu`
+is gone, any clock still reached by two goroutines is an unsynchronized read/write over
+`speed`/`accScaled`/`lastChange` — i.e. a DATA RACE, reported by `-race`. So drive the
+full network under `-race` while pushing speed changes through `stdin_reader`, at
+`-count=5`. This catches sharing we did not think to look for, including sharing
+introduced LATER by someone rewiring a constructor. The mutex's deletion is not merely
+safe here; it converts the invariant into something the toolchain enforces for free.
+
+Note the ordering consequence: this test only has teeth AFTER item 4 deletes `mu`. Run it
+before that and a shared clock passes silently, still protected by the lock.
+
+**C. Presence — every clock-holder has a REAL clock.** Non-sharing is trivially satisfied
+by handing everyone a broken clock, so assert the positive too: every production
+clock-holder has a live `*RealClock` whose `Tick()` actually advances, and **no production
+goroutine holds an `inertClock`**. That last clause matters because `inertClock.Tick()`
+returns a constant 0 forever and `SleepCycle` blocks until ctx death — a goroutine that
+silently gets one is inert, not paced, and every other test here would still pass. Assert
+over the FULL set of clock-holders, not a sample (same requirement as item 3).
+
+Item C is also what makes `inertClock`'s deletion checkable rather than assumed: after the
+demolition there should be no inert path left to hold, and the assertion should be
+impossible to violate rather than merely observed not to be.
+
+**What none of these prove:** that the copies agree in VALUE. That is item 1's tolerance
+band, and it is a separate question — three goroutines can each own a private clock,
+share nothing, pass A/B/C, and still drift apart if the delivery path is lossy. Keep them
+separate; do not let a passing structural test read as a timing guarantee.
+
 ## What this buys
 
 - Deletes RealClock.mu outright — the widest-fan-in lock in the system, taken on every
