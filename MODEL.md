@@ -11,7 +11,7 @@ frame. Stop, re-read this file, and re-derive from the model.
 The network is **nodes and wires**. Each node runs on its own Go
 goroutine. A wire (`PacedWire`) is NOT a goroutine or a channel — it is
 a passive, mutex-guarded struct (`inflight`/`delivered` bead slices)
-that the owning node's goroutine STEPS via `StepOnce`/`StepOnceAt`. The
+that the owning node's goroutine STEPS via `StepOnceAt`. The
 network is self-scheduling: there is no central runner, no walker, no
 underlying layer that "runs" the nodes. The network IS the running
 program.
@@ -27,7 +27,7 @@ the network itself is the nodes-and-wires Go runtime.
 - **Wire (`PacedWire`).** Transport plus visual depiction. A passive
   mutex-guarded struct, not a goroutine or channel: the source node calls
   `placeBeadNoWalkerAt` directly to place a bead, the owning node's
-  `StepOnce`/`StepOnceAt` times the traversal on Go's clock and moves the
+  `StepOnceAt` times the traversal on Go's clock and moves the
   bead from `inflight` to `delivered` via `tryDeliverHeadLocked`, and the
   destination node consumes it with `In.PollRecv`. The wire owns no
   parked state and applies no send policy.
@@ -46,7 +46,7 @@ A bead crosses a wire in one direction:
 1. The source node calls `placeBeadNoWalkerAt`, appending the bead to the
    wire's `inflight` slice with its traversal timed in ticks:
    `ticksToCross = arcLength / pulseSpeed`.
-2. While in flight, the owning node's `StepOnce`/`StepOnceAt` advances
+2. While in flight, the owning node's `StepOnceAt` advances
    the bead one position per tick and emits its position on the trace
    stream for the renderer.
 3. On traversal-complete, `tryDeliverHeadLocked` moves the bead from
