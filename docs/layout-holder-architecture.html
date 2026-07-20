@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>wirefold — LayoutHolder.mu</title>
+<style>
+  :root {
+    --ground:#F2F4F7; --surface:#FFFFFF; --plate:#FAFBFC;
+    --ink:#131A24; --muted:#5B6779; --faint:#8894A6;
+    --line:#D3D9E2; --line-strong:#B7C0CD;
+    --signal:#C06A12; --flow:#2E7D9A; --hazard:#A8443C; --ok:#3B7350;
+    --signal-wash:#F6ECDF; --flow-wash:#E4EFF3; --hazard-wash:#F6E6E4; --ok-wash:#E4EFE8;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground:#0D1219; --surface:#141C26; --plate:#111925;
+      --ink:#E4E9F0; --muted:#94A1B2; --faint:#6C7A8B;
+      --line:#26313F; --line-strong:#3A4859;
+      --signal:#E8A147; --flow:#57AECB; --hazard:#D2685E; --ok:#6FA783;
+      --signal-wash:#241B10; --flow-wash:#0F2029; --hazard-wash:#251413; --ok-wash:#12241A;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:#0D1219; --surface:#141C26; --plate:#111925;
+    --ink:#E4E9F0; --muted:#94A1B2; --faint:#6C7A8B;
+    --line:#26313F; --line-strong:#3A4859;
+    --signal:#E8A147; --flow:#57AECB; --hazard:#D2685E; --ok:#6FA783;
+    --signal-wash:#241B10; --flow-wash:#0F2029; --hazard-wash:#251413; --ok-wash:#12241A;
+  }
+  :root[data-theme="light"] {
+    --ground:#F2F4F7; --surface:#FFFFFF; --plate:#FAFBFC;
+    --ink:#131A24; --muted:#5B6779; --faint:#8894A6;
+    --line:#D3D9E2; --line-strong:#B7C0CD;
+    --signal:#C06A12; --flow:#2E7D9A; --hazard:#A8443C; --ok:#3B7350;
+    --signal-wash:#F6ECDF; --flow-wash:#E4EFF3; --hazard-wash:#F6E6E4; --ok-wash:#E4EFE8;
+  }
+
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--ground); color:var(--ink); font-family:var(--sans); line-height:1.5; -webkit-font-smoothing:antialiased; }
+  .wrap { max-width:1120px; margin:0 auto; padding:0 20px 72px; }
+  header { border-bottom:1px solid var(--line); background:var(--surface); }
+  .head-inner { max-width:1120px; margin:0 auto; padding:24px 20px 20px; }
+  .eyebrow { font-family:var(--mono); font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--faint); margin:0 0 8px; }
+  h1 { font-family:var(--mono); font-weight:600; font-size:clamp(20px,3vw,28px); margin:0 0 6px; }
+  .sub { margin:0; color:var(--muted); max-width:76ch; font-size:14px; }
+  h2 { font-family:var(--mono); font-size:13px; font-weight:600; margin:38px 0 2px; letter-spacing:.02em; }
+  .cap { margin:0 0 10px; color:var(--muted); font-size:13px; max-width:82ch; }
+  .cap b { color:var(--ink); font-weight:600; }
+  .plate { background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:14px; margin:0 0 10px; overflow-x:auto; }
+  .plate svg { display:block; min-width:600px; width:100%; height:auto; }
+
+  .t   { font-family:var(--mono); font-size:12.5px; fill:var(--ink); font-weight:600; }
+  .ts  { font-family:var(--mono); font-size:10.5px; fill:var(--muted); }
+  .tf  { font-family:var(--mono); font-size:9.5px;  fill:var(--faint); }
+  .tl  { font-family:var(--mono); font-size:11px; fill:var(--faint); letter-spacing:.1em; }
+  .tw  { font-family:var(--mono); font-size:10.5px; fill:var(--hazard); font-weight:600; }
+  .tk  { font-family:var(--mono); font-size:10.5px; fill:var(--ok); font-weight:600; }
+  .tq  { font-family:var(--mono); font-size:10.5px; fill:var(--signal); font-weight:600; }
+  .tb  { font-family:var(--mono); font-size:10.5px; fill:var(--flow); font-weight:600; }
+  .big { font-family:var(--mono); font-size:14px; fill:var(--hazard); font-weight:700; }
+
+  .box   { fill:var(--plate); stroke:var(--line-strong); stroke-width:1; }
+  .gor   { fill:var(--flow-wash); stroke:var(--flow); stroke-width:1.2; }
+  .state { fill:var(--hazard-wash); stroke:var(--hazard); stroke-width:1.4; }
+  .safe  { fill:var(--ok-wash); stroke:var(--ok); stroke-width:1.2; }
+  .queue { fill:var(--signal-wash); stroke:var(--signal); stroke-width:1.2; }
+  .dash  { fill:none; stroke:var(--line-strong); stroke-width:1; stroke-dasharray:4 3; }
+  .arr   { fill:none; stroke:var(--hazard); stroke-width:1.4; }
+  .arrb  { fill:none; stroke:var(--flow); stroke-width:1.4; }
+  .arrk  { fill:none; stroke:var(--ok); stroke-width:1.4; }
+  .arrq  { fill:none; stroke:var(--signal); stroke-width:1.4; }
+
+  .legend { display:flex; gap:16px; flex-wrap:wrap; margin:0 0 22px; font-size:12px; color:var(--muted); }
+  .legend span { display:flex; align-items:center; gap:6px; font-family:var(--mono); font-size:11px; }
+  .sw { width:12px; height:12px; border-radius:3px; border:1.4px solid; display:inline-block; }
+  .sw.g { background:var(--flow-wash);   border-color:var(--flow); }
+  .sw.s { background:var(--hazard-wash); border-color:var(--hazard); }
+  .sw.k { background:var(--ok-wash);     border-color:var(--ok); }
+  .sw.q { background:var(--signal-wash); border-color:var(--signal); }
+
+  .verdict { font-size:13px; margin:0 0 26px; padding:9px 12px; border-radius:6px; }
+  .verdict.ok { background:var(--ok-wash); }
+  .verdict.open { background:var(--signal-wash); }
+  .verdict.hazard { background:var(--hazard-wash); }
+  .verdict b { font-family:var(--mono); font-size:11.5px; }
+  code { font-family:var(--mono); font-size:.92em; }
+  footer { margin-top:46px; padding-top:16px; border-top:1px solid var(--line); color:var(--faint); font-size:12px; }
+
+</style>
+</head>
+<body>
+
+<header>
+  <div class="head-inner">
+    <p class="eyebrow">wirefold · concurrency</p>
+    <h1>LayoutHolder.mu — a lock with nothing to guard</h1>
+    <p class="sub">One instance per node, at <code>layout_holder.go:118</code>. In production
+    every access is the owning node's own goroutine, so nothing shares it. The only concurrent
+    reader anywhere is a <b>test</b>. That makes this different in kind from every other lock
+    in the repo — the sharing is not something to restructure away, it was never there.</p>
+  </div>
+</header>
+
+<div class="wrap">
+
+<div class="legend">
+  <span><i class="sw g"></i>goroutine</span>
+  <span><i class="sw s"></i>locked state</span>
+  <span><i class="sw k"></i>safe / single-owner</span>
+</div>
+
+
+<!-- ══ L0 · WHAT THE THING IS ══ -->
+<h2>0 · what a LayoutHolder actually is</h2>
+<p class="cap">Before the lock: this is <b>one node's record of where its neighbours are</b>,
+in polar terms, quantized to integer steps. Real values below are node 9's, read from
+<code>topology/nodes/9/local-polars.json</code>.</p>
+
+<div class="plate">
+<svg viewBox="0 0 860 300" role="img" aria-label="A LayoutHolder stores one quantized polar direction per neighbour plus the pole those directions were measured against, so node 9 records integer steps toward node 3 and node 6.">
+  <defs><marker id="alh" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#2E7D9A"/></marker></defs>
+
+  <text class="tl" x="0" y="14">THE PICTURE — node 9 and its two neighbours</text>
+
+  <circle cx="150" cy="120" r="26" fill="var(--flow-wash)" stroke="var(--flow)" stroke-width="1.6"/>
+  <text class="t" x="141" y="125">9</text>
+  <circle cx="330" cy="56" r="20" fill="var(--plate)" stroke="var(--line-strong)" stroke-width="1.2"/>
+  <text class="ts" x="324" y="61">3</text>
+  <circle cx="330" cy="192" r="20" fill="var(--plate)" stroke="var(--line-strong)" stroke-width="1.2"/>
+  <text class="ts" x="324" y="197">6</text>
+
+  <path class="arrb" d="M176,110 L306,64" marker-end="url(#alh)"/>
+  <path class="arrb" d="M176,132 L306,184" marker-end="url(#alh)"/>
+  <text class="tb" x="196" y="80">θ=145 · φ=0 · r=28</text>
+  <text class="tb" x="196" y="172">θ=114 · φ=157 · r=25</text>
+  <text class="tf" x="150" y="234">these are INTEGER step counts, not angles —</text>
+  <text class="tf" x="150" y="248">multiply by the step constant to get radians / world units</text>
+
+  <text class="tl" x="470" y="14">WHAT THAT IS IN THE STRUCT</text>
+
+  <rect class="box" x="470" y="28" width="390" height="86" rx="6"/>
+  <text class="ts" x="482" y="48">localPolars []LocalPolar</text>
+  <text class="tf" x="482" y="66">one entry per neighbour: To, QuantITheta,</text>
+  <text class="tf" x="482" y="80">QuantIPhi, QuantIR + per-neighbour step constants</text>
+  <text class="tf" x="482" y="100">layout_holder.go:47 — “where node 3 is, from 9”</text>
+
+  <rect class="box" x="470" y="124" width="390" height="72" rx="6"/>
+  <text class="ts" x="482" y="144">pole dir</text>
+  <text class="tf" x="482" y="162">the measurement pole those integers were</text>
+  <text class="tf" x="482" y="176">quantized ABOUT — without it the same integers</text>
+  <text class="tf" x="482" y="190">mean a different direction on reload</text>
+
+  <line x1="0" y1="262" x2="860" y2="262" stroke="var(--line)"/>
+  <text class="tk" x="0" y="282">WHY IT IS STORED AS INTEGERS</text>
+  <text class="ts" x="222" y="282">a drag updates position by arithmetic on step counts, so repeated drags do not accumulate float drift.</text>
+  <text class="tf" x="0" y="296">That is the whole point of the type — the mutex below is incidental to it.</text>
+</svg>
+</div>
+
+<!-- ══ L1 · THE STATE ══ -->
+<h2>1 · what the lock guards — two fields, six methods</h2>
+<p class="cap">One <code>LayoutHolder</code> is embedded in EVERY node kind's struct — one
+instance per node, not a package-wide singleton. Every accessor takes <code>mu</code>;
+none holds it across anything but a slice/field read or write.</p>
+
+<div class="plate">
+<svg viewBox="0 0 860 268" role="img" aria-label="LayoutHolder holds localPolars and pole under one mutex, with six short accessor methods that each lock and unlock it.">
+  <text class="tl" x="0" y="14">THE STRUCT</text>
+  <text class="tl" x="440" y="14">EVERY METHOD THAT TAKES mu</text>
+
+  <rect class="state" x="0" y="28" width="400" height="150" rx="8"/>
+  <text class="t"  x="14" y="50">LayoutHolder</text>
+  <text class="tf" x="14" y="65">nodes/Wiring/layout_holder.go:117</text>
+
+  <rect class="box" x="14" y="78" width="372" height="24" rx="4"/>
+  <text class="tw" x="26" y="95">mu sync.Mutex</text>
+
+  <rect class="box" x="14" y="108" width="372" height="26" rx="4"/>
+  <text class="ts" x="26" y="125">localPolars []LocalPolar</text>
+  <text class="tf" x="230" y="125">one entry per neighbor</text>
+
+  <rect class="box" x="14" y="140" width="372" height="26" rx="4"/>
+  <text class="ts" x="26" y="157">pole dir</text>
+  <text class="tf" x="90" y="157">measurement pole entries were quantized about</text>
+
+  <rect class="gor" x="440" y="28" width="420" height="24" rx="5"/>
+  <text class="ts" x="452" y="44">localPolarSteps(to) :141</text>
+
+  <rect class="gor" x="440" y="56" width="420" height="24" rx="5"/>
+  <text class="ts" x="452" y="72">LoadLocalPolars(lps) :156 — load-time, once</text>
+
+  <rect class="gor" x="440" y="84" width="420" height="24" rx="5"/>
+  <text class="ts" x="452" y="100">SetLocalPolar(to, ...) :165 — the drag writer</text>
+
+  <rect class="gor" x="440" y="112" width="420" height="24" rx="5"/>
+  <text class="ts" x="452" y="128">LocalPolarsSnapshot() :187 — defensive copy out</text>
+
+  <rect class="gor" x="440" y="140" width="420" height="24" rx="5"/>
+  <text class="ts" x="452" y="156">Pole() :197 / SetPole(p) :206</text>
+
+  <line x1="0" y1="196" x2="860" y2="196" stroke="var(--line)"/>
+  <text class="tk" x="0" y="216">ONE PER NODE, NOT SHARED</text>
+  <text class="ts" x="230" y="216">every node kind embeds its own LayoutHolder — contention would be within one node's holder, never across two.</text>
+  <text class="tf" x="0" y="234">Unlike the five persisters (one purpose each), every node in the graph gets one of these — dozens of instances, not five.</text>
+  <text class="tf" x="0" y="250">recordWrite/writes has no equivalent here — there is no debounce, no timer, no disk write in this file at all.</text>
+</svg>
+</div>
+
+<!-- ══ L2 · THE ISSUE ══ -->
+<h2>2 · the issue — every production caller is the owning node's own goroutine</h2>
+<p class="cap">Grepped every non-test caller of all six accessors. <b>Every one runs on the
+holder's own node's goroutine.</b> A node never reaches into a neighbour's holder — it sends
+a message and that neighbour's goroutine writes its own. So in production this is
+single-owner state carrying a mutex.</p>
+
+<div class="plate">
+<svg viewBox="0 0 860 264" role="img" aria-label="Every production caller of the six LayoutHolder accessors runs on the owning node's own goroutine, so the only second party found by the race detector is a test's polling goroutine.">
+  <text class="tl" x="0" y="14">EVERY PRODUCTION CALLER — all on the owning node's goroutine</text>
+
+  <rect class="safe" x="0" y="28" width="420" height="128" rx="6"/>
+  <text class="ts" x="12" y="48">requantizeLocalPolars   quantized_move.go:358</text>
+  <text class="tf" x="12" y="62">“X requantizes its OWN holder … on its own goroutine”</text>
+  <text class="ts" x="12" y="82">neighborSetCRequantize  :246 :264</text>
+  <text class="ts" x="12" y="98">commitNodeMoveLocal     :382</text>
+  <text class="ts" x="12" y="114">armDragAnchor           node_mover.go:289</text>
+  <text class="tf" x="12" y="128">“Runs only on this node’s own goroutine”</text>
+  <text class="ts" x="12" y="148">LoadLocalPolars/SetPole loader.go:637,645 — load-time</text>
+
+  <rect class="state" x="440" y="28" width="420" height="128" rx="6"/>
+  <text class="t"  x="452" y="50">THE ONLY SECOND PARTY IS A TEST</text>
+  <text class="ts" x="452" y="74">Delete the locking from all six accessors and run</text>
+  <text class="ts" x="452" y="90">the package under -race: RED, 5/5 runs.</text>
+  <text class="tf" x="452" y="112">SetLocalPolar (the node’s own mover goroutine)</text>
+  <text class="tf" x="452" y="126">races LocalPolarsSnapshot — called from</text>
+  <text class="tf" x="452" y="140">TestIndividualSnap_OnlyDraggedNodePersists’ own</text>
+  <text class="tf" x="452" y="152">polling goroutine, not from any production path.</text>
+
+  <line x1="0" y1="182" x2="860" y2="182" stroke="var(--line)"/>
+  <text class="tw" x="0" y="202">SO THE QUESTION IS</text>
+  <text class="ts" x="150" y="202">is this lock load-bearing, or is it holding a test’s hand?</text>
+  <text class="tf" x="0" y="222">A red proof that only fires because a TEST reaches into live state is not evidence the production model needs a lock —</text>
+  <text class="tf" x="0" y="236">it is evidence the test observes state it does not own. Those want different fixes: keep the mutex, or give the test a safe read.</text>
+  <text class="tf" x="0" y="256">Decide which before touching it. Removing the lock without addressing the test turns a green suite red for the wrong reason.</text>
+</svg>
+</div>
+<footer>
+  Verified against the tree on <span style="font-family:var(--mono)">task/mutex-layout-holder</span>.
+  Line numbers drift — re-grep before trusting them. Companions:
+  <span style="font-family:var(--mono)">docs/debounced-persister-architecture.html</span>,
+  <span style="font-family:var(--mono)">docs/mutex-architecture.html</span>,
+  <span style="font-family:var(--mono)">docs/framings.md</span>.
+</footer>
+
+</div>
+</body>
+</html>
