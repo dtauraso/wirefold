@@ -120,7 +120,7 @@ func TestPersistOverlaysRoundTrips(t *testing.T) {
 	md.persist.overlays.schedule(md.ov)
 	md.persist.overlays.flush()
 
-	ov, found := loadSceneOverlays(sceneCameraPath(root))
+	ov, found := loadSceneOverlays(overlaysFilePath(root), sceneCameraPath(root))
 	if !found {
 		t.Fatalf("loadSceneOverlays found no overlay keys after flush")
 	}
@@ -146,8 +146,8 @@ func TestPersistOverlaysRoundTrips(t *testing.T) {
 	}
 }
 
-// TestOverlaysPersistPreservesCamera: camera + overlays coexist in scene.json — the writers
-// must not clobber each other (sceneFileMu).
+// TestOverlaysPersistPreservesCamera: camera.json and overlays.json are separate files (one
+// writer each) — writing one must never disturb the other.
 func TestOverlaysPersistPreservesCamera(t *testing.T) {
 	root := writeTree(t)
 	md := loadTreeMD(t, root)
@@ -167,7 +167,7 @@ func TestOverlaysPersistPreservesCamera(t *testing.T) {
 		t.Fatalf("cameraPolar clobbered by overlay write")
 	}
 	// Overlay landed.
-	ov, found := loadSceneOverlays(sceneCameraPath(root))
+	ov, found := loadSceneOverlays(overlaysFilePath(root), sceneCameraPath(root))
 	if !found || ov.sceneToriVisible {
 		t.Fatalf("overlay not persisted alongside camera (found=%v ov=%+v)", found, ov)
 	}
@@ -221,7 +221,7 @@ func TestOverlaysPersistMonolithicForm(t *testing.T) {
 	md.persist.overlays.flush()
 
 	// Load back via sceneCameraPath.
-	ov, found := loadSceneOverlays(sceneCameraPath(topoFile))
+	ov, found := loadSceneOverlays(overlaysFilePath(topoFile), sceneCameraPath(topoFile))
 	if !found {
 		t.Fatal("loadSceneOverlays found no overlay keys after flush on monolithic form")
 	}

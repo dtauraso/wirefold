@@ -73,7 +73,8 @@ func loadTree(root string) (topoSpec, error) {
 	for _, nodeID := range nodeDirs {
 		nodeDir := filepath.Join(nodesDir, nodeID)
 
-		// meta.json — required
+		// meta.json — required. Still owns static node identity (id/type/r/gate) and, for a
+		// PRE-SPLIT topology, also the position/local-polars fields inline (legacy shape).
 		metaPath := filepath.Join(nodeDir, "meta.json")
 		metaRaw, err := os.ReadFile(metaPath)
 		if err != nil {
@@ -101,6 +102,33 @@ func loadTree(root string) (topoSpec, error) {
 			LocalPoleTheta:  meta.LocalPoleTheta,
 			LocalPolePhi:    meta.LocalPolePhi,
 			Gate:            meta.Gate,
+		}
+
+		// position.json — the POST-SPLIT position writer's file (quant_offset_persist.go
+		// writeQuantOffset). Present → overrides meta.json's (possibly stale/legacy) position
+		// fields. Absent → sn keeps whatever meta.json carried above (old-format topology).
+		var pf positionFileJSON
+		if readJSONIfExists(positionFilePath(root, nodeID), &pf) {
+			r, th, ph := pf.ScenePolarR, pf.ScenePolarTheta, pf.ScenePolarPhi
+			qt, qp, qr := pf.QuantITheta, pf.QuantIPhi, pf.QuantIR
+			st, sp, sr := pf.StepTheta, pf.StepPhi, pf.StepR
+			sn.ScenePolarR, sn.ScenePolarTheta, sn.ScenePolarPhi = &r, &th, &ph
+			sn.QuantITheta, sn.QuantIPhi, sn.QuantIR = &qt, &qp, &qr
+			sn.StepTheta, sn.StepPhi, sn.StepR = &st, &sp, &sr
+		}
+
+		// local-polars.json — the POST-SPLIT local-polars writer's file (quant_offset_persist.go
+		// WriteLocalPolars). Present → overrides meta.json's legacy localPolars/pole fields.
+		var lpf localPolarsFileJSON
+		readJSONBestEffort(localPolarsFilePath(root, nodeID), &lpf)
+		if lpf.LocalPolars != nil {
+			lps := make([]specLocalPolar, 0, len(lpf.LocalPolars))
+			for _, lp := range lpf.LocalPolars {
+				lps = append(lps, specLocalPolar(lp))
+			}
+			sn.LocalPolars = lps
+			pt, pp := lpf.LocalPoleTheta, lpf.LocalPolePhi
+			sn.LocalPoleTheta, sn.LocalPolePhi = &pt, &pp
 		}
 
 		// data.json — optional

@@ -77,8 +77,11 @@ func TestSceneJSONPathBothForms(t *testing.T) {
 // topologyPath left node-pos / anchor persister root == "" (no-op) while camera
 // + overlays worked correctly.
 func TestAllPersistersConsistentBothForms(t *testing.T) {
-	wantSceneJSON := func(root string) string {
-		return filepath.Join(root, "view", "scene.json")
+	wantCameraJSON := func(root string) string {
+		return filepath.Join(root, "view", "camera.json")
+	}
+	wantOverlaysJSON := func(root string) string {
+		return filepath.Join(root, "view", "overlays.json")
 	}
 
 	run := func(t *testing.T, label, topologyPath, expectedRoot string) {
@@ -90,21 +93,19 @@ func TestAllPersistersConsistentBothForms(t *testing.T) {
 		md.EnableViewpointPersist(topologyPath)
 		md.EnableEditPersist(topologyPath)
 
-		want := wantSceneJSON(expectedRoot)
-
-		// 1. viewpoint persister (camera)
+		// 1. viewpoint persister (camera) — its own file, camera.json.
 		if md.persist.vp == nil {
 			t.Fatalf("[%s] vpPersist nil", label)
 		}
-		if md.persist.vp.path != want {
+		if want := wantCameraJSON(expectedRoot); md.persist.vp.path != want {
 			t.Fatalf("[%s] vpPersist.path=%q want %q", label, md.persist.vp.path, want)
 		}
 
-		// 2. overlays persister
+		// 2. overlays persister — its own file, overlays.json.
 		if md.persist.overlays == nil {
 			t.Fatalf("[%s] overlaysPersist nil", label)
 		}
-		if md.persist.overlays.path != want {
+		if want := wantOverlaysJSON(expectedRoot); md.persist.overlays.path != want {
 			t.Fatalf("[%s] overlaysPersist.path=%q want %q", label, md.persist.overlays.path, want)
 		}
 

@@ -47,17 +47,38 @@ func writeStar3(t *testing.T) string {
 	return root
 }
 
-// persistedMeta reads and unmarshals <root>/nodes/<id>/meta.json into a raw map, for
-// asserting on the RE-PERSISTED bytes rather than in-memory state.
+// persistedMeta reads and merges <root>/nodes/<id>/{meta,position,local-polars}.json into
+// one raw map, for asserting on the RE-PERSISTED bytes rather than in-memory state. Since
+// the one-file-per-writer split (docs/planning/visual-editor/one-file-per-goroutine.md) the
+// position/local-polars fields live in their OWN files, not meta.json; merging here keeps
+// every existing by-key assertion in this test unchanged.
 func persistedMeta(t *testing.T, root, id string) map[string]json.RawMessage {
 	t.Helper()
+	m := map[string]json.RawMessage{}
 	raw, err := os.ReadFile(filepath.Join(root, "nodes", id, "meta.json"))
 	if err != nil {
 		t.Fatalf("read %s meta.json: %v", id, err)
 	}
-	var m map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &m); err != nil {
 		t.Fatalf("unmarshal %s meta.json: %v (raw=%s)", id, err, raw)
+	}
+	if praw, err := os.ReadFile(positionFilePath(root, id)); err == nil {
+		var pm map[string]json.RawMessage
+		if err := json.Unmarshal(praw, &pm); err != nil {
+			t.Fatalf("unmarshal %s position.json: %v (raw=%s)", id, err, praw)
+		}
+		for k, v := range pm {
+			m[k] = v
+		}
+	}
+	if lraw, err := os.ReadFile(localPolarsFilePath(root, id)); err == nil {
+		var lm map[string]json.RawMessage
+		if err := json.Unmarshal(lraw, &lm); err != nil {
+			t.Fatalf("unmarshal %s local-polars.json: %v (raw=%s)", id, err, lraw)
+		}
+		for k, v := range lm {
+			m[k] = v
+		}
 	}
 	return m
 }

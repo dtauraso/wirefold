@@ -1,22 +1,32 @@
 package Wiring
 
-// scene_persist.go — shared machinery for the four domain persisters in this package
-// (overlays, camera viewpoint, node position, port anchor).
-// Each of those files repeated the same three things: a debounced-coalesce timer, a
-// read-modify-write of a JSON object, and an atomic (tmp+rename) write. This file factors
-// that machinery out once so the four files hold only their domain-specific shape (which
-// key(s) they own, how to marshal/unmarshal them) and wire it in.
+// scene_persist.go — shared machinery for the domain persisters in this package
+// (overlays, camera viewpoint, scene sphere, node position, local polars, port anchor).
+// Each of those files repeated the same two things: a debounced-coalesce timer and an
+// atomic (tmp+rename) write. This file factors that machinery out once so the per-domain
+// files hold only their domain-specific shape (which fields they own, how to marshal them).
 //
-// Two read-modify-write flavors exist because the two persisted-file kinds have different
-// failure semantics:
-//   - scene.json (overlays/camera) is read BEST-EFFORT: an absent or malformed
-//     file yields an empty object and the writer proceeds, because the writer only ever
-//     owns a subset of scene.json's keys and scene.json is allowed to not exist yet (fresh
-//     topology). This intentionally REPLACES an unparsable file rather than blocking the
-//     write — matches every scene.json writer's pre-existing behavior.
-//   - per-entity files (node meta.json, port anchor files) are read REQUIRED: the file must
-//     already exist (a node/port is always written before it can be moved), so an error is
-//     propagated and logged rather than silently proceeding on a fabricated empty object.
+// One-file-per-writer (docs/planning/visual-editor/one-file-per-goroutine.md): every lock
+// that used to live here (sceneFileMu, entityFileMus/entityFileMuMu) existed because TWO
+// WRITERS shared ONE file — three writers read-modify-wrote view/scene.json, and two
+// writers read-modify-wrote nodes/<id>/meta.json. Splitting each shared file into one file
+// per writer (view/camera.json, view/overlays.json, view/sphere.json,
+// nodes/<id>/position.json, nodes/<id>/local-polars.json) removes the sharing, so there is
+// nothing left to serialize — those locks are DELETED, not narrowed. Each new file's writer
+// marshals its own current state fresh and writes the whole file; there is no
+// read-modify-write of a document another goroutine might also be writing.
+//
+// The one exception is nodes/<id>/{inputs,outputs}/<port>.json (port anchor files): those
+// always had exactly one writer (writePortAnchor) — entityReadModifyWrite below is kept,
+// delocked, purely to preserve the port file's OTHER field (`name`) across a write; it was
+// never actually racing a second writer.
+//
+// Old-format compatibility: existing on-disk view/scene.json and nodes/<id>/meta.json (both
+// pre-split, and view/scene.json is a real untracked file on disk today) are NEVER migrated
+// or deleted by this package. Each domain's loader tries its new file first and falls back
+// to reading the corresponding key out of the legacy file when the new file is absent — see
+// loadSceneViewpoint (scene_camera.go), loadSceneOverlays/loadSceneSphere
+// (scene_overlays_persist.go/scene_sphere_persist.go) and loadTree (loader_tree.go).
 
 import (
 	"encoding/json"
@@ -38,10 +48,6 @@ func safeTreePathComponent(s string) bool {
 		!strings.ContainsRune(s, '/') && !strings.ContainsRune(s, '\\') &&
 		s == filepath.Base(s)
 }
-
-// sceneFileMu serializes read-modify-write cycles on view/scene.json across all of its
-// writers (camera, overlays, polar locks) so their field updates never race/clobber.
-var sceneFileMu sync.Mutex
 
 // atomicWriteTmpSuffix is the temp-file suffix writeJSONAtomic uses before renaming into
 // place, so a reader never observes a partially-written file.
@@ -119,32 +125,32 @@ func logPersistErr(label, path string, err error) {
 	fmt.Fprintf(os.Stderr, "%s: write %s: %v\n", label, path, err)
 }
 
-// readSceneObjBestEffort best-effort-reads path (typically scene.json) as a raw-message
-// map for a read-modify-write. An absent or malformed file yields an empty map — see the
-// package doc comment above for why this is intentional rather than an oversight.
-func readSceneObjBestEffort(path string) map[string]json.RawMessage {
-	obj := map[string]json.RawMessage{}
-	if raw, err := os.ReadFile(path); err == nil && len(raw) > 0 {
-		_ = json.Unmarshal(raw, &obj) // best-effort: see package doc comment above
+// readJSONBestEffort reads path and unmarshals it into v; an absent or malformed file
+// leaves v untouched (its zero value) rather than erroring. Used for LEGACY-format fallback
+// reads (the old shared scene.json / meta.json a pre-split topology still has on disk) and
+// anywhere else an absent file is the normal, expected case (e.g. before the first save).
+func readJSONBestEffort(path string, v any) {
+	readJSONIfExists(path, v)
+}
+
+// readJSONIfExists reads path and unmarshals it into v, reporting whether a file was
+// actually present and successfully parsed. Unlike readJSONBestEffort's caller-facing
+// contract (which only cares about v), this distinguishes "file absent" from "file present
+// but its fields happen to be the zero value" — needed wherever a caller must not confuse a
+// genuinely-zero-valued persisted record with no record at all (loader_tree.go's
+// position.json/local-polars.json overlay check).
+func readJSONIfExists(path string, v any) bool {
+	raw, err := os.ReadFile(path)
+	if err != nil || len(raw) == 0 {
+		return false
 	}
-	return obj
+	return json.Unmarshal(raw, v) == nil
 }
 
-// sceneReadModifyWrite locks sceneFileMu, best-effort-reads path's existing object, lets
-// mutate edit it in place (setting only the key(s) the caller owns), then atomically writes
-// it back. This is THE single read-modify-write path for scene.json, shared by the camera,
-// overlays and polar-lock writers so they never race each other.
-func sceneReadModifyWrite(path string, mutate func(obj map[string]json.RawMessage)) error {
-	sceneFileMu.Lock()
-	defer sceneFileMu.Unlock()
-	obj := readSceneObjBestEffort(path)
-	mutate(obj)
-	return writeJSONAtomic(path, obj)
-}
-
-// readEntityObjRequired reads an existing per-entity JSON file (node meta.json, port file)
-// as a raw-message map for a read-modify-write. Unlike readSceneObjBestEffort, the file MUST
-// already exist, so an absence or parse failure is a real error the caller should propagate.
+// readEntityObjRequired reads an existing per-entity JSON file (a port anchor file) as a
+// raw-message map for a read-modify-write. The file MUST already exist (a port is always
+// written before it can be moved), so an error is propagated and logged rather than
+// silently proceeding on a fabricated empty object.
 func readEntityObjRequired(path string) (map[string]json.RawMessage, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -157,37 +163,14 @@ func readEntityObjRequired(path string) (map[string]json.RawMessage, error) {
 	return obj, nil
 }
 
-// entityFileMus serializes read-modify-write cycles PER per-entity file path, so independent
-// writers of the SAME nodes/<id>/meta.json (WriteLocalPolars called synchronously during a
-// drag AND writeQuantOffset fired from the quant-offset debounce timer goroutine) never race:
-// without this, two concurrent read-modify-writes both write meta.json.tmp and the second
-// os.Rename fails with "no such file or directory" (the first already renamed the shared tmp),
-// AND a lost-update can drop one writer's fields. Analogous to sceneFileMu for scene.json but
-// keyed per path so different nodes still persist concurrently.
-var (
-	entityFileMuMu sync.Mutex
-	entityFileMus  = map[string]*sync.Mutex{}
-)
-
-func entityFileMu(path string) *sync.Mutex {
-	entityFileMuMu.Lock()
-	defer entityFileMuMu.Unlock()
-	mu, ok := entityFileMus[path]
-	if !ok {
-		mu = &sync.Mutex{}
-		entityFileMus[path] = mu
-	}
-	return mu
-}
-
 // entityReadModifyWrite reads a required per-entity JSON file, lets mutate edit it, then
-// atomically writes it back. Shared by the node-position and port-anchor writers. The whole
-// read→mutate→write is held under a per-path lock (entityFileMu) so concurrent writers of the
-// same file serialize instead of racing the shared meta.json.tmp rename.
+// atomically writes it back. Used only by the port-anchor writer (writePortAnchor) to
+// preserve a port file's other field (`name`) across an anchor-only write. UNLOCKED: the
+// port-anchor file has exactly one writer (writePortAnchor itself, from the single
+// anchorPersister timer) — it never shared this file with a second writer the way
+// scene.json / meta.json used to, so there is nothing to serialize here. Do not add a
+// second writer of a port file without re-examining this.
 func entityReadModifyWrite(path string, mutate func(obj map[string]json.RawMessage)) error {
-	mu := entityFileMu(path)
-	mu.Lock()
-	defer mu.Unlock()
 	obj, err := readEntityObjRequired(path)
 	if err != nil {
 		return err

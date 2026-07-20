@@ -94,6 +94,18 @@ tools/topology-vscode/gen-node-defs
 /topology/view/scene.json
 /topology/view/scene.json.tmp
 
+# One-file-per-writer split of the scene sidecar above
+# (docs/planning/visual-editor/one-file-per-goroutine.md): camera/overlays/sphere are the
+# same kind of auto-written, locally-preferred view state scene.json was — not for VCS.
+# nodes/<id>/position.json and local-polars.json are NOT listed here: they carry the same
+# authoritative per-node data meta.json does (which IS tracked), so they stay trackable too.
+/topology/view/camera.json
+/topology/view/camera.json.tmp
+/topology/view/overlays.json
+/topology/view/overlays.json.tmp
+/topology/view/sphere.json
+/topology/view/sphere.json.tmp
+
 # Hook block log (local audit trail, not for VCS)
 .claude/hooks/go-blocks.log
 

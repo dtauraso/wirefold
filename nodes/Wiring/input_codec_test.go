@@ -88,8 +88,8 @@ func TestDecodeTruncatedAndUnknown(t *testing.T) {
 }
 
 // TestSavePersistsCurrentOverlayState applies an overlays TOGGLE edit (flipping Go's held
-// state), then a save, and asserts scene.json reflects the CURRENT (post-edit) state — not a
-// stale/empty snapshot. This is the "Go persists its own current topology" guarantee.
+// state), then a save, and asserts overlays.json reflects the CURRENT (post-edit) state —
+// not a stale/empty snapshot. This is the "Go persists its own current topology" guarantee.
 func TestSavePersistsCurrentOverlayState(t *testing.T) {
 	root := t.TempDir()
 	md := newMoveDispatch(map[string]nodeGeom{}, map[string]EdgeEndpoints{}, nil, nil, nil, NewRealClock(), nil)
@@ -99,13 +99,13 @@ func TestSavePersistsCurrentOverlayState(t *testing.T) {
 		t.Fatal("decode toggle failed")
 	}
 	applyEdit(toggle, md, nil, nil)
-	if err := writeSceneOverlays(sceneCameraPath(root), md.ov); err != nil {
+	if err := writeSceneOverlays(overlaysFilePath(root), md.ov); err != nil {
 		t.Fatalf("writeSceneOverlays: %v", err)
 	}
-	raw, _ := os.ReadFile(filepath.Join(root, "view", "scene.json"))
+	raw, _ := os.ReadFile(filepath.Join(root, "view", "overlays.json"))
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &obj); err != nil {
-		t.Fatalf("scene.json invalid: %v", err)
+		t.Fatalf("overlays.json invalid: %v", err)
 	}
 	if string(obj["overlaysActive"]) != "false" {
 		t.Fatalf("overlaysActive=%s want false (toggled-off state should persist)", obj["overlaysActive"])
@@ -114,7 +114,7 @@ func TestSavePersistsCurrentOverlayState(t *testing.T) {
 
 // TestFramedPartialReads feeds a framed record ONE BYTE AT A TIME through a pipe and
 // asserts the reader reassembles the frame and applies its side effect (a save writes
-// scene.json).
+// overlays.json).
 func TestFramedPartialReads(t *testing.T) {
 	root := t.TempDir()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -122,7 +122,7 @@ func TestFramedPartialReads(t *testing.T) {
 	pr, pw := io.Pipe()
 	// A real (empty) dispatch so the `save` command has an overlay snapshot to persist.
 	md := newMoveDispatch(map[string]nodeGeom{}, map[string]EdgeEndpoints{}, nil, nil, nil, NewRealClock(), nil)
-	md.EnableEditPersist(root) // arms overlaysPersist so `save` can write scene.json
+	md.EnableEditPersist(root) // arms overlaysPersist so `save` can write overlays.json
 	readerDone := make(chan struct{})
 	go func() {
 		RunStdinReader(ctx, pr, SlotRegistry{}, md, nil, nil)
@@ -140,14 +140,14 @@ func TestFramedPartialReads(t *testing.T) {
 			time.Sleep(100 * time.Microsecond)
 		}
 	}()
-	scenePath := filepath.Join(root, "view", "scene.json")
+	overlaysPath := filepath.Join(root, "view", "overlays.json")
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		if _, err := os.Stat(scenePath); err == nil {
+		if _, err := os.Stat(overlaysPath); err == nil {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("partial-read frame never dispatched (scene.json not written)")
+			t.Fatal("partial-read frame never dispatched (overlays.json not written)")
 		}
 		time.Sleep(2 * time.Millisecond)
 	}

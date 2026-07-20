@@ -280,7 +280,7 @@ func handleSaveMsg(md *MoveDispatch) {
 	md.persist.overlays.schedule(md.ov)
 	// Persist the scene sphere immediately (not debounced) so save reliably activates
 	// the polar-load path (scene_sphere_persist.go LoadSceneSphere) — until the sphere
-	// is in scene.json, reload stays on cartesian x/y/z.
+	// is in sphere.json, reload stays on cartesian x/y/z.
 	md.persist.sphere.flushNow(md.sceneSphere)
 }
 

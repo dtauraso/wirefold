@@ -1,5 +1,6 @@
-// scene_overlays_persist.go — persist + load Go's OWN overlay-visibility state to scene.json
-// (writer + debounced persister + loader + seed, mirroring scene_camera_persist.go).
+// scene_overlays_persist.go — persist + load Go's OWN overlay-visibility state to
+// view/overlays.json (writer + debounced persister + loader + seed, mirroring
+// scene_camera_persist.go).
 //
 // Go owns the overlay flags (overlay_gen.go's overlayState). Persistence has two triggers:
 // the bare `save` command (stdin_reader.go) and — like camera — an ON-CHANGE debounced
@@ -10,74 +11,70 @@
 // LOAD side: loadSceneOverlays reads the keys back (inverting the *Hidden polarity) and
 // MoveDispatch.LoadOverlays installs them into md.ov on startup + emits them so the first
 // snapshot reflects the saved state — closing the toggle→reload→still-toggled round trip.
+// It tries overlays.json first and falls back to the legacy scene.json's overlay keys (a
+// pre-split topology) — see loadSceneOverlays.
 //
-// Read-modify-write, serialized against writeSceneCameraPolar via sceneFileMu, so the
-// Go-owned cameraPolar (and any other fields) survive. The scene.json key names + polarity
-// + default-omission mirror TS's serializeSceneState (webview/state/viewer/types.ts): most
-// flags are visible-sense written only when hidden (false); labelsGlobalHidden/badgesHidden
+// WHOLE-FILE write (one-file-per-writer, docs/planning/visual-editor/one-file-per-goroutine.md):
+// overlays.json holds ONLY these flags and has exactly one writer, so each flush marshals the
+// current overlayState fresh — no read-modify-write, no sceneFileMu (deleted). The key names
+// + polarity + default-omission mirror TS's serializeSceneState (webview/state/viewer/types.ts):
+// most flags are visible-sense written only when hidden (false); labelsGlobalHidden/badgesHidden
 // are hidden-sense written only when hidden (true); a key at its default is deleted so the
 // on-disk shape matches what the editor would have written. An old scene.json that still
 // carries a "badgesHidden" key (from before the occlusion-badge feature was removed) is
 // tolerated: json.Unmarshal into sceneOverlaysFile silently ignores unknown keys, so it is
 // dropped on the next save without needing an explicit migration.
 //
-// The debounce/coalesce timer and the JSON read-modify-write/atomic-write plumbing are
-// shared machinery from scene_persist.go (debouncedPersister, sceneReadModifyWrite,
-// writeJSONAtomic) — this file holds only the overlays-specific shape.
+// The debounce/coalesce timer and the atomic-write plumbing are shared machinery from
+// scene_persist.go (debouncedPersister, writeJSONAtomic) — this file holds only the
+// overlays-specific shape.
 
 package Wiring
 
 import (
 	"encoding/json"
-	"os"
 	"time"
 
 	T "github.com/dtauraso/wirefold/Trace"
 )
 
-// writeSceneOverlays writes the current overlay-visibility snapshot into
-// scenePath (the resolved scene.json path, e.g. from sceneCameraPath), preserving
-// every other field (cameraPolar, camera3d, …).
-func writeSceneOverlays(scenePath string, ov overlayState) error {
-	return sceneReadModifyWrite(scenePath, func(obj map[string]json.RawMessage) {
-		// visible-sense: default true — write `false` only when hidden, else drop the key.
-		setVisible := func(key string, visible bool) {
-			if visible {
-				delete(obj, key)
-			} else {
-				obj[key] = json.RawMessage("false")
-			}
+// writeSceneOverlays writes the current overlay-visibility snapshot as the WHOLE content of
+// overlaysPath (overlays.json) — the sole writer of that file, so each call builds a fresh
+// object (no read-modify-write of any prior content).
+func writeSceneOverlays(overlaysPath string, ov overlayState) error {
+	obj := map[string]json.RawMessage{}
+	// visible-sense: default true — write `false` only when hidden, else drop the key.
+	setVisible := func(key string, visible bool) {
+		if !visible {
+			obj[key] = json.RawMessage("false")
 		}
-		// hidden-sense: default visible — write `true` only when hidden, else drop the key.
-		setHidden := func(key string, visible bool) {
-			if visible {
-				delete(obj, key)
-			} else {
-				obj[key] = json.RawMessage("true")
-			}
+	}
+	// hidden-sense: default visible — write `true` only when hidden, else drop the key.
+	setHidden := func(key string, visible bool) {
+		if !visible {
+			obj[key] = json.RawMessage("true")
 		}
+	}
 
-		setVisible("sceneToriVisible", ov.sceneToriVisible)
-		setVisible("scenePolesVisible", ov.scenePolesVisible)
-		setVisible("nodePolesVisible", ov.nodePolesVisible)
-		setVisible("selSpherePolesVisible", ov.selSpherePolesVisible)
-		setVisible("handholdsVisible", ov.handholdsVisible)
-		setVisible("overlaysActive", ov.overlaysVisible)
-		setHidden("labelsGlobalHidden", ov.labelsGlobalVisible)
-		// doubleLinksVisible is visible-sense with a FALSE default — write `true` only when on.
-		if ov.doubleLinksVisible {
-			obj["doubleLinksVisible"] = json.RawMessage("true")
-		} else {
-			delete(obj, "doubleLinksVisible")
-		}
-	})
+	setVisible("sceneToriVisible", ov.sceneToriVisible)
+	setVisible("scenePolesVisible", ov.scenePolesVisible)
+	setVisible("nodePolesVisible", ov.nodePolesVisible)
+	setVisible("selSpherePolesVisible", ov.selSpherePolesVisible)
+	setVisible("handholdsVisible", ov.handholdsVisible)
+	setVisible("overlaysActive", ov.overlaysVisible)
+	setHidden("labelsGlobalHidden", ov.labelsGlobalVisible)
+	// doubleLinksVisible is visible-sense with a FALSE default — write `true` only when on.
+	if ov.doubleLinksVisible {
+		obj["doubleLinksVisible"] = json.RawMessage("true")
+	}
+	return writeJSONAtomic(overlaysPath, obj)
 }
 
-// overlaysPersister coalesces rapid overlay toggles/sets into a debounced read-modify-write
-// of scene.json's overlay-visibility keys. Owned by MoveDispatch (armed by EnableEditPersist).
-// path == "" (tests that never arm) → no-op.
+// overlaysPersister coalesces rapid overlay toggles/sets into a debounced whole-file write
+// of overlays.json. Owned by MoveDispatch (armed by EnableEditPersist). path == "" (tests
+// that never arm) → no-op.
 type overlaysPersister struct {
-	path     string // scene.json path (sceneCameraPath(topologyPath))
+	path     string // overlays.json path (overlaysFilePath(topologyPath))
 	debounce time.Duration
 	debouncedPersister[overlayState]
 }
@@ -90,7 +87,7 @@ func (p *overlaysPersister) schedule(ov overlayState) {
 	p.arm(p.debounce, ov, p.flush)
 }
 
-// flush writes the pending overlay snapshot to scene.json (read-modify-write) and clears it.
+// flush writes the pending overlay snapshot to overlays.json (whole-file write) and clears it.
 func (p *overlaysPersister) flush() {
 	ov, has := p.take()
 	if !has {
@@ -129,22 +126,21 @@ type sceneOverlaysFile struct {
 	DoubleLinksVisible    *bool `json:"doubleLinksVisible"`
 }
 
-// loadSceneOverlays reads the persisted overlay-visibility snapshot from scenePath (the
-// resolved scene.json path, e.g. from sceneCameraPath), applying the same key names +
-// polarity the writer used (visible-sense keys straight through; the two *Hidden keys
-// inverted back to visible-sense). Starts from defaultOverlayState so any key the writer
-// omitted (because it was at its default) keeps the code default. The bool return is false
-// when scene.json is absent/malformed OR carries no overlay keys (fresh topology) — the
-// caller then keeps the code defaults.
-func loadSceneOverlays(scenePath string) (overlayState, bool) {
+// loadSceneOverlays reads the persisted overlay-visibility snapshot, applying the same key
+// names + polarity the writer used (visible-sense keys straight through; the two *Hidden
+// keys inverted back to visible-sense). It tries overlaysPath (overlays.json) first and
+// falls back to legacyScenePath (the old shared scene.json, a pre-split topology) when
+// overlaysPath carries no overlay keys. Starts from defaultOverlayState so any key the
+// writer omitted (because it was at its default) keeps the code default. The bool return is
+// false when NEITHER file yields an overlay key (fresh topology) — the caller then keeps the
+// code defaults.
+func loadSceneOverlays(overlaysPath, legacyScenePath string) (overlayState, bool) {
 	ov := defaultOverlayState()
-	raw, err := os.ReadFile(scenePath)
-	if err != nil {
-		return ov, false
-	}
 	var sf sceneOverlaysFile
-	if err := json.Unmarshal(raw, &sf); err != nil {
-		return ov, false
+	readJSONBestEffort(overlaysPath, &sf)
+	if sf == (sceneOverlaysFile{}) {
+		// Legacy fallback: pre-split topology only has scene.json's overlay keys.
+		readJSONBestEffort(legacyScenePath, &sf)
 	}
 	found := false
 	if sf.SceneToriVisible != nil {
@@ -191,8 +187,7 @@ func loadSceneOverlays(scenePath string) (overlayState, bool) {
 // loaded/default state back. topologyPath is passed to sceneCameraPath, which handles both the
 // directory-tree and monolithic forms.
 func (md *MoveDispatch) LoadOverlays(topologyPath string, tr *T.Trace) {
-	scenePath := sceneCameraPath(topologyPath)
-	ov, _ := loadSceneOverlays(scenePath) // ov = defaults with any persisted keys applied
+	ov, _ := loadSceneOverlays(overlaysFilePath(topologyPath), sceneCameraPath(topologyPath)) // ov = defaults with any persisted keys applied
 	if tr != nil {
 		md.ov.SetGuideVisibility(ov, tr) // ALWAYS emit so the buffer reflects the state
 	} else {

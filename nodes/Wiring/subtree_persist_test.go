@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"math"
 	"os"
-	"path/filepath"
 	"testing"
 	"time"
 )
@@ -132,9 +131,9 @@ func TestIndividualSnap_OnlyDraggedNodePersists(t *testing.T) {
 	// dst's meta got its EXACT scene-polar position (the lossless source of truth loaded
 	// verbatim on reload) plus the quantized scalar triple as a self-describing cache; src
 	// is byte-for-byte unchanged.
-	dstRaw, err := os.ReadFile(filepath.Join(root, "nodes", "dst", "meta.json"))
+	dstRaw, err := os.ReadFile(positionFilePath(root, "dst"))
 	if err != nil {
-		t.Fatalf("read dst meta: %v", err)
+		t.Fatalf("read dst position.json: %v", err)
 	}
 	var dst map[string]json.RawMessage
 	_ = json.Unmarshal(dstRaw, &dst)
@@ -150,22 +149,17 @@ func TestIndividualSnap_OnlyDraggedNodePersists(t *testing.T) {
 		t.Fatalf("dst quantIR cache not persisted: %s", dstRaw)
 	}
 
-	// src's persisted meta.json must reflect its UNCHANGED scene-polar position: under
-	// the single-assignment set-c REQUANTIZE model, a dst drag never moves src — only
-	// src's local-polar edge to dst (its own requantized bearing/distance) changes, not
-	// its own scene position. Assert src's persisted scenePolar still matches its
-	// pre-drag world center.
-	srcAfter, err := os.ReadFile(filepath.Join(root, "nodes", "src", "meta.json"))
-	if err != nil {
-		t.Fatalf("read src meta: %v", err)
-	}
-	var srcA map[string]json.RawMessage
-	if err := json.Unmarshal(srcAfter, &srcA); err != nil {
-		t.Fatalf("unmarshal src after: %v", err)
-	}
+	// src's persisted position must reflect its UNCHANGED scene-polar position: under the
+	// single-assignment set-c REQUANTIZE model, a dst drag never moves src — only src's
+	// local-polar edge to dst (its own requantized bearing/distance) changes, not its own
+	// scene position, so src's own position.json is never (re)written; its scenePolar still
+	// lives in meta.json (the legacy inline location) — persistedMeta reads both and merges,
+	// exactly as loadTree does. Assert src's persisted scenePolar still matches its pre-drag
+	// world center.
+	srcA := persistedMeta(t, root, "src")
 	for _, k := range []string{"scenePolarR", "scenePolarTheta", "scenePolarPhi"} {
 		if _, ok := srcA[k]; !ok {
-			t.Fatalf("src %s not persisted: %s", k, srcAfter)
+			t.Fatalf("src %s not persisted: %v", k, srcA)
 		}
 	}
 	var gotP polar

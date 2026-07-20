@@ -7,21 +7,21 @@ import (
 	"time"
 )
 
-// TestSceneSphereRoundTrip: writeSceneSphere then loadSceneSphere returns the same sphere,
-// preserving other scene.json keys.
+// TestSceneSphereRoundTrip: writeSceneSphere then loadSceneSphere returns the same sphere.
+// sphere.json has exactly one writer, so the legacy scene.json (a pre-split topology,
+// pre-seeded with an unrelated cameraPolar key) must be left completely untouched by it.
 func TestSceneSphereRoundTrip(t *testing.T) {
 	dir := t.TempDir()
-	scenePath := sceneCameraPath(dir)
+	scenePath := sceneCameraPath(dir) // legacy shared file
 	if err := os.MkdirAll(filepath.Dir(scenePath), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// Pre-seed an unrelated key to prove read-modify-write preserves it.
 	if err := os.WriteFile(scenePath, []byte(`{"cameraPolar":{"r":42}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
 	want := sceneSphere{Center: vec3{X: 10, Y: -20, Z: 30}, Radius: 250}
-	if err := writeSceneSphere(scenePath, want); err != nil {
+	if err := writeSceneSphere(sphereFilePath(dir), want); err != nil {
 		t.Fatalf("writeSceneSphere: %v", err)
 	}
 	got, ok := loadSceneSphere(dir)
@@ -31,10 +31,10 @@ func TestSceneSphereRoundTrip(t *testing.T) {
 	if got != want {
 		t.Fatalf("round-trip: got %+v want %+v", got, want)
 	}
-	// The unrelated key must survive the sphere write.
+	// The legacy scene.json is untouched — sphere.json is a different file with one writer.
 	raw, _ := os.ReadFile(scenePath)
-	if !contains(string(raw), `"cameraPolar"`) {
-		t.Fatalf("writeSceneSphere clobbered cameraPolar: %s", raw)
+	if string(raw) != `{"cameraPolar":{"r":42}}` {
+		t.Fatalf("writeSceneSphere touched the legacy scene.json: %s", raw)
 	}
 }
 
@@ -106,7 +106,7 @@ func TestSceneSphereContentFitSurvivesReloadAfterMove(t *testing.T) {
 
 func TestSceneSpherePersisterFlushNow(t *testing.T) {
 	dir := t.TempDir()
-	p := &sceneSpherePersister{path: sceneCameraPath(dir), debounce: time.Hour}
+	p := &sceneSpherePersister{path: sphereFilePath(dir), debounce: time.Hour}
 	s := sceneSphere{Center: vec3{X: 1, Y: 2, Z: 3}, Radius: 40}
 	p.flushNow(s)
 
@@ -117,13 +117,4 @@ func TestSceneSpherePersisterFlushNow(t *testing.T) {
 	if got != s {
 		t.Fatalf("flushNow round-trip: got %+v want %+v", got, s)
 	}
-}
-
-func contains(s, sub string) bool {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
 }
