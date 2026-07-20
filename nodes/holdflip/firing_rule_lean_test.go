@@ -9,9 +9,11 @@ import (
 	"github.com/dtauraso/wirefold/nodes/Wiring"
 )
 
-// stepWire continuously StepOnces pw on a short wall-clock poll until ctx is
-// cancelled, matching the production per-cycle StepOnce delivery path.
-func stepWire(ctx context.Context, pw *Wiring.PacedWire) {
+// stepWire continuously StepOnceAts pw on a short wall-clock poll until ctx is
+// cancelled, matching the production per-cycle StepOnceAt delivery path. clk is
+// this goroutine's OWN clock copy (docs/planning/visual-editor/per-goroutine-
+// clock.md); callers must not share it with another goroutine.
+func stepWire(ctx context.Context, pw *Wiring.PacedWire, clk Wiring.Clock) {
 	go func() {
 		for {
 			select {
@@ -19,7 +21,7 @@ func stepWire(ctx context.Context, pw *Wiring.PacedWire) {
 				return
 			default:
 			}
-			pw.StepOnce(ctx)
+			pw.StepOnceAt(ctx, clk.Tick())
 			time.Sleep(time.Millisecond)
 		}
 	}()
@@ -38,19 +40,18 @@ func TestFlipRoundTripLean(t *testing.T) {
 
 	inPw := Wiring.NewPacedWire(latMs*Wiring.PulseSpeedWuPerMs, Wiring.PulseSpeedWuPerMs)
 	clk := Wiring.NewRealClock()
-	inPw.SetClock(clk)
-	stepWire(ctx, inPw)
-	// inSrc is a test-only seeding source on inPw: PlaceDriven places a bead
+	stepWire(ctx, inPw, clk.Copy())
+	// inSrc is a test-only seeding source on inPw: PlaceDrivenAt places a bead
 	// (no walker) that the stepWire loop above then drives to delivery,
 	// reusing the production placement API to inject the test's input value.
 	inSrc := Wiring.NewPacedOutNoGeom(inPw, ctx, "seed", "Out", tr, Wiring.RuleFireAndForget, 0, 0, "")
 
 	outPw := Wiring.NewPacedWire(latMs*Wiring.PulseSpeedWuPerMs, Wiring.PulseSpeedWuPerMs)
-	outPw.SetClock(clk)
 
 	node := &Node{
-		Fire: func() {},
-		In:   Wiring.NewInPaced(inPw, ctx, "hf", "In", tr),
+		Fire:  func() {},
+		Clock: clk,
+		In:    Wiring.NewInPaced(inPw, ctx, "hf", "In", tr),
 		Out: Wiring.NewPacedOutNoGeom(outPw, ctx, "hf", "Out", tr,
 			Wiring.RuleFireAndForget, latMs*Wiring.PulseSpeedWuPerMs, latMs, ""),
 	}
@@ -71,13 +72,13 @@ func TestFlipRoundTripLean(t *testing.T) {
 		t.Fatalf("timeout waiting for flipped value %d", want)
 	}
 
-	if !inSrc.PlaceDriven(0).Live() {
-		t.Fatal("PlaceDriven returned false")
+	if !inSrc.PlaceDrivenAt(0, clk.Tick()).Live() {
+		t.Fatal("PlaceDrivenAt returned false")
 	}
 	expectFlip(1) // 1-0 = 1
 
-	if !inSrc.PlaceDriven(1).Live() {
-		t.Fatal("PlaceDriven returned false")
+	if !inSrc.PlaceDrivenAt(1, clk.Tick()).Live() {
+		t.Fatal("PlaceDrivenAt returned false")
 	}
 	expectFlip(0) // 1-1 = 0
 

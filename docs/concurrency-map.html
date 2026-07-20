@@ -1,0 +1,742 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>wirefold — concurrency map</title>
+<style>
+  :root {
+    --ground:#F2F4F7; --surface:#FFFFFF; --plate:#FAFBFC;
+    --ink:#131A24; --muted:#5B6779; --faint:#8894A6;
+    --line:#D3D9E2; --line-strong:#B7C0CD;
+    --signal:#C06A12; --flow:#2E7D9A; --hazard:#A8443C; --ok:#3B7350;
+    --signal-wash:#F6ECDF; --flow-wash:#E4EFF3; --hazard-wash:#F6E6E4; --ok-wash:#E4EFE8;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground:#0D1219; --surface:#141C26; --plate:#111925;
+      --ink:#E4E9F0; --muted:#94A1B2; --faint:#6C7A8B;
+      --line:#26313F; --line-strong:#3A4859;
+      --signal:#E8A147; --flow:#57AECB; --hazard:#D2685E; --ok:#6FA783;
+      --signal-wash:#241B10; --flow-wash:#0F2029; --hazard-wash:#251413; --ok-wash:#12241A;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:#0D1219; --surface:#141C26; --plate:#111925;
+    --ink:#E4E9F0; --muted:#94A1B2; --faint:#6C7A8B;
+    --line:#26313F; --line-strong:#3A4859;
+    --signal:#E8A147; --flow:#57AECB; --hazard:#D2685E; --ok:#6FA783;
+    --signal-wash:#241B10; --flow-wash:#0F2029; --hazard-wash:#251413; --ok-wash:#12241A;
+  }
+  :root[data-theme="light"] {
+    --ground:#F2F4F7; --surface:#FFFFFF; --plate:#FAFBFC;
+    --ink:#131A24; --muted:#5B6779; --faint:#8894A6;
+    --line:#D3D9E2; --line-strong:#B7C0CD;
+    --signal:#C06A12; --flow:#2E7D9A; --hazard:#A8443C; --ok:#3B7350;
+    --signal-wash:#F6ECDF; --flow-wash:#E4EFF3; --hazard-wash:#F6E6E4; --ok-wash:#E4EFE8;
+  }
+
+  * { box-sizing:border-box; }
+  body {
+    margin:0; background:var(--ground); color:var(--ink);
+    font-family:var(--sans); line-height:1.55;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap { max-width:1180px; margin:0 auto; padding:0 24px 80px; }
+
+  header { border-bottom:1px solid var(--line); background:var(--surface); }
+  .head-inner { max-width:1180px; margin:0 auto; padding:28px 24px 0; }
+  .eyebrow {
+    font-family:var(--mono); font-size:11px; letter-spacing:.14em;
+    text-transform:uppercase; color:var(--faint); margin:0 0 10px;
+  }
+  h1 {
+    font-family:var(--mono); font-weight:600; font-size:clamp(22px,3.2vw,31px);
+    margin:0 0 8px; letter-spacing:-.01em; text-wrap:balance;
+  }
+  .sub { margin:0 0 22px; color:var(--muted); max-width:66ch; font-size:15px; }
+
+  .tabs { display:flex; gap:2px; flex-wrap:wrap; }
+  .tab {
+    font-family:var(--mono); font-size:12.5px; letter-spacing:.02em;
+    background:none; border:1px solid transparent; border-bottom:none;
+    color:var(--muted); padding:10px 15px; cursor:pointer;
+    border-radius:5px 5px 0 0; position:relative; top:1px;
+  }
+  .tab:hover { color:var(--ink); }
+  .tab[aria-selected="true"] {
+    background:var(--ground); border-color:var(--line);
+    color:var(--ink); font-weight:600;
+  }
+  .tab:focus-visible { outline:2px solid var(--flow); outline-offset:2px; }
+
+  .panel { display:none; padding-top:34px; }
+  .panel[data-active] { display:block; }
+
+  .layout { display:grid; grid-template-columns:minmax(0,1fr) 290px; gap:28px; align-items:start; }
+  @media (max-width:900px){ .layout { grid-template-columns:minmax(0,1fr); } }
+
+  .plate {
+    background:var(--plate); border:1px solid var(--line);
+    border-radius:8px; padding:22px; overflow-x:auto;
+  }
+  .plate svg { display:block; min-width:640px; width:100%; height:auto; }
+  .plate-cap {
+    font-family:var(--mono); font-size:11px; color:var(--faint);
+    letter-spacing:.08em; text-transform:uppercase; margin:14px 0 0;
+  }
+
+  .rail h2 { font-family:var(--mono); font-size:13px; margin:0 0 10px; letter-spacing:.01em; }
+  .rail p { margin:0 0 14px; font-size:14px; color:var(--muted); }
+  .rail code, .plate code { font-family:var(--mono); font-size:.9em; color:var(--ink); }
+
+  .stat { display:flex; gap:14px; margin:0 0 18px; flex-wrap:wrap; }
+  .stat div { flex:1 1 90px; }
+  .stat b {
+    display:block; font-family:var(--mono); font-size:23px;
+    font-variant-numeric:tabular-nums; letter-spacing:-.02em;
+  }
+  .stat span {
+    font-family:var(--mono); font-size:10.5px; letter-spacing:.09em;
+    text-transform:uppercase; color:var(--faint);
+  }
+
+  .verdict {
+    display:inline-block; font-family:var(--mono); font-size:10.5px;
+    letter-spacing:.09em; text-transform:uppercase; padding:3px 8px;
+    border-radius:3px; border:1px solid;
+  }
+  .v-ok { color:var(--ok); border-color:var(--ok); background:var(--ok-wash); }
+  .v-no { color:var(--hazard); border-color:var(--hazard); background:var(--hazard-wash); }
+  .v-gone { color:var(--faint); border-color:var(--line-strong); }
+
+  table { width:100%; border-collapse:collapse; margin:22px 0 0; font-size:13.5px; }
+  th, td { text-align:left; padding:10px 12px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th {
+    font-family:var(--mono); font-size:10.5px; letter-spacing:.09em;
+    text-transform:uppercase; color:var(--faint); font-weight:600;
+  }
+  td:first-child { font-family:var(--mono); font-size:12.5px; white-space:nowrap; }
+  .tbl-wrap { overflow-x:auto; }
+
+  .note {
+    border-left:2px solid var(--signal); background:var(--signal-wash);
+    padding:12px 15px; margin:20px 0 0; font-size:13.5px;
+  }
+  .note b { font-family:var(--mono); font-size:12px; }
+
+  /* SVG diagram tokens */
+  .d-box { fill:var(--surface); stroke:var(--line-strong); stroke-width:1.2; }
+  .d-box-flow { fill:var(--flow-wash); stroke:var(--flow); stroke-width:1.2; }
+  .d-box-sig  { fill:var(--signal-wash); stroke:var(--signal); stroke-width:1.2; }
+  .d-box-haz  { fill:var(--hazard-wash); stroke:var(--hazard); stroke-width:1.2; }
+  .d-box-passive { fill:none; stroke:var(--signal); stroke-width:1.4; stroke-dasharray:5 3; }
+  .d-group { fill:none; stroke:var(--line); stroke-width:1; stroke-dasharray:3 3; }
+  .d-t  { font-family:var(--mono); font-size:11px; fill:var(--ink); }
+  .d-ts { font-family:var(--mono); font-size:9.5px; fill:var(--muted); }
+  .d-tl { font-family:var(--mono); font-size:9.5px; fill:var(--faint); letter-spacing:.08em; }
+  .d-arrow { stroke:var(--line-strong); stroke-width:1.3; fill:none; }
+  .d-arrow-sig { stroke:var(--signal); stroke-width:1.6; fill:none; }
+  .d-arrow-flow { stroke:var(--flow); stroke-width:1.4; fill:none; }
+  .d-arrow-x { stroke:var(--hazard); stroke-width:1.4; fill:none; stroke-dasharray:4 3; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="head-inner">
+    <p class="eyebrow">wirefold · go network</p>
+    <h1>Concurrency map</h1>
+    <p class="sub">
+      Goroutines here are the architecture, not a way to serve load. One per node, one per edge,
+      one per wire — so the count scales with the graph you draw, and every shared boundary
+      between them is enumerable.
+    </p>
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" id="t-goroutines" aria-controls="p-goroutines" aria-selected="true">goroutines</button>
+      <button class="tab" role="tab" id="t-mutexes"    aria-controls="p-mutexes"    aria-selected="false">mutex patterns</button>
+      <button class="tab" role="tab" id="t-drag"       aria-controls="p-drag"       aria-selected="false">a drag</button>
+      <button class="tab" role="tab" id="t-bead"       aria-controls="p-bead"       aria-selected="false">a bead</button>
+      <button class="tab" role="tab" id="t-clock"      aria-controls="p-clock"      aria-selected="false">the clock question</button>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+<!-- ───────────────────────── GOROUTINES ───────────────────────── -->
+<section class="panel" id="p-goroutines" role="tabpanel" aria-labelledby="t-goroutines" data-active>
+  <div class="layout">
+    <div>
+      <div class="plate">
+        <svg viewBox="0 0 860 450" role="img" aria-label="Goroutines that run for a nine node, ten edge graph, grouped into per-node, per-edge and singleton goroutines.">
+          <text class="d-tl" x="0" y="12">PER NODE  × 9</text>
+          <rect class="d-group" x="0" y="22" width="270" height="216" rx="6"/>
+          <rect class="d-box-flow" x="18" y="42" width="234" height="34" rx="4"/>
+          <text class="d-t" x="30" y="63">nodeMover.run</text>
+          <text class="d-ts" x="196" y="63">inbox</text>
+          <rect class="d-box-flow" x="18" y="88" width="234" height="34" rx="4"/>
+          <text class="d-t" x="30" y="109">outbox.run</text>
+          <text class="d-ts" x="176" y="109">sender</text>
+          <rect class="d-box-flow" x="18" y="134" width="234" height="34" rx="4"/>
+          <text class="d-t" x="30" y="155">node kind loop</text>
+          <text class="d-ts" x="186" y="155">fires</text>
+          <rect class="d-box-flow" x="18" y="176" width="234" height="30" rx="4"/>
+          <text class="d-t" x="30" y="195">DriveHeld</text>
+          <text class="d-ts" x="120" y="195">one per driven output</text>
+          <text class="d-ts" x="18" y="224">writes only its own position</text>
+
+          <text class="d-tl" x="300" y="12">PER EDGE  × 10</text>
+          <rect class="d-group" x="300" y="22" width="250" height="216" rx="6"/>
+          <rect class="d-box-flow" x="318" y="42" width="214" height="34" rx="4"/>
+          <text class="d-t" x="330" y="63">edgeMover.run</text>
+          <text class="d-ts" x="318" y="88">holds both endpoints; draws the curve</text>
+
+          <rect class="d-box-passive" x="318" y="106" width="214" height="62" rx="4"/>
+          <text class="d-t" x="330" y="126">PacedWire</text>
+          <text class="d-ts" x="330" y="142">NOT a goroutine —</text>
+          <text class="d-ts" x="330" y="158">stepped by the source node</text>
+          <text class="d-ts" x="318" y="188">passive struct: inflight · delivered</text>
+
+          <text class="d-tl" x="580" y="12">SINGLETONS</text>
+          <rect class="d-group" x="580" y="22" width="270" height="216" rx="6"/>
+          <rect class="d-box" x="598" y="42" width="234" height="34" rx="4"/>
+          <text class="d-t" x="610" y="63">Trace drain</text>
+          <rect class="d-box" x="598" y="88" width="234" height="34" rx="4"/>
+          <text class="d-t" x="610" y="109">stdin reader</text>
+          <text class="d-ts" x="740" y="109">gestures</text>
+          <rect class="d-box" x="598" y="134" width="234" height="34" rx="4"/>
+          <text class="d-t" x="610" y="155">persist timers</text>
+          <text class="d-ts" x="742" y="155">debounced</text>
+          <text class="d-ts" x="598" y="224">one each, whole process</text>
+
+          <line class="d-arrow" x1="430" y1="256" x2="430" y2="278"/>
+          <path class="d-arrow" d="M426 272 L430 280 L434 272"/>
+
+          <rect class="d-box" x="150" y="282" width="560" height="62" rx="5"/>
+          <text class="d-t" x="176" y="308">≈ 45 long-lived goroutines</text>
+          <text class="d-ts" x="176" y="328">for a 9-node / 10-edge graph — all running continuously, all session</text>
+
+          <text class="d-tl" x="150" y="376">SCALING</text>
+          <line class="d-arrow-flow" x1="150" y1="386" x2="710" y2="386"/>
+          <text class="d-ts" x="150" y="406">add a node in the editor</text>
+          <text class="d-ts" x="470" y="406">→ you add goroutines</text>
+          <text class="d-ts" x="150" y="424">the concurrency structure is the picture you drew, not a function of load</text>
+        </svg>
+        <p class="plate-cap">spawn sites: node_mover.go · node_move.go · main.go · gatecommon/drive.go</p>
+      </div>
+    </div>
+    <aside class="rail">
+      <div class="stat">
+        <div><b>~40</b><span>goroutines</span></div>
+        <div><b>26</b><span>sync sites</span></div>
+      </div>
+      <h2>Why this is unusual</h2>
+      <p>
+        In a typical Go service, goroutines are short-lived — one per request, sharing almost
+        nothing, handing off through a channel and dying. The race surface is small and uniform.
+      </p>
+      <p>
+        Here they are long-lived and graph-shaped. They run the whole session, they both
+        message-pass <em>and</em> touch shared state, and their number is set by the topology
+        on screen.
+      </p>
+      <h2>The ownership rule</h2>
+      <p>
+        A node writes only itself. No coordinator, no worklist. Almost all state is therefore
+        protected by nothing at all — which is what makes the handful of sync sites worth
+        enumerating: each one marks a place that rule is deliberately crossed.
+      </p>
+    </aside>
+  </div>
+</section>
+
+<!-- ───────────────────────── MUTEXES ───────────────────────── -->
+<section class="panel" id="p-mutexes" role="tabpanel" aria-labelledby="t-mutexes">
+  <div class="layout">
+    <div>
+      <div class="plate">
+        <svg viewBox="0 0 860 800" role="img" aria-label="The four mutex patterns shown as the specific calls each goroutine makes: identity reads versus position writes, message enqueue and bead handling, clock ticks and trace emissions, and the refuted holder access.">
+          <!-- ── 1 anti-tearing ── -->
+          <text class="d-tl" x="0" y="12">1 · ANTI-TEARING — geomMu, now deleted</text>
+          <rect class="d-group" x="0" y="22" width="860" height="120" rx="6"/>
+
+          <rect class="d-box-flow" x="18" y="40" width="176" height="28" rx="4"/>
+          <text class="d-ts" x="30" y="59">mover: applyCenter()</text>
+          <line class="d-arrow-sig" x1="196" y1="54" x2="316" y2="54"/>
+          <path class="d-arrow-sig" d="M308 50 L318 54 L308 58"/>
+          <text class="d-ts" x="206" y="47">writes every move</text>
+          <rect class="d-box-sig" x="320" y="40" width="200" height="28" rx="4"/>
+          <text class="d-ts" x="332" y="59">ScenePolar · HasPos · ReachR</text>
+
+          <rect class="d-box" x="18" y="86" width="176" height="28" rx="4"/>
+          <text class="d-ts" x="30" y="105">gesture: NodeKind()</text>
+          <line class="d-arrow-flow" x1="196" y1="100" x2="316" y2="100"/>
+          <path class="d-arrow-flow" d="M308 96 L318 100 L308 104"/>
+          <text class="d-ts" x="210" y="93">reads only Kind</text>
+          <rect class="d-box" x="320" y="86" width="200" height="28" rx="4"/>
+          <text class="d-ts" x="332" y="105">nodeIdentity — never written</text>
+
+          <text class="d-ts" x="548" y="59">two different structs now,</text>
+          <text class="d-ts" x="548" y="76">so nothing can tear —</text>
+          <text class="d-ts" x="548" y="93">live position reaches other</text>
+          <text class="d-ts" x="548" y="110">goroutines via snap atomic.Pointer</text>
+
+          <!-- ── 2 queues ── -->
+          <text class="d-tl" x="0" y="176">2 · QUEUES — outbox.mu + cond, PacedWire.mu</text>
+          <rect class="d-group" x="0" y="186" width="860" height="140" rx="6"/>
+
+          <rect class="d-box-flow" x="18" y="204" width="150" height="28" rx="4"/>
+          <text class="d-ts" x="30" y="223">X.handle()</text>
+          <line class="d-arrow-sig" x1="170" y1="218" x2="222" y2="218"/>
+          <path class="d-arrow-sig" d="M214 214 L224 218 L214 222"/>
+          <text class="d-ts" x="172" y="211">enqueue</text>
+          <rect class="d-box-sig" x="226" y="204" width="140" height="28" rx="4"/>
+          <text class="d-ts" x="238" y="223">X's outbox queue</text>
+          <line class="d-arrow-sig" x1="368" y1="218" x2="420" y2="218"/>
+          <path class="d-arrow-sig" d="M412 214 L422 218 L412 222"/>
+          <text class="d-ts" x="372" y="211">sender</text>
+          <rect class="d-box-flow" x="424" y="204" width="150" height="28" rx="4"/>
+          <text class="d-ts" x="436" y="223">M.inbox</text>
+          <text class="d-ts" x="590" y="223">handler never blocks → no deadlock</text>
+
+          <rect class="d-box-flow" x="18" y="256" width="150" height="28" rx="4"/>
+          <text class="d-ts" x="30" y="275">source: PlaceDriven</text>
+          <rect class="d-box-flow" x="18" y="290" width="150" height="24" rx="4"/>
+          <text class="d-ts" x="30" y="307">source: StepOnce</text>
+          <rect class="d-box-flow" x="424" y="256" width="150" height="28" rx="4"/>
+          <text class="d-ts" x="436" y="275">dest: PollRecv</text>
+          <rect class="d-box-flow" x="424" y="290" width="150" height="24" rx="4"/>
+          <text class="d-ts" x="436" y="307">edge: ReviseInFlight…</text>
+          <rect class="d-box-sig" x="200" y="266" width="190" height="36" rx="4"/>
+          <text class="d-ts" x="212" y="288">inflight · delivered</text>
+          <line class="d-arrow-sig" x1="170" y1="284" x2="196" y2="284"/>
+          <line class="d-arrow-sig" x1="392" y1="284" x2="420" y2="284"/>
+          <text class="d-ts" x="590" y="284">three goroutines, one bead list</text>
+
+          <!-- ── 3 shared services: two buses, service left, owners tapped right ── -->
+          <text class="d-tl" x="0" y="360">3 · SHARED SERVICES — the service, who owns each tap, and the wiring</text>
+          <rect class="d-group" x="0" y="370" width="860" height="282" rx="6"/>
+
+          <!-- ── bus A: the clock ── -->
+          <text class="d-tl" x="20" y="392">SHARED STATE — asks “when?”</text>
+          <rect class="d-box-passive" x="20" y="402" width="140" height="196" rx="5"/>
+          <text class="d-t"  x="34" y="426">RealClock</text>
+          <text class="d-ts" x="34" y="444">passive object —</text>
+          <text class="d-ts" x="34" y="462">NOT a goroutine</text>
+          <text class="d-ts" x="34" y="486">Tick() computes</text>
+          <text class="d-ts" x="34" y="500">on demand; nobody</text>
+          <text class="d-ts" x="34" y="514">is driven by it</text>
+          <text class="d-ts" x="34" y="574">mu</text>
+
+          <line class="d-arrow-flow" x1="160" y1="428" x2="204" y2="428"/>
+          <rect class="d-box-flow" x="214" y="402" width="196" height="38" rx="4" opacity=".35"/>
+          <rect class="d-box-flow" x="210" y="406" width="196" height="38" rx="4" opacity=".6"/>
+          <rect class="d-box-flow" x="206" y="410" width="196" height="38" rx="4"/>
+          <text class="d-t"  x="218" y="427">node's own loop</text>
+          <text class="d-ts" x="218" y="441">× 9  —  SleepCycle · StepOnce</text>
+
+          <line class="d-arrow-flow" x1="160" y1="486" x2="204" y2="486"/>
+          <rect class="d-box-flow" x="214" y="460" width="196" height="38" rx="4" opacity=".35"/>
+          <rect class="d-box-flow" x="210" y="464" width="196" height="38" rx="4" opacity=".6"/>
+          <rect class="d-box-flow" x="206" y="468" width="196" height="38" rx="4"/>
+          <text class="d-t"  x="218" y="485">DriveHeld</text>
+          <text class="d-ts" x="218" y="499">× ~7  —  one per driven output</text>
+
+          <line class="d-arrow-x" x1="160" y1="544" x2="204" y2="544"/>
+          <path class="d-arrow-x" d="M168 540 L158 544 L168 548"/>
+          <rect class="d-box" x="206" y="526" width="196" height="38" rx="4"/>
+          <text class="d-t"  x="218" y="543">stdin goroutine</text>
+          <text class="d-ts" x="218" y="557">one · SetSpeed — only writer</text>
+
+          <text class="d-ts" x="20" y="614">≈16 goroutines read it · 1 writes it · no scheduler</text>
+
+          <!-- ── bus B: the trace ── -->
+          <text class="d-tl" x="450" y="392">SHARED STATE — says “what happened”</text>
+          <rect class="d-box-passive" x="450" y="402" width="140" height="196" rx="5"/>
+          <text class="d-t"  x="464" y="426">Trace</text>
+          <text class="d-ts" x="464" y="444">passive object —</text>
+          <text class="d-ts" x="464" y="462">NOT a goroutine</text>
+          <text class="d-ts" x="464" y="486">the drain below</text>
+          <text class="d-ts" x="464" y="500">is the goroutine</text>
+          <text class="d-ts" x="464" y="574">mu</text>
+
+          <line class="d-arrow-flow" x1="590" y1="428" x2="634" y2="428"/>
+          <path class="d-arrow-flow" d="M598 424 L588 428 L598 432"/>
+          <rect class="d-box-flow" x="644" y="402" width="204" height="38" rx="4" opacity=".35"/>
+          <rect class="d-box-flow" x="640" y="406" width="204" height="38" rx="4" opacity=".6"/>
+          <rect class="d-box-flow" x="636" y="410" width="204" height="38" rx="4"/>
+          <text class="d-t"  x="648" y="427">node's own loop</text>
+          <text class="d-ts" x="648" y="441">× 9  —  Fire · Send · Arrive</text>
+
+          <line class="d-arrow-flow" x1="590" y1="486" x2="634" y2="486"/>
+          <path class="d-arrow-flow" d="M598 482 L588 486 L598 490"/>
+          <rect class="d-box-flow" x="644" y="460" width="204" height="38" rx="4" opacity=".35"/>
+          <rect class="d-box-flow" x="640" y="464" width="204" height="38" rx="4" opacity=".6"/>
+          <rect class="d-box-flow" x="636" y="468" width="204" height="38" rx="4"/>
+          <text class="d-t"  x="648" y="485">nodeMover</text>
+          <text class="d-ts" x="648" y="499">× 9  —  NodeGeometry</text>
+
+          <line class="d-arrow-sig" x1="590" y1="544" x2="634" y2="544"/>
+          <path class="d-arrow-sig" d="M626 540 L636 544 L626 548"/>
+          <rect class="d-box-sig" x="636" y="526" width="204" height="38" rx="4"/>
+          <text class="d-t"  x="648" y="543">drain — THE shared goroutine</text>
+          <text class="d-ts" x="648" y="557">one · reads it back, packs buffer → editor</text>
+
+          <text class="d-ts" x="450" y="614">≈18 goroutines write it · 1 drains it</text>
+          <rect class="d-box-flow" x="20" y="630" width="16" height="11" rx="2"/>
+          <text class="d-ts" x="44" y="640">goroutine — one per node / per output</text>
+          <rect class="d-box-passive" x="330" y="630" width="16" height="11" rx="2"/>
+          <text class="d-ts" x="354" y="640">passive object, mutex-guarded — nothing runs in it</text>
+
+          <!-- ── 4 refuted ── -->
+          <text class="d-tl" x="0" y="716">4 · CLAIMED MULTI-WRITER — LayoutHolder.mu, refuted</text>
+          <rect class="d-group" x="0" y="696" width="860" height="86" rx="6"/>
+          <rect class="d-box-flow" x="18" y="716" width="150" height="28" rx="4"/>
+          <text class="d-ts" x="30" y="735">X: requantize…</text>
+          <line class="d-arrow-x" x1="170" y1="730" x2="270" y2="730"/>
+          <text class="d-ts" x="204" y="722">✕ never</text>
+          <rect class="d-box" x="274" y="716" width="150" height="28" rx="4"/>
+          <text class="d-ts" x="286" y="735">M's holder</text>
+          <text class="d-ts" x="30" y="766">X sends neighborSetC → M's own goroutine writes M's holder</text>
+          <text class="d-ts" x="470" y="735">single-owner, like every other holder</text>
+        </svg>
+        <p class="plate-cap">verified by removing each guard and running go test -race</p>
+      </div>
+
+      <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Mutex</th><th>Contenders</th><th>Verdict</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>geomMu</td>
+            <td>mover goroutine writes; gesture goroutine read only identity</td>
+            <td><span class="verdict v-gone">deleted</span></td>
+          </tr>
+          <tr>
+            <td>outbox.mu</td>
+            <td>handler enqueues; dedicated sender delivers</td>
+            <td><span class="verdict v-ok">confirmed</span></td>
+          </tr>
+          <tr>
+            <td>PacedWire.mu</td>
+            <td>source node · destination node · edge mover</td>
+            <td><span class="verdict v-ok">confirmed</span></td>
+          </tr>
+          <tr>
+            <td>RealClock.mu</td>
+            <td>many Tick readers vs one SetSpeed writer</td>
+            <td><span class="verdict v-ok">confirmed</span></td>
+          </tr>
+          <tr>
+            <td>Trace.mu</td>
+            <td>every node goroutine emits vs drain and Close</td>
+            <td><span class="verdict v-ok">confirmed</span></td>
+          </tr>
+          <tr>
+            <td>LayoutHolder.mu</td>
+            <td>none — every holder is single-owner</td>
+            <td><span class="verdict v-no">refuted</span></td>
+          </tr>
+        </tbody>
+      </table>
+      </div>
+    </div>
+
+    <aside class="rail">
+      <h2>How each was settled</h2>
+      <p>
+        Not by reading the comment. Each guard was removed and the suite re-run under
+        <code>-race</code>. A guard that could be deleted with nothing noticing was treated
+        as unproven, not as safe.
+      </p>
+      <h2>geomMu is gone</h2>
+      <p>
+        Its struct mixed write-once identity with per-move mutable state, so a reader that
+        only wanted <code>Kind</code> had to guard fields it never touched. Splitting the
+        struct removed the hazard instead of guarding it.
+      </p>
+      <h2>Three comments were wrong</h2>
+      <p>
+        Each named the wrong pair of goroutines. That is why every surviving guard now cites
+        a test that fails when it is removed — prose was not holding.
+      </p>
+    </aside>
+  </div>
+</section>
+
+<!-- ───────────────────────── DRAG ───────────────────────── -->
+<section class="panel" id="p-drag" role="tabpanel" aria-labelledby="t-drag">
+  <div class="layout">
+    <div>
+      <div class="plate">
+        <svg viewBox="0 0 860 470" role="img" aria-label="What happens when a node is dragged: the gesture goroutine routes a message to the dragged node, which commits its own position and fans neighbour messages through its outbox.">
+          <text class="d-tl" x="0" y="12">GESTURE GOROUTINE</text>
+          <line class="d-arrow" x1="80" y1="26" x2="80" y2="440" stroke-dasharray="2 4"/>
+          <text class="d-tl" x="300" y="12">NODE X — OWN GOROUTINE</text>
+          <line class="d-arrow" x1="380" y1="26" x2="380" y2="440" stroke-dasharray="2 4"/>
+          <text class="d-tl" x="640" y="12">NEIGHBOUR M — OWN GOROUTINE</text>
+          <line class="d-arrow" x1="720" y1="26" x2="720" y2="440" stroke-dasharray="2 4"/>
+
+          <rect class="d-box-flow" x="10" y="40" width="140" height="30" rx="4"/>
+          <text class="d-ts" x="22" y="59">pending → dragging</text>
+          <text class="d-ts" x="10" y="86">once per drag</text>
+
+          <rect class="d-box-flow" x="10" y="104" width="140" height="30" rx="4"/>
+          <text class="d-ts" x="22" y="123">RootMove</text>
+          <text class="d-ts" x="10" y="150">every pointer-move</text>
+
+          <line class="d-arrow-sig" x1="152" y1="119" x2="376" y2="119"/>
+          <path class="d-arrow-sig" d="M368 115 L378 119 L368 123"/>
+          <text class="d-ts" x="200" y="111">moveMsgKindDrag</text>
+
+          <rect class="d-box-sig" x="300" y="160" width="160" height="30" rx="4"/>
+          <text class="d-ts" x="312" y="179">applyCenter</text>
+          <text class="d-ts" x="300" y="206">the only position write</text>
+
+          <rect class="d-box-sig" x="300" y="228" width="160" height="30" rx="4"/>
+          <text class="d-ts" x="312" y="247">requantizeLocalPolars</text>
+
+          <rect class="d-box" x="300" y="286" width="160" height="30" rx="4"/>
+          <text class="d-ts" x="312" y="305">X’s own outbox</text>
+          <line class="d-arrow" x1="380" y1="258" x2="380" y2="284"/>
+          <path class="d-arrow" d="M376 278 L380 286 L384 278"/>
+
+          <line class="d-arrow-sig" x1="462" y1="301" x2="716" y2="301"/>
+          <path class="d-arrow-sig" d="M708 297 L718 301 L708 305"/>
+          <text class="d-ts" x="500" y="293">neighborSetC + Δ(a,b,c)</text>
+
+          <rect class="d-box-flow" x="640" y="330" width="170" height="30" rx="4"/>
+          <text class="d-ts" x="652" y="349">writes its OWN holder</text>
+          <rect class="d-box-flow" x="640" y="370" width="170" height="30" rx="4"/>
+          <text class="d-ts" x="652" y="389">emits its drag-log mark</text>
+
+          <text class="d-ts" x="640" y="424">M stays put — only X moved</text>
+          <text class="d-ts" x="300" y="424">edges redraw from their own movers</text>
+        </svg>
+        <p class="plate-cap">gesture.go · quantized_move.go · node_mover.go</p>
+      </div>
+      <div class="note">
+        <b>9,345 of 9,600</b> — neighbour messages that were being silently dropped under load,
+        before this fan was routed through the outbox. The drop path was the common case, not
+        the exception. It is now zero.
+      </div>
+    </div>
+    <aside class="rail">
+      <h2>One writer moves</h2>
+      <p>
+        Dragging X changes X’s position and nothing else’s. The neighbour is told its stored
+        description is stale; it stays exactly where it was.
+      </p>
+      <h2>Why the edge changes length</h2>
+      <p>
+        Because an edge is drawn between two centres and one of them moved. The edge has its
+        own goroutine holding both endpoints — neither node draws it.
+      </p>
+      <h2>Per drag vs per move</h2>
+      <p>
+        <code>RootMove</code> runs on every pointer-move, not once per drag. Two separate bugs
+        came from assuming otherwise; anything drag-scoped is anchored at the
+        pending→dragging edge instead.
+      </p>
+    </aside>
+  </div>
+</section>
+
+<!-- ───────────────────────── BEAD ───────────────────────── -->
+<section class="panel" id="p-bead" role="tabpanel" aria-labelledby="t-bead">
+  <div class="layout">
+    <div>
+      <div class="plate">
+        <svg viewBox="0 0 860 400" role="img" aria-label="A bead crossing one wire, and the three independent goroutines that touch the wire's bead lists.">
+          <rect class="d-box-flow" x="20" y="150" width="130" height="48" rx="5"/>
+          <text class="d-t" x="34" y="172">source node</text>
+          <text class="d-ts" x="34" y="189">own goroutine</text>
+
+          <rect class="d-box-flow" x="710" y="150" width="130" height="48" rx="5"/>
+          <text class="d-t" x="724" y="172">dest node</text>
+          <text class="d-ts" x="724" y="189">own goroutine</text>
+
+          <rect class="d-box-passive" x="230" y="140" width="400" height="68" rx="6"/>
+          <text class="d-t" x="248" y="162">PacedWire</text>
+          <text class="d-ts" x="248" y="178">passive — never runs; stepped by the source</text>
+          <text class="d-ts" x="248" y="194">inflight · delivered · nextGen, all under mu</text>
+
+          <line class="d-arrow-sig" x1="152" y1="174" x2="226" y2="174"/>
+          <path class="d-arrow-sig" d="M218 170 L228 174 L218 178"/>
+          <text class="d-ts" x="150" y="132">PlaceDriven</text>
+          <text class="d-ts" x="150" y="230">StepOnce</text>
+
+          <line class="d-arrow-sig" x1="634" y1="174" x2="706" y2="174"/>
+          <path class="d-arrow-sig" d="M698 170 L708 174 L698 178"/>
+          <text class="d-ts" x="632" y="132">PollRecv</text>
+
+          <circle cx="300" cy="174" r="5" fill="var(--signal)"/>
+          <circle cx="380" cy="174" r="5" fill="var(--signal)" opacity=".7"/>
+          <circle cx="460" cy="174" r="5" fill="var(--signal)" opacity=".45"/>
+          <circle cx="540" cy="174" r="5" fill="var(--signal)" opacity=".25"/>
+
+          <rect class="d-box" x="330" y="290" width="200" height="46" rx="5"/>
+          <text class="d-t" x="346" y="311">edge mover</text>
+          <text class="d-ts" x="346" y="328">own goroutine</text>
+          <line class="d-arrow" x1="430" y1="288" x2="430" y2="212"/>
+          <path class="d-arrow" d="M426 218 L430 210 L434 218"/>
+          <text class="d-ts" x="440" y="252">ReviseInFlightGeometry</text>
+          <text class="d-ts" x="440" y="268">when a node moves</text>
+
+          <text class="d-tl" x="20" y="368">THREE INDEPENDENT GOROUTINES TOUCH ONE WIRE</text>
+          <text class="d-ts" x="20" y="388">no single owner — which is why this lock cannot be split away like geomMu was</text>
+        </svg>
+        <p class="plate-cap">paced_wire.go · ports.go · node_mover.go</p>
+      </div>
+    </div>
+    <aside class="rail">
+      <h2>Go times its own delivery</h2>
+      <p>
+        The wire records the tick a bead was placed and sleeps cycle by cycle until it has
+        crossed. Every wire reads the same clock independently. Nothing on the render side
+        tells Go a bead arrived.
+      </p>
+      <h2>Why this lock stays</h2>
+      <p>
+        A queue is definitionally shared. There is no write-once subset to lift out, and all
+        three goroutines touch the same bead lists.
+      </p>
+      <h2>Open lead</h2>
+      <p>
+        Splitting <code>inflight</code> from <code>delivered</code> by owner might reduce three
+        contenders to two. Unverified — worth testing, not asserting.
+      </p>
+    </aside>
+  </div>
+</section>
+
+<!-- ───────────────────────── CLOCK ───────────────────────── -->
+<section class="panel" id="p-clock" role="tabpanel" aria-labelledby="t-clock">
+  <div class="layout">
+    <div>
+      <div class="plate">
+        <svg viewBox="0 0 860 470" role="img" aria-label="Every clock user holds its own copy, so no two goroutines share a clock and its mutex is deleted; the one place two copies are subtracted from each other is within the accepted tolerance.">
+          <text class="d-tl" x="0" y="12">TODAY — ONE OBJECT, ONE LOCK</text>
+          <rect class="d-group" x="0" y="22" width="410" height="150" rx="6"/>
+          <rect class="d-box-flow" x="20" y="44" width="120" height="24" rx="3"/>
+          <rect class="d-box-flow" x="20" y="74" width="120" height="24" rx="3"/>
+          <rect class="d-box-flow" x="20" y="104" width="120" height="24" rx="3"/>
+          <text class="d-ts" x="20" y="148">≈16 goroutines</text>
+          <line class="d-arrow-flow" x1="142" y1="56" x2="236" y2="94"/>
+          <line class="d-arrow-flow" x1="142" y1="86" x2="236" y2="100"/>
+          <line class="d-arrow-flow" x1="142" y1="116" x2="236" y2="106"/>
+          <rect class="d-box-haz" x="240" y="78" width="150" height="46" rx="4"/>
+          <text class="d-t"  x="254" y="98">RealClock</text>
+          <text class="d-ts" x="254" y="115">mu — contended</text>
+
+          <text class="d-tl" x="450" y="12">PROPOSED — A COPY EACH, NO LOCK</text>
+          <rect class="d-group" x="450" y="22" width="410" height="150" rx="6"/>
+          <rect class="d-box-flow" x="470" y="44" width="120" height="24" rx="3"/>
+          <rect class="d-box-flow" x="470" y="74" width="120" height="24" rx="3"/>
+          <rect class="d-box-flow" x="470" y="104" width="120" height="24" rx="3"/>
+          <line class="d-arrow-flow" x1="592" y1="56" x2="626" y2="56"/>
+          <line class="d-arrow-flow" x1="592" y1="86" x2="626" y2="86"/>
+          <line class="d-arrow-flow" x1="592" y1="116" x2="626" y2="116"/>
+          <rect class="d-box-passive" x="630" y="44" width="120" height="24" rx="3"/>
+          <rect class="d-box-passive" x="630" y="74" width="120" height="24" rx="3"/>
+          <rect class="d-box-passive" x="630" y="104" width="120" height="24" rx="3"/>
+          <text class="d-ts" x="762" y="60">own</text>
+          <text class="d-ts" x="762" y="90">copy</text>
+          <text class="d-ts" x="762" y="120">each</text>
+          <text class="d-ts" x="470" y="148">nothing shared → no mutex at all</text>
+
+          <text class="d-tl" x="0" y="212">THE ONE PLACE TWO COPIES MEET</text>
+          <rect class="d-group" x="0" y="222" width="860" height="118" rx="6"/>
+          <rect class="d-box-flow" x="20" y="244" width="210" height="34" rx="4"/>
+          <text class="d-ts" x="34" y="265">source node stamps placementTick</text>
+          <rect class="d-box-flow" x="20" y="288" width="210" height="34" rx="4"/>
+          <text class="d-ts" x="34" y="309">edge mover reads its own Tick()</text>
+          <line class="d-arrow-sig" x1="232" y1="261" x2="296" y2="278"/>
+          <line class="d-arrow-sig" x1="232" y1="305" x2="296" y2="288"/>
+          <rect class="d-box-sig" x="300" y="264" width="250" height="38" rx="4"/>
+          <text class="d-ts" x="314" y="288">t = (nowTick − placementTick)</text>
+          <text class="d-ts" x="576" y="272">off by ~1 tick per speed change</text>
+          <text class="d-ts" x="576" y="290">= 1–2% of the wire</text>
+          <text class="d-ts" x="576" y="316">within the accepted band</text>
+
+          <text class="d-tl" x="0" y="386">STAYS SHARED</text>
+          <rect class="d-box-passive" x="0" y="398" width="410" height="52" rx="5"/>
+          <text class="d-t"  x="18" y="420">Trace</text>
+          <text class="d-ts" x="18" y="438">an accumulator — copies would give N partial streams</text>
+          <rect class="d-box" x="440" y="398" width="420" height="52" rx="5"/>
+          <text class="d-ts" x="458" y="420">still to settle: DriveHeld has no inbox, and every</text>
+          <text class="d-ts" x="458" y="438">paced loop grows a second poll — plumbing, not semantics</text>
+        </svg>
+        <p class="plate-cap">plan: docs/planning/visual-editor/per-goroutine-clock.md (branch-local)</p>
+      </div>
+
+      <div class="note">
+        <b>NO FLOOR</b> — an earlier draft argued a wire must keep one shared clock, which
+        left 3–5 goroutines per lock and lost the point. That was exactness re-imported
+        after it had already been dropped: the error at that subtraction is the same 1–2%
+        accepted everywhere else. <code>RealClock.mu</code> is deleted, not reduced.
+      </div>
+    </div>
+
+    <aside class="rail">
+      <h2>Sized, not feared</h2>
+      <div class="stat">
+        <div><b>16ms</b><span>pause stagger</span></div>
+        <div><b>1–2%</b><span>of a wire / change</span></div>
+      </div>
+      <p>
+        Each goroutine hears a speed change when it next wakes, so the spread is about one
+        cycle. On a control operated by hand, that is imperceptible.
+      </p>
+      <p>
+        Offsets are signed by direction, so speeding up and slowing down partly cancel
+        rather than accumulating. Reaching the clamp that would snap a bead to the end of
+        its wire needs roughly sixty speed changes.
+      </p>
+      <h2>What got dropped</h2>
+      <p>
+        An earlier draft carried an “effective at” instant on every transition so
+        all copies banked identically. It was machinery for a problem that measurement
+        showed was not there — and it sent a clock backward over ticks it had already
+        acted on.
+      </p>
+      <h2>The real cost</h2>
+      <p>
+        Not timing, and no longer a correctness cliff. A copy that hears late is off by the
+        band already accepted, so no timestamps and no special handling. What is left is
+        plumbing: every paced loop grows a second poll.
+      </p>
+      <h2>Trace is different</h2>
+      <p>
+        It cannot be copied. Every event has to land in one place to become one buffer, so
+        copies would produce partial streams and no whole picture. That mutex stays.
+      </p>
+    </aside>
+  </div>
+</section>
+
+</div>
+
+<script>
+  const tabs = Array.from(document.querySelectorAll('.tab'));
+  function select(tab) {
+    tabs.forEach(t => {
+      const on = t === tab;
+      t.setAttribute('aria-selected', String(on));
+      const panel = document.getElementById(t.getAttribute('aria-controls'));
+      if (on) panel.setAttribute('data-active', ''); else panel.removeAttribute('data-active');
+    });
+  }
+  tabs.forEach(t => t.addEventListener('click', () => select(t)));
+  tabs.forEach((t, i) => t.addEventListener('keydown', e => {
+    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+    e.preventDefault();
+    const next = tabs[(i + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
+    next.focus(); select(next);
+  }));
+</script>
+</body>
+</html>

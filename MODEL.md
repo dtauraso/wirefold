@@ -110,7 +110,7 @@ animation never halts.
 
 Each wire times its OWN delivery on the human-speed clock: when its
 `ticksToCross` have elapsed (observed by the owning node's loop driving
-`StepOnce` one cycle at a time) `tryDeliverHeadLocked` moves the bead
+`StepOnceAt` one cycle at a time) `tryDeliverHeadLocked` moves the bead
 from `inflight` to `delivered`, and the destination node picks it up via
 `In.PollRecv`. Delivery is not triggered by the renderer — there is no
 cross-boundary delivery signal. The editor is told where each bead is;

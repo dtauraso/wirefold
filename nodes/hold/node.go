@@ -21,7 +21,17 @@ type Node struct {
 	EmitGeometry func()
 	EmitHeldBead func(held int)
 	Held         int `wire:"data.state"`
-	In           *Wiring.In
+	// Clock is this node's OWN clock storage, seeded by Wiring.reflectBuild
+	// directly from the loader's origin (bare-field injection by exact type
+	// Wiring.Clock — see input.Node.Clock; ports no longer hand out a clock,
+	// per-goroutine-clock.md API demolition item 1). Update() Copies it exactly
+	// once at its own start.
+	Clock Wiring.Clock
+	// SpeedCh delivers a speed change to THIS goroutine's own clk copy
+	// (per-goroutine-clock.md "Delivery"), seeded by Wiring.reflectBuild
+	// (injectSpeedChans). nil on a test build with no loader.
+	SpeedCh <-chan float64
+	In      *Wiring.In
 }
 
 func (h *Node) Update(ctx context.Context) {
@@ -32,7 +42,9 @@ func (h *Node) Update(ctx context.Context) {
 		h.EmitHeldBead(held)
 	}
 
-	clk := h.In.Clock()
+	// Copy taken ONCE at this goroutine's start (Update IS the goroutine) —
+	// docs/planning/visual-editor/per-goroutine-clock.md.
+	clk := h.Clock.Copy()
 
 	for {
 		select {
@@ -41,6 +53,7 @@ func (h *Node) Update(ctx context.Context) {
 		default:
 		}
 
+		Wiring.ApplySpeedNonBlocking(clk, h.SpeedCh)
 		if err := clk.SleepCycle(ctx); err != nil {
 			return
 		}

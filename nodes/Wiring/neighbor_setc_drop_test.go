@@ -47,7 +47,7 @@ func loadTreeMDWithDebugSink(t *testing.T, root string, dbg *lockedWriter) *Move
 	t.Helper()
 	tr := T.New(0)
 	tr.SetDebugSink(dbg)
-	_, _, md, err := LoadTopology(context.Background(), root, tr, NewRealClock())
+	_, _, md, _, err := LoadTopology(context.Background(), root, tr, NewRealClock())
 	if err != nil {
 		t.Fatalf("LoadTopology: %v", err)
 	}

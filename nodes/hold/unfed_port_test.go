@@ -11,6 +11,13 @@
 // This test drives the REAL loader on a REAL spec file — the runtime's own input form —
 // because the panic lived in the wiring path, not in Node's logic: every other test in
 // this package wires the input port, which is exactly why the crash went unnoticed.
+//
+// Per-goroutine-clock.md's API demolition (docs/planning/visual-editor/
+// per-goroutine-clock.md) removed In.Clock()/Out.Clock() entirely — a node now
+// carries its OWN Clock field (seeded by reflectBuild from the loader's origin) and
+// Copies it once at its own goroutine's start, independent of whether any port is
+// wired. The nil-clock hazard this test guards moved from the port to that field;
+// see the Clock assertion below.
 package hold
 
 import (
@@ -41,7 +48,7 @@ func TestUnfedRequiredPortLoadsAndStaysInert(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	nodes, _, _, err := Wiring.LoadTopology(ctx, path, T.New(16), Wiring.NewRealClock())
+	nodes, _, _, _, err := Wiring.LoadTopology(ctx, path, T.New(16), Wiring.NewRealClock())
 	if err != nil {
 		t.Fatalf("LoadTopology rejected an unfed port, but validate.go promises it loads: %v", err)
 	}
@@ -49,10 +56,14 @@ func TestUnfedRequiredPortLoadsAndStaysInert(t *testing.T) {
 		t.Fatalf("want 1 node, got %d", len(nodes))
 	}
 
-	// The clock must be real and usable, not nil: this is the assertion that makes the
-	// bug class unrepresentable rather than merely unobserved.
-	if got := nodes[0].(*Node).In.Clock(); got == nil {
-		t.Fatal("In.Clock() returned nil for an unwired port — every pacing loop calls SleepCycle on it unguarded")
+	// The node's own clock must be real and usable, not nil: this is the assertion
+	// that makes the bug class unrepresentable rather than merely unobserved.
+	// Per-goroutine-clock.md's API demolition removed In.Clock()/Out.Clock()
+	// entirely (port accessors go away) — the node's OWN Clock field, seeded by
+	// reflectBuild from the loader's origin, is what Update() Copies at its own
+	// start instead, whether or not the In it also holds is wired.
+	if got := nodes[0].(*Node).Clock; got == nil {
+		t.Fatal("Node.Clock was nil for an unfed-port node — every pacing loop Copies it and calls SleepCycle unguarded")
 	}
 
 	// Production runs Update with no recover(); recover here so a regression is a test

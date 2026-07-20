@@ -9,9 +9,11 @@ import (
 	"github.com/dtauraso/wirefold/nodes/Wiring"
 )
 
-// stepWire continuously StepOnces pw on a short wall-clock poll until ctx is
-// cancelled, matching the production per-cycle StepOnce delivery path.
-func stepWire(ctx context.Context, pw *Wiring.PacedWire) {
+// stepWire continuously StepOnceAts pw on a short wall-clock poll until ctx is
+// cancelled, matching the production per-cycle StepOnceAt delivery path. clk is
+// this goroutine's OWN clock copy (docs/planning/visual-editor/per-goroutine-
+// clock.md); callers must not share it with another goroutine.
+func stepWire(ctx context.Context, pw *Wiring.PacedWire, clk Wiring.Clock) {
 	go func() {
 		for {
 			select {
@@ -19,7 +21,7 @@ func stepWire(ctx context.Context, pw *Wiring.PacedWire) {
 				return
 			default:
 			}
-			pw.StepOnce(ctx)
+			pw.StepOnceAt(ctx, clk.Tick())
 			time.Sleep(time.Millisecond)
 		}
 	}()
@@ -39,20 +41,18 @@ func TestFireOnReceiveLean(t *testing.T) {
 
 	inPw := Wiring.NewPacedWire(latMs*Wiring.PulseSpeedWuPerMs, Wiring.PulseSpeedWuPerMs)
 	clk := Wiring.NewRealClock()
-	inPw.SetClock(clk)
-	stepWire(ctx, inPw)
-	// inSrc is a test-only seeding source on inPw: PlaceDriven places a bead
+	stepWire(ctx, inPw, clk.Copy())
+	// inSrc is a test-only seeding source on inPw: PlaceDrivenAt places a bead
 	// (no walker) that the stepWire loop above then drives to delivery,
 	// reusing the production placement API to inject the test's input value.
 	inSrc := Wiring.NewPacedOutNoGeom(inPw, ctx, "seed", "Out", tr, Wiring.RuleFireAndForget, 0, 0, "")
 
 	outPw0 := Wiring.NewPacedWire(latMs*Wiring.PulseSpeedWuPerMs, Wiring.PulseSpeedWuPerMs)
-	outPw0.SetClock(clk)
 	outPw1 := Wiring.NewPacedWire(latMs*Wiring.PulseSpeedWuPerMs, Wiring.PulseSpeedWuPerMs)
-	outPw1.SetClock(clk)
 
 	node := &Node{
 		Fire:                       func() {},
+		Clock:                      clk,
 		Held:                       99, // seed a non-zero prior value to forward
 		FromPrevHoldNewSendOldNode: Wiring.NewInPaced(inPw, ctx, "in", "FromPrevHoldNewSendOldNode", tr),
 		ToNext: Wiring.OutMulti{
@@ -68,8 +68,8 @@ func TestFireOnReceiveLean(t *testing.T) {
 	done := make(chan struct{})
 	go func() { node.Update(ctx); close(done) }()
 
-	if !inSrc.PlaceDriven(7).Live() {
-		t.Fatal("PlaceDriven returned false")
+	if !inSrc.PlaceDrivenAt(7, clk.Tick()).Live() {
+		t.Fatal("PlaceDrivenAt returned false")
 	}
 
 	waitFor := func(obs *Wiring.In, want int) {

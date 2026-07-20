@@ -165,7 +165,15 @@ type SlotRegistry map[string]*PacedWire
 // drive an unbounded allocation. Matches the 1 MB headroom of the pre-frame line buffer.
 const maxFrameBytes = 1 << 20
 
-func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace, clk Clock) {
+// speedSinks is the build-wide list of every clock-owning goroutine's speed
+// channel (LoadTopology's 4th return value, per-goroutine-clock.md
+// "Delivery"), collected ONCE at load before any goroutine spawned. This
+// RunStdinReader goroutine is the sole writer of every channel in it from here
+// on — nothing else sends on them — so broadcasting a speed change by looping
+// over the slice and calling SendSpeedNonBlocking needs no lock. nil (or an
+// empty slice) is fine: the speed edit then simply reaches nobody, same as
+// today's known-inert slider before this delivery path existed.
+func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace, speedSinks []chan float64) {
 	// Flush every debounced persister's pending value on EVERY clean-shutdown return path
 	// (stdin EOF, channel close, ctx cancel) — the Go process exits on every webview reload
 	// / window close, and a drag within the 250ms debounce window of that exit would
@@ -242,7 +250,7 @@ func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *
 			// MSG_TYPES_START
 			switch msg.Type {
 			case "edit":
-				applyEdit(msg, md, tr, clk)
+				applyEdit(msg, md, tr, speedSinks)
 			case "raw-input":
 				handleRawInputMsg(msg, slotReg, md, tr)
 			case "save":
@@ -295,11 +303,11 @@ func handleSaveMsg(md *MoveDispatch) {
 // stays live for delivery/movers (md.Bind), but the reader no longer indexes it here.
 //
 // Unknown ops/kinds/attrs are ignored (forward-compat).
-func applyEdit(msg stdinMsg, md *MoveDispatch, tr *T.Trace, clk Clock) {
+func applyEdit(msg stdinMsg, md *MoveDispatch, tr *T.Trace, speedSinks []chan float64) {
 	// EDIT_OPS_START
 	switch msg.Op {
 	case "update":
-		applyUpdate(msg, md, tr, clk)
+		applyUpdate(msg, md, tr, speedSinks)
 	}
 	// EDIT_OPS_END
 }
@@ -308,18 +316,25 @@ func applyEdit(msg stdinMsg, md *MoveDispatch, tr *T.Trace, clk Clock) {
 // requested attribute. Live entities: overlays (toggle one flag) and clock (set the
 // playback-speed multiplier — Go-owned state, the slider just signals the value).
 // Unknown kinds/attrs are ignored (forward-compat).
-func applyUpdate(msg stdinMsg, md *MoveDispatch, tr *T.Trace, clk Clock) {
+func applyUpdate(msg stdinMsg, md *MoveDispatch, tr *T.Trace, speedSinks []chan float64) {
 	// EDIT_UPDATE_KINDS_START
 	switch msg.Kind {
 	case "clock":
-		if clk == nil {
-			return
-		}
 		switch msg.Attr {
 		case "speed":
-			// The playback multiplier (0/1/2 from the slider). Go owns the clock; this
-			// just sets its speed. Every tick-timed thing scales together (see Clock.SetSpeed).
-			clk.SetSpeed(float64(msg.Num))
+			// The playback multiplier (0/1/2 from the slider). SetSpeed left the Clock
+			// INTERFACE in the per-goroutine-clock demolition (docs/planning/visual-
+			// editor/per-goroutine-clock.md item 4): nothing outside a goroutine's own
+			// copy may mutate it anymore, since a copy is owned by exactly one goroutine.
+			// Delivery (per-goroutine-clock.md "Delivery"): broadcast the new speed to
+			// EVERY clock-owning goroutine's own channel (collected once, at load,
+			// before any goroutine spawned — see LoadTopology's speedSinks return
+			// value). This RunStdinReader goroutine is the sole writer of any of these
+			// channels, so no lock is needed; SendSpeedNonBlocking never blocks on a
+			// receiver that is asleep or never reads (latest-wins coalescing).
+			for _, ch := range speedSinks {
+				SendSpeedNonBlocking(ch, float64(msg.Num))
+			}
 		}
 	case "overlays":
 		if md == nil {

@@ -37,7 +37,11 @@ import (
 // three goroutines actually touch (inflight, delivered, nextGen).
 func TestPacedWireSourceDestEdgeConcurrentRace(t *testing.T) {
 	pw := NewPacedWire(0, PulseSpeedWuPerMs)
-	pw.SetClock(NewRealClock())
+	// Per-goroutine-clock model: each of the three goroutines below owns its
+	// OWN clock copy, Copy()'d once at its own start, exactly as production
+	// does (docs/planning/visual-editor/per-goroutine-clock.md) — not one
+	// shared clock read from all three.
+	origin := NewRealClock()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -46,16 +50,17 @@ func TestPacedWireSourceDestEdgeConcurrentRace(t *testing.T) {
 
 	var wg sync.WaitGroup
 
-	// Source goroutine: place + step, exactly as Out.PlaceDriven/Out.StepOnce do from
-	// the source node's own driving goroutine.
+	// Source goroutine: place + step, exactly as Out.PlaceDrivenAt/Out.StepOnceAt do
+	// from the source node's own driving goroutine.
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		clk := origin.Copy()
 		val := 0
 		for time.Now().Before(deadline) {
 			val++
-			pw.placeBeadNoWalker(val, beadPlacement{InFlightMs: 4, Start: vec3{}, End: vec3{X: 1}, Node: "src", Port: "Out"})
-			pw.StepOnce(ctx)
+			pw.placeBeadNoWalkerAt(val, beadPlacement{InFlightMs: 4, Start: vec3{}, End: vec3{X: 1}, Node: "src", Port: "Out"}, clk.Tick())
+			pw.StepOnceAt(ctx, clk.Tick())
 		}
 	}()
 
@@ -74,10 +79,11 @@ func TestPacedWireSourceDestEdgeConcurrentRace(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		clk := origin.Copy()
 		i := 0.0
 		for time.Now().Before(deadline) {
 			i++
-			pw.ReviseInFlightGeometry(4+i*0.01, wireSegment{Start: vec3{}, End: vec3{X: 1 + i*0.001}})
+			pw.ReviseInFlightGeometry(clk.Tick(), 4+i*0.01, wireSegment{Start: vec3{}, End: vec3{X: 1 + i*0.001}})
 		}
 	}()
 

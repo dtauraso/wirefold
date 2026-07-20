@@ -25,7 +25,6 @@ func TestEmitsInitValuesLean(t *testing.T) {
 
 	pw := Wiring.NewPacedWire(latMs*Wiring.PulseSpeedWuPerMs, Wiring.PulseSpeedWuPerMs)
 	clk := Wiring.NewRealClock()
-	pw.SetClock(clk)
 
 	node := &Node{
 		Fire:  func() {},

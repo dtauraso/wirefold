@@ -57,11 +57,24 @@ type PortBindings struct {
 	// by "node.handle" so the loader can index Outs by edge for node-move
 	// travel-time updates. Render/run paths leave it nil.
 	outSink map[string]*Out
-	// clock is the single monotonic clock the loader shares with every PacedWire.
-	// reflectBuild injects it into nodes that need clock-paced interior animation
-	// (the Input node's refill slide). Test builds without a loader leave it nil,
-	// and such nodes fall back to an instant refill.
+	// clock is the loader's ORIGIN clock, read only by reflectBuild's injectClosures
+	// (never by a port): it seeds a node's bare `Clock Wiring.Clock` field and the
+	// `Tick func() int64` closure at construction. Per per-goroutine-clock.md API
+	// demolition, ports/wires no longer hold or hand out a clock at all — a node's
+	// own goroutine does exactly one Copy() of its Clock field at its own start.
+	// Test builds without a loader leave this nil, and such nodes' Clock/Tick
+	// fields simply stay unset (their own zero-value fallback, e.g. gatecommon's
+	// defaultTick/defaultSleep).
 	clock Clock
+	// speedSinks accumulates the SEND end of every speed channel created for
+	// this node during construction (one per clock-owning goroutine the node
+	// spawns — see injectSpeedChans). It points at the loader's build-wide slice
+	// (buildCtx.speedSinks) so every node's channels land in the one list
+	// LoadTopology hands back to stdin_reader. nil in test builds with no
+	// loader — injectSpeedChans then skips channel creation entirely (a node
+	// with no speed channel just never hears a speed change, same as it never
+	// had a clock to speed up before this plan).
+	speedSinks *[]chan float64
 }
 
 // singleBinding is the resolved paced binding for one single port. For an INPUT
@@ -146,7 +159,7 @@ var (
 	tEmitBeadsFunc      = reflect.TypeFor[func(working, backup []int)]()
 	tEmitHeldFunc       = reflect.TypeFor[func(held int)]()
 	tEmitInputBeadsFunc = reflect.TypeFor[func(left, right int)]()
-	tRefillSlideFunc    = reflect.TypeFor[func(beads []int)]()
+	tRefillSlideFunc    = reflect.TypeFor[func(clk Clock, speedCh <-chan float64, beads []int)]()
 	tTickFunc           = reflect.TypeFor[func() int64]()
 )
 
@@ -290,27 +303,83 @@ func injectClosures(ctx context.Context, v reflect.Value, name string, pb PortBi
 		emitInputBeads(tr, name, left, right)
 	})
 
-	// The remaining injections require the loader's shared clock; a test build
-	// without a loader leaves pb.clock nil and these fields stay nil (each node
-	// falls back to its wall-clock / instant behavior).
+	// EmitRefillSlide func(clk Clock, speedCh <-chan float64, beads []int): the
+	// clock-paced refill slide (the OLD backup beads slide DOWN from row 0 into row
+	// 1 at wire-bead speed; a paused clock freezes it). The clock AND speed channel
+	// are parameters the CALLER supplies at invocation time (its own
+	// already-Copy()'d clock and its own SpeedCh — see input.Node.Update, which
+	// calls n.EmitRefillSlide(clk, n.SpeedCh, beads) with the same copy/channel its
+	// own loop paces on) rather than values captured here from pb.clock: capturing
+	// the loader's origin in this closure would hand every future call a read into
+	// a clock this goroutine never Copy()'d for itself (per-goroutine-clock.md
+	// flagged this as a residual — this closure no longer needs pb.clock at all, so
+	// it is unconditional). The speed channel must be threaded through too: this
+	// slide runs its OWN blocking SleepCycle loop separate from the caller's main
+	// loop, so it must poll ApplySpeedNonBlocking itself each cycle or a speed
+	// change sent mid-slide sits unapplied until the slide finishes.
+	injectFunc(v, "EmitRefillSlide", tRefillSlideFunc, func(clk Clock, speedCh <-chan float64, beads []int) {
+		emitRefillSlide(ctx, tr, name, clk, speedCh, beads)
+	})
+
+	// The remaining injections seed a node's OWN clock storage from the loader's
+	// origin, once, at construction — a test build without a loader leaves pb.clock
+	// nil and these fields stay unset (each node falls back to its own wall-clock/
+	// no-loader behavior, e.g. gatecommon's defaultTick/defaultSleep).
 	if pb.clock != nil {
 		clk := pb.clock
-		// EmitRefillSlide func(beads []int): the clock-paced refill slide (the OLD
-		// backup beads slide DOWN from row 0 into row 1 at wire-bead speed; a paused
-		// clock freezes it).
-		injectFunc(v, "EmitRefillSlide", tRefillSlideFunc, func(beads []int) {
-			emitRefillSlide(ctx, tr, name, clk, beads)
-		})
-		// Tick func() int64: current tick (pause-aware) off the shared human-speed
-		// clock, so a node timing a window/dwell in ticks freezes on pause.
+		// Tick func() int64: current tick (pause-aware) off the origin clock. Used
+		// only as a chan-mode/no-Out-yet fallback for "now" by gatecommon.GateNode;
+		// the paced path takes its own Copy() of the Clock field below instead.
 		injectFunc(v, "Tick", tTickFunc, func() int64 { return clk.Tick() })
-		// Clock Wiring.Clock: the shared node-level clock, injected directly so a
-		// node's paced Update loop does not have to derive its clock from a
-		// specific wired output port (fragile — the port that happens to carry
-		// the clock varies by topology). Only fields typed exactly Wiring.Clock
-		// (e.g. input.Node.Clock) receive this; other nodes are unaffected.
+		// Clock Wiring.Clock: the node's OWN clock storage, seeded from the loader's
+		// origin so the node's goroutine can Copy() it exactly once at its own
+		// start (docs/planning/visual-editor/per-goroutine-clock.md) — this field is
+		// never read repeatedly by anything outside the node's own goroutine, and it
+		// is never reached through a port. Only fields typed exactly Wiring.Clock
+		// (e.g. input.Node.Clock, gatecommon.GateNode.Clock) receive this; other
+		// nodes are unaffected.
 		tClockType := reflect.TypeFor[Clock]()
 		injectFunc(v, "Clock", tClockType, clk)
+	}
+
+	injectSpeedChans(v, pb)
+}
+
+// speedChanFieldNames lists every field name a node kind may declare to receive
+// a speed-delivery channel. Most kinds (input/hold/holdnewsendold/pacer,
+// gatecommon.GateNode) run exactly one clock-owning goroutine and declare only
+// SpeedCh. Pulse/HoldFlip split into a main loop plus one-or-two
+// gatecommon.DriveHeld goroutines (one per driven Out) — each is an
+// INDEPENDENT clock copy, so each needs its OWN channel: sharing one channel
+// across two goroutines would silently starve whichever one loses a given
+// receive, which is exactly the "no goroutine left behind" failure item 3 of
+// per-goroutine-clock.md guards against. DriveSpeedCh/Out1SpeedCh/Out2SpeedCh
+// are those extra per-drive-goroutine channels; a struct that doesn't declare
+// a given name simply doesn't get one (injectSpeedChans is a no-op per name
+// when the field is absent, same contract as injectFunc).
+var speedChanFieldNames = []string{"SpeedCh", "DriveSpeedCh", "Out1SpeedCh", "Out2SpeedCh"}
+
+// injectSpeedChans creates one fresh buffered-1 speed channel per field name in
+// speedChanFieldNames that the struct pointed to by v actually declares (typed
+// exactly `<-chan float64`), injects its RECEIVE end into that field, and
+// appends its SEND end to *pb.speedSinks — the loader's build-wide accumulator
+// (docs/planning/visual-editor/per-goroutine-clock.md "Delivery"). A no-op
+// when pb.speedSinks is nil (test builds with no loader): such a node's
+// goroutines simply have no speed channel to poll, exactly like they had no
+// shared clock to receive a speed change on before this plan either.
+func injectSpeedChans(v reflect.Value, pb PortBindings) {
+	if pb.speedSinks == nil {
+		return
+	}
+	tSpeedChan := reflect.TypeFor[<-chan float64]()
+	for _, fname := range speedChanFieldNames {
+		f := v.FieldByName(fname)
+		if !f.IsValid() || !f.CanSet() || f.Type() != tSpeedChan {
+			continue
+		}
+		speedCh := make(chan float64, 1)
+		f.Set(reflect.ValueOf((<-chan float64)(speedCh)))
+		*pb.speedSinks = append(*pb.speedSinks, speedCh)
 	}
 }
 
@@ -340,28 +409,18 @@ func wirePorts(ctx context.Context, v reflect.Value, nodePtr any, name string, p
 // wireInPort resolves a single PortIn field: a paced binding (NewInPaced) when
 // pb has one for this port name, otherwise a dead-end chan wrapper.
 //
-// The dead-end In gets the shared clock as well as the placeholder channel: node pacing
-// loops call In.Clock().SleepCycle unguarded, so an unwired In holding no clock is a
-// panic (see In.Clock). With the real clock it paces exactly like a wired node and stays
-// inert by polling a port that never delivers — the precondition-gating validate.go
-// promises.
+// Neither branch carries a clock (per-goroutine-clock.md API demolition item 1: port
+// accessors are gone) — an unwired In just polls a dead-end channel that never
+// delivers, staying inert by precondition-gating (validate.go) exactly like a wired
+// node whose peer never sends; its owning node paces off its OWN Clock field/Copy(),
+// never off this port.
 func wireInPort(f reflect.Value, portName string, ctx context.Context, name string, pb PortBindings, tr *T.Trace) {
 	if b := pb.singlePaced[portName]; b.pw != nil {
 		f.Set(reflect.ValueOf(NewInPaced(b.pw, ctx, name, portName, tr)))
 	} else {
 		ch := pb.deadEndIn(portName)
-		f.Set(reflect.ValueOf(&In{ch: ch, node: name, port: portName, trace: tr, clock: pb.inClock()}))
+		f.Set(reflect.ValueOf(&In{ch: ch, node: name, port: portName, trace: tr}))
 	}
-}
-
-// inClock is the Clock an unwired In should hold: the loader's shared clock when there is
-// one (always, in production — loader.go sets pb.clock), else the inert placeholder for a
-// test build with no loader. Never nil.
-func (pb *PortBindings) inClock() Clock {
-	if pb.clock != nil {
-		return pb.clock
-	}
-	return inertClock{}
 }
 
 // wireOutPort resolves a single PortOut field: a paced binding

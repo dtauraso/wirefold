@@ -222,13 +222,21 @@ type WireRegistry map[string]*PacedWire
 // clk is the single monotonic clock injected into every PacedWire so each wire
 // times its own delivery on it (MODEL.md: exactly one clock). Production and
 // tests alike pass a RealClock — the model is sleep-only.
-func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace, clk Clock) ([]Node, SlotRegistry, *MoveDispatch, error) {
+//
+// The 5th return value is the build-wide list of SEND ends of every speed
+// channel created for a clock-owning goroutine (per-goroutine-clock.md
+// "Delivery") — one per goroutine, collected ONCE here at load time before any
+// goroutine spawns, so the set never needs a lock: it is written only during
+// this call and read thereafter by exactly one goroutine (stdin_reader's),
+// never touched by the goroutines that own the receive ends. Most callers
+// (tests that don't drive a speed slider) can discard it.
+func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace, clk Clock) ([]Node, SlotRegistry, *MoveDispatch, []chan float64, error) {
 	spec, err := parseSpec(jsonPath)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	if err := validateSpec(&spec); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	// Load the persisted scene sphere (if any) BEFORE positioning nodes, so nodes stored as
 	// scene polar can be placed as sceneCenter + polar2cart(scenePolar). A persisted sphere
@@ -307,6 +315,13 @@ type buildCtx struct {
 	// Phase 5: the MoveDispatch.
 	md *MoveDispatch
 
+	// speedSinks accumulates the SEND end of every speed channel created for
+	// any clock-owning goroutine across the whole build — edge movers
+	// (buildMoveDispatch, via newMoveDispatch) and per-node goroutines
+	// (buildNodes, via reflectBuild/injectSpeedChans). Returned by
+	// buildFromSpec/LoadTopology (per-goroutine-clock.md "Delivery").
+	speedSinks []chan float64
+
 	// Phase 6: id→type map and per-kind OutMulti port set.
 	nodeType          map[string]string
 	kindOutMultiPorts map[string]map[string]bool
@@ -324,7 +339,7 @@ type buildCtx struct {
 // buildFromSpec constructs nodes, wires, and the MoveDispatch from an already-parsed
 // and validated topoSpec. It orchestrates the phase helpers below in the same order
 // the original monolithic function performed them; behavior is unchanged.
-func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock, sphere sceneSphere, hasScene bool) ([]Node, SlotRegistry, *MoveDispatch, error) {
+func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock, sphere sceneSphere, hasScene bool) ([]Node, SlotRegistry, *MoveDispatch, []chan float64, error) {
 	b := &buildCtx{ctx: ctx, spec: spec, tr: tr, clk: clk, sphere: sphere, hasScene: hasScene}
 
 	b.computeNodeGeometry()
@@ -336,12 +351,12 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock, s
 	b.buildTypeMaps()
 	b.buildEdgeMaps()
 	if err := b.buildNodes(); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	b.emitLayoutLinks()
 	b.bindDispatch()
 
-	return b.nodes, SlotRegistry(b.destWire), b.md, nil
+	return b.nodes, SlotRegistry(b.destWire), b.md, b.speedSinks, nil
 }
 
 // computeNodeGeometry builds the id→geometry map used for arc-length computation
@@ -408,7 +423,6 @@ func (b *buildCtx) allocateWires() {
 			pw.Target = e.Target
 			pw.TargetHandle = e.TargetHandle
 			pw.Trace = b.tr
-			pw.SetClock(b.clk) // one clock shared by every wire; times its own delivery
 			destWire[destKey] = pw
 		}
 		edgeWire[e.Label] = pw
@@ -446,7 +460,7 @@ func (b *buildCtx) buildMoveDispatch() {
 	for i, e := range b.spec.Edges {
 		edgeOrder[i] = e.Label
 	}
-	md := newMoveDispatch(b.nodeGeoms, b.edgeEndpoints, b.tr, nodeOrder, edgeOrder)
+	md := newMoveDispatch(b.nodeGeoms, b.edgeEndpoints, b.tr, nodeOrder, edgeOrder, b.clk, &b.speedSinks)
 	if b.hasScene {
 		// Persisted scene sphere: install it now so md.sceneSphere is consistent straight out
 		// of LoadTopology (a fresh/legacy scene has none — main.go's LoadSceneSphere then
@@ -554,6 +568,10 @@ func (b *buildCtx) buildNodes() error {
 		pb := newPortBindings()
 		pb.outSink = outSink
 		pb.clock = b.clk // shared clock for clock-paced interior animation (Input refill slide)
+		// &b.speedSinks (not a fresh slice per node): every node's channels append
+		// onto the SAME build-wide accumulator, so LoadTopology's one returned
+		// list carries every clock-owning goroutine across the whole build.
+		pb.speedSinks = &b.speedSinks
 
 		for _, port := range bind.Ports {
 			switch port.Dir {

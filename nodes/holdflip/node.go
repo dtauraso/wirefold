@@ -34,6 +34,21 @@ type Node struct {
 	// Re-emitted at startup (held = noValue, empty interior) and whenever the held
 	// value changes.
 	EmitHeldBead func(held int)
+	// Clock is this node's OWN clock storage, seeded by Wiring.reflectBuild
+	// directly from the loader's origin (bare-field injection by exact type
+	// Wiring.Clock — see input.Node.Clock; ports no longer hand out a clock,
+	// per-goroutine-clock.md API demolition item 1). Update() Copies it once for
+	// its own loop, and passes the ORIGIN (not that copy) to the DRIVE goroutine
+	// below, which Copies independently at ITS OWN start.
+	Clock Wiring.Clock
+	// SpeedCh delivers a speed change to the MAIN loop's own clock copy;
+	// DriveSpeedCh does the same for the DRIVE goroutine's OWN independent
+	// copy (per-goroutine-clock.md "Delivery") — two separate clock-owning
+	// goroutines here need two separate channels. Seeded by
+	// Wiring.reflectBuild (injectSpeedChans); nil on a test build with no
+	// loader.
+	SpeedCh      <-chan float64
+	DriveSpeedCh <-chan float64
 	In           *Wiring.In
 	Out          *Wiring.Out
 }
@@ -59,7 +74,7 @@ func (g *Node) Update(ctx context.Context) {
 			return gatecommon.NoValue // no value yet; emit sentinel so wire doesn't carry garbage
 		}
 		return 1 - int(h)
-	})
+	}, g.Clock, g.DriveSpeedCh)
 
 	// MAIN loop frame: do activities (non-blocking input check, drain-to-latest,
 	// Fire/update held/emit interior bead), then sleep one human clock cycle,
@@ -95,7 +110,10 @@ func (g *Node) Update(ctx context.Context) {
 		lastDisplayed = newHeld
 	}
 
-	clk := g.In.Clock()
+	// Copy taken ONCE at this goroutine's start (Update IS the goroutine); the
+	// DRIVE goroutine above takes its own copy independently inside
+	// gatecommon.DriveHeld (docs/planning/visual-editor/per-goroutine-clock.md).
+	clk := g.Clock.Copy()
 
 	// Paced mode: do activities, sleep one human clock cycle, repeat.
 	for {
@@ -103,6 +121,7 @@ func (g *Node) Update(ctx context.Context) {
 			return
 		}
 		consume()
+		Wiring.ApplySpeedNonBlocking(clk, g.SpeedCh)
 		if err := clk.SleepCycle(ctx); err != nil {
 			return
 		}

@@ -327,7 +327,15 @@ func (md *MoveDispatch) EdgeSeeds() []EdgeGeomSeed { return md.edgeSeeds }
 // later by Bind once node construction has populated them. nodeOrder/edgeOrder are the
 // SPEC order (deterministic directory-sorted order, not map iteration order) used to
 // build md.nodeSeeds/edgeSeeds for buffer row seeding.
-func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEndpoints, tr *T.Trace, nodeOrder, edgeOrder []string) *MoveDispatch {
+//
+// speedSinks, when non-nil, is the loader's build-wide accumulator
+// (buildCtx.speedSinks): each edgeMover created below gets its own fresh
+// buffered-1 speed channel (per-goroutine-clock.md "Delivery" — an edgeMover
+// owns its own clock copy, same as any other clock-owning goroutine, so it
+// must not be left behind), and that channel's SEND end is appended here.
+// nil in test call sites that construct a MoveDispatch directly with no
+// loader — those edgeMovers then simply have no speed channel to poll.
+func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEndpoints, tr *T.Trace, nodeOrder, edgeOrder []string, clk Clock, speedSinks *[]chan float64) *MoveDispatch {
 	// nil order (test call sites that don't care about seed order) falls back to sorted
 	// map keys — still deterministic, just not necessarily spec order.
 	if nodeOrder == nil {
@@ -426,7 +434,12 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 		md.dispatch[id] = nm.inbox
 	}
 	for edgeID, ep := range edgeEndpoints {
-		em := newEdgeMover(ep, edgeID, geoms[ep.Source], geoms[ep.Target], tr)
+		em := newEdgeMover(ep, edgeID, geoms[ep.Source], geoms[ep.Target], tr, clk)
+		if speedSinks != nil {
+			edgeSpeedCh := make(chan float64, 1)
+			em.speedCh = edgeSpeedCh
+			*speedSinks = append(*speedSinks, edgeSpeedCh)
+		}
 		md.edgeMovers[edgeID] = em
 		md.dispatch[edgeID] = em.inbox
 	}

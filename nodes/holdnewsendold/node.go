@@ -9,10 +9,20 @@ import (
 
 type Node struct {
 	Wiring.LayoutHolder
-	Fire                       func()
-	EmitGeometry               func()
-	EmitHeldBead               func(held int)
-	Held                       int `wire:"data.state"`
+	Fire         func()
+	EmitGeometry func()
+	EmitHeldBead func(held int)
+	Held         int `wire:"data.state"`
+	// Clock is this node's OWN clock storage, seeded by Wiring.reflectBuild
+	// directly from the loader's origin (bare-field injection by exact type
+	// Wiring.Clock — see input.Node.Clock; ports no longer hand out a clock,
+	// per-goroutine-clock.md API demolition item 1). Update() Copies it exactly
+	// once at its own start.
+	Clock Wiring.Clock
+	// SpeedCh delivers a speed change to THIS goroutine's own clk copy
+	// (per-goroutine-clock.md "Delivery"), seeded by Wiring.reflectBuild
+	// (injectSpeedChans). nil on a test build with no loader.
+	SpeedCh                    <-chan float64
 	FromPrevHoldNewSendOldNode *Wiring.In
 	ToNext                     Wiring.OutMulti
 }
@@ -47,7 +57,10 @@ func (in *Node) Update(ctx context.Context) {
 		in.EmitHeldBead(held)
 	}
 
-	clk := in.FromPrevHoldNewSendOldNode.Clock()
+	// Copy taken ONCE at this goroutine's start (Update IS the goroutine): from
+	// here on this loop reads only its own clock, never in.Clock (this node's
+	// origin field) directly again (docs/planning/visual-editor/per-goroutine-clock.md).
+	clk := in.Clock.Copy()
 
 	// Paced mode: single loop, one step per human-clock cycle. windowActive tracks
 	// whether the current cycle is inside a processing window — the span from
@@ -72,6 +85,7 @@ func (in *Node) Update(ctx context.Context) {
 		default:
 		}
 
+		Wiring.ApplySpeedNonBlocking(clk, in.SpeedCh)
 		if err := clk.SleepCycle(ctx); err != nil {
 			return
 		}

@@ -50,10 +50,23 @@ import (
 // Chan mode (!out.Paced(), unit tests) has no shared clock and no wire geometry,
 // so it keeps the OLD unconditional per-cycle placement (wall-clock sleep) — that
 // mode has no tick to read and no wire to visualize.
-func DriveHeld(ctx context.Context, out *Wiring.Out, held *atomic.Int64, transform func(int64) int) {
+// clk is the ORIGIN clock this goroutine Copies from exactly ONCE at its own start
+// (docs/planning/visual-editor/per-goroutine-clock.md) — the caller's own Clock field
+// (e.g. Pulse/HoldFlip's Node.Clock, injected by reflectBuild), not derived from out
+// (port accessors are gone: API demolition item 1). nil in chan mode (unit tests with
+// no loader): fine, because clk is never touched unless out.Paced().
+//
+// speedCh delivers a speed change to THIS goroutine's own clock copy
+// (per-goroutine-clock.md "Delivery"). Each DriveHeld call spawns an
+// INDEPENDENT goroutine with its own clock copy, so a node driving two Outs
+// (Pulse's Out/Out2, or any future fan-out) must pass a DIFFERENT channel per
+// call — passing the same channel to two DriveHeld goroutines would starve
+// whichever one loses a given receive. nil is fine (chan mode, or a caller
+// with no speed channel to give): ApplySpeedNonBlocking is then a no-op.
+func DriveHeld(ctx context.Context, out *Wiring.Out, held *atomic.Int64, transform func(int64) int, clk Wiring.Clock, speedCh <-chan float64) {
 	go func() {
 		paced := out.Paced()
-		clk := out.Clock()
+		var c Wiring.Clock
 		sleep := func(ctx context.Context) error {
 			select {
 			case <-ctx.Done():
@@ -62,15 +75,29 @@ func DriveHeld(ctx context.Context, out *Wiring.Out, held *atomic.Int64, transfo
 				return nil
 			}
 		}
+		// tick returns the current tick in paced mode (off this goroutine's own
+		// clock copy) or 0 in chan mode, where no caller reads it for anything
+		// meaningful (PlaceDrivenAt's chan-mode branch ignores the tick argument).
+		tick := func() int64 { return 0 }
 		if paced {
-			sleep = clk.SleepCycle
+			// Copy taken ONCE at this goroutine's start (the go func() literal above
+			// IS the goroutine) — docs/planning/visual-editor/per-goroutine-clock.md.
+			c = clk.Copy()
+			// Fold the speed-delivery poll into the one blocking point this loop has
+			// (this comment block's own note above it): DriveHeld's only blocking
+			// point is sleep, so that is where the check goes.
+			sleep = func(ctx context.Context) error {
+				Wiring.ApplySpeedNonBlocking(c, speedCh)
+				return c.SleepCycle(ctx)
+			}
+			tick = c.Tick
 		}
 
 		// lastPlaceTick anchors placement pacing in SCALED-tick space (paced mode).
 		// Seeded to now so the first bead lands one K after start, as before.
 		var lastPlaceTick int64
 		if paced {
-			lastPlaceTick = clk.Tick()
+			lastPlaceTick = tick()
 		}
 		for {
 			if ctx.Err() != nil {
@@ -86,23 +113,23 @@ func DriveHeld(ctx context.Context, out *Wiring.Out, held *atomic.Int64, transfo
 					if k < 1 {
 						k = 1
 					}
-					place = clk.Tick()-lastPlaceTick >= k
+					place = tick()-lastPlaceTick >= k
 				}
 				// else: geometry not yet known — don't place this cycle.
 			}
 			if place {
-				if out.PlaceDriven(transform(held.Load())).Failed() {
+				if out.PlaceDrivenAt(transform(held.Load()), tick()).Failed() {
 					return
 				}
 				if paced {
-					lastPlaceTick = clk.Tick()
+					lastPlaceTick = tick()
 				}
 			}
 
 			if err := sleep(ctx); err != nil {
 				return
 			}
-			out.StepOnce(ctx)
+			out.StepOnceAt(ctx, tick())
 		}
 	}()
 }

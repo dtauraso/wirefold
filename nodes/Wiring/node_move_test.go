@@ -67,7 +67,8 @@ func TestDecentralizedNodeMove(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	tr := T.New(256)
-	_, slotReg, md, err := LoadTopology(ctx, path, tr, NewRealClock())
+	clk := NewRealClock()
+	_, slotReg, md, _, err := LoadTopology(ctx, path, tr, clk)
 	if err != nil {
 		t.Fatalf("LoadTopology: %v", err)
 	}
@@ -79,10 +80,13 @@ func TestDecentralizedNodeMove(t *testing.T) {
 		t.Fatalf("missing Out/wire: out=%v pw=%v", out, pw)
 	}
 
-	// Place a bead on the wire so the move must revise it in flight.
+	// Place a bead on the wire so the move must revise it in flight. This test's own
+	// driving goroutine (placeAndDrive's driveGenToDelivery) gets its own copy of
+	// clk, per-goroutine-clock.md — not the same instance production goroutines
+	// (e.g. the edgeMover) hold.
 	seg0 := wireSegment{Start: out.Geom().Start, End: out.Geom().End}
 	bp := beadPlacement{InFlightMs: out.Geom().SimLatencyMs, Start: seg0.Start, End: seg0.End, Node: "src", Port: "Out"}
-	if !placeAndDrive(pw, 7, bp) {
+	if !placeAndDrive(pw, 7, bp, clk.Copy()) {
 		t.Fatal("placeAndDrive rejected on fresh wire")
 	}
 
@@ -184,7 +188,7 @@ func TestNodeGeometryLabelSidecar(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	tr := T.New(256)
-	_, _, md, err := LoadTopology(ctx, path, tr, NewRealClock())
+	_, _, md, _, err := LoadTopology(ctx, path, tr, NewRealClock())
 	if err != nil {
 		t.Fatalf("LoadTopology: %v", err)
 	}
@@ -261,7 +265,7 @@ func TestMoverCenterRace(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	tr := T.New(4096)
-	_, _, md, err := LoadTopology(ctx, path, tr, NewRealClock())
+	_, _, md, _, err := LoadTopology(ctx, path, tr, NewRealClock())
 	if err != nil {
 		t.Fatalf("LoadTopology: %v", err)
 	}
@@ -315,7 +319,7 @@ func TestOutGeomRace(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	tr := T.New(4096)
-	_, _, md, err := LoadTopology(ctx, path, tr, NewRealClock())
+	_, _, md, _, err := LoadTopology(ctx, path, tr, NewRealClock())
 	if err != nil {
 		t.Fatalf("LoadTopology: %v", err)
 	}
@@ -383,7 +387,7 @@ func TestRootMoveContinuousPositionLocalPolarRequantize(t *testing.T) {
 	defer cancel()
 	tr := T.New(4096)
 	defer tr.Close()
-	_, _, md, err := LoadTopology(ctx, path, tr, NewRealClock())
+	_, _, md, _, err := LoadTopology(ctx, path, tr, NewRealClock())
 	if err != nil {
 		t.Fatalf("LoadTopology: %v", err)
 	}
@@ -471,23 +475,4 @@ func TestRootMoveContinuousPositionLocalPolarRequantize(t *testing.T) {
 	if float64(foundBack.QuantIR) != wantIRBack {
 		t.Fatalf("dst.localPolar[src].QuantIR = %d, want round(%v/%v) = %v", foundBack.QuantIR, wantPolBack.R, rStep, wantIRBack)
 	}
-}
-
-// mockPulseSink is a minimal single-In kind registering the "Pulse" kind for the
-// Wiring test binary (loader_scene_polar_test.go / loader_tree_test.go load "Pulse"
-// nodes and need it registered). Its Update is a no-op like faninSrc/faninSink in
-// fanin_travel_time_test.go — no bead traffic is driven by it. "Hold" and
-// "HoldNewSendOld" are already registered by their real node packages (imported by
-// other _test.go files sharing this test binary via nonblocking_traversal_test.go /
-// gate_nonblocking_traversal_test.go), so tests reuse those real kinds instead of
-// re-registering mocks (Register panics on a duplicate kind).
-type mockPulseSink struct {
-	LayoutHolder
-	In *In
-}
-
-func (n *mockPulseSink) Update(ctx context.Context) { <-ctx.Done() }
-
-func init() {
-	Register("Pulse", func() any { return &mockPulseSink{} })
 }

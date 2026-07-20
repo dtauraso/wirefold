@@ -9,11 +9,12 @@ import (
 	"github.com/dtauraso/wirefold/nodes/Wiring"
 )
 
-// stepWire continuously StepOnces pw on a short wall-clock poll until ctx is
-// cancelled, matching the production per-cycle StepOnce delivery path (no
-// blocking delivery loop). The real clock advances on its own, so a placed
-// bead is carried to delivery once real time crosses its deadline.
-func stepWire(ctx context.Context, pw *Wiring.PacedWire) {
+// stepWire continuously StepOnceAts pw on a short wall-clock poll until ctx is
+// cancelled, matching the production per-cycle StepOnceAt delivery path (no
+// blocking delivery loop). clk is this goroutine's OWN clock copy
+// (docs/planning/visual-editor/per-goroutine-clock.md), which advances on its
+// own, so a placed bead is carried to delivery once its deadline is crossed.
+func stepWire(ctx context.Context, pw *Wiring.PacedWire, clk Wiring.Clock) {
 	go func() {
 		for {
 			select {
@@ -21,7 +22,7 @@ func stepWire(ctx context.Context, pw *Wiring.PacedWire) {
 				return
 			default:
 			}
-			pw.StepOnce(ctx)
+			pw.StepOnceAt(ctx, clk.Tick())
 			time.Sleep(time.Millisecond)
 		}
 	}()
@@ -41,9 +42,8 @@ func TestHoldFiresAndHoldsOnReceiveLean(t *testing.T) {
 
 	pw := Wiring.NewPacedWire(latMs*Wiring.PulseSpeedWuPerMs, Wiring.PulseSpeedWuPerMs)
 	clk := Wiring.NewRealClock()
-	pw.SetClock(clk)
-	stepWire(ctx, pw)
-	// inSrc is a test-only seeding source on pw: PlaceDriven places a bead
+	stepWire(ctx, pw, clk.Copy())
+	// inSrc is a test-only seeding source on pw: PlaceDrivenAt places a bead
 	// (no walker) that the stepWire loop above then drives to delivery,
 	// reusing the production placement API to inject the test's input value.
 	inSrc := Wiring.NewPacedOutNoGeom(pw, ctx, "seed", "Out", tr, Wiring.RuleFireAndForget, 0, 0, "")
@@ -52,6 +52,7 @@ func TestHoldFiresAndHoldsOnReceiveLean(t *testing.T) {
 	fires := 0
 	node := &Node{
 		Fire:         func() { fires++ },
+		Clock:        clk,
 		In:           Wiring.NewInPaced(pw, ctx, "hold", "In", tr),
 		EmitHeldBead: func(v int) { beadCh <- v },
 	}
@@ -69,8 +70,8 @@ func TestHoldFiresAndHoldsOnReceiveLean(t *testing.T) {
 		t.Fatal("timeout waiting for startup bead")
 	}
 
-	if !inSrc.PlaceDriven(7).Live() {
-		t.Fatal("PlaceDriven returned false")
+	if !inSrc.PlaceDrivenAt(7, clk.Tick()).Live() {
+		t.Fatal("PlaceDrivenAt returned false")
 	}
 
 	// After input arrives (7 != held -1) the changed held bead is emitted.
