@@ -4,6 +4,39 @@ branch: task/mutex-shared-services
 
 # Per-goroutine clock
 
+> **STATUS: SHIPPED** on `task/mutex-shared-services`. Everything below is DONE unless
+> this box says otherwise. Read the rest as the reasoning that produced the code, not as
+> outstanding work — the future-tense framing ("still to settle", "what must be proven")
+> is preserved deliberately because the reasoning is why the code looks like it does.
+>
+> What landed: `RealClock.mu`, `PacedWire.clock`/`SetClock`, `In.Clock`/`Out.Clock`,
+> `inertClock`/`NewInertClock`, and `SetSpeed`-on-the-`Clock`-interface are all deleted.
+> `Clock.Copy()` exists and every clock-owning goroutine takes exactly one copy at its own
+> start. Hot `PacedWire` methods take a caller-pinned tick (the pre-existing `…At`
+> convention, extended; the non-`At` wrappers that read a shared clock are gone).
+>
+> **Delivery, which this doc left open, resolved as:** one buffered-1 latest-wins
+> `chan float64` per clock-owning goroutine, built at LOAD TIME before any goroutine
+> spawns. Send ends are collected once and touched only by `stdin_reader`'s goroutine, so
+> **no lock is needed and none was added**. A `Subscribe()`-style bus was designed and
+> REJECTED: dynamic subscription forces a mutex over the subscriber list, which is the
+> shared-object shape this plan exists to delete. Do not re-propose one.
+>
+> **The two gaps this doc named and the work initially skipped, both now closed:**
+> `Buffer/snapshot.go`'s tick source was silently pinned to speed 1 (the origin clock
+> stopped hearing speed changes), contradicting its own "the tick IS the animation clock"
+> claim — the Trace drain goroutine, its sole caller, now owns a copy and a speed channel
+> like everything else. And proof item 1's tolerance bound is now asserted in code
+> (`paced_wire_rebase_tolerance_test.go`) instead of living only in this prose.
+>
+> **Verified end-to-end against the real binary,** not just unit tests: driving framed
+> `edit-update(clock,speed)` records into the production process and decoding the fd3
+> buffer stream, bead motion ran ~1200-1830/s at speed 1, 0.5-65/s frozen, ~3400-3845/s at
+> 2x, with the broadcast reaching 63 distinct per-goroutine clock pointers.
+>
+> **Not performance.** See "Why — and it is NOT performance" below before re-justifying
+> any of this on speed.
+
 ## Premise
 
 **Overshoot is not an issue.** A speed change reaches each goroutine when it next wakes,
