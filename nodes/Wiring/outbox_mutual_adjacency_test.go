@@ -117,6 +117,100 @@ func driveMutuallyAdjacentDragFlood(md *MoveDispatch) <-chan struct{} {
 	return done
 }
 
+// TestMutuallyAdjacentDragFloodNoDeadlockStress is the RED PROOF the realistic-rate test
+// above cannot be, per its own doc comment: at a realistic 60/sec drag rate, buffered-8
+// channels never stay saturated long enough for both mutually-adjacent movers to block
+// on each other simultaneously, so reintroducing the old blocking send does not hang that
+// test. This test uses a load DELIBERATELY FAR BEYOND anything the system can see in
+// practice on purpose -- 12 workers x 2 goroutines x 400 = 9,600 unpaced RootMove calls
+// per node, fired as fast as 24 goroutines can spin, with NO pacing sleep between calls.
+// That is not a realistic drag; it is a stress load whose only job is to keep both
+// nodes' inboxes saturated long enough for the mutual-block condition to actually occur.
+// A proof that cannot be made to fail is not a proof, and the realistic test cannot be
+// made to fail this way (measured, see below) -- so this unrealistic load is the price of
+// keeping an actual red proof in the suite at all.
+//
+// RED-PROOF RESULT (measured by hand for this test, see the subagent report that
+// introduced it): temporarily replacing flushPending's non-blocking `select { case ch <-
+// item.msg: default: ... }` with a raw blocking `ch <- item.msg` send (bypassing
+// nm.pending's retain-and-retry entirely, on both mutually-adjacent movers) made this
+// test hang and time out on EVERY run at this load; reverting to the non-blocking
+// retain-and-retry send made it pass again, consistently. That is the actual proof this
+// test carries -- see the honest limits below for what the timeout itself does and does
+// not establish.
+//
+// WHAT A TIMEOUT DOES AND DOES NOT PROVE: hitting the deadline below only means "the
+// flood did not finish in time" -- a bare timeout cannot, by itself, distinguish a true
+// deadlock (every relevant goroutine permanently blocked, no further progress possible)
+// from merely "slow" (still making forward progress, just not fast enough to finish
+// within the deadline, e.g. under -race's overhead or on a loaded CI box). What actually
+// licenses calling this a deadlock proof is the RED-PROOF RESULT above: a deliberately
+// reintroduced blocking send hangs this exact test at this exact load, every time, and
+// removing that regression un-hangs it, every time -- the timeout is the detection
+// mechanism, not the argument. This test's failure message says exactly that, not "proven
+// deadlocked."
+//
+// Load and timing (measured on this branch, plain and under -race, in a full `go test
+// ./...` run alongside the rest of the suite, not in isolation): plain ~2-3s, -race
+// ~15-25s (channel-op instrumentation slows -race down substantially at this call
+// volume, consistent with the load-bearing comment on the original unpaced version of
+// this test, before it was rewritten to the realistic paced load above). The deadline
+// below (45s) leaves comfortable headroom over the -race timing while staying well short
+// of anything that would make a full-suite run annoying.
+//
+// This test is NOT gated behind testing.Short() -- it runs by default. A proof that does
+// not run by default is close to no proof at all, and its measured -race timing is well
+// within what a full-suite run can absorb.
+func TestMutuallyAdjacentDragFloodNoDeadlockStress(t *testing.T) {
+	root := writeTree(t)
+	md := loadTreeMD(t, root)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	md.Start(ctx)
+
+	const workers = 12
+	const perWorker = 400
+
+	done := make(chan struct{})
+	go func() {
+		var wg sync.WaitGroup
+		for w := 0; w < workers; w++ {
+			wg.Add(2)
+			go func(seed int) {
+				defer wg.Done()
+				for i := 0; i < perWorker; i++ {
+					md.RootMove("src", vec3{X: float64(seed%7) - 3, Y: float64(i%5) - 2, Z: float64(i % 3)})
+				}
+			}(w)
+			go func(seed int) {
+				defer wg.Done()
+				for i := 0; i < perWorker; i++ {
+					md.RootMove("dst", vec3{X: float64(i%5) - 2, Y: float64(seed%7) - 3, Z: float64(i % 3)})
+				}
+			}(w)
+		}
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// All workers' RootMove calls returned and every commit's fan-out drained --
+		// consistent with no mutual-adjacency deadlock at this load. See the RED-PROOF
+		// RESULT above for what actually licenses that reading of a passing run.
+	case <-time.After(45 * time.Second):
+		// See "WHAT A TIMEOUT DOES AND DOES NOT PROVE" above: this by itself only
+		// asserts "did not finish within 45s", which is consistent with either a true
+		// deadlock or unusually slow progress. It is the RED-PROOF RESULT recorded in
+		// this test's doc comment -- a deliberately reintroduced blocking send hangs
+		// this exact test, and only that regression does -- that lets a timeout here
+		// be read as evidence of the cascade deadlock rather than mere slowness.
+		t.Fatal("TestMutuallyAdjacentDragFloodNoDeadlockStress: did not finish within 45s " +
+			"-- consistent with (but not proof of) the mutual-adjacency cascade deadlock; " +
+			"see this test's doc comment for the red-proof result that licenses that reading")
+	}
+}
+
 // TestOutboxFIFOPerTargetOrderNoDrop drives nm.pending's retain-and-retry send directly
 // (the same mechanism nm.sendMove/flushPending implement): a single sender goroutine
 // (mirroring the real shape -- one handler goroutine, its own run loop, doing every send
