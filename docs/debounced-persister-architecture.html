@@ -562,65 +562,41 @@ none holds it across anything but a slice/field read or write.</p>
 </svg>
 </div>
 
-<!-- ══ L2 · WHY IT'S DIFFERENT FROM THE PERSISTER ══ -->
-<h2>2 · why this lock's own comment says it is uncontended</h2>
-<p class="cap">This is not a debounce-vs-timer race. The code comment argues the ONE
-cross-goroutine access pattern that would matter — node X reaching directly into
-neighbor M's holder — never happens: X only ever sends M a message; M's own goroutine
-is the one that calls <code>SetLocalPolar</code> on itself.</p>
+<!-- ══ L2 · THE ISSUE ══ -->
+<h2>2 · the issue — every production caller is the owning node's own goroutine</h2>
+<p class="cap">Grepped every non-test caller of all six accessors. <b>Every one runs on the
+holder's own node's goroutine.</b> A node never reaches into a neighbour's holder — it sends
+a message and that neighbour's goroutine writes its own. So in production this is
+single-owner state carrying a mutex.</p>
 
 <div class="plate">
-<svg viewBox="0 0 860 210" role="img" aria-label="Node X never writes directly into neighbor M's LayoutHolder; it sends M a message and M's own goroutine writes its own holder, so mu guards only within one node, not across two.">
-  <defs><marker id="ah5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#3B7350"/></marker></defs>
-  <text class="tl" x="0" y="14">THE REFUTED CLAIM (comment says: false, checked 3x)</text>
-  <rect class="state" x="0" y="24" width="420" height="60" rx="6"/>
-  <text class="ts" x="12" y="46">X's goroutine calls M.SetLocalPolar directly</text>
-  <text class="tf" x="12" y="64">while M's own goroutine also mutates M's holder</text>
+<svg viewBox="0 0 860 264" role="img" aria-label="Every production caller of the six LayoutHolder accessors runs on the owning node's own goroutine, so the only second party found by the race detector is a test's polling goroutine.">
+  <text class="tl" x="0" y="14">EVERY PRODUCTION CALLER — all on the owning node's goroutine</text>
 
-  <text class="tl" x="440" y="14">WHAT THE CODE ACTUALLY DOES</text>
-  <rect class="safe" x="440" y="24" width="420" height="60" rx="6"/>
-  <text class="ts" x="452" y="46">X sends moveMsgKindNeighborSetC to M's channel</text>
-  <text class="tf" x="452" y="64">M's OWN goroutine drains it, calls SetLocalPolar on itself</text>
+  <rect class="safe" x="0" y="28" width="420" height="128" rx="6"/>
+  <text class="ts" x="12" y="48">requantizeLocalPolars   quantized_move.go:358</text>
+  <text class="tf" x="12" y="62">“X requantizes its OWN holder … on its own goroutine”</text>
+  <text class="ts" x="12" y="82">neighborSetCRequantize  :246 :264</text>
+  <text class="ts" x="12" y="98">commitNodeMoveLocal     :382</text>
+  <text class="ts" x="12" y="114">armDragAnchor           node_mover.go:289</text>
+  <text class="tf" x="12" y="128">“Runs only on this node’s own goroutine”</text>
+  <text class="ts" x="12" y="148">LoadLocalPolars/SetPole loader.go:637,645 — load-time</text>
 
-  <path class="arrk" d="M650,88 L650,110" marker-end="url(#ah5)"/>
-  <rect class="box" x="0" y="110" width="860" height="46" rx="6"/>
-  <text class="t" x="12" y="132">RESULT: every LayoutHolder is written/read only by its OWNING node's single goroutine</text>
-  <text class="tf" x="12" y="148">(channel-serialized, one message at a time) — the SAME pattern nodeMover.quantOffset already relies on.</text>
+  <rect class="state" x="440" y="28" width="420" height="128" rx="6"/>
+  <text class="t"  x="452" y="50">THE ONLY SECOND PARTY IS A TEST</text>
+  <text class="ts" x="452" y="74">Delete the locking from all six accessors and run</text>
+  <text class="ts" x="452" y="90">the package under -race: RED, 5/5 runs.</text>
+  <text class="tf" x="452" y="112">SetLocalPolar (the node’s own mover goroutine)</text>
+  <text class="tf" x="452" y="126">races LocalPolarsSnapshot — called from</text>
+  <text class="tf" x="452" y="140">TestIndividualSnap_OnlyDraggedNodePersists’ own</text>
+  <text class="tf" x="452" y="152">polling goroutine, not from any production path.</text>
 
-  <line x1="0" y1="172" x2="860" y2="172" stroke="var(--line)"/>
-  <text class="tw" x="0" y="192">SO THE MODEL CLAIMS: mu GUARDS NOTHING TODAY</text>
-  <text class="ts" x="330" y="192">kept as insurance against a FUTURE direct md.layoutHolders[m] call, not a present race.</text>
-</svg>
-</div>
-
-<!-- ══ L3 · MEASURED ══ -->
-<h2>3 · measured: a race exists, but not the one the comment tested for</h2>
-<p class="cap">The comment's own claim is narrower than the one this audit tested: it says a
-prior test could not make node-X-writes-node-M contention go red (10/10 clean). Deleting
-the locking from all six accessors and running the FULL package suite under
-<code>-race</code> (5/5 runs) finds a DIFFERENT race the comment does not mention.</p>
-
-<div class="plate">
-<svg viewBox="0 0 860 190" role="img" aria-label="Deleting the locking from all six LayoutHolder accessors and running the full package test suite under -race produces a real data race between SetLocalPolar on the node's own mover goroutine and a test's own LocalPolarsSnapshot polling loop.">
-  <rect class="state" x="0" y="24" width="420" height="110" rx="6"/>
-  <text class="t"  x="12" y="46">MEASURED</text>
-  <text class="ts" x="12" y="68">go test ./nodes/Wiring/... -race after deleting</text>
-  <text class="ts" x="12" y="82">the locking: TestIndividualSnap_OnlyDraggedNodePersists</text>
-  <text class="tf" x="12" y="100">goes RED (5/5 runs) — SetLocalPolar (the node's</text>
-  <text class="tf" x="12" y="112">own mover goroutine) races LocalPolarsSnapshot,</text>
-  <text class="tf" x="12" y="124">called by the TEST's own polling goroutine.</text>
-
-  <rect class="safe" x="440" y="24" width="420" height="110" rx="6"/>
-  <text class="t"  x="452" y="46">NOT THE SAME CLAIM AS THE COMMENT</text>
-  <text class="ts" x="452" y="68">The comment's own X-writes-M scenario may still</text>
-  <text class="ts" x="452" y="82">be genuinely absent from production code paths.</text>
-  <text class="tf" x="452" y="100">But "mu guards nothing today" overstates it: a</text>
-  <text class="tf" x="452" y="112">TEST goroutine reaching into a live node's holder</text>
-  <text class="tf" x="452" y="124">while its mover goroutine writes IS a real race.</text>
-
-  <line x1="0" y1="150" x2="860" y2="150" stroke="var(--line)"/>
-  <text class="tw" x="0" y="170">SAME UNSETTLED SHAPE AS debouncedPersister.mu</text>
-  <text class="ts" x="330" y="170">a red proof exists here too; the in-code comment just never ran this exact test.</text>
+  <line x1="0" y1="182" x2="860" y2="182" stroke="var(--line)"/>
+  <text class="tw" x="0" y="202">SO THE QUESTION IS</text>
+  <text class="ts" x="150" y="202">is this lock load-bearing, or is it holding a test’s hand?</text>
+  <text class="tf" x="0" y="222">A red proof that only fires because a TEST reaches into live state is not evidence the production model needs a lock —</text>
+  <text class="tf" x="0" y="236">it is evidence the test observes state it does not own. Those want different fixes: keep the mutex, or give the test a safe read.</text>
+  <text class="tf" x="0" y="256">Decide which before touching it. Removing the lock without addressing the test turns a green suite red for the wrong reason.</text>
 </svg>
 </div>
 
