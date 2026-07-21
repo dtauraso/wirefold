@@ -10,11 +10,8 @@ package Wiring
 // center — every node independent — not a scene-polar center, so scene-polar is no
 // longer scheduled for write on drag.
 
-import "time"
-
-// nodePosPersister's root/debounce fields are inspected by tests to confirm which
-// topology form a MoveDispatch loaded from; it schedules no writes of its own.
+// nodePosPersister's root field is inspected by tests to confirm which topology form a
+// MoveDispatch loaded from; it schedules no writes of its own.
 type nodePosPersister struct {
-	root     string // tree root; "" for a monolithic topology.json (no per-node meta.json)
-	debounce time.Duration
+	root string // tree root; "" for a monolithic topology.json (no per-node meta.json)
 }

@@ -6,19 +6,19 @@ package Wiring
 // A node's PERSISTED position is its EXACT scene-polar (r,θ,φ) about the scene center —
 // lossless, so a dragged node reloads at exactly where it was dropped. The quantized
 // scalar triple (quantITheta/quantIPhi/quantIR + steps) rides along as a self-describing
-// cache of the drag-time snap cells, NOT the position source. This is the debounced
-// mirror: RootMove calls schedule() for the dragged (and equalized) nodes; this persister
-// coalesces rapid updates (a drag) into one write per node after motion settles, writing
-// scenePolarR/Theta/Phi + the quant cache to `<root>/nodes/<id>/position.json` — one-file-
-// per-writer: this file has exactly
-// one writer (writeQuantOffset), so each write is a fresh whole-file marshal, no
+// cache of the drag-time snap cells, NOT the position source. commitNodeMoveLocal calls
+// schedule() for the dragged node, writing scenePolarR/Theta/Phi + the quant cache to
+// `<root>/nodes/<id>/position.json` — one-file-per-writer: this file has exactly one writer
+// per node id (writeQuantOffset), so each write is a fresh whole-file marshal, no
 // read-modify-write, no entityFileMu (deleted). Static node identity (id/type/r/gate) stays
 // in meta.json, which this persister never touches. WriteLocalPolars below is the OTHER
 // former meta.json writer; it now owns its own file (local-polars.json) for the same reason.
 //
-// Go owns persistence (MODEL.md): fire-and-forget, runs on the debounce timer's own
-// goroutine, logs on error, never blocks the gesture. Only the directory-tree form has
-// a per-node position.json to write; root == "" (monolithic topology.json) is a no-op.
+// Go owns persistence (MODEL.md): fire-and-forget, SYNCHRONOUS — schedule() writes
+// immediately, inline on the caller's own goroutine (see scene_persist.go's header comment
+// for why the prior debounce was removed) — logs on error, never blocks the gesture. Only
+// the directory-tree form has a per-node position.json to write; root == "" (monolithic
+// topology.json) is a no-op.
 //
 // LEGACY FALLBACK: an existing pre-split topology has these fields inline in meta.json
 // instead of a separate position.json/local-polars.json — loader_tree.go's loadTree reads
@@ -29,72 +29,32 @@ package Wiring
 import (
 	"fmt"
 	"path/filepath"
-	"time"
 )
 
-// quantOffsetPersister coalesces rapid per-node scalar-triple changes (a drag, plus its
-// direct children's re-measured triples) into a debounced read-modify-write of each
-// node's meta.json quantITheta/quantIPhi/quantIR + reference. Owned by MoveDispatch
-// (armed by EnableEditPersist). root == "" disables it (monolithic form / unarmed tests).
-// quantPersistEntry is one pending node write: the exact scene-polar position (the
-// LOSSLESS source of truth — where the node actually is) plus the quantized scalar
-// triple (kept as a self-describing cache/bookkeeping value, not the position source).
-type quantPersistEntry struct {
-	off   quantizedOffset
-	scene polar // exact (r,θ,φ) of the node's continuous position about the scene center
-}
-
+// quantOffsetPersister writes a node's scalar-triple change straight to its
+// position.json as it happens. Owned by MoveDispatch (armed by EnableEditPersist).
+// root == "" disables it (monolithic form / unarmed tests).
+//
+// UNLIKE this package's other four persisters, this one has MULTIPLE writers: every node
+// has its OWN mover goroutine, and commitNodeMoveLocal runs schedule() on that node's own
+// goroutine — so two different nodes' drags can call schedule() on this SAME
+// quantOffsetPersister struct concurrently. That is safe without a lock because they write
+// to DIFFERENT files (position.json is keyed by node id, so no two calls ever race the same
+// os.WriteFile/Rename) and this struct holds no other shared mutable state.
 type quantOffsetPersister struct {
-	root     string // tree root; per-node meta.json lives at <root>/nodes/<id>/meta.json
-	debounce time.Duration
-	debouncedPersister[map[string]quantPersistEntry]
+	root string // tree root; per-node position.json lives at <root>/nodes/<id>/position.json
 }
 
-// schedule records a node's exact position (scene) plus its quantized triple and
-// (re)arms the debounce timer. scene is the authoritative persisted position.
+// schedule writes the given node's exact position (scene) plus its quantized triple to
+// position.json synchronously. scene is the authoritative persisted position.
 func (p *quantOffsetPersister) schedule(id string, off quantizedOffset, scene polar) {
 	if p == nil || p.root == "" {
 		return
 	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.pending == nil {
-		p.pending = map[string]quantPersistEntry{}
-	}
-	p.pending[id] = quantPersistEntry{off: off, scene: scene}
-	p.has = true
-	if p.timer == nil {
-		p.timer = time.AfterFunc(p.debounce, p.flush)
-	} else {
-		p.timer.Reset(p.debounce)
-	}
-}
-
-// flush writes every pending node's scalar triple + reference to its meta.json
-// (read-modify-write, preserving other fields) and clears the pending set.
-// Fire-and-forget: errors are logged, not returned.
-func (p *quantOffsetPersister) flush() {
-	pend, has := p.take()
-	if !has || len(pend) == 0 {
+	if err := writeQuantOffset(p.root, id, off, scene); err != nil {
+		logPersistErr("quant_offset_persist", id, err)
 		return
 	}
-	for id, e := range pend {
-		if err := writeQuantOffset(p.root, id, e.off, e.scene); err != nil {
-			logPersistErr("quant_offset_persist", id, err)
-		}
-	}
-	p.recordWrite()
-}
-
-// flushPending cancels any pending debounce timer and synchronously writes whatever is
-// still pending, for the clean-shutdown path (RunStdinReader) — a drag within the debounce
-// window of process exit would otherwise be silently lost.
-func (p *quantOffsetPersister) flushPending() {
-	if p == nil {
-		return
-	}
-	p.stop()
-	p.flush()
 }
 
 // positionFileJSON is the shape of nodes/<id>/position.json — the node's exact scene-polar

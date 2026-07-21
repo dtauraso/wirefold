@@ -2,9 +2,18 @@ package Wiring
 
 // scene_persist.go — shared machinery for the domain persisters in this package
 // (overlays, camera viewpoint, scene sphere, node position, local polars, port anchor).
-// Each of those files repeated the same two things: a debounced-coalesce timer and an
-// atomic (tmp+rename) write. This file factors that machinery out once so the per-domain
-// files hold only their domain-specific shape (which fields they own, how to marshal them).
+// Each of those files repeated the same thing: an atomic (tmp+rename) write. This file
+// factors that machinery out once so the per-domain files hold only their domain-specific
+// shape (which fields they own, how to marshal them).
+//
+// There used to be a shared debounce/coalesce timer here too (debouncedPersister[T]) — each
+// domain persister's schedule() armed a 250ms timer and a background goroutine wrote the
+// LATEST value once the burst settled. It was removed: writeJSONAtomic does no fsync (writes
+// land in the page cache; the kernel already coalesces them), and the sibling writer
+// WriteLocalPolars already wrote synchronously on the same drag path with no reported
+// problem, so the debounce was solving a problem nobody had measured. Each persister's
+// schedule() now writes synchronously, inline on whatever goroutine called it — see the
+// commit that removed debouncedPersister for the reasoning in full.
 //
 // One-file-per-writer: every lock
 // that used to live here (sceneFileMu, entityFileMus/entityFileMuMu) existed because TWO
@@ -34,8 +43,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
-	"time"
 )
 
 // safeTreePathComponent reports whether s is safe to use as a SINGLE path segment
@@ -52,70 +59,6 @@ func safeTreePathComponent(s string) bool {
 // atomicWriteTmpSuffix is the temp-file suffix writeJSONAtomic uses before renaming into
 // place, so a reader never observes a partially-written file.
 const atomicWriteTmpSuffix = ".tmp"
-
-// debouncedPersister is the generic debounce/coalesce/write machinery every domain
-// persister below embeds ANONYMOUSLY (not as a named field): that lets the `writes` test
-// counter promote through to e.g. `md.persist.vp.writes`. Each domain type keeps its own
-// `path`/`root` and `debounce` fields at its OWN top level (not inside this generic type),
-// because call sites construct persisters with keyed struct literals like
-// `&overlaysPersister{path: ..., debounce: ...}`, and Go's keyed-literal syntax cannot address a
-// field nested inside an embedded struct.
-type debouncedPersister[T any] struct {
-	mu      sync.Mutex
-	pending T
-	has     bool
-	timer   *time.Timer
-	writes  int // count of completed writes (test observability)
-}
-
-// arm records the latest pending value and (re)arms the debounce timer, invoking flush once
-// the value has been stable for `debounce`. Each call resets the window, so a continuous
-// stream of updates (e.g. a drag) coalesces into a single write after activity settles.
-func (c *debouncedPersister[T]) arm(debounce time.Duration, v T, flush func()) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.pending = v
-	c.has = true
-	if c.timer == nil {
-		c.timer = time.AfterFunc(debounce, flush)
-	} else {
-		c.timer.Reset(debounce)
-	}
-}
-
-// take returns the pending value and clears it; ok is false when nothing is pending (e.g.
-// a flush that raced an empty timer fire). It resets pending to the zero value — critical
-// when T is a reference type (the map-valued anchor/node-pos persisters mutate pending in
-// place): clearing it forces the next schedule to allocate a fresh map, so flush can iterate
-// the value it took here without a concurrent schedule writing the same map underneath it.
-func (c *debouncedPersister[T]) take() (v T, ok bool) {
-	c.mu.Lock()
-	v, ok = c.pending, c.has
-	var zero T
-	c.pending = zero
-	c.has = false
-	c.mu.Unlock()
-	return v, ok
-}
-
-// stop cancels a pending debounce timer; callers follow with flush() to write any pending
-// value synchronously on shutdown (there is no live TS "shutdown" message — this is called
-// from the clean-exit path in RunStdinReader). Locks/unlocks mu independently of flush()'s
-// own take()-based locking, so this never holds mu across a flush() call (no deadlock risk).
-func (c *debouncedPersister[T]) stop() {
-	c.mu.Lock()
-	if c.timer != nil {
-		c.timer.Stop()
-	}
-	c.mu.Unlock()
-}
-
-// recordWrite increments the completed-write counter (test observability).
-func (c *debouncedPersister[T]) recordWrite() {
-	c.mu.Lock()
-	c.writes++
-	c.mu.Unlock()
-}
 
 // logPersistErr logs a persister write failure in the uniform shape used by every
 // debounced persister in this package. Fire-and-forget: persistence never blocks or panics

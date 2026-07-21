@@ -250,10 +250,11 @@ func TestDragPersistsOnlyDraggedNodeAndRequantizesNeighborsOnDisk(t *testing.T) 
 		}
 	}
 
-	// Force the debounced scene-position persister to land before reading disk (the
-	// per-node local-polar writes from neighborSetCRequantize are synchronous, not
-	// debounced, but A's own scenePolar/quantOffset write is).
-	md.persist.quantOffset.flush()
+	// quantOffsetPersister.schedule() writes synchronously now (no debounce), but it runs
+	// a few statements after A's center converges (pollDragConverged above), on that same
+	// node-mover goroutine (quantized_move.go commitNodeMoveLocal) — poll the read-back so
+	// this does not race ahead of that write landing (same shape as pollDragConverged).
+	pollPositionFileWritten(t, root, "A")
 
 	// ---- Read the RE-PERSISTED bytes on disk. ----
 	metaA := persistedMeta(t, root, "A")

@@ -10,69 +10,40 @@ package Wiring
 //
 // Go owns persistence (MODEL.md): there is no TS→Go camera-save on the new path. The
 // write is:
-//   - DEBOUNCED: a drag emits a viewpoint every pointermove; we coalesce and write once
-//     the viewpoint has been stable for a beat (viewpointPersistDebounce), off the hot path.
+//   - SYNCHRONOUS: schedule() writes camera.json immediately, inline on the calling
+//     goroutine (the stdin/gesture goroutine — every gesture path serializes through it, so
+//     there is only ever one writer). No debounce: see scene_persist.go's header comment for
+//     why the prior 250ms coalescing window was removed.
 //   - WHOLE-FILE: camera.json holds ONLY the camera pose (one-file-per-writer,
 //     the one-file-per-writer split) — no other writer touches it,
-//     so each flush marshals the pose fresh and overwrites the file, no read-modify-write.
-//   - FIRE-AND-FORGET: the write runs on the debounce timer's goroutine and logs on error;
-//     it never blocks the gesture.
+//     so each write marshals the pose fresh and overwrites the file, no read-modify-write.
+//   - FIRE-AND-FORGET: errors are logged, not returned; it never blocks the gesture.
 //
 // Before this split, camera.json's content lived at scene.json's `cameraPolar` key,
 // shared with the overlays and sphere writers under sceneFileMu. That lock is gone
 // (scene_persist.go); an existing pre-split scene.json still loads — see
 // loadSceneViewpoint's legacy fallback in scene_camera.go.
 //
-// The debounce/coalesce timer and the atomic-write plumbing are shared machinery from
-// scene_persist.go (debouncedPersister, writeJSONAtomic) — this file holds only the
-// camera-specific shape.
+// The atomic-write plumbing is shared machinery from scene_persist.go (writeJSONAtomic) —
+// this file holds only the camera-specific shape.
 
-import (
-	"time"
-)
-
-// viewpointPersistDebounce is how long the current viewpoint must be stable before it is
-// written. A drag emits a viewpoint every pointermove; this coalesces the burst into a
-// single write at gesture settle.
-const viewpointPersistDebounce = 250 * time.Millisecond
-
-// viewpointPersister coalesces rapid viewpoint changes into a debounced whole-file write of
-// camera.json. Owned by MoveDispatch (armed after the startup seed).
+// viewpointPersister writes viewpoint changes to camera.json as they happen. Owned by
+// MoveDispatch (armed after the startup seed).
 type viewpointPersister struct {
-	path     string        // camera.json path (cameraFilePath(topologyPath))
-	debounce time.Duration // coalescing window
-	debouncedPersister[*scenePolarCamera]
+	path string // camera.json path (cameraFilePath(topologyPath))
 }
 
-// schedule records the latest viewpoint and (re)arms the debounce timer. Each call resets
-// the window, so a continuous drag writes once — after motion stops for `debounce`.
+// schedule writes the given viewpoint to camera.json synchronously. Fire-and-forget:
+// errors are logged, not returned.
 func (p *viewpointPersister) schedule(v viewpoint) {
-	p.arm(p.debounce, viewpointToPolar(v), p.flush)
-}
-
-// flush writes the pending viewpoint to camera.json (whole-file write) and clears the
-// pending value. Fire-and-forget: errors are logged, not returned.
-func (p *viewpointPersister) flush() {
-	cam, has := p.take()
-	if !has || cam == nil {
+	if p == nil || p.path == "" {
 		return
 	}
+	cam := viewpointToPolar(v)
 	if err := writeSceneCameraPolar(p.path, cam); err != nil {
 		logPersistErr("scene_camera_persist", p.path, err)
 		return
 	}
-	p.recordWrite()
-}
-
-// flushPending cancels any pending debounce timer and synchronously writes whatever is
-// still pending, for the clean-shutdown path (RunStdinReader) — a camera move within the
-// debounce window of process exit would otherwise be silently lost.
-func (p *viewpointPersister) flushPending() {
-	if p == nil {
-		return
-	}
-	p.stop()
-	p.flush()
 }
 
 // viewpointToPolar converts an FSM viewpoint to the persisted cameraPolar shape. It is the

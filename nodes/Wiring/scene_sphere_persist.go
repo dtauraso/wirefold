@@ -22,10 +22,6 @@
 
 package Wiring
 
-import (
-	"time"
-)
-
 type sceneSphereJSON struct {
 	Center *[3]float64 `json:"center"`
 	Radius *float64    `json:"radius"`
@@ -111,28 +107,22 @@ func (md *MoveDispatch) LoadSceneSphere(topologyPath string) {
 	}
 }
 
-// sceneSpherePersister coalesces rapid pans into a debounced read-modify-write of
-// scene.json's "sceneSphere" key, mirroring overlaysPersister. path == "" ⇒
-// no-op (tests that never arm persistence).
+// sceneSpherePersister writes the scene sphere to view/sphere.json, mirroring
+// overlaysPersister. path == "" ⇒ no-op (tests that never arm persistence). The sphere is
+// "established once and never moves" (MODEL.md) — flushNow is its only writer, called by
+// LoadSceneSphere's content-fit and by the "save" command (handleSaveMsg); there was never a
+// debounced schedule() for it to begin with.
 type sceneSpherePersister struct {
-	path     string
-	debounce time.Duration
-	debouncedPersister[sceneSphere]
+	path string
 }
 
-// flushNow synchronously writes the current sphere, bypassing the debounce — used by the
-// "save" command so the sphere is guaranteed persisted at save time even if the debounce
-// timer hasn't fired yet.
+// flushNow writes the current sphere synchronously.
 func (p *sceneSpherePersister) flushNow(s sceneSphere) {
 	if p == nil || p.path == "" {
 		return
 	}
-	// Cancel any pending debounce timer through the mutex-guarded stop() (matching
-	// the sibling persisters) rather than touching p.timer directly — the timer is
-	// unarmed today (no pan-scheduler calls arm()), but the unlocked access would be
-	// a live race the moment one is added.
-	p.stop()
 	if err := writeSceneSphere(p.path, s); err != nil {
 		logPersistErr("scene_sphere_persist", p.path, err)
+		return
 	}
 }

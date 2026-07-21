@@ -45,8 +45,7 @@ func TestPersistViewpointRoundTrips(t *testing.T) {
 	wantUp := dir{Theta: 0.3, Phi: 0.4}
 
 	md.SetViewpoint(wantPivot, wantR, wantPos, wantUp)
-	md.EmitViewpoint(nil) // schedules the debounced write (gesture path is EmitViewpoint)
-	md.persist.vp.flush() // force the coalesced write now (no timing dependence)
+	md.EmitViewpoint(nil) // synchronously writes camera.json (gesture path is EmitViewpoint)
 
 	pivot, r, pos, up, ok := loadSceneViewpoint(td)
 	if !ok {
@@ -90,7 +89,6 @@ func TestPersistLoadsLegacySceneJSONThenWritesNewFile(t *testing.T) {
 	md.EnableViewpointPersist(td)
 	md.SetViewpoint(vec3{X: 7, Y: 8, Z: 9}, 123, dir{Theta: 1, Phi: 2}, dir{Theta: 0.1, Phi: 0.2})
 	md.EmitViewpoint(nil)
-	md.persist.vp.flush()
 
 	// The legacy scene.json is byte-for-byte untouched — camera.json is a DIFFERENT file.
 	raw, err := os.ReadFile(scenePath)
@@ -109,28 +107,23 @@ func TestPersistLoadsLegacySceneJSONThenWritesNewFile(t *testing.T) {
 	vpEqual(t, pivot, r, pos, up, vec3{X: 7, Y: 8, Z: 9}, 123, dir{Theta: 1, Phi: 2}, dir{Theta: 0.1, Phi: 0.2})
 }
 
-// TestPersistDebounceCoalesces schedules many rapid viewpoint changes (a drag burst) and
-// asserts a single flush produces exactly ONE write carrying the FINAL value — the debounce
-// keeps per-frame writes off the hot path.
-func TestPersistDebounceCoalesces(t *testing.T) {
+// TestPersistWriteBurstLandsFinalValue schedules many rapid viewpoint changes (a drag
+// burst) and asserts the FINAL value is what's on disk. Each schedule() call now writes
+// synchronously (the debounce that used to coalesce a burst into one write was removed —
+// see scene_persist.go's header comment: unmeasured, and writeJSONAtomic does no fsync so
+// the OS already coalesces at the page-cache level). What matters, and what this asserts,
+// is that the on-disk state after the burst is correct — not how many writes it took to
+// get there.
+func TestPersistWriteBurstLandsFinalValue(t *testing.T) {
 	td := t.TempDir()
 	md := &MoveDispatch{nodeMovers: map[string]*nodeMover{}}
 	md.EnableViewpointPersist(td)
-	// Stop the debounce timer so it cannot fire during the burst; we flush explicitly and
-	// assert coalescing (many schedules → one write).
 	md.SetViewpoint(vec3{}, 1, dir{}, dir{})
 	for i := 0; i < 50; i++ {
 		md.SetViewpoint(vec3{X: float64(i)}, float64(100+i), dir{Theta: float64(i) * 0.01}, dir{Phi: float64(i) * 0.02})
-		md.EmitViewpoint(nil) // schedule; resets the debounce window each time
+		md.EmitViewpoint(nil) // synchronous write, every call
 	}
-	if md.persist.vp.timer != nil {
-		md.persist.vp.timer.Stop()
-	}
-	md.persist.vp.flush()
 
-	if got := md.persist.vp.writes; got != 1 {
-		t.Fatalf("writes=%d want 1 (burst should coalesce to a single write)", got)
-	}
 	// Final value is the last scheduled viewpoint (i=49).
 	pivot, r, pos, up, ok := loadSceneViewpoint(td)
 	if !ok {
@@ -138,12 +131,6 @@ func TestPersistDebounceCoalesces(t *testing.T) {
 	}
 	vpEqual(t, pivot, r, pos, up,
 		vec3{X: 49}, 149, dir{Theta: 49 * 0.01}, dir{Phi: 49 * 0.02})
-
-	// A second flush with nothing pending does not write again.
-	md.persist.vp.flush()
-	if got := md.persist.vp.writes; got != 1 {
-		t.Fatalf("writes=%d want 1 after empty flush", got)
-	}
 }
 
 // TestCameraAndOverlaysFilesDoNotClobber pins the point of this split: camera.json and
@@ -158,7 +145,6 @@ func TestCameraAndOverlaysFilesDoNotClobber(t *testing.T) {
 	md.EnableViewpointPersist(td)
 	md.SetViewpoint(vec3{X: 11, Y: 22, Z: 33}, 321, dir{Theta: 0.5, Phi: 1.5}, dir{Theta: 0.05, Phi: 0.15})
 	md.EmitViewpoint(nil)
-	md.persist.vp.flush()
 
 	// A save persists Go's OWN overlay state into a SEPARATE file (overlays.json).
 	ov := defaultOverlayState()

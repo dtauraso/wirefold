@@ -412,8 +412,15 @@ already emits (the <code>"abc-drag"</code> breadcrumb, or a tapped
 
 <!-- ═══════════ 5 · scene_persist ═══════════ -->
 <h2>2 · scene_persist — the second party is a timer goroutine</h2>
-<p class="cap"><code>time.AfterFunc</code> runs every debounced flush in a <b>new goroutine</b>.
-That is the easily-missed racer against a drag-time synchronous write on the same file.</p>
+<p class="verdict ok"><b>RESOLVED</b> — task/mutex-debounced-persister deleted the debounce
+timer (and its lock) outright rather than keeping it: see
+<code>docs/debounced-persister-architecture.html</code> for the full analysis. Every domain
+persister below now writes synchronously on the calling goroutine; there is no timer
+goroutine left to race. This section is kept as the historical record of why the lock
+existed.</p>
+<p class="cap">the standard library's timer-fire API used to run every debounced flush in a
+<b>new goroutine</b>. That was the easily-missed racer against a drag-time synchronous write
+on the same file.</p>
 
 <div class="plate">
 <svg viewBox="0 0 860 310" role="img" aria-label="Camera, overlays and drag-time writers plus a debounce timer goroutine all funnel through per-file locks before touching the scene JSON and per-entity meta files.">
