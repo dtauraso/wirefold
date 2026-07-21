@@ -56,17 +56,6 @@ function classifyHit(pickRequest: PickRef, ndcX: number, ndcY: number): { kind: 
   return { kind: "empty", isInput: false, nodeRow: -1, portRow: -1, edgeRow: -1, handholdTerm: -1 };
 }
 
-/** World point under the pointer: unproject the pointer ray onto the z=0 plane. This is the
- *  raycast "hit point" three.js contributes (Go decides what it means). */
-function hitWorldPoint(cam: THREE.PerspectiveCamera, ndcX: number, ndcY: number): { x: number; y: number; z: number } {
-  const raycaster = new THREE.Raycaster();
-  raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), cam);
-  const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
-  const target = new THREE.Vector3();
-  const hit = raycaster.ray.intersectPlane(plane, target);
-  return hit ? { x: target.x, y: target.y, z: target.z } : { x: 0, y: 0, z: 0 };
-}
-
 /** Build a RawInputEvent from a React pointer event + the raycast hit. */
 export function buildPointerRaw(
   e: React.PointerEvent<HTMLDivElement>,
@@ -79,8 +68,7 @@ export function buildPointerRaw(
   const rect = e.currentTarget.getBoundingClientRect();
   const { ndcX, ndcY } = pixelToNDC(e.clientX, e.clientY, rect);
   const c = classifyHit(pickRequest, ndcX, ndcY);
-  const p = hitWorldPoint(cam, ndcX, ndcY);
-  const hit: RawHit = { kind: c.kind, isInput: c.isInput, nodeRow: c.nodeRow, portRow: c.portRow, edgeRow: c.edgeRow, handholdTerm: c.handholdTerm, x: p.x, y: p.y, z: p.z };
+  const hit: RawHit = { kind: c.kind, isInput: c.isInput, nodeRow: c.nodeRow, portRow: c.portRow, edgeRow: c.edgeRow, handholdTerm: c.handholdTerm };
   return {
     kind,
     x: e.clientX, y: e.clientY,
@@ -98,7 +86,7 @@ export function buildPointerRaw(
  *  rect.aspect() reads width/height = aspect). No pose is computed here; Go frames the scene
  *  from its own node geometry. Pointer/hit fields are inert (unused for a home command). */
 export function buildHomeRaw(fov: number, aspect: number): RawInputEvent {
-  const hit: RawHit = { kind: "empty", isInput: false, nodeRow: -1, portRow: -1, edgeRow: -1, handholdTerm: -1, x: 0, y: 0, z: 0 };
+  const hit: RawHit = { kind: "empty", isInput: false, nodeRow: -1, portRow: -1, edgeRow: -1, handholdTerm: -1 };
   return {
     kind: "home",
     x: 0, y: 0,
@@ -122,8 +110,7 @@ export function buildWheelRaw(
   const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
   const { ndcX, ndcY } = pixelToNDC(e.clientX, e.clientY, rect);
   const c = classifyHit(pickRequest, ndcX, ndcY);
-  const p = hitWorldPoint(cam, ndcX, ndcY);
-  const hit: RawHit = { kind: c.kind, isInput: c.isInput, nodeRow: c.nodeRow, portRow: c.portRow, edgeRow: c.edgeRow, handholdTerm: c.handholdTerm, x: p.x, y: p.y, z: p.z };
+  const hit: RawHit = { kind: c.kind, isInput: c.isInput, nodeRow: c.nodeRow, portRow: c.portRow, edgeRow: c.edgeRow, handholdTerm: c.handholdTerm };
   return {
     kind: "wheel",
     x: e.clientX, y: e.clientY,

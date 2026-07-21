@@ -111,9 +111,11 @@ type rawInputMsg struct {
 	Hit        rawHit
 }
 
-// rawHit is the classified raycast hit: which rendered entity is under the pointer and its
-// world point. Kind ∈ port|handhold|node|edge|torus|empty. Topology facts (e.g. connected?)
-// are NOT carried — Go's FSM decides those from its own held state.
+// rawHit is the classified raycast hit: which rendered entity is under the pointer. Kind ∈
+// port|handhold|node|edge|torus|empty. Topology facts (e.g. connected?) are NOT carried —
+// Go's FSM decides those from its own held state. There is no world point on this record:
+// any ray/plane unprojection Go needs is computed Go-side from the raw pointer NDC + Go's
+// own camera/surface state (pointerOnRingPlane / rayDirThroughNDC in gesture.go).
 type rawHit struct {
 	Kind string
 	// PortRow is the numeric buffer PORT-ROW index for a port hit (the port InstancedMesh
@@ -136,9 +138,6 @@ type rawHit struct {
 	// (comp, sign) by the gesture FSM's rule-builder (gesture.go).
 	HandholdTerm int
 	IsInput      bool
-	X            float64
-	Y            float64
-	Z            float64
 }
 
 // SlotRegistry maps "targetNodeId.targetHandle" → *PacedWire.

@@ -74,12 +74,16 @@ type EditMsg =
 // geometry. It is NOT a camera pose sent by TS — the model keeps Go owning the camera.
 export type RawPointerKind = "pointerdown" | "pointermove" | "pointerup" | "wheel" | "home";
 
-/** The stateless raycast hit: which rendered entity is under the pointer + its world point.
+/** The stateless raycast hit: which rendered entity is under the pointer.
  *  kind classifies the rendered target (three.js hit-testing). Every entity hit carries ONLY a
  *  numeric buffer ROW — Go resolves the row back to its entity via its own row tables, so NO id
  *  string crosses the bridge. isInput is vestigial (Go derives the port side from its port-row
  *  table). nodeRow/portRow/edgeRow are the buffer NODE/PORT/EDGE row indices (the InstancedMesh
- *  instanceId == its buffer row), each -1 when the hit is not of that kind. */
+ *  instanceId == its buffer row), each -1 when the hit is not of that kind. There is no world
+ *  point on this record: any ray/plane unprojection Go needs (ring-anchor drag, node-drag
+ *  target) is computed Go-side from the raw pointer NDC + Go's own camera/surface state
+ *  (nodes/Wiring/gesture.go pointerOnRingPlane / rayDirThroughNDC), never carried across the
+ *  bridge. */
 export type RawHit = {
   kind: "port" | "handhold" | "node" | "edge" | "torus" | "empty";
   isInput: boolean;
@@ -95,9 +99,6 @@ export type RawHit = {
   /** Term-id for a handhold hit (+θ=0, +φ=1, -θ=2, -φ=3; NavGuides.tsx HANDHOLD_TERM_TAG);
    *  -1 when not a handhold hit. Go decodes comp/sign from it (nodes/Wiring/gesture.go). */
   handholdTerm: number;
-  x: number;
-  y: number;
-  z: number;
 };
 
 export type RawInputEvent = {

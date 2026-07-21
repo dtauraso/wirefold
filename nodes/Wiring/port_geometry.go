@@ -366,17 +366,32 @@ func edgeSegment(src, tgt nodeGeom, srcPort, dstPort string) wireSegment {
 	return wireSegment{Start: start, End: end}
 }
 
-// edgeArcPolar is the pulse's travel budget for an edge: the straight-line distance between the
-// two AIMED port positions (edgeSegment), computed in POLAR via the spherical law of cosines
-// (polarDist). Both aimed points are converted to scene polar about the shared scene center
-// (src.SceneCenter — src and tgt are assumed to share one scene, per the polar-frame model) so
-// polarDist applies directly; if that assumption ever breaks (multi-scene), fall back to a plain
-// cartesian chord length between the two aimed points instead.
+// edgeArcPolar is the pulse's travel budget for an edge: the distance between the two AIMED
+// port positions, computed ENTIRELY IN POLAR from each node's stored ScenePolar.
+//
+// Both ports are aimed at the other node's center, so the two ports and the two centers are
+// COLINEAR by construction (see portWorldPosAimed). That makes the port-to-port distance pure
+// arithmetic: the center-to-center distance less each port's own radius. No cartesian is
+// involved, so there is nothing to convert back.
+//
+// This deliberately does NOT go through edgeSegment. Doing so would build cartesian endpoints
+// out of ScenePolar (nodeWorldPos = SceneCenter + polar2cart) and then cart2polar them straight
+// back — a polar→cartesian→polar round trip that re-derives a quantity both nodes already hold,
+// and whose Acos(v.Y/r)/Atan2(v.Z,v.X) degenerates for a node sitting near the scene pole.
+//
+// The radius subtracted is portRadiusByName, not nodeRadius(kind): portWorldPosAimed places the
+// port at exactly that radius, and a materialized port may carry a PortR that differs from the
+// node default (portRadiusByName falls back to nodeRadius when PortR is nil).
 func edgeArcPolar(src, tgt nodeGeom, srcPort, dstPort string) float64 {
-	seg := edgeSegment(src, tgt, srcPort, dstPort)
-	startPolar := cart2polar(seg.Start.sub(src.SceneCenter))
-	endPolar := cart2polar(seg.End.sub(src.SceneCenter))
-	raw := polarDist(startPolar, endPolar)
+	raw := polarDist(src.ScenePolar, tgt.ScenePolar) -
+		portRadiusByName(src, srcPort, false) -
+		portRadiusByName(tgt, dstPort, true)
+	// Overlapping nodes can drive the subtraction negative; a negative arc would poison
+	// ticksToCross. The CurveParamMinArcLength floor below is the real guard, this only
+	// keeps the quantize step well-defined.
+	if raw < 0 {
+		raw = 0
+	}
 	quantized := math.Round(raw/edgeLengthCellWu) * edgeLengthCellWu
 	if quantized < CurveParamMinArcLength {
 		return CurveParamMinArcLength

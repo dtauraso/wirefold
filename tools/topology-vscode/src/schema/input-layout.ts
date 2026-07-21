@@ -23,9 +23,9 @@
 // BuildAndRunRunner.lastSnapshot / getLastSnapshot in runCommand.ts). Left as an
 // intentional GAP rather than renumbered, so no other kind's wire value moves.
 
-// INPUT_LAYOUT_FINGERPRINT: v18 kinds=save:4,raw-input:10,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays,clock updateAttrs=toggle,speed overlayFlags=tori,scenePoles,nodePoles,selSpherePoles,handholds,labelsGlobal,overlays,doubleLinks
+// INPUT_LAYOUT_FINGERPRINT: v19 kinds=save:4,raw-input:10,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays,clock updateAttrs=toggle,speed overlayFlags=tori,scenePoles,nodePoles,selSpherePoles,handholds,labelsGlobal,overlays,doubleLinks
 export const INPUT_LAYOUT_FINGERPRINT =
-  "v18 kinds=save:4,raw-input:10,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays,clock updateAttrs=toggle,speed overlayFlags=tori,scenePoles,nodePoles,selSpherePoles,handholds,labelsGlobal,overlays,doubleLinks";
+  "v19 kinds=save:4,raw-input:10,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays,clock updateAttrs=toggle,speed overlayFlags=tori,scenePoles,nodePoles,selSpherePoles,handholds,labelsGlobal,overlays,doubleLinks";
 
 // Record kind bytes (first byte of every record). Must match input_codec.go.
 // Kinds 1 (resume) and 2 (pause) removed — the play/pause clock gate was deleted
@@ -177,9 +177,6 @@ export function encodeRawInput(ev: RawInputEvent): ArrayBuffer {
   w.i32(ev.hit.portRow);
   w.i32(ev.hit.edgeRow);
   w.i32(ev.hit.handholdTerm);
-  w.f64(ev.hit.x);
-  w.f64(ev.hit.y);
-  w.f64(ev.hit.z);
   return w.toArrayBuffer();
 }
 
@@ -272,9 +269,6 @@ export function decodeInputRecord(record: ArrayBuffer): DecodedInput | undefined
           portRow: r.i32(),
           edgeRow: r.i32(),
           handholdTerm: r.i32(),
-          x: r.f64(),
-          y: r.f64(),
-          z: r.f64(),
         },
       };
       return { kind: "raw-input", event };

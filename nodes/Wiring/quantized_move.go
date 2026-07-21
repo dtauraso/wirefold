@@ -281,7 +281,12 @@ func (md *MoveDispatch) neighborSetCRequantize(selfID, fromID string, fromCenter
 func (md *MoveDispatch) commitNodeMoveLocal(nodeID string, newPos vec3) {
 	edges := md.heldEdges()
 	polars := md.heldPolar()
-	polars[nodeID] = cart2polar(newPos.sub(md.sceneSphere.Center))
+	// Single cart2polar boundary conversion for this drag target — newPos is mouse-
+	// derived cartesian (gesture.go ray/plane unproject); everything downstream
+	// (reach, measureScalar, the persist schedule) reuses this one polar value rather
+	// than re-deriving it from newPos.
+	nodePolar := cart2polar(newPos.sub(md.sceneSphere.Center))
+	polars[nodeID] = nodePolar
 	reach := reachRFromPolar(polars, edges)
 
 	nm, ok := md.nodeMovers[nodeID]
@@ -291,10 +296,10 @@ func (md *MoveDispatch) commitNodeMoveLocal(nodeID string, newPos vec3) {
 	md.fanEdgesAndPartners(map[string]vec3{nodeID: newPos}, md.enqueueFuncFor(nodeID))
 
 	if md.quantizedLayout && ok {
-		off := measureScalar(newPos, md.sceneSphere.Center, nm.quantOffset)
+		off := measureScalar(nodePolar, nm.quantOffset)
 		nm.quantOffset = off
 		if md.persist.quantOffset != nil {
-			md.persist.quantOffset.schedule(nodeID, off, cart2polar(newPos.sub(md.sceneSphere.Center)))
+			md.persist.quantOffset.schedule(nodeID, off, nodePolar)
 		}
 	}
 
