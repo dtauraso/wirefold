@@ -112,7 +112,7 @@
   <div class="head-inner">
     <p class="eyebrow">wirefold · concurrency</p>
     <h1>Mutex architecture — who touches what</h1>
-    <p class="sub">Three lock groups left. Each diagram names the real goroutines, the real methods,
+    <p class="sub">Two lock groups left. Each diagram names the real goroutines, the real methods,
     and the real line numbers. A lock with one owner is not a lock.</p>
   </div>
 </header>
@@ -346,13 +346,20 @@ and no whole picture, so the move that deleted <code>RealClock.mu</code> is unav
 <b style="color:var(--signal)">But the framing above it is open:</b> the merged log is already only
 <i>arrival order at the drain</i> — scheduler order, not causal order.</p>
 
-<!-- ═══════════ 4 · LayoutHolder ═══════════ -->
-<h2>2 · LayoutHolder.mu — uncontended; the neighbour path is a message</h2>
+<!-- ═══════════ gone · LayoutHolder.mu ═══════════ -->
+<h2>gone · LayoutHolder.mu — deleted by ownership, not by a smaller lock</h2>
 <p class="cap">A node never reaches into a neighbour's holder. It <b>sends a message</b>, and the
-neighbour's own goroutine does the write. That is why there is nothing to guard.</p>
+neighbour's own goroutine does the write — so there was never anything for a lock to guard.
+Every production caller of the six accessors ran on the owning node's own goroutine already;
+the only concurrent second party the race detector ever found was a <b>test</b> polling live
+state from its own goroutine. The tests were fixed to wait on a happens-before edge production
+already emits (the <code>"abc-drag"</code> breadcrumb, or a tapped
+<code>moveMsgKindNeighborSetC</code> send); no synchronization was added to production. See
+<span style="color:var(--muted)">docs/layout-holder-architecture.html</span> and
+<span style="color:var(--muted)">task/mutex-layout-holder</span>.</p>
 
 <div class="plate">
-<svg viewBox="0 0 860 250" role="img" aria-label="Node A writes only its own layout holder; to affect node B it sends a neighborSetC message on B's own dedicated neighborIn channel, and B's own goroutine writes B's holder. No goroutine ever touches another's holder.">
+<svg viewBox="0 0 860 250" role="img" aria-label="Node A writes only its own layout holder; to affect node B it sends a neighborSetC message on B's own dedicated neighborIn channel, and B's own goroutine writes B's holder. No goroutine ever touches another's holder, and no lock remains.">
   <defs>
     <marker id="ak" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
       <path d="M0,0 L10,5 L0,10 z" fill="#3B7350"/>
@@ -371,7 +378,7 @@ neighbour's own goroutine does the write. That is why there is nothing to guard.
   <rect class="safe" x="0" y="122" width="210" height="66" rx="6"/>
   <text class="t"  x="12" y="142">A's LayoutHolder</text>
   <text class="ts" x="12" y="158">localPolars · pole</text>
-  <text class="tf" x="12" y="174">written by A only</text>
+  <text class="tf" x="12" y="174">written by A only, no lock</text>
 
   <!-- message path -->
   <path class="arrk" d="M210,58 L330,58" marker-end="url(#ak)"/>
@@ -388,7 +395,7 @@ neighbour's own goroutine does the write. That is why there is nothing to guard.
   <rect class="safe" x="660" y="122" width="200" height="66" rx="6"/>
   <text class="t"  x="672" y="142">B's LayoutHolder</text>
   <text class="ts" x="672" y="158">SetLocalPolar / SetPole</text>
-  <text class="tf" x="672" y="174">written by B only</text>
+  <text class="tf" x="672" y="174">written by B only, no lock</text>
 
   <!-- the crossed-out direct path -->
   <path class="dash" d="M210,155 L660,155"/>
@@ -397,17 +404,14 @@ neighbour's own goroutine does the write. That is why there is nothing to guard.
   <line x1="455" y1="145" x2="425" y2="165" stroke="var(--hazard)" stroke-width="2"/>
 
   <line x1="0" y1="206" x2="860" y2="206" stroke="var(--line)"/>
-  <text class="tk" x="0" y="226">REFUTED</text>
-  <text class="ts" x="72" y="226">a test written to force contention could not be made to fail with mu removed — 10/10 clean</text>
-  <text class="tf" x="0" y="242">layout_holder.go:77–115 records the retraction. No vacuous test ships.</text>
+  <text class="tk" x="0" y="226">DELETED, NOT NARROWED</text>
+  <text class="ts" x="180" y="226">go test -race -count=3 ./... — clean; single-owner invariant is the only thing preventing the race, and it holds</text>
+  <text class="tf" x="0" y="242">layout_holder.go's doc comment records the invariant. No vacuous test ships.</text>
 </svg>
 </div>
 
-<p class="verdict ok"><b>KEPT AS INSURANCE ONLY.</b> Do not cite this lock as evidence that
-cross-goroutine holder access is expected. It is not.</p>
-
 <!-- ═══════════ 5 · scene_persist ═══════════ -->
-<h2>3 · scene_persist — the second party is a timer goroutine</h2>
+<h2>2 · scene_persist — the second party is a timer goroutine</h2>
 <p class="cap"><code>time.AfterFunc</code> runs every debounced flush in a <b>new goroutine</b>.
 That is the easily-missed racer against a drag-time synchronous write on the same file.</p>
 

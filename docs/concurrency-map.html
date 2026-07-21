@@ -256,7 +256,7 @@
   <div class="layout">
     <div>
       <div class="plate">
-        <svg viewBox="0 0 860 800" role="img" aria-label="The four mutex patterns shown as the specific calls each goroutine makes: identity reads versus position writes, message enqueue and bead handling, why the clock is no longer a shared bus while trace still is, and the refuted holder access.">
+        <svg viewBox="0 0 860 800" role="img" aria-label="The four mutex patterns shown as the specific calls each goroutine makes: identity reads versus position writes, message enqueue and bead handling, why the clock is no longer a shared bus while trace still is, and the refuted-then-deleted holder access.">
           <!-- ── 1 anti-tearing ── -->
           <text class="d-tl" x="0" y="12">1 · ANTI-TEARING — geomMu, now deleted</text>
           <rect class="d-group" x="0" y="22" width="860" height="120" rx="6"/>
@@ -366,14 +366,14 @@
           <text class="d-ts" x="354" y="640">passive object, mutex-guarded — nothing runs in it</text>
 
           <!-- ── 4 refuted ── -->
-          <text class="d-tl" x="0" y="716">4 · CLAIMED MULTI-WRITER — LayoutHolder.mu, refuted</text>
+          <text class="d-tl" x="0" y="716">4 · CLAIMED MULTI-WRITER — LayoutHolder.mu, refuted, now deleted</text>
           <rect class="d-group" x="0" y="696" width="860" height="86" rx="6"/>
           <rect class="d-box-flow" x="18" y="716" width="150" height="28" rx="4"/>
           <text class="d-ts" x="30" y="735">X: requantize…</text>
           <line class="d-arrow-x" x1="170" y1="730" x2="270" y2="730"/>
           <text class="d-ts" x="204" y="722">✕ never</text>
           <rect class="d-box" x="274" y="716" width="150" height="28" rx="4"/>
-          <text class="d-ts" x="286" y="735">M's holder</text>
+          <text class="d-ts" x="286" y="735">M's holder — no mutex</text>
           <text class="d-ts" x="30" y="766">X sends neighborSetC → M's own goroutine writes M's holder</text>
           <text class="d-ts" x="470" y="735">single-owner, like every other holder</text>
         </svg>
@@ -412,7 +412,7 @@
           <tr>
             <td>LayoutHolder.mu</td>
             <td>none — every holder is single-owner</td>
-            <td><span class="verdict v-no">refuted</span></td>
+            <td><span class="verdict v-gone">deleted</span></td>
           </tr>
         </tbody>
       </table>
