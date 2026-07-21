@@ -109,23 +109,52 @@ func (t *Trace) drain() {
 			t.onEvent(ev)
 		}
 	}
+	// dispatch routes one event off t.ch: kindBreadcrumb bypasses record entirely — no
+	// Step, no append to t.events, no onEvent call (breadcrumbs are outside the closed
+	// TraceEventKinds vocabulary) — everything else goes through record as before.
+	dispatch := func(ev Event) {
+		if ev.Kind == kindBreadcrumb {
+			writeBreadcrumb(t, ev)
+			return
+		}
+		record(ev)
+	}
 	for {
 		select {
 		case ev := <-t.ch:
-			record(ev)
+			dispatch(ev)
 		case <-t.stopped:
 			// Close() signalled. Drain any events already buffered in t.ch
 			// (senders may have enqueued before observing stopped), then finish.
 			for {
 				select {
 				case ev := <-t.ch:
-					record(ev)
+					dispatch(ev)
 				default:
 					close(t.done)
 					return
 				}
 			}
 		}
+	}
+}
+
+// writeBreadcrumb writes one Breadcrumb() line to sink/debugSink, exactly as
+// Breadcrumb used to do inline under t.mu. Called only from the drain goroutine
+// (dispatch, above), which is now the SOLE writer of sink/debugSink, so no lock
+// is needed here.
+func writeBreadcrumb(t *Trace, ev Event) {
+	b, err := marshalBreadcrumb(ev.BreadcrumbLabel, ev.Node, ev.Port, ev.BreadcrumbValue)
+	if err != nil {
+		return
+	}
+	if t.sink != nil {
+		_, _ = t.sink.Write(b)
+		_, _ = t.sink.Write([]byte{'\n'})
+	}
+	if t.debugSink != nil {
+		_, _ = t.debugSink.Write(b)
+		_, _ = t.debugSink.Write([]byte{'\n'})
 	}
 }
 

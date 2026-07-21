@@ -140,6 +140,12 @@ const (
 	// event, so the in-editor drag-log overlay lists only THIS drag's recipients — not
 	// recipients accumulated across the whole session. No payload beyond the kind itself.
 	KindAbcDragReset = "abc-drag-reset"
+	// kindBreadcrumb is the internal marker for a Breadcrumb() call routed through
+	// t.ch like any other event (see Breadcrumb). Deliberately unexported and NOT
+	// added to TraceEventKinds: breadcrumbs stay outside the closed replay
+	// vocabulary — they get no Step ordinal and are never appended to t.events
+	// (drain's writeBreadcrumb intercepts kindBreadcrumb before record()).
+	kindBreadcrumb = "breadcrumb"
 )
 
 // TraceEventKinds is the single source of truth for the closed kind
@@ -263,6 +269,12 @@ type Event struct {
 	DeltaA int `json:"deltaA,omitempty"`
 	DeltaB int `json:"deltaB,omitempty"`
 	DeltaC int `json:"deltaC,omitempty"`
+	// BreadcrumbLabel/BreadcrumbValue carry a Breadcrumb() call's label/value strings
+	// on the internal kindBreadcrumb event (see Breadcrumb below). Node/Port reuse the
+	// existing fields. Set on kindBreadcrumb events only; never part of the closed
+	// TraceEventKinds vocabulary and never appended to t.events.
+	BreadcrumbLabel string
+	BreadcrumbValue string
 }
 
 // Trace is the shared recorder. Construct with New; injected into
@@ -274,12 +286,13 @@ type Trace struct {
 	done    chan struct{}
 	stopped chan struct{} // closed by Close() to signal senders to stop; ch is NEVER closed
 	// mu guards events/closed/sink/onEvent/debugSink against the real contention
-	// shape: every node goroutine calls Emit/Breadcrumb concurrently, the single
+	// shape: every node goroutine calls Emit (Breadcrumb now goes through emit too,
+	// same as everything else — see Breadcrumb/drain's writeBreadcrumb), the single
 	// drain goroutine appends to events and writes sink under this lock (drain.go
 	// record), and Close() flips closed. CHECKED: TestTraceConcurrentEmitVsClose
-	// and TestTraceBreadcrumbConcurrentWithClose (trace_concurrency_test.go) drive
-	// many concurrent Emit/Breadcrumb callers against one Close() (plus concurrent
-	// Events()/SetDebugSink() readers) under `go test -race`, and are RED
+	// (trace_concurrency_test.go) drives many concurrent Emit callers against one
+	// Close() (plus concurrent Events()/SetDebugSink() readers) under `go test
+	// -race`, and is RED
 	// (reproducible data-race reports on these exact fields/buffers) when the
 	// Lock/Unlock calls are removed from Close/Events/SetDebugSink/Breadcrumb/
 	// drain's record. The doc claim "`ch` is NEVER closed" (a send on a closed
@@ -567,13 +580,15 @@ func (t *Trace) Hover(node, port string, isInput bool) {
 	t.emit(Event{Kind: KindHover, Node: node, Port: port, Value: v})
 }
 
-// Breadcrumb writes a free-form diagnostic line directly to the sink
-// (if any) in real time. It is logging-only: breadcrumbs are NOT added
-// to the buffered event slice, do NOT receive a Step ordinal, and are
-// outside the closed trace vocabulary used for replay/parity. The line
-// shape is {"src":"go","kind":"breadcrumb","label":...,"node":...,
-// "port":...,"value":...} with empty/zero fields omitted, so the TS
-// relay can route it to go.jsonl alongside real trace events.
+// Breadcrumb sends a free-form diagnostic line as an ordinary event on t.ch —
+// same path as Recv/Fire/Send — so the single drain goroutine is the one that
+// writes it to the sink(s), same as everything else. It is logging-only:
+// breadcrumbs are NOT added to the buffered event slice, do NOT receive a Step
+// ordinal, and are outside the closed trace vocabulary used for replay/parity
+// (drain's writeBreadcrumb intercepts kindBreadcrumb before record()). The line
+// shape is {"kind":"breadcrumb","label":...,"node":...,"port":...,"value":...}
+// with empty fields omitted (marshalBreadcrumb, unchanged), so the TS relay
+// still routes it to go-debug.jsonl alongside real trace events.
 //
 // Used to trace one-off control events (e.g. edge delete / wire reset)
 // that have no place in the recv/fire/send lifecycle.
@@ -584,24 +599,14 @@ func (t *Trace) Breadcrumb(label, node, port, value string) {
 	// sink = the in-process test observation buffer (headless model/gate tests poll it).
 	// debugSink = the PRODUCTION debug channel (os.Stdout, wired in main via SetDebugSink),
 	// which the ext host recognises by the "breadcrumb" kind and routes to .probe/go-debug.jsonl.
-	// A breadcrumb with neither sink wired is a cheap no-op (marshal is skipped).
+	// A breadcrumb with neither sink wired is a cheap no-op — both fields are set once at
+	// startup (New*/SetDebugSink), before any node goroutine runs, and never mutated again,
+	// so reading them here from an arbitrary caller goroutine has a happens-before edge from
+	// goroutine creation and needs no lock.
 	if t.sink == nil && t.debugSink == nil {
 		return
 	}
-	b, err := marshalBreadcrumb(label, node, port, value)
-	if err != nil {
-		return
-	}
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if t.sink != nil {
-		_, _ = t.sink.Write(b)
-		_, _ = t.sink.Write([]byte{'\n'})
-	}
-	if t.debugSink != nil {
-		_, _ = t.debugSink.Write(b)
-		_, _ = t.debugSink.Write([]byte{'\n'})
-	}
+	t.emit(Event{Kind: kindBreadcrumb, Node: node, Port: port, BreadcrumbLabel: label, BreadcrumbValue: value})
 }
 
 // SetDebugSink wires the production DEBUG BREADCRUMB channel: after this call every

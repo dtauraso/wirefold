@@ -73,9 +73,12 @@ func TestTraceConcurrentEmitVsClose(t *testing.T) {
 	}
 }
 
-// TestTraceBreadcrumbConcurrentWithClose checks that Breadcrumb (which writes
-// directly to sink/debugSink under mu, independent of the emit/ch path) does not
-// race Close's mutation of t.closed/t.stopped.
+// TestTraceBreadcrumbConcurrentWithClose checks that Breadcrumb — now an ordinary
+// event routed through emit()/t.ch like Recv/Fire/Send, written by the drain
+// goroutine's writeBreadcrumb instead of writing sink/debugSink directly on the
+// caller's own goroutine — does not race Close's mutation of t.closed/t.stopped,
+// and never panics (a send on t.ch racing Close must select the stopped case,
+// per emit's contract, not block or panic).
 func TestTraceBreadcrumbConcurrentWithClose(t *testing.T) {
 	var buf bytes.Buffer
 	tr := NewWithSink(8, &buf)
