@@ -14,11 +14,14 @@ import (
 
 func TestBreadcrumbWritesToDebugSink(t *testing.T) {
 	tr := New(0)
-	defer tr.Close()
 	var dbg bytes.Buffer
 	tr.SetDebugSink(&dbg)
 
 	tr.Breadcrumb("topology-loaded", "node-7", "in", "nodes=3")
+	// Breadcrumb now only enqueues onto t.ch; the drain goroutine does the actual
+	// write. Close() drains every buffered event before returning, so it is the
+	// synchronization point that makes the write to dbg visible here.
+	tr.Close()
 
 	line := strings.TrimSpace(dbg.String())
 	if line == "" {
@@ -53,10 +56,12 @@ func TestBreadcrumbNoSinkIsNoOp(t *testing.T) {
 func TestBreadcrumbHitsBothSinks(t *testing.T) {
 	var evSink, dbg bytes.Buffer
 	tr := NewWithSink(0, &evSink)
-	defer tr.Close()
 	tr.SetDebugSink(&dbg)
 
 	tr.Breadcrumb("both", "", "", "")
+	// Synchronization point: Close() drains t.ch before returning, so the drain
+	// goroutine's writes to both sinks are visible by the time it returns.
+	tr.Close()
 
 	if !strings.Contains(evSink.String(), `"label":"both"`) {
 		t.Fatalf("event sink missing breadcrumb: %q", evSink.String())

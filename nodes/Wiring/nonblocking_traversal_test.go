@@ -44,7 +44,7 @@ func TestInputToHoldNewSendOldTraversal(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tr := T.New(256)
+	tr, live := newTraceWithLiveEvents(256)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -70,7 +70,7 @@ func TestInputToHoldNewSendOldTraversal(t *testing.T) {
 			t.Fatalf("timed out waiting for 2 recv events on dst; got %v so far", got)
 		case <-poll.C:
 			got = got[:0]
-			for _, e := range tr.Events() {
+			for _, e := range live.snapshot() {
 				if e.Kind == T.KindRecv && e.Node == "dst" && e.Port == "FromPrevHoldNewSendOldNode" {
 					got = append(got, e.Value)
 				}

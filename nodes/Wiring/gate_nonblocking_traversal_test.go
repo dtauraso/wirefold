@@ -55,7 +55,7 @@ func TestGateFireAndOutputTraversal(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tr := T.New(256)
+	tr, live := newTraceWithLiveEvents(256)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -84,7 +84,7 @@ func TestGateFireAndOutputTraversal(t *testing.T) {
 		case <-deadline:
 			t.Fatalf("timed out: fired=%v delivered=%v", fired, delivered)
 		case <-poll.C:
-			for _, e := range tr.Events() {
+			for _, e := range live.snapshot() {
 				if e.Kind == T.KindFire && e.Node == "gate" {
 					fired = true
 				}

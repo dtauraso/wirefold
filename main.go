@@ -188,11 +188,29 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 
 	// Launch the per-node and per-edge move-handler goroutines (decentralized
 	// node-move: each node/edge drains its own inbox and recomputes its own geometry).
-	md.Start(ctx)
+	// moverWG covers every nodeMover/edgeMover goroutine Start launched (see its doc
+	// comment). Waiting on it is what lets Close() run with nothing still emitting —
+	// the reason Trace needs no mutex.
+	moverWG := md.Start(ctx)
 
 	// Read the editor→Go bridge: "edit" JSON lines (op = create/update/delete)
 	// from stdin. When stdin reaches EOF (extension host disconnect), cancel the context.
+	//
+	// stdinWG tracks ONLY this dispatch-loop goroutine, not RunStdinReader's internal
+	// frame-reader goroutine. That inner goroutine blocks in io.ReadFull(os.Stdin),
+	// which does NOT select on ctx — it is unblocked only by closing the fd (which
+	// RunStdinReader itself arranges when r is an io.Closer and ctx is done). On a
+	// non-pollable fd that close could still leave the read parked, so waiting on it
+	// here would turn a leak into a hang. RunStdinReader's dispatch loop, in contrast,
+	// selects on ctx.Done() and returns immediately on cancel regardless of the frame
+	// reader's state — that promptness is what stdinWG actually certifies. The frame
+	// reader goroutine is deliberately left un-waited (detached); in production it
+	// outlives the process only as long as it takes the OS to tear down the closed fd,
+	// which is bounded by process exit, not by this WaitGroup.
+	stdinWG := new(sync.WaitGroup)
+	stdinWG.Add(1)
 	go func() {
+		defer stdinWG.Done()
 		W.RunStdinReader(ctx, os.Stdin, slotReg, md, tr, speedSinks)
 		cancel()
 	}()
@@ -206,24 +224,21 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 		}()
 	}
 
-	// Wait for all nodes to exit, but never block forever: in a timed/cancelled
-	// run (e.g. -duration, or SIGINT) a node could still be mid-cycle when ctx is
-	// cancelled. Pacing loops are all ctx-aware (SleepCycle selects on ctx.Done),
-	// so they observe cancellation on their own; we wait a brief grace and exit
-	// regardless. The buffer's row tables are already seeded from the diagram
-	// (above, before the node-goroutine launch loop), so flushing the trace here
-	// still captures a correct scene even if a node's own startup geometry emit
-	// never got scheduled.
+	// Wait for every tracked goroutine to exit — node Update loops, nodeMover/
+	// edgeMover goroutines, and the stdin dispatch loop — before closing the trace.
+	// No grace timeout: every one of these goroutines' only blocking call is
+	// SleepCycle, which selects on ctx.Done(), so cancel-to-return is bounded by one
+	// clock tick (~16ms), not by an arbitrary grace window. If a goroutine ever fails
+	// to exit, wg.Wait() below hangs visibly instead of silently proceeding past a
+	// still-running goroutine — a hang names the bug; a grace timeout hides it.
 	done := make(chan struct{})
-	go func() { wg.Wait(); close(done) }()
-	select {
-	case <-done:
-	case <-ctx.Done():
-		select {
-		case <-done:
-		case <-time.After(250 * time.Millisecond):
-		}
-	}
+	go func() {
+		wg.Wait()
+		moverWG.Wait()
+		stdinWG.Wait()
+		close(done)
+	}()
+	<-done
 
 	tr.Close()
 	// Trace.Close drained every remaining event into snapState.Update; flush a final snapshot

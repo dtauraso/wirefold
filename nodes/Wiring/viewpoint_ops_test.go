@@ -80,12 +80,13 @@ func TestMoveDispatchViewpointDelegatorsEmit(t *testing.T) {
 	md.PanViewpoint(vec3{X: 5}, tr)
 	md.OrbitViewpoint(dir{Theta: 1.0, Phi: 0.0}, dir{Theta: 1.1, Phi: 0.1}, tr)
 
+	// Events() is drain-only and only safe to read once the drain goroutine has
+	// exited (Trace's doc comment); Close() is the synchronization point. lastCamera
+	// below also calls Close(), which is idempotent, so this is just the earliest
+	// point the count can be asserted correctly.
+	tr.Close()
 	if n := countCameraEvents(tr.Events()); n < 3 {
-		tr.Close()
-		n = countCameraEvents(tr.Events())
-		if n < 3 {
-			t.Fatalf("expected >=3 camera events from delegators, got %d", n)
-		}
+		t.Fatalf("expected >=3 camera events from delegators, got %d", n)
 	}
 	// Confirm the last event reflects the zoom+pan state (r halved, pivot moved).
 	e := lastCamera(t, tr)
