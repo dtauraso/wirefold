@@ -17,34 +17,31 @@ func marshalBreadcrumb(label, node, port, value string) ([]byte, error) {
 	return json.Marshal(breadcrumb{Kind: "breadcrumb", Label: label, Node: node, Port: port, Value: value})
 }
 
-// Close stops the drain goroutine. Call after every node's Update
-// has returned (sync.WaitGroup.Wait in main). Idempotent.
+// Close stops the drain goroutine. Call after every producer goroutine has exited
+// (main.go: node Update loops + nodeMover/edgeMover goroutines + the stdin dispatch
+// loop, all wg.Wait()'d — see close-everything.md). Idempotent via closeOnce: only
+// the first call actually signals+waits; later calls return immediately (matching
+// the old mutex-guarded behavior, which also skipped the wait on a second call).
 func (t *Trace) Close() {
 	if t == nil {
 		return
 	}
-	t.mu.Lock()
-	if t.closed {
-		t.mu.Unlock()
-		return
-	}
-	t.closed = true
-	// Signal senders to stop. t.ch is NEVER closed, so an in-flight emit
-	// selects the stopped case and drops rather than panicking.
-	close(t.stopped)
-	t.mu.Unlock()
-	// drain() observes t.stopped, flushes any buffered events, then closes done.
-	<-t.done
+	t.closeOnce.Do(func() {
+		// Signal senders to stop. t.ch is NEVER closed, so an in-flight emit
+		// selects the stopped case and drops rather than panicking.
+		close(t.stopped)
+		// drain() observes t.stopped, flushes any buffered events, then closes done.
+		<-t.done
+	})
 }
 
-// Events returns a snapshot of the recorded sequence. Safe to call
-// after Close; calling before Close races with the drain goroutine.
+// Events returns a snapshot of the recorded sequence. Safe to call after Close: by
+// then the drain goroutine (events' sole writer) has exited, so this read has no
+// concurrent writer to race. Calling before Close races with the drain goroutine.
 func (t *Trace) Events() []Event {
 	if t == nil {
 		return nil
 	}
-	t.mu.Lock()
-	defer t.mu.Unlock()
 	out := make([]Event, len(t.events))
 	copy(out, t.events)
 	return out
@@ -54,8 +51,6 @@ func (t *Trace) Events() []Event {
 // object per line, trailing newline) onto w. Emits raw form: send
 // events carry node+port. Call after Close.
 func (t *Trace) WriteJSONL(w io.Writer) error {
-	t.mu.Lock()
-	defer t.mu.Unlock()
 	return writeAll(t.events, w, marshalEvent)
 }
 
@@ -88,9 +83,10 @@ func (t *Trace) drain() {
 		// so NO trace-event JSON is written to stdout — the JSON-trace-on-stdout emitter is
 		// removed at the wiring. The .probe log is now the DECODE of the fd3 binary content
 		// buffer's EVENT block (onEvent → SnapshotState → ext-host buffer-log.ts), the spec's
-		// "one representation including logs". Hold the lock across the sink write so a
-		// concurrent Breadcrumb()/Close() write cannot fuse two JSON objects onto one line.
-		t.mu.Lock()
+		// "one representation including logs". No lock needed: the drain goroutine is
+		// the SOLE writer of events/sink (Breadcrumb routes through writeBreadcrumb on
+		// this same goroutine now too — see dispatch below — so there is no second
+		// writer that could fuse two JSON objects onto one line).
 		ev.Step = len(t.events)
 		t.events = append(t.events, ev)
 		if t.sink != nil {
@@ -101,10 +97,8 @@ func (t *Trace) drain() {
 				}
 			}
 		}
-		t.mu.Unlock()
-		// Binary snapshot hook: called outside the lock (pure state mutation, no
-		// channel sends). The drain goroutine is the sole caller, so the hook
-		// never races with itself or with the lock-protected sink writes above.
+		// Binary snapshot hook: the drain goroutine is the sole caller, so it never
+		// races with itself or with the sink write above.
 		if t.onEvent != nil {
 			t.onEvent(ev)
 		}

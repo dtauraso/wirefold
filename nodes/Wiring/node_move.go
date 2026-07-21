@@ -29,6 +29,7 @@ package Wiring
 import (
 	"context"
 	"sort"
+	"sync"
 	"sync/atomic"
 
 	T "github.com/dtauraso/wirefold/Trace"
@@ -535,14 +536,33 @@ func (md *MoveDispatch) Bind(outSink map[string]*Out, slotReg SlotRegistry) {
 // dedicated sender/watcher goroutines (an earlier shared-outbox-plus-sender-goroutine
 // design was removed: each mover's own run loop drains its own inbox AND retries its own
 // pending sends, non-blockingly, every cycle).
-func (md *MoveDispatch) Start(ctx context.Context) {
+//
+// Returns a *sync.WaitGroup covering every launched goroutine, so a caller that wants a
+// complete shutdown (main.go: "wait for everything, then close" — see
+// docs/planning/visual-editor/close-everything.md) can wg.Wait() on it after cancelling
+// ctx. Both nm.run and em.run select on ctx.Done() at the top of their loop (their only
+// blocking call is SleepCycle, which also selects on ctx), so cancel-to-return is one
+// clock tick, worst case. Callers that don't care about shutdown completeness (most
+// existing tests) can ignore the return value — Start(ctx) alone still compiles and
+// still launches every goroutine exactly as before.
+func (md *MoveDispatch) Start(ctx context.Context) *sync.WaitGroup {
 	md.ctx = ctx
+	wg := new(sync.WaitGroup)
 	for _, nm := range md.nodeMovers {
-		go nm.run(ctx)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			nm.run(ctx)
+		}()
 	}
 	for _, em := range md.edgeMovers {
-		go em.run(ctx)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			em.run(ctx)
+		}()
 	}
+	return wg
 }
 
 // EdgeOut returns the source *Out bound to the given edge label, or nil if unknown.

@@ -285,28 +285,32 @@ type Trace struct {
 	ch      chan Event
 	done    chan struct{}
 	stopped chan struct{} // closed by Close() to signal senders to stop; ch is NEVER closed
-	// mu guards events/closed/sink/onEvent/debugSink against the real contention
-	// shape: every node goroutine calls Emit (Breadcrumb now goes through emit too,
-	// same as everything else — see Breadcrumb/drain's writeBreadcrumb), the single
-	// drain goroutine appends to events and writes sink under this lock (drain.go
-	// record), and Close() flips closed. CHECKED: TestTraceConcurrentEmitVsClose
-	// (trace_concurrency_test.go) drives many concurrent Emit callers against one
-	// Close() (plus concurrent Events()/SetDebugSink() readers) under `go test
-	// -race`, and is RED
-	// (reproducible data-race reports on these exact fields/buffers) when the
-	// Lock/Unlock calls are removed from Close/Events/SetDebugSink/Breadcrumb/
-	// drain's record. The doc claim "`ch` is NEVER closed" (a send on a closed
-	// channel panics — verified by reading emit()/Close(): Close only closes
-	// `stopped`, never `ch`) is CHECKED by TestTraceConcurrentEmitVsClose, which
-	// recovers any goroutine panic from an Emit racing Close and fails the test
-	// if one occurs; it passes today (no panic observed) — this is a positive
-	// (no-panic) claim so it cannot be red-proofed by deletion the same way the
-	// data-race claims can, since removing the mutex around closed/stopped does
-	// not reintroduce a close(ch) call. Guard against reintroducing a `close(t.ch)`
-	// anywhere: that is the one change this test does NOT independently rule out.
-	mu        sync.Mutex
+	// closeOnce makes Close idempotent (replaces the old `closed bool` guarded by
+	// Trace.mu). No lock is needed: events/sink/onEvent/debugSink are all written by
+	// the single drain goroutine and nothing else — see the field comments below and
+	// docs/planning/visual-editor/close-everything.md. CHECKED:
+	// TestTraceConcurrentEmitVsClose (trace_concurrency_test.go) drives many
+	// concurrent Emit callers against one Close() under `go test -race` and is RED
+	// (reproducible data-race reports) if a caller writes events/sink/debugSink
+	// directly instead of going through emit()/t.ch. The doc claim "`ch` is NEVER
+	// closed" (a send on a closed channel panics — verified by reading emit()/
+	// Close(): Close only closes `stopped`, never `ch`) is CHECKED by the same test,
+	// which recovers any goroutine panic from an Emit racing Close and fails if one
+	// occurs. Guard against reintroducing a `close(t.ch)` anywhere: that is the one
+	// change this test does NOT independently rule out.
+	closeOnce sync.Once
+	// events is drain-only: the drain goroutine (drain.go) is its sole writer, from
+	// construction (NewWithSinkHook's `go t.drain()`) until Close(). Events()/
+	// WriteJSONL() read it too — safe only once every producer goroutine has exited
+	// (main.go's complete shutdown: node Update loops + nodeMover/edgeMover
+	// goroutines + the stdin dispatch loop, all wg.Wait()'d before Close(); see
+	// close-everything.md) and the drain goroutine has itself observed t.stopped and
+	// returned. sink/onEvent/debugSink are set ONCE at startup (NewWithSinkHook /
+	// SetDebugSink), before any producer goroutine is spawned, and never mutated
+	// again — read-only for the rest of the process, by both drain and Breadcrumb's
+	// unwired-no-op check, with no synchronization needed beyond the ordinary
+	// happens-before edge from goroutine creation.
 	events    []Event
-	closed    bool
 	sink      io.Writer   // if non-nil, each event is written as JSONL in real time
 	onEvent   func(Event) // if non-nil, called from drain goroutine on every event (binary snapshot hook)
 	debugSink io.Writer   // if non-nil, Breadcrumb() lines are ALSO written here (production debug channel)
@@ -615,12 +619,12 @@ func (t *Trace) Breadcrumb(label, node, port, value string) {
 // {"kind":"breadcrumb",...} lines; the ext host routes those to .probe/go-debug.jsonl
 // (distinct from trace events, which flow on fd3, and from errors on stderr). This is
 // diagnostic-only and fire-and-forget — it never blocks node loops and is safe to leave
-// unset (Breadcrumb stays a no-op). Set once at startup before nodes run.
+// unset (Breadcrumb stays a no-op). Set once at startup before nodes run — no lock: the
+// happens-before edge from goroutine creation is what makes every later Breadcrumb()
+// caller (running in a goroutine spawned after this call returns) see the write.
 func (t *Trace) SetDebugSink(w io.Writer) {
 	if t == nil {
 		return
 	}
-	t.mu.Lock()
-	defer t.mu.Unlock()
 	t.debugSink = w
 }
