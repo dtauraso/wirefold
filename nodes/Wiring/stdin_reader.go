@@ -174,12 +174,9 @@ const maxFrameBytes = 1 << 20
 // empty slice) is fine: the speed edit then simply reaches nobody, same as
 // today's known-inert slider before this delivery path existed.
 func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *MoveDispatch, tr *T.Trace, speedSinks []chan float64) {
-	// Flush every debounced persister's pending value on EVERY clean-shutdown return path
-	// (stdin EOF, channel close, ctx cancel) — the Go process exits on every webview reload
-	// / window close, and a drag within the 250ms debounce window of that exit would
-	// otherwise be silently abandoned (the node reverts on the next load). md is nil-guarded
-	// inside flushPendingPersists for headless/test callers that pass nil.
-	defer md.flushPendingPersists()
+	// Every persister now writes synchronously the moment its value changes (see
+	// scene_persist.go's header comment for why the prior debounce/clean-shutdown-flush
+	// machinery was removed), so there is nothing pending to flush on exit here anymore.
 	// Framed-binary reader: each record is [len:u32-LE][record bytes]. A background
 	// goroutine reads whole frames (io.ReadFull handles partial reads — a frame split
 	// across TCP/pipe chunks is reassembled before the record is decoded) and hands the

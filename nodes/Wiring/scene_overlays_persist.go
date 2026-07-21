@@ -3,9 +3,10 @@
 // scene_camera_persist.go).
 //
 // Go owns the overlay flags (overlay_gen.go's overlayState). Persistence has two triggers:
-// the bare `save` command (stdin_reader.go) and — like camera — an ON-CHANGE debounced
-// write scheduled whenever an overlays update lands (applyUpdate toggle/set). The camera pose
-// is continuously flushed by scene_camera_persist.go; this file handles the overlay half. No
+// the bare `save` command (stdin_reader.go) and — like camera — an ON-CHANGE synchronous
+// write scheduled whenever an overlays update lands (applyUpdate toggle/set); see
+// scene_persist.go's header comment for why the prior debounce was removed. The camera pose
+// is written the same way by scene_camera_persist.go; this file handles the overlay half. No
 // scene document crosses the TS→Go bridge — Go writes ITS OWN current snapshot.
 //
 // LOAD side: loadSceneOverlays reads the keys back (inverting the *Hidden polarity) and
@@ -25,15 +26,13 @@
 // tolerated: json.Unmarshal into sceneOverlaysFile silently ignores unknown keys, so it is
 // dropped on the next save without needing an explicit migration.
 //
-// The debounce/coalesce timer and the atomic-write plumbing are shared machinery from
-// scene_persist.go (debouncedPersister, writeJSONAtomic) — this file holds only the
-// overlays-specific shape.
+// The atomic-write plumbing is shared machinery from scene_persist.go (writeJSONAtomic) —
+// this file holds only the overlays-specific shape.
 
 package Wiring
 
 import (
 	"encoding/json"
-	"time"
 
 	T "github.com/dtauraso/wirefold/Trace"
 )
@@ -70,45 +69,25 @@ func writeSceneOverlays(overlaysPath string, ov overlayState) error {
 	return writeJSONAtomic(overlaysPath, obj)
 }
 
-// overlaysPersister coalesces rapid overlay toggles/sets into a debounced whole-file write
-// of overlays.json. Owned by MoveDispatch (armed by EnableEditPersist). path == "" (tests
-// that never arm) → no-op.
+// overlaysPersister writes overlay toggles/sets to overlays.json as they happen. Owned by
+// MoveDispatch (armed by EnableEditPersist). path == "" (tests that never arm) → no-op.
 type overlaysPersister struct {
-	path     string // overlays.json path (overlaysFilePath(topologyPath))
-	debounce time.Duration
-	debouncedPersister[overlayState]
+	path   string // overlays.json path (overlaysFilePath(topologyPath))
+	writes int    // count of completed writes (test observability); single writer
+	// (applyUpdate/handleSaveMsg run only on the stdin/gesture goroutine) so no lock is
+	// needed.
 }
 
-// schedule records the latest overlay snapshot and (re)arms the debounce timer.
+// schedule writes the given overlay snapshot to overlays.json synchronously.
 func (p *overlaysPersister) schedule(ov overlayState) {
 	if p == nil || p.path == "" {
-		return
-	}
-	p.arm(p.debounce, ov, p.flush)
-}
-
-// flush writes the pending overlay snapshot to overlays.json (whole-file write) and clears it.
-func (p *overlaysPersister) flush() {
-	ov, has := p.take()
-	if !has {
 		return
 	}
 	if err := writeSceneOverlays(p.path, ov); err != nil {
 		logPersistErr("scene_overlays_persist", p.path, err)
 		return
 	}
-	p.recordWrite()
-}
-
-// flushPending cancels any pending debounce timer and synchronously writes whatever is
-// still pending, for the clean-shutdown path (RunStdinReader) — an overlay toggle within
-// the debounce window of process exit would otherwise be silently lost.
-func (p *overlaysPersister) flushPending() {
-	if p == nil {
-		return
-	}
-	p.stop()
-	p.flush()
+	p.writes++
 }
 
 // sceneOverlaysFile is the subset of scene.json the overlay loader reads. Pointer fields
