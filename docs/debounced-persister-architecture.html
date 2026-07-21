@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>wirefold — debouncedPersister.mu, the last lock</title>
+<title>wirefold — debouncedPersister.mu, resolved</title>
 <style>
   :root {
     --ground:#F2F4F7; --surface:#FFFFFF; --plate:#FAFBFC;
@@ -94,18 +94,20 @@
 
 <header>
   <div class="head-inner">
-    <p class="eyebrow">wirefold · concurrency</p>
-    <h1>debouncedPersister.mu — the last lock</h1>
-    <p class="sub">Most locks in this repo have been deleted — <code>sceneFileMu</code> and
-    <code>entityFileMu</code> are both gone. <code>LayoutHolder.mu</code> was deleted too
-    (one owner goroutine per node, no lock needed); see
-    <code>docs/layout-holder-architecture.html</code> for that removal. Of the two locks that
-    remain in non-test Go, <code>Trace.mu</code> is settled and red-proven (it guards an
-    accumulator that cannot be copied — NOT event delivery, which is <code>Trace.ch</code>,
-    a buffered channel). That left the debounced persister's own lock (was
-    <code>nodes/Wiring/scene_persist.go:64</code>, five instances) as the one lock in this
-    repo still in question. See <code>docs/mutex-architecture.html</code> for the whole-system
-    view.</p>
+    <p class="eyebrow">wirefold · concurrency · RESOLVED</p>
+    <h1>debouncedPersister.mu — a deleted lock, recorded</h1>
+    <p class="sub">Every lock in this repo has now been deleted — <code>sceneFileMu</code> and
+    <code>entityFileMu</code> are both gone; <code>LayoutHolder.mu</code> was deleted too
+    (one owner goroutine per node, no lock needed), see
+    <code>docs/layout-holder-architecture.html</code> for that removal; and
+    <code>Trace.mu</code>, once thought to be the one lock that had to stay because it guarded
+    an accumulator that cannot be copied, was deleted too — that claim was true but was never
+    what the lock actually guarded in production (see
+    <code>docs/trace-mutex-architecture.html</code>). This page records the debounced
+    persister's own lock (was <code>nodes/Wiring/scene_persist.go:64</code>, five instances),
+    the last one in question when this page was written. See
+    <code>docs/mutex-architecture.html</code> for the whole-system view, now describing zero
+    live locks.</p>
     <p class="verdict ok"><b>RESOLVED</b> — task/mutex-debounced-persister deleted the whole
     generic type (the struct, its lock, the coalescing timer) rather than restructuring it:
     the throughput case for debouncing (diagram 2b) never held up, and the analysis below is

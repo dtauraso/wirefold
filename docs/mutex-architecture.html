@@ -112,8 +112,10 @@
   <div class="head-inner">
     <p class="eyebrow">wirefold · concurrency</p>
     <h1>Mutex architecture — who touches what</h1>
-    <p class="sub">Two lock groups left. Each diagram names the real goroutines, the real methods,
-    and the real line numbers. A lock with one owner is not a lock.</p>
+    <p class="sub">Zero locks left. Every <code>sync.Mutex</code>/<code>Cond</code> in non-test Go has been
+    deleted, each by giving its state one owner rather than by narrowing the lock. Each diagram below is
+    now historical record — the real goroutines, the real methods, the real line numbers, and what
+    replaced the lock.</p>
   </div>
 </header>
 
@@ -269,13 +271,21 @@ SPSC outbox queue had a lock-free form. It no longer applies — there is no que
 pair of adjacent movers talks over its own dedicated channel, and a full channel just means "try
 again next cycle," never a block.</p>
 
-<!-- ═══════════ 1 · Trace.mu ═══════════ -->
-<h2>1 · Trace.mu — the hot path is NOT locked</h2>
-<p class="cap">Every emitting goroutine sends on a <b>channel</b>, taking no lock. The mutex guards
-only the single drain goroutine's ledger. This is the most misread lock in the tree.</p>
+<!-- ═══════════ gone · Trace.mu ═══════════ -->
+<h2>gone · Trace.mu — deleted by giving the drain the only write, not by a smaller lock</h2>
+<p class="cap">Every emitting goroutine sent on a <b>channel</b>, taking no lock, even before the lock
+was deleted. What the mutex actually guarded was <code>Breadcrumb</code>'s direct sink writes (it used
+to write <code>sink</code>/<code>debugSink</code> straight from the calling goroutine, bypassing
+<code>t.ch</code>) and surviving a <code>Close()</code> that ran while goroutines were still shutting
+down. Both were fixed at the source: <code>Breadcrumb</code> now sends on <code>t.ch</code> like every
+other event, so the drain goroutine is the sole writer; and shutdown became complete — every
+<code>nodeMover.run</code>/<code>edgeMover.run</code> and <code>RunStdinReader</code> is now covered
+by a <code>WaitGroup</code>, so nothing can call into <code>Trace</code> during <code>Close()</code>.
+The accumulator-can't-be-copied justification below was true but was never what the lock was doing
+in production — this was the most misread lock in the tree.</p>
 
 <div class="plate">
-<svg viewBox="0 0 860 340" role="img" aria-label="Many goroutines emit into a buffered channel with no lock; a single drain goroutine takes the mutex to append events and write sinks; Close and the readers contend with the drain, not with the emitters.">
+<svg viewBox="0 0 860 340" role="img" aria-label="Many goroutines, including Breadcrumb callers, emit into a buffered channel with no lock; a single drain goroutine appends events and writes sinks with no lock either, because it is the only writer; a WaitGroup now covers every mover and the stdin reader so Close cannot run concurrently with them.">
   <defs>
     <marker id="ab" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
       <path d="M0,0 L10,5 L0,10 z" fill="#2E7D9A"/>
@@ -287,16 +297,16 @@ only the single drain goroutine's ledger. This is the most misread lock in the t
 
   <text class="tl" x="0" y="14">MANY EMITTERS — NO LOCK</text>
   <text class="tl" x="336" y="14">HANDOFF</text>
-  <text class="tl" x="620" y="14">LEDGER — LOCKED</text>
+  <text class="tl" x="620" y="14">LEDGER — NO LOCK NEEDED</text>
 
   <rect class="safe" x="0" y="30" width="230" height="150" rx="6"/>
   <text class="tk" x="12" y="50">node Update loops (one per node)</text>
   <text class="tk" x="12" y="70">gate loops · DriveHeld</text>
   <text class="tk" x="12" y="90">nodeMover.run · edgeMover.run</text>
   <text class="tk" x="12" y="110">RunStdinReader</text>
-  <text class="tk" x="12" y="130">main (Breadcrumb, pre-spawn)</text>
+  <text class="tk" x="12" y="130">Breadcrumb (now sends on t.ch too)</text>
   <text class="tf" x="12" y="156">emit() = bare select send</text>
-  <text class="tf" x="12" y="170">Trace.go:341–346 — mu untouched</text>
+  <text class="tf" x="12" y="170">Trace.go — mu deleted, not narrowed</text>
 
   <path class="arrb" d="M230,86 L336,86" marker-end="url(#ab)"/>
   <text class="tb" x="240" y="78">send</text>
@@ -313,37 +323,41 @@ only the single drain goroutine's ledger. This is the most misread lock in the t
   <text class="ts" x="632" y="66">record() — the ONLY writer</text>
   <text class="tf" x="632" y="82">spawned once · Trace.go:332</text>
 
-  <path class="arr" d="M740,90 L740,116" marker-end="url(#ah2)"/>
+  <path class="arrk" d="M740,90 L740,116" marker-end="url(#ah2)"/>
 
-  <rect class="state" x="620" y="122" width="240" height="126" rx="8"/>
+  <rect class="safe" x="620" y="122" width="240" height="126" rx="8"/>
   <text class="t"  x="632" y="144">Trace</text>
   <text class="tf" x="632" y="158">Trace/Trace.go:294</text>
   <rect x="632" y="170" width="216" height="24" rx="4" class="box"/>
-  <text class="tw" x="644" y="187">mu sync.Mutex</text>
+  <text class="tk" x="644" y="187">no mu — drain-only writer</text>
   <rect x="632" y="202" width="216" height="38" rx="4" class="box"/>
-  <text class="ts" x="644" y="217">events · closed</text>
+  <text class="ts" x="644" y="217">events · closed (sync.Once)</text>
   <text class="ts" x="644" y="232">sink · onEvent · debugSink</text>
 
-  <!-- contenders on the ledger -->
-  <rect class="gor" x="336" y="176" width="180" height="34" rx="6"/>
-  <text class="ts" x="348" y="197">Close — flips closed</text>
-  <path class="arr" d="M516,193 L620,193" marker-end="url(#ah2)"/>
+  <!-- former contenders on the ledger, now waited on -->
+  <rect class="safe" x="336" y="176" width="180" height="34" rx="6"/>
+  <text class="tk" x="348" y="197">Close — waits for wg first</text>
+  <path class="arrk" d="M516,193 L620,193" marker-end="url(#ah2)"/>
 
-  <rect class="gor" x="336" y="220" width="180" height="46" rx="6"/>
-  <text class="ts" x="348" y="238">Events · WriteJSONL</text>
-  <text class="tf" x="348" y="253">readers · drain.go:38–58</text>
-  <path class="arr" d="M516,240 L620,225" marker-end="url(#ah2)"/>
+  <rect class="safe" x="336" y="220" width="180" height="46" rx="6"/>
+  <text class="tk" x="348" y="238">Events · WriteJSONL</text>
+  <text class="tf" x="348" y="253">readers · run AFTER drain exits</text>
+  <path class="arrk" d="M516,240 L620,225" marker-end="url(#ah2)"/>
 
   <line x1="0" y1="288" x2="860" y2="288" stroke="var(--line)"/>
   <text class="tk" x="0" y="308">THE POINT</text>
-  <text class="ts" x="86" y="308">producers contend on the CHANNEL, never on mu. mu serializes drain vs Close vs readers.</text>
+  <text class="ts" x="86" y="308">producers only ever contended on the CHANNEL. Once Close waits for every goroutine, nothing contends on the ledger either — no mutex left to take.</text>
   <text class="tf" x="0" y="324">Trace/trace_concurrency_test.go</text>
 </svg>
 </div>
 
-<p class="verdict ok"><b>STAYING.</b> An accumulator cannot be copied — copies give N partial streams
-and no whole picture, so the move that deleted <code>RealClock.mu</code> is unavailable here.
-<b style="color:var(--signal)">But the framing above it is open:</b> the merged log is already only
+<p class="verdict ok"><b>DELETED, NOT NARROWED.</b> The accumulator-can't-be-copied claim above was
+true but was not what the lock guarded — in production nothing ever raced <code>events</code>
+(the drain was already sole writer, <code>Events()</code> had zero non-test callers,
+<code>WriteJSONL</code> ran after drain exited). The lock's real job was serializing
+<code>Breadcrumb</code>'s direct sink writes and surviving an incomplete shutdown; fixing both
+removed it. <b style="color:var(--signal)">The framing above it is still open:</b> the event
+channel and the drain's single-writer ordering still exist, and the merged log is already only
 <i>arrival order at the drain</i> — scheduler order, not causal order.</p>
 
 <!-- ═══════════ gone · LayoutHolder.mu ═══════════ -->
@@ -410,8 +424,8 @@ already emits (the <code>"abc-drag"</code> breadcrumb, or a tapped
 </svg>
 </div>
 
-<!-- ═══════════ 5 · scene_persist ═══════════ -->
-<h2>2 · scene_persist — the second party is a timer goroutine</h2>
+<!-- ═══════════ gone · scene_persist ═══════════ -->
+<h2>gone · scene_persist — the second party was a timer goroutine</h2>
 <p class="verdict ok"><b>RESOLVED</b> — task/mutex-debounced-persister deleted the debounce
 timer (and its lock) outright rather than keeping it: see
 <code>docs/debounced-persister-architecture.html</code> for the full analysis. Every domain

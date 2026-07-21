@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>wirefold — Trace.mu, the last lock</title>
+<title>wirefold — Trace.mu, resolved</title>
 <style>
   :root {
     --ground:#F2F4F7; --surface:#FFFFFF; --plate:#FAFBFC;
@@ -94,14 +94,15 @@
 
 <header>
   <div class="head-inner">
-    <p class="eyebrow">wirefold · concurrency</p>
-    <h1>Trace.mu — the last lock in the repo</h1>
-    <p class="sub">Six other mutexes were removed before this one — <code>geomMu</code> and
-    <code>RealClock.mu</code> removed, <code>PacedWire.mu</code> and <code>outbox.mu</code>
-    removed, <code>LayoutHolder.mu</code> and <code>debouncedPersister.mu</code> removed.
-    This one is at <code>Trace/Trace.go:294</code>. Its stated job is guarding the event
-    accumulator — and that turns out to be mostly <b>vestigial</b>. What it actually still
-    does in production is something else.</p>
+    <p class="eyebrow">wirefold · concurrency · RESOLVED</p>
+    <h1>Trace.mu — the record of a question that closed</h1>
+    <p class="sub">This page used to describe <code>Trace.mu</code> as present and its removal as
+    open. It is now deleted — the seventh and last <code>sync.Mutex</code>/<code>Cond</code> in
+    non-test Go. All six others were already deleted before it: <code>geomMu</code> deleted, <code>RealClock.mu</code> deleted, <code>PacedWire.mu</code> deleted, <code>outbox.mu</code> deleted, <code>LayoutHolder.mu</code> deleted, <code>debouncedPersister.mu</code> deleted. Its stated job was guarding the event accumulator, and
+    that claim was true but <b>vestigial</b> — nothing in production ever raced it. What the
+    lock was actually still doing — serializing <code>Breadcrumb</code>'s direct sink writes and
+    surviving a shutdown that didn't wait — is what got fixed. The diagrams below are kept as the
+    historical record of the diagnosis; each is marked with what changed.</p>
   </div>
 </header>
 
@@ -115,13 +116,15 @@
 </div>
 
 <!-- ══ 1 · THE TWO PATHS ══ -->
-<h2>1 · the hot path never touches the lock</h2>
-<p class="cap">Every node and wire goroutine emits events. <b>None of them takes the mutex.</b>
-They send on a buffered channel and return. The lock lives entirely on the far side of that
-channel, on one goroutine.</p>
+<h2>1 · the hot path never touched the lock — still true, now trivially</h2>
+<p class="cap">Every node and wire goroutine emits events. <b>None of them ever took the mutex.</b>
+They send on a buffered channel and return. The lock used to live entirely on the far side of
+that channel, on one goroutine — the diagram below is unchanged except that the
+<code>mu.Lock()</code> box on the right no longer exists; the drain goroutine writes
+<code>events</code> with no lock at all now.</p>
 
 <div class="plate">
-<svg viewBox="0 0 860 250" role="img" aria-label="Producer goroutines emit onto a buffered channel with no lock; a single drain goroutine receives lock-free and only then takes the mutex to append to the events slice.">
+<svg viewBox="0 0 860 250" role="img" aria-label="Producer goroutines emit onto a buffered channel with no lock; a single drain goroutine receives lock-free and appends to the events slice with no lock either, because it is the only writer.">
   <defs><marker id="ab1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#2E7D9A"/></marker>
         <marker id="ah1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#A8443C"/></marker></defs>
 
@@ -153,27 +156,33 @@ channel, on one goroutine.</p>
 
   <path class="arr" d="M730,86 L730,110" marker-end="url(#ah1)"/>
 
-  <rect class="state" x="600" y="116" width="260" height="52" rx="6"/>
-  <text class="tw" x="612" y="136">mu.Lock() — drain.go:93</text>
+  <rect class="safe" x="600" y="116" width="260" height="52" rx="6"/>
+  <text class="tk" x="612" y="136">no mu — deleted, not narrowed</text>
   <text class="tf" x="612" y="152">append to events · Step = len(events)</text>
-  <text class="tf" x="612" y="164">then Unlock, then onEvent OUTSIDE the lock</text>
+  <text class="tf" x="612" y="164">then onEvent, still on the drain goroutine</text>
 
   <line x1="0" y1="196" x2="860" y2="196" stroke="var(--line)"/>
-  <text class="tk" x="0" y="216">THE HOT PATH IS ALREADY LOCK-FREE</text>
-  <text class="ts" x="290" y="216">the doc comment says “every node goroutine calls Emit concurrently” — true, and none of them touch mu.</text>
-  <text class="tf" x="0" y="234">So the contention the comment describes is not contention on the mutex. The channel absorbs it.</text>
+  <text class="tk" x="0" y="216">THE HOT PATH WAS ALREADY LOCK-FREE, AND NOW THE LEDGER IS TOO</text>
+  <text class="ts" x="290" y="216">the old doc comment said “every node goroutine calls Emit concurrently” — true, and none of them ever touched mu.</text>
+  <text class="tf" x="0" y="234">The contention the comment described was never contention on the mutex. The channel absorbed it, and nothing else needed one.</text>
 </svg>
 </div>
 
 <!-- ══ 2 · WHAT IT GUARDS ══ -->
-<h2>2 · what it guards — and one field the comment claims but does not</h2>
+<h2>2 · what it used to guard — and one field the comment claimed but did not</h2>
+<p class="cap">Historical: what <code>mu</code> covered before it was deleted. All four fields it
+protected are gone from the lock's job list now — the drain goroutine is the sole writer of
+<code>events</code>/<code>closed</code> (a <code>sync.Once</code> now), and
+<code>sink</code>/<code>debugSink</code> are only ever written by the drain too, since
+<code>Breadcrumb</code> was changed to send on <code>t.ch</code> instead of writing them
+directly.</p>
 
 <div class="plate">
-<svg viewBox="0 0 860 240" role="img" aria-label="The mutex guards events, closed, sink and debugSink; onEvent is listed in the doc comment but is called outside the lock and never mutated after construction.">
-  <text class="tl" x="0" y="14">CLAIMED BY THE DOC COMMENT · Trace.go:275-296</text>
+<svg viewBox="0 0 860 240" role="img" aria-label="Before deletion, the mutex guarded events, closed, sink and debugSink; onEvent was listed in the doc comment but was called outside the lock and never mutated after construction.">
+  <text class="tl" x="0" y="14">CLAIMED BY THE DOC COMMENT (HISTORICAL) · Trace.go:275-296</text>
 
   <rect class="state" x="0" y="28" width="420" height="150" rx="6"/>
-  <text class="tw" x="12" y="50">mu sync.Mutex — Trace.go:294</text>
+  <text class="tw" x="12" y="50">mu sync.Mutex — DELETED, was Trace.go:294</text>
   <text class="ts" x="12" y="74">events   :295   the accumulator slice</text>
   <text class="ts" x="12" y="94">closed   :296   idempotency flag in Close</text>
   <text class="ts" x="12" y="114">sink     :297   optional JSONL writer</text>
@@ -195,25 +204,27 @@ channel, on one goroutine.</p>
 </div>
 
 <!-- ══ 3 · WHO CONTENDS ══ -->
-<h2>3 · who actually takes the lock — and which of them exist in production</h2>
-<p class="cap">This is where the stated justification comes apart. <code>Events()</code> has
-<b>zero non-test callers</b>, and <code>WriteJSONL</code> runs only after the drain goroutine
-is already dead.</p>
+<h2>3 · who actually took the lock — and which of them existed in production</h2>
+<p class="cap">Historical: this is where the stated justification came apart.
+<code>Events()</code> had <b>zero non-test callers</b>, and <code>WriteJSONL</code> ran only
+after the drain goroutine was already dead — so of the five callers below, only
+<code>drain</code>'s own <code>record()</code> and <code>Breadcrumb</code> were ever
+concurrent in production, and both are now folded onto the drain goroutine with no lock.</p>
 
 <div class="plate">
-<svg viewBox="0 0 860 300" role="img" aria-label="Of the goroutines taking the mutex, the drain goroutine and Breadcrumb callers are production, Close is production but runs once, Events is test-only, and WriteJSONL runs after drain has exited.">
-  <text class="tl" x="0" y="14">TAKES mu</text>
-  <text class="tl" x="470" y="14">EXISTS IN PRODUCTION?</text>
+<svg viewBox="0 0 860 300" role="img" aria-label="Historical: of the goroutines that used to take the mutex, the drain goroutine and Breadcrumb callers were production, Close was production but ran once, Events was test-only, and WriteJSONL ran after drain had exited.">
+  <text class="tl" x="0" y="14">USED TO TAKE mu</text>
+  <text class="tl" x="470" y="14">EXISTED IN PRODUCTION?</text>
 
   <rect class="gor" x="0" y="28" width="440" height="34" rx="5"/>
   <text class="ts" x="12" y="49">drain’s record()  drain.go:85-111</text>
   <rect class="safe" x="470" y="28" width="390" height="34" rx="5"/>
-  <text class="tk" x="482" y="49">YES — the sole writer of events</text>
+  <text class="tk" x="482" y="49">YES — was the sole writer of events, still is, now with no lock</text>
 
   <rect class="gor" x="0" y="68" width="440" height="34" rx="5"/>
   <text class="ts" x="12" y="89">Breadcrumb  Trace.go:580-602</text>
   <rect class="safe" x="470" y="68" width="390" height="34" rx="5"/>
-  <text class="tk" x="482" y="89">YES — called from many node goroutines</text>
+  <text class="tk" x="482" y="89">YES — now sends on t.ch instead of taking mu</text>
 
   <rect class="gor" x="0" y="108" width="440" height="34" rx="5"/>
   <text class="ts" x="12" y="129">Close  drain.go:22-38</text>
@@ -237,26 +248,32 @@ is already dead.</p>
   <text class="tf" x="482" y="258">so drain has already exited: no concurrent writer</text>
 
   <line x1="0" y1="278" x2="860" y2="278" stroke="var(--line)"/>
-  <text class="tw" x="0" y="296">SO THE ACCUMULATOR ARGUMENT IS LARGELY VESTIGIAL — in production nothing races `events` at all.</text>
+  <text class="tw" x="0" y="296">SO THE ACCUMULATOR ARGUMENT WAS LARGELY VESTIGIAL — in production nothing ever raced `events` at all. mu is now deleted.</text>
 </svg>
 </div>
 
 <!-- ══ 4 · THE REAL CONTENTION ══ -->
-<h2>4 · what the lock is really doing — shutdown, not accumulation</h2>
-<p class="cap">Production shutdown waits at most <b>250 ms</b> for node goroutines, then calls
-<code>Close()</code> regardless. So <code>Close</code> can run while goroutines are still
-calling <code>Breadcrumb</code>. That is genuine production contention — and it is on
-<code>sink</code>/<code>debugSink</code>, not on <code>events</code>.</p>
+<h2>4 · what the lock was really doing — shutdown, not accumulation (RESOLVED)</h2>
+<p class="cap">This diagram found the lock's real job: production shutdown used to wait at most
+<b>250 ms</b> for node goroutines, then call <code>Close()</code> regardless, so
+<code>Close</code> could run while goroutines were still calling <code>Breadcrumb</code>. That
+was genuine production contention, on <code>sink</code>/<code>debugSink</code>, not on
+<code>events</code>. <b>Fixed at the source, not narrowed:</b> the 250ms grace is gone —
+<code>MoveDispatch.Start</code> now returns a <code>WaitGroup</code> covering every
+<code>nodeMover.run</code>/<code>edgeMover.run</code>, <code>RunStdinReader</code> got its own,
+and <code>wg.Wait()</code> now means nothing is running, so nothing can call into
+<code>Trace</code> during <code>Close()</code> — the race this diagram found is now
+unrepresentable, not just unlikely.</p>
 
 <div class="plate">
-<svg viewBox="0 0 860 240" role="img" aria-label="At shutdown the main goroutine calls Close after a bounded 250 millisecond wait, while node goroutines may still be calling Breadcrumb, so the two contend on the debug sink.">
-  <text class="tl" x="0" y="14">SHUTDOWN — main.go:212-228</text>
+<svg viewBox="0 0 860 240" role="img" aria-label="Historical: at shutdown the main goroutine used to call Close after a bounded 250 millisecond wait, while node goroutines might still be calling Breadcrumb, so the two contended on the debug sink. Now Close waits on a WaitGroup covering every one of those goroutines instead.">
+  <text class="tl" x="0" y="14">SHUTDOWN, BEFORE — was main.go:212-228</text>
 
   <rect class="gor" x="0" y="30" width="330" height="86" rx="6"/>
   <text class="ts" x="12" y="50">main: wg.Wait() … or 250ms, whichever first</text>
-  <text class="tf" x="12" y="68">main.go:212-221 — the wait is BOUNDED</text>
-  <text class="tw" x="12" y="90">then tr.Close() — main.go:228</text>
-  <text class="tf" x="12" y="106">even if node goroutines are still running</text>
+  <text class="tf" x="12" y="68">the wait was BOUNDED — REMOVED</text>
+  <text class="tw" x="12" y="90">then tr.Close() ran regardless</text>
+  <text class="tf" x="12" y="106">even if node goroutines were still running</text>
 
   <rect class="gor" x="0" y="128" width="330" height="60" rx="6"/>
   <text class="ts" x="12" y="148">node goroutines, still alive</text>
@@ -267,36 +284,38 @@ calling <code>Breadcrumb</code>. That is genuine production contention — and i
   <path class="arr" d="M330,158 L470,130" marker-end="url(#ah1)"/>
 
   <rect class="state" x="470" y="92" width="390" height="60" rx="6"/>
-  <text class="big" x="482" y="116">REAL PRODUCTION CONTENTION</text>
+  <text class="big" x="482" y="116">THE REAL PRODUCTION CONTENTION</text>
   <text class="tf" x="482" y="136">on sink / debugSink — the one thing here</text>
-  <text class="tf" x="482" y="148">that is not test-only or already-serialized</text>
+  <text class="tf" x="482" y="148">that was not test-only or already-serialized</text>
 
   <line x1="0" y1="200" x2="860" y2="200" stroke="var(--line)"/>
-  <text class="tw" x="0" y="220">THE LOCK'S REAL JOB</text>
-  <text class="ts" x="140" y="220">serialize breadcrumb writes to stdout, and survive a Close that races them.</text>
-  <text class="tf" x="0" y="236">Note this is NOT the “accumulator needs one place” story the doc comment tells. Different problem, same mutex.</text>
+  <text class="tw" x="0" y="220">THE LOCK'S REAL JOB, AND WHAT REPLACED IT</text>
+  <text class="ts" x="140" y="220">Close now waits on a WaitGroup for every mover + RunStdinReader; nothing can call Breadcrumb during Close, so nothing needs to serialize the write.</text>
+  <text class="tf" x="0" y="236">This was NOT the “accumulator needs one place” story the old doc comment told. Different problem, same mutex — and it is the one that got fixed.</text>
 </svg>
 </div>
 
 <!-- ══ 5 · I/O UNDER THE LOCK ══ -->
-<h2>5 · unlike every other lock here, this one is held across I/O</h2>
-<p class="cap">Every lock deleted this session released before touching the outside world.
-This one does not.</p>
+<h2>5 · unlike every other lock here, this one was held across I/O (now moot — the lock is gone)</h2>
+<p class="cap">Historical: every lock deleted before this one released before touching the outside
+world. This one didn't — which no longer matters, because there is no lock left to hold across
+anything. <code>Breadcrumb</code> and <code>WriteJSONL</code> still do the same I/O; they just
+do it from the drain goroutine with nothing else able to race them.</p>
 
 <div class="plate">
-<svg viewBox="0 0 860 190" role="img" aria-label="Breadcrumb writes to standard output while holding the mutex, and WriteJSONL holds it across an entire write loop to an arbitrary writer.">
-  <rect class="state" x="0" y="24" width="420" height="106" rx="6"/>
+<svg viewBox="0 0 860 190" role="img" aria-label="Historical: Breadcrumb used to write to standard output while holding the mutex, and WriteJSONL held it across an entire write loop to an arbitrary writer. Neither holds a lock now because Breadcrumb runs on the drain goroutine and WriteJSONL still runs after drain has exited.">
+  <rect class="safe" x="0" y="24" width="420" height="106" rx="6"/>
   <text class="t"  x="12" y="46">Breadcrumb — Trace.go:580-602</text>
-  <text class="ts" x="12" y="68">holds mu across a write to debugSink</text>
+  <text class="tk" x="12" y="68">no mu — sends on t.ch, drain writes debugSink</text>
   <text class="tf" x="12" y="88">= os.Stdout in production (main.go:82)</text>
-  <text class="tf" x="12" y="106">a slow/blocked stdout blocks every other</text>
-  <text class="tf" x="12" y="120">breadcrumb caller behind it</text>
+  <text class="tf" x="12" y="106">a slow/blocked stdout now only blocks the</text>
+  <text class="tf" x="12" y="120">drain goroutine, not other emitters</text>
 
-  <rect class="state" x="440" y="24" width="420" height="106" rx="6"/>
+  <rect class="safe" x="440" y="24" width="420" height="106" rx="6"/>
   <text class="t"  x="452" y="46">WriteJSONL — drain.go:56-60</text>
-  <text class="ts" x="452" y="68">holds mu across the ENTIRE write loop</text>
+  <text class="tk" x="452" y="68">no mu — nothing left to hold</text>
   <text class="tf" x="452" y="88">to a caller-supplied io.Writer</text>
-  <text class="tf" x="452" y="106">harmless today: one call, after Close,</text>
+  <text class="tf" x="452" y="106">still: one call, after Close,</text>
   <text class="tf" x="452" y="120">nothing else running (main.go:240)</text>
 
   <line x1="0" y1="152" x2="860" y2="152" stroke="var(--line)"/>
@@ -306,39 +325,47 @@ This one does not.</p>
 </div>
 
 <!-- ══ 6 · SINGLE OWNER ══ -->
-<h2>6 · the single-owner question — drain already is one</h2>
+<h2>6 · the single-owner question — drain already was one (RESOLVED)</h2>
 <p class="cap">The move that removed the other six: give the state one owner.
-<code>events</code> <b>already has one</b> — the drain goroutine is its sole writer. So the
-accumulator was never the obstacle.</p>
+<code>events</code> <b>already had one</b> — the drain goroutine was its sole writer, so the
+accumulator was never the obstacle. What this diagram called "the whole difficulty" —
+<code>Breadcrumb</code> writing to <code>sink</code>/<code>debugSink</code> directly, on
+arbitrary node goroutines, not through the drain channel — is exactly what got changed:
+<code>Breadcrumb</code> now sends on <code>t.ch</code> too, so the drain goroutine is the sole
+writer of everything the lock used to guard.</p>
 
 <div class="plate">
-<svg viewBox="0 0 860 250" role="img" aria-label="The drain goroutine is already the sole writer of events, so routing the readers through it would make it a true single owner, but the breadcrumb writes would still need separate handling.">
+<svg viewBox="0 0 860 250" role="img" aria-label="The drain goroutine was already the sole writer of events; the fix was routing Breadcrumb's sink writes through drain too, and giving closed a sync.Once instead of the mutex, so the whole struct is now single-owner with no lock.">
   <rect class="safe" x="0" y="28" width="420" height="96" rx="6"/>
-  <text class="t"  x="12" y="50">ALREADY SINGLE-OWNER</text>
-  <text class="ts" x="12" y="72">drain is the only writer of events (drain.go:95)</text>
-  <text class="tf" x="12" y="92">Events() is test-only; WriteJSONL runs after</text>
-  <text class="tf" x="12" y="106">drain has exited. Route them through drain as</text>
-  <text class="tf" x="12" y="118">request/reply and the lock on events is gone.</text>
+  <text class="tk" x="12" y="50">WAS ALREADY SINGLE-OWNER</text>
+  <text class="ts" x="12" y="72">drain was the only writer of events (drain.go:95)</text>
+  <text class="tf" x="12" y="92">Events() was test-only; WriteJSONL ran after</text>
+  <text class="tf" x="12" y="106">drain had exited. Nothing to route — that</text>
+  <text class="tf" x="12" y="118">part of the lock was already dead weight.</text>
 
-  <rect class="queue" x="440" y="28" width="420" height="96" rx="6"/>
-  <text class="t"  x="452" y="50">closed — DOES NOT NEED A MUTEX</text>
-  <text class="ts" x="452" y="72">it is an idempotency flag inside Close</text>
+  <rect class="safe" x="440" y="28" width="420" height="96" rx="6"/>
+  <text class="tk" x="452" y="50">closed — NOW sync.Once, NO MUTEX</text>
+  <text class="ts" x="452" y="72">it was an idempotency flag inside Close</text>
   <text class="tf" x="452" y="92">sync.Once expresses that directly, with no</text>
-  <text class="tf" x="452" y="106">lock at all. Close already coordinates via</text>
+  <text class="tf" x="452" y="106">lock at all. Close still coordinates via</text>
   <text class="tf" x="452" y="118">close(t.stopped) and &lt;-t.done.</text>
 
-  <rect class="state" x="0" y="136" width="860" height="72" rx="6"/>
-  <text class="t"  x="12" y="158">WHAT THAT LEAVES — and it is the whole difficulty</text>
-  <text class="ts" x="12" y="180">Breadcrumb writes to sink/debugSink directly, on arbitrary node goroutines — NOT through the drain channel.</text>
-  <text class="ts" x="12" y="196">Routing events through drain does not touch that. It would need its own mechanism: a serialized writer, or send breadcrumbs down t.ch too.</text>
+  <rect class="safe" x="0" y="136" width="860" height="72" rx="6"/>
+  <text class="tk" x="12" y="158">WHAT THIS DIAGRAM CALLED "THE WHOLE DIFFICULTY" — FIXED</text>
+  <text class="ts" x="12" y="180">Breadcrumb used to write to sink/debugSink directly, on arbitrary node goroutines — NOT through the drain channel.</text>
+  <text class="ts" x="12" y="196">It now sends on t.ch like every other event, so the drain goroutine writes sink/debugSink too. One owner for all four fields.</text>
 
   <line x1="0" y1="224" x2="860" y2="224" stroke="var(--line)"/>
-  <text class="tq" x="0" y="242">So this is not one question. It is three, and only the first resembles the six already solved.</text>
+  <text class="tq" x="0" y="242">It was three questions, not one — and the third (Breadcrumb) was the one that actually needed fixing.</text>
 </svg>
 </div>
 
 <!-- ══ 7 · THE FRAMING ══ -->
-<h2>7 · the framing above it — Step is arrival order, not causal order</h2>
+<h2>7 · the framing above it — Step is arrival order, not causal order (STILL OPEN)</h2>
+<p class="cap">This question does not close with the lock. <code>Trace.mu</code> is gone, but the
+event channel and the drain's single-writer ordering are unchanged — <code>Step</code> is still
+assigned in scheduler-arrival order, not causal order. See
+<code>task/framing-event-order</code> and <code>task/per-owner-buffer-rows</code>.</p>
 
 <div class="plate">
 <svg viewBox="0 0 860 200" role="img" aria-label="The Step ordinal is assigned in the order events arrive at the channel, which is scheduler order, and nothing computes or checks causal order.">
@@ -361,21 +388,26 @@ accumulator was never the obstacle.</p>
   <line x1="0" y1="160" x2="860" y2="160" stroke="var(--line)"/>
   <text class="tq" x="0" y="180">SEPARATE QUESTION → task/framing-event-order</text>
   <text class="ts" x="290" y="180">“each owner’s own order is the only real one” vs “events have a global total order”.</text>
-  <text class="tf" x="0" y="196">Deleting the lock does not settle that, and settling that might delete the lock. They are not the same branch.</text>
+  <text class="tf" x="0" y="196">Deleting Trace.mu did not settle this. The lock was never what produced the ordering — the channel and the drain were, and both are still here.</text>
 </svg>
 </div>
 
 <!-- ══ 8 · RED PROOF ══ -->
-<h2>8 · the red proof — and the one claim it cannot make</h2>
+<h2>8 · the red proof — settled by the deletion itself</h2>
+<p class="cap">This section used to say the RED claim was a comment's assertion, not a
+measurement made here. It is now settled the direct way: the lock was actually deleted and
+<code>go test -race ./...</code> stayed clean, which is a stronger result than deleting-and-
+reverting a `Lock()`/`Unlock()` pair to check a comment. The "no panic on a closed channel"
+claim below is unaffected by any of this — it was never about the mutex.</p>
 
 <div class="plate">
-<svg viewBox="0 0 860 190" role="img" aria-label="The concurrency test asserts data-race freedom which is falsifiable by deleting the lock, and separately asserts no panic, which the comment admits cannot be red-proofed the same way.">
+<svg viewBox="0 0 860 190" role="img" aria-label="The concurrency test asserted data-race freedom, falsifiable by deleting the lock; that deletion has now actually happened and go test -race stayed clean. Separately it asserts no panic, which was never about the mutex.">
   <rect class="safe" x="0" y="24" width="420" height="110" rx="6"/>
-  <text class="t"  x="12" y="46">FALSIFIABLE — the data-race claims</text>
-  <text class="ts" x="12" y="68">TestTraceConcurrentEmitVsClose: 16 Emit,</text>
-  <text class="ts" x="12" y="82">4 Events/SetDebugSink, 1 Close, under -race</text>
-  <text class="tf" x="12" y="102">comment says RED when the Lock/Unlock calls</text>
-  <text class="tf" x="12" y="116">are removed — asserted in-code, NOT re-run here</text>
+  <text class="tk" x="12" y="46">FALSIFIED THE HARD WAY — the lock is gone</text>
+  <text class="ts" x="12" y="68">TestTraceConcurrentEmitVsClose: many Emit,</text>
+  <text class="ts" x="12" y="82">readers, 1 Close, under -race</text>
+  <text class="tk" x="12" y="102">mu was actually deleted, not Lock/Unlock'd</text>
+  <text class="tf" x="12" y="116">out — go test -race ./... stayed clean</text>
 
   <rect class="state" x="440" y="24" width="420" height="110" rx="6"/>
   <text class="t"  x="452" y="46">NOT FALSIFIABLE — the “no panic” claim</text>
@@ -385,7 +417,7 @@ accumulator was never the obstacle.</p>
   <text class="tf" x="452" y="120">the mutex was never what prevented close(t.ch)</text>
 
   <line x1="0" y1="158" x2="860" y2="158" stroke="var(--line)"/>
-  <text class="tw" x="0" y="178">BEFORE TOUCHING THIS: re-run the deletion experiment yourself. The RED status is a comment's claim, not a measurement made here.</text>
+  <text class="tk" x="0" y="178">RESOLVED: the deletion experiment was actually run, on this branch, not just claimed in a comment.</text>
 </svg>
 </div>
 

@@ -256,7 +256,7 @@
   <div class="layout">
     <div>
       <div class="plate">
-        <svg viewBox="0 0 860 800" role="img" aria-label="The four mutex patterns shown as the specific calls each goroutine makes: identity reads versus position writes, message enqueue and bead handling, why the clock is no longer a shared bus while trace still is, and the refuted-then-deleted holder access.">
+        <svg viewBox="0 0 860 800" role="img" aria-label="The four mutex patterns shown as the specific calls each goroutine makes: identity reads versus position writes, message enqueue and bead handling, why neither the clock nor the trace is a shared lock anymore, and the refuted-then-deleted holder access.">
           <!-- ── 1 anti-tearing ── -->
           <text class="d-tl" x="0" y="12">1 · ANTI-TEARING — geomMu, now deleted</text>
           <rect class="d-group" x="0" y="22" width="860" height="120" rx="6"/>
@@ -310,8 +310,8 @@
           <line class="d-arrow-flow" x1="392" y1="284" x2="420" y2="284"/>
           <text class="d-ts" x="590" y="284">two channels, one owning goroutine — nothing left to lock</text>
 
-          <!-- ── 3 shared services: the clock stopped being a bus, Trace is the one left ── -->
-          <text class="d-tl" x="0" y="360">3 · SHARED SERVICE — the clock is no longer one; Trace still is</text>
+          <!-- ── 3 shared services: neither the clock nor Trace is a shared lock anymore ── -->
+          <text class="d-tl" x="0" y="360">3 · SHARED SERVICE — neither is a shared lock anymore</text>
           <rect class="d-group" x="0" y="370" width="860" height="282" rx="6"/>
 
           <!-- ── left: the clock, once shared, now per-goroutine ── -->
@@ -328,14 +328,14 @@
           <text class="d-ts" x="34" y="588">see “the clock question” tab</text>
 
           <!-- ── bus B: the trace ── -->
-          <text class="d-tl" x="450" y="392">SHARED STATE — says “what happened”</text>
+          <text class="d-tl" x="450" y="392">SHARED STATE, NO LOCK — says “what happened”</text>
           <rect class="d-box-passive" x="450" y="402" width="140" height="196" rx="5"/>
           <text class="d-t"  x="464" y="426">Trace</text>
           <text class="d-ts" x="464" y="444">passive object —</text>
           <text class="d-ts" x="464" y="462">NOT a goroutine</text>
           <text class="d-ts" x="464" y="486">the drain below</text>
           <text class="d-ts" x="464" y="500">is the goroutine</text>
-          <text class="d-ts" x="464" y="574">mu</text>
+          <text class="d-ts" x="464" y="574">mu deleted</text>
 
           <line class="d-arrow-flow" x1="590" y1="428" x2="634" y2="428"/>
           <path class="d-arrow-flow" d="M598 424 L588 428 L598 432"/>
@@ -353,17 +353,17 @@
           <text class="d-t"  x="648" y="485">nodeMover</text>
           <text class="d-ts" x="648" y="499">× 9  —  NodeGeometry</text>
 
-          <line class="d-arrow-sig" x1="590" y1="544" x2="634" y2="544"/>
-          <path class="d-arrow-sig" d="M626 540 L636 544 L626 548"/>
-          <rect class="d-box-sig" x="636" y="526" width="204" height="38" rx="4"/>
-          <text class="d-t"  x="648" y="543">drain — THE shared goroutine</text>
+          <line class="d-arrow-flow" x1="590" y1="544" x2="634" y2="544"/>
+          <path class="d-arrow-flow" d="M626 540 L636 544 L626 548"/>
+          <rect class="d-box-flow" x="636" y="526" width="204" height="38" rx="4"/>
+          <text class="d-t"  x="648" y="543">drain — the ONLY writer, no lock</text>
           <text class="d-ts" x="648" y="557">one · reads it back, packs buffer → editor</text>
 
-          <text class="d-ts" x="450" y="614">≈18 goroutines write it · 1 drains it</text>
+          <text class="d-ts" x="450" y="614">≈18 goroutines emit to it on a channel · 1 drains it</text>
           <rect class="d-box-flow" x="20" y="630" width="16" height="11" rx="2"/>
           <text class="d-ts" x="44" y="640">goroutine — one per node / per output</text>
           <rect class="d-box-passive" x="330" y="630" width="16" height="11" rx="2"/>
-          <text class="d-ts" x="354" y="640">passive object, mutex-guarded — nothing runs in it</text>
+          <text class="d-ts" x="354" y="640">passive object — nothing runs in it, no lock</text>
 
           <!-- ── 4 refuted ── -->
           <text class="d-tl" x="0" y="716">4 · CLAIMED MULTI-WRITER — LayoutHolder.mu, refuted, now deleted</text>
@@ -406,8 +406,8 @@
           </tr>
           <tr>
             <td>Trace.mu</td>
-            <td>every node goroutine emits vs drain and Close</td>
-            <td><span class="verdict v-ok">confirmed</span></td>
+            <td>was: Breadcrumb's direct sink write vs drain vs an unwaited Close</td>
+            <td><span class="verdict v-gone">deleted</span></td>
           </tr>
           <tr>
             <td>LayoutHolder.mu</td>
@@ -640,10 +640,10 @@
           <text class="d-ts" x="576" y="290">= 1–2% of the wire</text>
           <text class="d-ts" x="576" y="316">within the accepted band</text>
 
-          <text class="d-tl" x="0" y="386">STAYS SHARED</text>
+          <text class="d-tl" x="0" y="386">STAYS SHARED STATE — but not a shared lock</text>
           <rect class="d-box-passive" x="0" y="398" width="410" height="52" rx="5"/>
           <text class="d-t"  x="18" y="420">Trace</text>
-          <text class="d-ts" x="18" y="438">an accumulator — copies would give N partial streams</text>
+          <text class="d-ts" x="18" y="438">an accumulator — copies would give N partial streams; mu is deleted</text>
           <rect class="d-box" x="440" y="398" width="420" height="52" rx="5"/>
           <text class="d-ts" x="458" y="420">still to settle: DriveHeld has no inbox, and every</text>
           <text class="d-ts" x="458" y="438">paced loop grows a second poll — plumbing, not semantics</text>
@@ -687,10 +687,15 @@
         band already accepted, so no timestamps and no special handling. What is left is
         plumbing: every paced loop grows a second poll.
       </p>
-      <h2>Trace is different</h2>
+      <h2>Trace is different, but its lock still went</h2>
       <p>
-        It cannot be copied. Every event has to land in one place to become one buffer, so
-        copies would produce partial streams and no whole picture. That mutex stays.
+        Trace cannot be copied the way the clock was — every event has to land in one
+        place to become one buffer, so copies would produce partial streams and no whole
+        picture. That claim was true, but it was never what <code>Trace.mu</code> guarded:
+        in production nothing ever raced <code>events</code> (the drain was already sole
+        writer). The lock's real job was serializing <code>Breadcrumb</code>'s direct sink
+        writes and surviving a shutdown that didn't wait for every goroutine; fixing both
+        removed it. See the mutexes tab.
       </p>
     </aside>
   </div>
