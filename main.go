@@ -189,8 +189,8 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 	// Launch the per-node and per-edge move-handler goroutines (decentralized
 	// node-move: each node/edge drains its own inbox and recomputes its own geometry).
 	// moverWG covers every nodeMover/edgeMover goroutine Start launched (see its doc
-	// comment) — part of "wait for everything, then close"
-	// (docs/planning/visual-editor/close-everything.md).
+	// comment). Waiting on it is what lets Close() run with nothing still emitting —
+	// the reason Trace needs no mutex.
 	moverWG := md.Start(ctx)
 
 	// Read the editor→Go bridge: "edit" JSON lines (op = create/update/delete)

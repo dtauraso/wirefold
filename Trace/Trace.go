@@ -288,7 +288,7 @@ type Trace struct {
 	// closeOnce makes Close idempotent (replaces the old `closed bool` guarded by
 	// Trace.mu). No lock is needed: events/sink/onEvent/debugSink are all written by
 	// the single drain goroutine and nothing else — see the field comments below and
-	// docs/planning/visual-editor/close-everything.md. CHECKED:
+	// the wait-for-everything-then-close change. CHECKED:
 	// TestTraceConcurrentEmitVsClose (trace_concurrency_test.go) drives many
 	// concurrent Emit callers against one Close() under `go test -race` and is RED
 	// (reproducible data-race reports) if a caller writes events/sink/debugSink

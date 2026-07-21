@@ -539,7 +539,7 @@ func (md *MoveDispatch) Bind(outSink map[string]*Out, slotReg SlotRegistry) {
 //
 // Returns a *sync.WaitGroup covering every launched goroutine, so a caller that wants a
 // complete shutdown (main.go: "wait for everything, then close" — see
-// docs/planning/visual-editor/close-everything.md) can wg.Wait() on it after cancelling
+// the wait-for-everything-then-close change) can wg.Wait() on it after cancelling
 // ctx. Both nm.run and em.run select on ctx.Done() at the top of their loop (their only
 // blocking call is SleepCycle, which also selects on ctx), so cancel-to-return is one
 // clock tick, worst case. Callers that don't care about shutdown completeness (most

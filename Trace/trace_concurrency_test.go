@@ -10,7 +10,7 @@ import (
 )
 
 // trace_concurrency_test.go — pins the NEW invariant that replaced Trace.mu (see
-// docs/planning/visual-editor/close-everything.md): events/sink/onEvent/debugSink
+// the wait-for-everything-then-close change): events/sink/onEvent/debugSink
 // have exactly ONE writer, the drain goroutine — every producer goroutine (node
 // Update loops, movers, Breadcrumb callers) only ever sends on t.ch via emit(). No
 // lock is needed because nothing outside drain ever touches those fields while the
