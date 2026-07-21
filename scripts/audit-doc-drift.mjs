@@ -95,6 +95,7 @@ function checkRef(file, abs, ref, idx, lineOf) {
 
 for (const file of mdFiles) {
   const abs = join(root, file);
+  if (!existsSync(abs)) continue; // unstaged deletion — see the srcFiles loop below
   const text = readFileSync(abs, "utf8");
   const lineOf = lineOfFactory(text);
   const checks = [...text.matchAll(linkRe), ...text.matchAll(inlineRe)];
@@ -104,6 +105,10 @@ for (const file of mdFiles) {
 for (const file of srcFiles) {
   if (!file) continue;
   const abs = join(root, file);
+  // git ls-files reads the INDEX, so a file deleted in the working tree but not yet
+  // staged is still listed. Skip it rather than dying on ENOENT: an audit that crashes
+  // on an in-progress deletion reports a guard failure for the wrong reason.
+  if (!existsSync(abs)) continue;
   const text = readFileSync(abs, "utf8");
   const lineOf = lineOfFactory(text);
   for (const m of text.matchAll(srcRefRe)) {
