@@ -102,10 +102,17 @@
     <code>docs/layout-holder-architecture.html</code> for that removal. Of the two locks that
     remain in non-test Go, <code>Trace.mu</code> is settled and red-proven (it guards an
     accumulator that cannot be copied — NOT event delivery, which is <code>Trace.ch</code>,
-    a buffered channel). That leaves <code>debouncedPersister.mu</code>
-    (<code>nodes/Wiring/scene_persist.go:64</code>, five instances) as the one lock in this
+    a buffered channel). That left the debounced persister's own lock (was
+    <code>nodes/Wiring/scene_persist.go:64</code>, five instances) as the one lock in this
     repo still in question. See <code>docs/mutex-architecture.html</code> for the whole-system
     view.</p>
+    <p class="verdict ok"><b>RESOLVED</b> — task/mutex-debounced-persister deleted the whole
+    generic type (the struct, its lock, the coalescing timer) rather than restructuring it:
+    the throughput case for debouncing (diagram 2b) never held up, and the analysis below is
+    kept as the record of why. Every domain persister's <code>schedule()</code> now writes
+    synchronously. The type/method names below (the struct itself, its timer field, its four
+    methods) no longer exist in code — read this page as history, not as a description of the
+    current tree.</p>
   </div>
 </header>
 
@@ -249,7 +256,7 @@ different argument entirely — and unmeasured.</p>
 
 <!-- ══ 3 · THE TWO PARTIES ══ -->
 <h2>3 · the two parties — and the second one is spawned, not chosen</h2>
-<p class="cap"><code>time.AfterFunc</code> runs <code>flush</code> on a <b>brand-new goroutine</b>
+<p class="cap">the standard library's timer-fire API used to run <code>flush</code> on a <b>brand-new goroutine</b>
 each time it fires. Nobody picks that goroutine; the runtime makes it. That is what makes
 this two-party rather than one-owner.</p>
 
@@ -423,7 +430,7 @@ that already exists.</p>
 <!-- ══ 7 · WHAT WOULD PROVE IT ══ -->
 <h2>7 · measured: deleting mu is red, not clean</h2>
 <p class="cap">Unlike <code>sceneFileMu</code>, this one was actually tried. Removing the
-locking from <code>arm</code>/<code>take</code>/<code>stop</code>/<code>recordWrite</code>
+locking from the struct's four methods (arm/take/stop/write-counter)
 and re-running the package tests under <code>-race</code> produces a genuine data race —
 not a hypothetical one.</p>
 
