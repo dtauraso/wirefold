@@ -62,7 +62,7 @@ func TestDecodeRawInputRoundTrip(t *testing.T) {
 		Kind: "wheel", X: 12.5, Y: -3.25, RectLeft: 1, RectTop: 2, RectWidth: 800, RectHeight: 600,
 		Button: -1, Ctrl: true, Shift: false, Alt: true, Meta: false,
 		DeltaX: 4, DeltaY: -8, Fov: 50,
-		Hit: rawHit{Kind: "node", IsInput: true, NodeRow: 7, PortRow: -1, EdgeRow: -1, X: 1.5, Y: 2.5, Z: 3.5},
+		Hit: rawHit{Kind: "node", IsInput: true, NodeRow: 7, PortRow: -1, EdgeRow: -1},
 	}
 	msg, ok := decodeInputRecord(encodeRawInput(in))
 	if !ok || msg.Type != "raw-input" || msg.Event == nil {

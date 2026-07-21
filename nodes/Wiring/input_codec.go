@@ -41,8 +41,8 @@ import (
 // to INPUT_LAYOUT_FINGERPRINT in input-layout.ts (guarded by check-input-layout-parity.sh).
 // Bump on both sides whenever any record kind, field, or enum ordering changes.
 //
-// INPUT_LAYOUT_FINGERPRINT: v18 kinds=save:4,raw-input:10,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays,clock updateAttrs=toggle,speed overlayFlags=tori,scenePoles,nodePoles,selSpherePoles,handholds,labelsGlobal,overlays,doubleLinks
-const InputLayoutFingerprint = "v18 kinds=save:4,raw-input:10,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays,clock updateAttrs=toggle,speed overlayFlags=tori,scenePoles,nodePoles,selSpherePoles,handholds,labelsGlobal,overlays,doubleLinks"
+// INPUT_LAYOUT_FINGERPRINT: v19 kinds=save:4,raw-input:10,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays,clock updateAttrs=toggle,speed overlayFlags=tori,scenePoles,nodePoles,selSpherePoles,handholds,labelsGlobal,overlays,doubleLinks
+const InputLayoutFingerprint = "v19 kinds=save:4,raw-input:10,edit-update:22 eventKinds=pointerdown,pointermove,pointerup,wheel,home hitKinds=port,handhold,node,edge,torus,empty updateKinds=overlays,clock updateAttrs=toggle,speed overlayFlags=tori,scenePoles,nodePoles,selSpherePoles,handholds,labelsGlobal,overlays,doubleLinks"
 
 // Record kind bytes (first byte of every record).
 const (
@@ -276,9 +276,6 @@ func decodeRawInput(r *recReader) (rawInputMsg, bool) {
 	ev.Hit.PortRow = i()
 	ev.Hit.EdgeRow = i()
 	ev.Hit.HandholdTerm = i()
-	ev.Hit.X = f()
-	ev.Hit.Y = f()
-	ev.Hit.Z = f()
 	if e != nil || ev.Kind == "" || ev.Hit.Kind == "" {
 		return ev, false
 	}
@@ -347,9 +344,6 @@ func encodeRawInput(ev rawInputMsg) []byte {
 	w.i32(int32(ev.Hit.PortRow))
 	w.i32(int32(ev.Hit.EdgeRow))
 	w.i32(int32(ev.Hit.HandholdTerm))
-	w.f64(ev.Hit.X)
-	w.f64(ev.Hit.Y)
-	w.f64(ev.Hit.Z)
 	return w.b
 }
 
