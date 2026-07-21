@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 )
 
 // TestSceneSphereRoundTrip: writeSceneSphere then loadSceneSphere returns the same sphere.
@@ -106,7 +105,7 @@ func TestSceneSphereContentFitSurvivesReloadAfterMove(t *testing.T) {
 
 func TestSceneSpherePersisterFlushNow(t *testing.T) {
 	dir := t.TempDir()
-	p := &sceneSpherePersister{path: sphereFilePath(dir), debounce: time.Hour}
+	p := &sceneSpherePersister{path: sphereFilePath(dir)}
 	s := sceneSphere{Center: vec3{X: 1, Y: 2, Z: 3}, Radius: 40}
 	p.flushNow(s)
 

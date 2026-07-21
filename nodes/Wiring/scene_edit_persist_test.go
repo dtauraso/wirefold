@@ -75,7 +75,6 @@ func TestPersistAnchorRoundTrips(t *testing.T) {
 	dir := vec3{X: 1, Y: 0, Z: 0}
 	want := snapToRingAnchorIndex(md.NodeKind("src"), dir)
 	md.applyRingAnchor("src", "Out", false, dir)
-	md.persist.anchor.flush()
 
 	spec, err := parseSpec(root)
 	if err != nil {
@@ -118,7 +117,6 @@ func TestPersistOverlaysRoundTrips(t *testing.T) {
 	md.ToggleSceneTori(nil)    // sceneToriVisible: true -> false
 	md.ToggleLabelsGlobal(nil) // labelsGlobalVisible: true -> false
 	md.persist.overlays.schedule(md.ov)
-	md.persist.overlays.flush()
 
 	ov, found := loadSceneOverlays(overlaysFilePath(root), sceneCameraPath(root))
 	if !found {
@@ -154,13 +152,11 @@ func TestOverlaysPersistPreservesCamera(t *testing.T) {
 	md.EnableViewpointPersist(root)
 	md.SetViewpoint(vec3{X: 1, Y: 2, Z: 3}, 200, dir{Theta: 0.5, Phi: 1.5}, dir{Theta: 0.05, Phi: 0.15})
 	md.EmitViewpoint(nil)
-	md.persist.vp.flush()
 
 	md.EnableEditPersist(root)
 
 	md.ToggleSceneTori(nil)
 	md.persist.overlays.schedule(md.ov)
-	md.persist.overlays.flush()
 
 	// Camera survives.
 	if _, _, _, _, ok := loadSceneViewpoint(root); !ok {
@@ -218,7 +214,6 @@ func TestOverlaysPersistMonolithicForm(t *testing.T) {
 	// Toggle an overlay and flush.
 	md.ToggleSceneTori(nil) // sceneToriVisible: true -> false
 	md.persist.overlays.schedule(md.ov)
-	md.persist.overlays.flush()
 
 	// Load back via sceneCameraPath.
 	ov, found := loadSceneOverlays(overlaysFilePath(topoFile), sceneCameraPath(topoFile))

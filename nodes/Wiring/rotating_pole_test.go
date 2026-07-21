@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"testing"
+	"time"
 )
 
 // offsetFromDir builds a unit-length Cartesian offset vector pointing in direction d
@@ -224,7 +225,6 @@ func TestRotatingPoleClearsSingularityOnDrag(t *testing.T) {
 			got.QuantITheta, got.QuantIPhi, got.QuantIR, wantTheta, wantPhi, wantR)
 	}
 
-	md.persist.quantOffset.flush()
 }
 
 // TestRotatingPolePersistReload drags src's neighbor, flushes, then RELOADS from disk
@@ -288,11 +288,23 @@ func TestRotatingPolePersistReload(t *testing.T) {
 	if before == nil || before.QuantIR == preDrag.QuantIR {
 		t.Fatalf("src's local polar to dst never picked up the new set-c: before=%+v preDrag=%+v", before, preDrag)
 	}
-	md.persist.quantOffset.flush()
-
-	raw, err := os.ReadFile(localPolarsFilePath(root, "src"))
-	if err != nil {
-		t.Fatalf("read src local-polars.json: %v", err)
+	// waitForAbcDrag only proves the "abc-drag" breadcrumb has logged; neighborSetCRequantize
+	// writes local-polars.json to disk (WriteLocalPolars, synchronous) a few statements
+	// AFTER that breadcrumb on the same goroutine, so reading disk immediately after can
+	// still race ahead of that write landing. Poll the read-back under a deadline (same
+	// shape as pollDragConverged/pollPositionFileWritten).
+	var raw []byte
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		var err error
+		raw, err = os.ReadFile(localPolarsFilePath(root, "src"))
+		if err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("read src local-polars.json: %v", err)
+		}
+		time.Sleep(time.Millisecond)
 	}
 	if !containsKey(raw, "localPoleTheta") || !containsKey(raw, "localPolePhi") {
 		t.Fatalf("src local-polars.json should persist the local pole (fixed-increment/stored-index model): %s", raw)

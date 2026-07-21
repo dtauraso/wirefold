@@ -99,19 +99,18 @@ func TestPreSplitTopologyRoundTrips(t *testing.T) {
 		t.Fatalf("legacy sceneSphere did not load via fallback: ok=%v s=%+v", ok, s)
 	}
 
-	// ---- Drag src, then save (flush every debounced persister synchronously). ----
+	// ---- Drag src; the quant-offset persister writes synchronously. ----
 	target := srcCenterBefore.add(vec3{X: 40, Y: -25, Z: 10})
 	if !md.RootMove("src", target) {
 		t.Fatal("RootMove(src) returned false")
 	}
 	// pollDragConverged only waits for the dragged node's CENTER to publish (applyCenter's
 	// atomic snap store) — commitNodeMoveLocal schedules the quantOffset persist write a few
-	// lines LATER on that same node-mover goroutine (quantized_move.go), so a single
-	// flushPendingPersists() right after convergence can race ahead of that schedule() call
-	// and flush an empty pending set. Poll flush+read-back instead of a one-shot flush, the
-	// same deadline-bound retry shape pollDragConverged itself uses.
+	// lines LATER on that same node-mover goroutine (quantized_move.go), so reading disk
+	// right after convergence can still race ahead of that write landing. Poll the
+	// read-back instead, the same deadline-bound retry shape pollDragConverged itself uses.
 	pollDragConverged(t, md, "src", target)
-	pollFlushedPositionFile(t, md, root, "src")
+	pollPositionFileWritten(t, root, "src")
 
 	// ---- Load 2: a completely fresh MoveDispatch over the now-partially-migrated tree. ----
 	tr2 := T.New(0)

@@ -168,7 +168,6 @@ func TestNeighborSetCRequantizesEdgeNeighborStaysPut(t *testing.T) {
 		t.Fatalf("(3) expected exactly one moveMsgKindNeighborSetC (senderID=dst) routed to src; got %d in trace %+v", setCCount, trace)
 	}
 
-	md.persist.quantOffset.flush()
 }
 
 // TestNeighborSetCDeltaIsDraggedNodesOwnTripleChange proves the DRAGGED node's own
@@ -250,5 +249,4 @@ func TestNeighborSetCDeltaIsDraggedNodesOwnTripleChange(t *testing.T) {
 			got.DeltaA, got.DeltaB, got.DeltaC, wantA, wantB, wantC, dstToSrcBefore, dstToSrcAfter)
 	}
 
-	md.persist.quantOffset.flush()
 }
