@@ -96,11 +96,12 @@
   <div class="head-inner">
     <p class="eyebrow">wirefold · concurrency</p>
     <h1>Trace.mu — the last lock in the repo</h1>
-    <p class="sub">Every other mutex is gone: <code>geomMu</code>, <code>RealClock.mu</code>,
-    <code>PacedWire.mu</code>, <code>outbox.mu</code>, <code>LayoutHolder.mu</code>,
-    <code>debouncedPersister.mu</code>. This one is at <code>Trace/Trace.go:294</code>. Its
-    stated job is guarding the event accumulator — and that turns out to be mostly
-    <b>vestigial</b>. What it actually still does in production is something else.</p>
+    <p class="sub">Six other mutexes were removed before this one — <code>geomMu</code> and
+    <code>RealClock.mu</code> removed, <code>PacedWire.mu</code> and <code>outbox.mu</code>
+    removed, <code>LayoutHolder.mu</code> and <code>debouncedPersister.mu</code> removed.
+    This one is at <code>Trace/Trace.go:294</code>. Its stated job is guarding the event
+    accumulator — and that turns out to be mostly <b>vestigial</b>. What it actually still
+    does in production is something else.</p>
   </div>
 </header>
 
