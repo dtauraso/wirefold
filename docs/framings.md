@@ -14,37 +14,24 @@ observer**, which requires knowing what this system is and who is looking at it.
 | Identity is write-once, so tearing is unrepresentable | A shared struct must be guarded against concurrent read | `geomMu`, plus a widened read invented to make the guard falsifiable | **Done** — `nodeGeom` split into `nodeIdentity` + mutable state, lock deleted |
 | A holder is written only by its owner | Neighbours reach into each other, so holders need guarding | `LayoutHolder.mu` | **Done** — every non-test caller confirmed to run on the owning node's own goroutine; the lock was deleted, not narrowed; the nine tests that had polled live state cross-goroutine were fixed to wait on a happens-before edge instead |
 | Budget is pixels of relative displacement during motion | Every block of a frame must describe the same instant | `SnapshotState`'s accumulate-then-pack, the drain merge | Planned — `task/per-owner-buffer-rows` |
-| Each owner's own event order is the only real one | Events have a global total order | `Trace.mu` (deleted — see below), the event channel, the drain's ordering | Planned — `task/framing-event-order`, `task/per-owner-buffer-rows`. Note the merged log is already only *arrival order at the drain*, which is scheduler order, not causal order. Deleting `Trace.mu` did not close this row: the event channel and the drain's single-writer ordering still exist, and whether that ordering should be treated as authoritative is still open |
+| Each owner's own event order is the only real one | Events have a global total order | `Trace.mu` (deleted), the event channel, the drain's ordering | Planned — `task/framing-event-order`, `task/per-owner-buffer-rows`. Note the merged log is already only *arrival order at the drain*, which is scheduler order, not causal order. Deleting `Trace.mu` did not close this row: the event channel and the drain's single-writer ordering still exist, and whether that ordering should be treated as authoritative is still open |
 | Pack at the rate the consumer consumes | Emission must be driven by change | `emitSnapshot` scattered across `Update`'s arms, tick coalescing | Planned — same branch |
 
-## Every mutex left in the tree
+## Not one lock is left
 
-The rows above track *framings*. This tracks *locks* — every `sync.Mutex`/`Cond` in
-non-test Go, so "which are left" is answerable without grepping. Verified against the code
-when written; re-grep before trusting it.
+Every `sync.Mutex` and `sync.Cond` in non-test Go has been removed. This section used to be
+an inventory of the ones that remained; there is nothing to inventory, so it is gone rather
+than kept as an empty table promising a lookup it cannot answer.
 
-| Lock | Where | What it guards | Status |
-|---|---|---|---|
-| ~~`PacedWire.mu`~~ | — | was `inflight`/`delivered` | **DELETED.** The wire became its own goroutine, so it has one owner and nothing to guard — see below |
-| ~~`outbox.mu` + `cond`~~ | — | was the unbounded move queue | **DELETED.** Per-direction channels replaced the shared queue; with no blocking send there is nothing to hold — see below |
-| ~~`Trace.mu`~~ | — | was `events`/`closed`/sinks | **DELETED.** `Breadcrumb` used to write sinks directly from any calling goroutine, bypassing `t.ch`; it now sends on `t.ch` like every other event, so the drain goroutine is the sole writer. Shutdown became complete (every mover's goroutine is now waited on, `closed` became a `sync.Once`), so nothing can call into `Trace` during `Close()` either. The real job the lock was doing — serializing `Breadcrumb`'s direct sink writes and surviving a shutdown that didn't wait — was fixed at the source, not narrowed. The *ordering* framing above it is still open (`task/per-owner-buffer-rows`) |
-| ~~`LayoutHolder.mu`~~ | — | was `localPolars`/`pole` | **DELETED.** Every non-test caller ran on the owning node's own goroutine already; a neighbour is reached by message, never by touching its holder — see `docs/layout-holder-architecture.html` |
-| ~~`sceneFileMu`, `entityFileMuMu`, per-path `entityFileMus`~~ | — | were read-modify-write cycles on shared JSON files | **DELETED.** Every one existed because two writers shared one file; the files were split so each writer owns its own — see below |
-| ~~`debouncedPersister.mu`~~ ×5 | — | was `pending` / `has` / `timer` / `writes` | **DELETED.** Each domain persister now writes inline on its own caller's goroutine the moment its value changes, with no shared debounce timer to guard — see `scene_persist.go`'s header comment |
+The one measured lesson worth carrying forward, from `RealClock.mu` — the widest-fan-in of
+them: it was never removed for speed. Contention measured ~500-1700 acquisitions/sec against
+a mutex that handles tens of millions, and no benchmark or profile in this repo ever
+motivated it. It went because a shared object forces every reader of the code to understand
+the whole network's clock wiring before understanding one goroutine, and because the lock
+defended an exactness — every reader agrees to the millisecond — that nothing here needs.
+"Widest fan-in" was a structural claim being read as a cost claim. Check which kind you are
+making before pulling on any shared state.
 
-Every `sync.Mutex`/`Cond` in non-test Go is now gone. There is nothing left in this table.
-
-`RealClock.mu` was the widest-fan-in lock and is **gone** — deleted by
-`task/mutex-shared-services`, replaced by ownership (one clock copy per goroutine) rather
-than by a smaller lock. Its two rows left this table with it.
-
-Worth carrying into the rows above: it was never removed for speed. Measured contention was
-~500-1700 acquisitions/sec against a mutex that does tens of millions, and no benchmark or
-profile in this repo ever motivated it. It went because a shared object forces every reader
-of the code to understand the whole network's clock wiring before understanding one
-goroutine, and because the lock defended an exactness — every reader agrees to the
-millisecond — that nothing here needs. "Widest fan-in" was a structural claim being read as
-a cost claim. Check which kind you are making before pulling on any remaining lock.
 
 ## `PacedWire.mu` was examined, and the answer was yes
 
@@ -70,7 +57,7 @@ cond, its dedicated sender goroutine and that goroutine's ctx-watcher are all go
 goroutine count went **down** by two per mover.
 
 **That is seven for seven.** `geomMu`, `RealClock.mu`, `PacedWire.mu`, `outbox.mu`,
-`LayoutHolder.mu`, `debouncedPersister.mu`, `Trace.mu` — every lock this table ever called
+`LayoutHolder.mu`, `debouncedPersister.mu`, `Trace.mu` — every lock this doc ever called
 necessary has been removed by a restructuring, and in every case the restructuring was
 *giving the state one owner*, not being clever about locking. `Trace.mu` looked like the
 strongest holdout — "an accumulator that cannot be copied without producing N partial
