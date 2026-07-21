@@ -51,7 +51,9 @@ done
 # here means the doc-drift failure is expected and fixable in the same commit
 # that stripped the doc, rather than surfacing later as a surprise.
 for f in "${matched[@]}"; do
-  hits=$(grep -rln --exclude-dir=node_modules --exclude-dir=.git -- "$f" . 2>/dev/null | grep -v '^\./docs/' || true)
+  # --exclude-dir=.claude skips nested agent worktrees (.claude/worktrees/*), which are full
+  # checkouts of this same tree and would otherwise report every doc as still referenced.
+  hits=$(grep -rln --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=.claude -- "$f" . 2>/dev/null | grep -v '^\./docs/' || true)
   if [[ -n "$hits" ]]; then
     echo "WARNING: $f is still cited from:"
     echo "$hits" | sed 's/^/  /'

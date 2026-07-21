@@ -32,7 +32,21 @@ CANONICAL_SPEED="PulseSpeedWuPerTick"
 cd "$REPO_ROOT"
 
 # All NewPacedWire CALL sites outside _test.go, excluding the func declaration itself.
-CALLS=$(grep -rn "NewPacedWire(" --include="*.go" . \
+#
+# Enumerate via `git ls-files`, NOT `grep -r .`: a recursive scan from the repo root also
+# descends into nested git worktrees (agents create them under .claude/worktrees/), which
+# are full checkouts of this same tree — so the one production call site gets counted once
+# per live worktree and this guard fails claiming a second call site that does not exist.
+# git ls-files lists only THIS worktree's files, so there is no exclusion list to keep in
+# sync as new nested-checkout locations appear (.claude/worktrees/ is gitignored, .gitignore:122).
+#
+# --others --exclude-standard is REQUIRED, not optional: without it this enumerates only
+# TRACKED files, so a brand-new second call site in a not-yet-`git add`ed file passes
+# silently — the guard goes vacuous exactly when it matters most (new code). Verified by
+# dropping an untracked probe file with a second NewPacedWire call and confirming this
+# fails; a bare `git ls-files` did not.
+CALLS=$(git ls-files -z --cached --others --exclude-standard '*.go' \
+  | xargs -0 grep -n "NewPacedWire(" -- \
   | grep -v "_test.go" \
   | grep -v "func NewPacedWire(" \
   || true)
