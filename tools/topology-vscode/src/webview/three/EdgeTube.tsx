@@ -1,10 +1,26 @@
 // EdgeTube.tsx — real 3D edge render matching the JSON path's SingleEdgeTube,
-// plus the EdgeTubes buffer-poll wrapper that rebuilds
-// per-edge TubeGeometry only when a coordinate actually changes. Split out of
-// buffer-scene.tsx: pure buffer→GPU render, no state authority beyond that geometry-cache
-// React state.
+// plus the EdgeTubes buffer-poll wrapper.
+//
+// TIMING CONTRACT (why this file is imperative, not setState-driven):
+// NodeInstances updates node/port meshes IMPERATIVELY inside its useFrame (setMatrixAt +
+// instanceMatrix.needsUpdate), so a moved node lands on the SAME frame it is decoded. If
+// edge segment coordinates flowed through React state (setSegs -> re-render -> useMemo
+// rebuild), the tube+arrow would land ONE FRAME LATER than the ports they connect. During a
+// drag that differential shows as the destination arrowhead sliding off its port,
+// proportional to drag speed and sign-flipping with lengthen/shorten — a lag, not a Go bug
+// (Go's emitted SX..EZ track the ports exactly; probe-verified). So per-frame COORDINATES
+// are pushed to each edge slot via an imperative handle (EdgeHandle.update), updated in the
+// same useFrame that reads NodeInstances' buffer — never through state.
+//
+// What DOES stay in useState: the mounted SLOT COUNT, the selected row, and the dim flag.
+// Those change on edge add/remove and user clicks, never per drag-frame, so a one-frame
+// commit latency on them is imperceptible and is not the lag this contract exists to kill.
+// Holding them is buffer reflection (count/selection/flags Go owns), not domain authority —
+// no segment geometry is cached in state (check-no-webview-state).
 
-import React, { useRef, useState, useMemo, useEffect } from "react";
+import React, {
+  useRef, useState, useEffect, forwardRef, useImperativeHandle,
+} from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { getLatestSnapshot } from "../snapshot-buffer";
@@ -48,6 +64,16 @@ const LAYOUT_LINK_EMISSIVE_COLOR = new THREE.Color(SHADING_PARAM_LAYOUT_LINK_EMI
 
 interface EdgeSeg { sx: number; sy: number; sz: number; ex: number; ey: number; ez: number; }
 
+// Imperative per-slot handle: the parent pushes this slot's current segment every frame,
+// bypassing React state so the tube/arrow land the same frame the ports do (see the timing
+// contract at the top of this file).
+interface EdgeHandle { update(seg: EdgeSeg): void }
+
+function sameSeg(a: EdgeSeg, b: EdgeSeg): boolean {
+  return a.sx === b.sx && a.sy === b.sy && a.sz === b.sz
+    && a.ex === b.ex && a.ey === b.ey && a.ez === b.ez;
+}
+
 /**
  * Builds an arrow descriptor: a cone whose apex sits at `apex`, pointing in `dir`
  * (normalized, toward the apex). ConeGeometry apex is at +Y; we rotate +Y onto `dir`.
@@ -68,60 +94,92 @@ function buildArrow(apex: THREE.Vector3, dir: THREE.Vector3, height: number): {
 // (opacity 0.6) when Go marks this edge selected; otherwise the halo stays opacity 0 but
 // remains raycast-hittable. `dimmed` (the layout-link overlay is on) drops opacity to 0.25,
 // same as the pre-removal DoubleEdgeOverlay dim.
-function EdgeTube({ seg, dimmed, row, selected }: { seg: EdgeSeg; dimmed: boolean; row: number; selected: boolean }) {
-  const tubeTransparent = dimmed;
-  const tubeOpacity = dimmed ? 0.25 : 1;
-  const matKey = dimmed ? "dimmed" : "solid";
-  const { tubeGeo, haloGeo, arrow } = useMemo(() => {
-    const start = new THREE.Vector3(seg.sx, seg.sy, seg.sz);
-    const end = new THREE.Vector3(seg.ex, seg.ey, seg.ez);
-    const curve = new THREE.LineCurve3(start, end);
-    const _tubeGeo = new THREE.TubeGeometry(curve, 1, 1.5, 6, false);
-    // Wide concentric halo on the same segment — the pre-branch pick radius (5).
-    const _haloGeo = new THREE.TubeGeometry(curve, 1, EDGE_HALO_RADIUS, 6, false);
-    const dir = end.clone().sub(start);
-    let _arrow: { center: THREE.Vector3; q: THREE.Quaternion } | null = null;
-    if (dir.length() >= DIRECTION_ZERO_EPS) {
-      dir.normalize();
-      _arrow = buildArrow(end, dir, ARROWHEAD_LENGTH);
-    }
-    return { tubeGeo: _tubeGeo, haloGeo: _haloGeo, arrow: _arrow };
-  }, [seg.sx, seg.sy, seg.sz, seg.ex, seg.ey, seg.ez]);
+//
+// The SEGMENT is NOT a prop: the parent pushes it every frame via the imperative handle
+// (update), which rebuilds the tube/halo TubeGeometry in place and re-transforms the arrow
+// mesh, all synchronously inside the parent's useFrame. That is what keeps the edge on the
+// same frame as its ports (timing contract, top of file). Only the low-frequency props
+// (dimmed/row/selected) flow through React.
+const EdgeTube = forwardRef<EdgeHandle, { dimmed: boolean; row: number; selected: boolean }>(
+  function EdgeTube({ dimmed, row, selected }, ref) {
+    const tubeTransparent = dimmed;
+    const tubeOpacity = dimmed ? 0.25 : 1;
+    const matKey = dimmed ? "dimmed" : "solid";
 
-  // R3F does not auto-dispose an imperatively-passed geometry={...}; dispose on rebuild/unmount.
-  useEffect(() => () => { tubeGeo.dispose(); haloGeo.dispose(); }, [tubeGeo, haloGeo]);
+    const tubeMeshRef = useRef<THREE.Mesh>(null);
+    const haloMeshRef = useRef<THREE.Mesh>(null);
+    const arrowMeshRef = useRef<THREE.Mesh>(null);
+    const lastSeg = useRef<EdgeSeg | null>(null);
+    // The two TubeGeometries this slot currently owns, so update() can dispose the previous
+    // pair before replacing them (R3F does not auto-dispose an imperatively-assigned geometry).
+    const geoRef = useRef<{ tube: THREE.TubeGeometry; halo: THREE.TubeGeometry } | null>(null);
 
-  return (
-    <>
-      <mesh geometry={tubeGeo} raycast={() => null} frustumCulled={false}>
-        <meshStandardMaterial
-          key={matKey}
-          color={SHADING_PARAM_TUBE_COLOR}
-          emissive={TUBE_EMISSIVE_COLOR}
-          emissiveIntensity={SHADING_PARAM_TUBE_EMISSIVE_INTENSITY}
-          transparent={tubeTransparent}
-          opacity={tubeOpacity}
-        />
-      </mesh>
-      {/* Selection halo doubles as the wide pick target (pre-branch SingleEdgeTube). Always
-          mounted so the raycaster can hit anywhere within the halo radius; painted only when
-          selected (opacity 0 otherwise — an opacity-0 mesh is still raycast-hittable). */}
-      <mesh geometry={haloGeo} userData={{ [BUFFER_EDGE_TAG]: row }} frustumCulled={false}>
-        <meshBasicMaterial
-          color={EDGE_HALO_COLOR}
-          transparent
-          opacity={selected ? EDGE_HALO_SELECTED_OPACITY : 0}
-          side={THREE.DoubleSide}
-          depthWrite={false}
-        />
-      </mesh>
-      {arrow && (
-        <mesh
-          position={[arrow.center.x, arrow.center.y, arrow.center.z]}
-          quaternion={[arrow.q.x, arrow.q.y, arrow.q.z, arrow.q.w]}
-          raycast={() => null}
-          frustumCulled={false}
-        >
+    useImperativeHandle(ref, () => ({
+      update(seg: EdgeSeg) {
+        // Skip the rebuild when this slot's endpoints did not move — same gate the old
+        // sameSegs check gave, now per-slot. Selection/dim are props, handled by React.
+        if (lastSeg.current && sameSeg(lastSeg.current, seg)) return;
+        lastSeg.current = seg;
+
+        const start = new THREE.Vector3(seg.sx, seg.sy, seg.sz);
+        const end = new THREE.Vector3(seg.ex, seg.ey, seg.ez);
+        const curve = new THREE.LineCurve3(start, end);
+        const tubeGeo = new THREE.TubeGeometry(curve, 1, 1.5, 6, false);
+        // Wide concentric halo on the same segment — the pre-branch pick radius (5).
+        const haloGeo = new THREE.TubeGeometry(curve, 1, EDGE_HALO_RADIUS, 6, false);
+        if (geoRef.current) { geoRef.current.tube.dispose(); geoRef.current.halo.dispose(); }
+        geoRef.current = { tube: tubeGeo, halo: haloGeo };
+        if (tubeMeshRef.current) tubeMeshRef.current.geometry = tubeGeo;
+        if (haloMeshRef.current) haloMeshRef.current.geometry = haloGeo;
+
+        const arrow = arrowMeshRef.current;
+        if (arrow) {
+          const dir = end.clone().sub(start);
+          if (dir.length() >= DIRECTION_ZERO_EPS) {
+            dir.normalize();
+            const { center, q } = buildArrow(end, dir, ARROWHEAD_LENGTH);
+            arrow.position.set(center.x, center.y, center.z);
+            arrow.quaternion.set(q.x, q.y, q.z, q.w);
+            arrow.visible = true;
+          } else {
+            arrow.visible = false;
+          }
+        }
+      },
+    }), []);
+
+    // Dispose this slot's geometries on unmount (the last pair update() assigned).
+    useEffect(() => () => {
+      if (geoRef.current) { geoRef.current.tube.dispose(); geoRef.current.halo.dispose(); }
+    }, []);
+
+    return (
+      <>
+        <mesh ref={tubeMeshRef} raycast={() => null} frustumCulled={false}>
+          <meshStandardMaterial
+            key={matKey}
+            color={SHADING_PARAM_TUBE_COLOR}
+            emissive={TUBE_EMISSIVE_COLOR}
+            emissiveIntensity={SHADING_PARAM_TUBE_EMISSIVE_INTENSITY}
+            transparent={tubeTransparent}
+            opacity={tubeOpacity}
+          />
+        </mesh>
+        {/* Selection halo doubles as the wide pick target (pre-branch SingleEdgeTube). Always
+            mounted so the raycaster can hit anywhere within the halo radius; painted only when
+            selected (opacity 0 otherwise — an opacity-0 mesh is still raycast-hittable). */}
+        <mesh ref={haloMeshRef} userData={{ [BUFFER_EDGE_TAG]: row }} frustumCulled={false}>
+          <meshBasicMaterial
+            color={EDGE_HALO_COLOR}
+            transparent
+            opacity={selected ? EDGE_HALO_SELECTED_OPACITY : 0}
+            side={THREE.DoubleSide}
+            depthWrite={false}
+          />
+        </mesh>
+        {/* Arrow transform is pushed imperatively by update(); starts hidden until the first
+            update populates its position/quaternion (avoids a one-frame arrow at the origin). */}
+        <mesh ref={arrowMeshRef} raycast={() => null} frustumCulled={false} visible={false}>
           <coneGeometry args={[ARROWHEAD_RADIUS, ARROWHEAD_LENGTH, 16]} />
           <meshStandardMaterial
             key={matKey}
@@ -132,10 +190,10 @@ function EdgeTube({ seg, dimmed, row, selected }: { seg: EdgeSeg; dimmed: boolea
             opacity={tubeOpacity}
           />
         </mesh>
-      )}
-    </>
-  );
-}
+      </>
+    );
+  },
+);
 
 // One layout-link pair's cyan bidirectional overlay: thin tube (radius 1.0) + an
 // outward-pointing arrowhead at each end. Mirrors the pre-removal DoubleEdgeOverlay. The
@@ -146,170 +204,187 @@ function EdgeTube({ seg, dimmed, row, selected }: { seg: EdgeSeg; dimmed: boolea
 // pair had no bead edge to ride along (LayoutLink EdgeRow === -1); the caller falls back to
 // node centers, and this is rendered visibly dimmer so a center-anchored fallback segment
 // never looks identical to a real port-anchored one.
-function LayoutLinkOverlay({ seg, viaEdge }: { seg: EdgeSeg; viaEdge: boolean }) {
-  const { lineGeo, arrowStart, arrowEnd } = useMemo(() => {
-    const start = new THREE.Vector3(seg.sx, seg.sy, seg.sz);
-    const end = new THREE.Vector3(seg.ex, seg.ey, seg.ez);
-    const curve = new THREE.LineCurve3(start, end);
-    const _lineGeo = new THREE.TubeGeometry(curve, 1, 1.0, 6, false);
-    const dir = end.clone().sub(start);
-    let _arrowStart: { center: THREE.Vector3; q: THREE.Quaternion } | null = null;
-    let _arrowEnd: { center: THREE.Vector3; q: THREE.Quaternion } | null = null;
-    if (dir.length() >= DIRECTION_ZERO_EPS) {
-      const dirNorm = dir.clone().normalize();
-      _arrowStart = buildArrow(start, dirNorm.clone().negate(), DL_ARROWHEAD_LENGTH);
-      _arrowEnd = buildArrow(end, dirNorm, DL_ARROWHEAD_LENGTH);
-    }
-    return { lineGeo: _lineGeo, arrowStart: _arrowStart, arrowEnd: _arrowEnd };
-  }, [seg.sx, seg.sy, seg.sz, seg.ex, seg.ey, seg.ez]);
+//
+// Same timing contract as EdgeTube: the segment is pushed imperatively (update), not a prop,
+// so a link overlay tracks its dragged endpoints on the same frame as the ports it rides.
+const LayoutLinkOverlay = forwardRef<EdgeHandle, { viaEdge: boolean }>(
+  function LayoutLinkOverlay({ viaEdge }, ref) {
+    const lineMeshRef = useRef<THREE.Mesh>(null);
+    const arrowStartRef = useRef<THREE.Mesh>(null);
+    const arrowEndRef = useRef<THREE.Mesh>(null);
+    const lastSeg = useRef<EdgeSeg | null>(null);
+    const geoRef = useRef<THREE.TubeGeometry | null>(null);
 
-  useEffect(() => () => { lineGeo.dispose(); }, [lineGeo]);
+    useImperativeHandle(ref, () => ({
+      update(seg: EdgeSeg) {
+        if (lastSeg.current && sameSeg(lastSeg.current, seg)) return;
+        lastSeg.current = seg;
 
-  const cone = (a: { center: THREE.Vector3; q: THREE.Quaternion }, key: string) => (
-    <mesh
-      key={key}
-      position={[a.center.x, a.center.y, a.center.z]}
-      quaternion={[a.q.x, a.q.y, a.q.z, a.q.w]}
-      raycast={() => null}
-      frustumCulled={false}
-    >
-      <coneGeometry args={[DL_ARROWHEAD_RADIUS, DL_ARROWHEAD_LENGTH, 16]} />
-      <meshStandardMaterial
-        color={SHADING_PARAM_LAYOUT_LINK_COLOR}
-        emissive={LAYOUT_LINK_EMISSIVE_COLOR}
-        emissiveIntensity={SHADING_PARAM_LAYOUT_LINK_EMISSIVE_INTENSITY}
-      />
-    </mesh>
-  );
+        const start = new THREE.Vector3(seg.sx, seg.sy, seg.sz);
+        const end = new THREE.Vector3(seg.ex, seg.ey, seg.ez);
+        const curve = new THREE.LineCurve3(start, end);
+        const lineGeo = new THREE.TubeGeometry(curve, 1, 1.0, 6, false);
+        if (geoRef.current) geoRef.current.dispose();
+        geoRef.current = lineGeo;
+        if (lineMeshRef.current) lineMeshRef.current.geometry = lineGeo;
 
-  return (
-    <>
-      <mesh geometry={lineGeo} raycast={() => null} frustumCulled={false}>
+        const dir = end.clone().sub(start);
+        const as = arrowStartRef.current;
+        const ae = arrowEndRef.current;
+        if (dir.length() >= DIRECTION_ZERO_EPS) {
+          const dirNorm = dir.clone().normalize();
+          if (as) {
+            const { center, q } = buildArrow(start, dirNorm.clone().negate(), DL_ARROWHEAD_LENGTH);
+            as.position.set(center.x, center.y, center.z);
+            as.quaternion.set(q.x, q.y, q.z, q.w);
+            as.visible = true;
+          }
+          if (ae) {
+            const { center, q } = buildArrow(end, dirNorm, DL_ARROWHEAD_LENGTH);
+            ae.position.set(center.x, center.y, center.z);
+            ae.quaternion.set(q.x, q.y, q.z, q.w);
+            ae.visible = true;
+          }
+        } else {
+          if (as) as.visible = false;
+          if (ae) ae.visible = false;
+        }
+      },
+    }), []);
+
+    useEffect(() => () => { if (geoRef.current) geoRef.current.dispose(); }, []);
+
+    const coneMesh = (r: React.Ref<THREE.Mesh>) => (
+      <mesh ref={r} raycast={() => null} frustumCulled={false} visible={false}>
+        <coneGeometry args={[DL_ARROWHEAD_RADIUS, DL_ARROWHEAD_LENGTH, 16]} />
         <meshStandardMaterial
           color={SHADING_PARAM_LAYOUT_LINK_COLOR}
           emissive={LAYOUT_LINK_EMISSIVE_COLOR}
           emissiveIntensity={SHADING_PARAM_LAYOUT_LINK_EMISSIVE_INTENSITY}
-          transparent={!viaEdge}
-          opacity={viaEdge ? 1 : 0.35}
         />
       </mesh>
-      {arrowStart && cone(arrowStart, "start")}
-      {arrowEnd && cone(arrowEnd, "end")}
-    </>
-  );
-}
+    );
 
-function sameSegs(a: EdgeSeg[], b: EdgeSeg[]): boolean {
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) {
-    const x = a[i]!;
-    const y = b[i]!;
-    if (
-      x.sx !== y.sx || x.sy !== y.sy || x.sz !== y.sz ||
-      x.ex !== y.ex || x.ey !== y.ey || x.ez !== y.ez
-    ) {
-      return false;
-    }
-  }
-  return true;
-}
+    return (
+      <>
+        <mesh ref={lineMeshRef} raycast={() => null} frustumCulled={false}>
+          <meshStandardMaterial
+            color={SHADING_PARAM_LAYOUT_LINK_COLOR}
+            emissive={LAYOUT_LINK_EMISSIVE_COLOR}
+            emissiveIntensity={SHADING_PARAM_LAYOUT_LINK_EMISSIVE_INTENSITY}
+            transparent={!viaEdge}
+            opacity={viaEdge ? 1 : 0.35}
+          />
+        </mesh>
+        {coneMesh(arrowStartRef)}
+        {coneMesh(arrowEndRef)}
+      </>
+    );
+  },
+);
 
 export function EdgeTubes({ capacity, layoutLinkCapacity }: { capacity: number; layoutLinkCapacity: number }) {
-  const [segs, setSegs] = useState<EdgeSeg[]>([]);
-  // The Go-selected edge's buffer row (-1 = none). Tracked separately from the segment set
-  // so a selection change (which does NOT move any endpoint) toggles the halo without
-  // rebuilding the tube geometries. Go OWNS the selection (Edge block Selected column).
+  // Number of edge slots to MOUNT (not their coordinates). Changes only when edges are
+  // added/removed — never during a drag — so its one-frame commit latency is invisible.
+  const [edgeCount, setEdgeCount] = useState(0);
+  // The Go-selected edge's buffer row (-1 = none). Tracked separately from geometry so a
+  // selection change (which moves no endpoint) toggles the halo without touching the tubes.
   const [selRow, setSelRow] = useState(-1);
-  const prevRef = useRef<{ segs: EdgeSeg[] }>({ segs: [] });
-
-  // Layout-link overlay state: whether it's on (Go-owned overlay flag), and the current
-  // per-pair segments — sourced from the buffer's LayoutLink block (node-row pairs) resolved
-  // against the ALREADY-DECODED Node block's centers, never from the Edge block.
   const [showDouble, setShowDouble] = useState(false);
-  const [linkSegs, setLinkSegs] = useState<EdgeSeg[]>([]);
+  // Mounted layout-link slot count + each slot's viaEdge flag (line color/opacity). Both are
+  // low-frequency (a link gains/loses its bead edge, or the overlay toggles) — not per-frame.
+  const [linkCount, setLinkCount] = useState(0);
   const [linkViaEdge, setLinkViaEdge] = useState<boolean[]>([]);
-  const linkPrevRef = useRef<{ dbl: boolean; segs: EdgeSeg[]; viaEdge: boolean[] }>({ dbl: false, segs: [], viaEdge: [] });
+
+  // Imperative handles to every mounted slot — this is the per-frame coordinate channel that
+  // replaces the old setSegs/setLinkSegs state (see the timing contract at the top of file).
+  const edgeHandles = useRef<(EdgeHandle | null)[]>([]);
+  const linkHandles = useRef<(EdgeHandle | null)[]>([]);
+  // Scratch reused each frame so viaEdge comparison allocates nothing on the steady path.
+  const linkViaScratch = useRef<boolean[]>([]);
 
   useFrame(() => {
     const snap = getLatestSnapshot();
     if (!snap) return;
     const decoded = decodeSnapshot(snap);
     if (!decoded) return;
-    const { edgeCount, edgeView, nodeView, layoutLinkCount, layoutLinkView, overlayView } = decoded;
+    const { edgeCount: bufEdgeCount, edgeView, nodeView, layoutLinkCount, layoutLinkView, overlayView } = decoded;
 
-    const n = Math.min(edgeCount, capacity);
-    const next: EdgeSeg[] = new Array<EdgeSeg>(n);
+    const n = Math.min(bufEdgeCount, capacity);
+    if (n !== edgeCount) setEdgeCount(n);
+
     let sel = -1;
     for (let i = 0; i < n; i++) {
-      const s: EdgeSeg = {
+      if (sel < 0 && readEdgeSelected(edgeView, i)) sel = i;
+      // Push this edge's current endpoints straight to its slot — no state, so it lands this
+      // frame. A slot mounted THIS frame (n just grew) has no handle yet; it gets its first
+      // push next frame, an imperceptible one-frame delay on edge APPEARANCE, never on a move.
+      edgeHandles.current[i]?.update({
         sx: readEdgeSX(edgeView, i), sy: readEdgeSY(edgeView, i), sz: readEdgeSZ(edgeView, i),
         ex: readEdgeEX(edgeView, i), ey: readEdgeEY(edgeView, i), ez: readEdgeEZ(edgeView, i),
-      };
-      next[i] = s;
-      if (sel < 0 && readEdgeSelected(edgeView, i)) sel = i;
+      });
     }
-    // Rebuild the segment set (and thus the tube geometries) only when something moved —
-    // not every frame.
-    if (!sameSegs(prevRef.current.segs, next)) {
-      prevRef.current = { segs: next };
-      setSegs(next);
-    }
-    // Selection toggles cheaply (no geometry rebuild) — update only when the row changes.
     if (sel !== selRow) setSelRow(sel);
 
     // Layout-link overlay: Go-streamed pairs (LayoutLink block). Each pair's endpoints are the
     // connecting bead edge's own port-anchored SX..EZ (Edge block, row = this pair's EdgeRow) —
     // the same points the bead wire uses, so the overlay terminates at the ports and stays
-    // attached as a node is dragged (the Edge block is re-emitted on every move). Fallback
-    // (EdgeRow === -1, no bead edge for this pair): the two nodes' CENTERS from the Node
-    // block — an honest degradation, rendered dimmer (viaEdge=false) so it never looks like a
-    // real port-anchored link.
-    // Both overlay flags (0/1 columns) must be set. Coerce each side explicitly with `> 0`
-    // — a per-operand boolean check, no `!!`, and independent of which flag is set.
+    // attached as a node is dragged. Fallback (EdgeRow === -1): the two nodes' CENTERS from the
+    // Node block — an honest degradation, rendered dimmer (viaEdge=false).
+    // Both overlay flags (0/1 columns) must be set. Coerce each side explicitly with `> 0`.
     const dbl = readOverlayOverlaysVis(overlayView) > 0 && readOverlayDoubleLinks(overlayView) > 0;
-    // Clamp with the layout-link's OWN capacity, never the edge `capacity`: layout links
-    // come from LocalPolars (not the Edge block), so layoutLinkCount is independent of
-    // edgeCount and can exceed edgeCap — clamping by edgeCap silently dropped links.
+    if (dbl !== showDouble) setShowDouble(dbl);
+
+    // Clamp with the layout-link's OWN capacity, never the edge `capacity`: layout links come
+    // from LocalPolars (not the Edge block), so layoutLinkCount is independent of edgeCount and
+    // can exceed edgeCap — clamping by edgeCap silently dropped links.
     const linkN = Math.min(layoutLinkCount, layoutLinkCapacity);
-    const nextLinks: EdgeSeg[] = new Array<EdgeSeg>(linkN);
-    const nextViaEdge: boolean[] = new Array<boolean>(linkN);
+    if (linkN !== linkCount) setLinkCount(linkN);
+
+    const via = linkViaScratch.current;
+    via.length = linkN;
     for (let i = 0; i < linkN; i++) {
       const edgeRow = readLayoutLinkEdgeRow(layoutLinkView, i);
+      let seg: EdgeSeg;
       if (edgeRow >= 0) {
-        nextLinks[i] = {
+        seg = {
           sx: readEdgeSX(edgeView, edgeRow), sy: readEdgeSY(edgeView, edgeRow), sz: readEdgeSZ(edgeView, edgeRow),
           ex: readEdgeEX(edgeView, edgeRow), ey: readEdgeEY(edgeView, edgeRow), ez: readEdgeEZ(edgeView, edgeRow),
         };
-        nextViaEdge[i] = true;
+        via[i] = true;
       } else {
         const srcRow = readLayoutLinkSrcNodeRow(layoutLinkView, i);
         const dstRow = readLayoutLinkDstNodeRow(layoutLinkView, i);
-        nextLinks[i] = {
+        seg = {
           sx: readNodeCX(nodeView, srcRow), sy: readNodeCY(nodeView, srcRow), sz: readNodeCZ(nodeView, srcRow),
           ex: readNodeCX(nodeView, dstRow), ey: readNodeCY(nodeView, dstRow), ez: readNodeCZ(nodeView, dstRow),
         };
-        nextViaEdge[i] = false;
+        via[i] = false;
       }
+      linkHandles.current[i]?.update(seg);
     }
-    const viaEdgeChanged = linkPrevRef.current.viaEdge.length !== nextViaEdge.length
-      || nextViaEdge.some((v, i) => v !== linkPrevRef.current.viaEdge[i]);
-    if (dbl !== linkPrevRef.current.dbl || !sameSegs(linkPrevRef.current.segs, nextLinks) || viaEdgeChanged) {
-      linkPrevRef.current = { dbl, segs: nextLinks, viaEdge: nextViaEdge };
-      setShowDouble(dbl);
-      setLinkSegs(nextLinks);
-      setLinkViaEdge(nextViaEdge);
-    }
+    // viaEdge drives per-slot material — a prop, so commit it only when the vector changes.
+    const viaChanged = linkViaEdge.length !== linkN || via.some((v, i) => v !== linkViaEdge[i]);
+    if (viaChanged) setLinkViaEdge(via.slice(0, linkN));
   });
 
   return (
     <>
-      {segs.map((s, i) => (
-        <React.Fragment key={`edge-row-${i}`}>
-          <EdgeTube seg={s} dimmed={showDouble} row={i} selected={i === selRow} />
-        </React.Fragment>
+      {Array.from({ length: edgeCount }, (_, i) => (
+        <EdgeTube
+          key={`edge-row-${i}`}
+          ref={(h) => { edgeHandles.current[i] = h; }}
+          dimmed={showDouble}
+          row={i}
+          selected={i === selRow}
+        />
       ))}
-      {showDouble && linkSegs.map((s, i) => (
-        <LayoutLinkOverlay key={`layout-link-row-${i}`} seg={s} viaEdge={!!linkViaEdge[i]} />
+      {showDouble && Array.from({ length: linkCount }, (_, i) => (
+        <LayoutLinkOverlay
+          key={`layout-link-row-${i}`}
+          ref={(h) => { linkHandles.current[i] = h; }}
+          viaEdge={!!linkViaEdge[i]}
+        />
       ))}
     </>
   );
