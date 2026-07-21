@@ -94,16 +94,16 @@ func measureScalars(centers map[string]vec3, ids map[string]bool, sceneCenter ve
 	return result
 }
 
-// measureScalar is the single-node variant of measureScalars: given ONE node's current
-// world center, derive its integer scalar triple (iTheta, iPhi, iR) about sceneCenter,
-// preserving prior's stored step constants (cTheta/cPhi/cR) exactly as measureScalars
-// does. Used by the per-node commit path (commitNodeMoveLocal) so
-// each node's quantized offset lives on that node's OWN mover (nodeMover.quantOffset)
-// rather than a shared map read/written from multiple mover goroutines — see
-// node6-drag-decentralized.md / the quantizedOffsets data-race fix.
-func measureScalar(pos, sceneCenter vec3, prior quantizedOffset) quantizedOffset {
+// measureScalar is the single-node variant of measureScalars: given ONE node's ALREADY-
+// COMPUTED polar position p (about the scene sphere center — cart2polar happens once, at
+// the mouse-derived cartesian->polar boundary; see commitNodeMoveLocal), derive its
+// integer scalar triple (iTheta, iPhi, iR), preserving prior's stored step constants
+// (cTheta/cPhi/cR) exactly as measureScalars does. Used by the per-node commit path
+// (commitNodeMoveLocal) so each node's quantized offset lives on that node's OWN mover
+// (nodeMover.quantOffset) rather than a shared map read/written from multiple mover
+// goroutines — see node6-drag-decentralized.md / the quantizedOffsets data-race fix.
+func measureScalar(p polar, prior quantizedOffset) quantizedOffset {
 	t, p_, r := prior.effectiveSteps()
-	p := cart2polar(pos.sub(sceneCenter))
 	return quantizedOffset{
 		iTheta: int(math.Round(p.Theta / t)),
 		iPhi:   int(math.Round(p.Phi / p_)),
