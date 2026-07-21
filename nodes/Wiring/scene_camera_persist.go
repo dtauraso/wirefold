@@ -30,9 +30,7 @@ package Wiring
 // viewpointPersister writes viewpoint changes to camera.json as they happen. Owned by
 // MoveDispatch (armed after the startup seed).
 type viewpointPersister struct {
-	path   string // camera.json path (cameraFilePath(topologyPath))
-	writes int    // count of completed writes (test observability); single writer
-	// (the stdin/gesture goroutine) so no lock is needed.
+	path string // camera.json path (cameraFilePath(topologyPath))
 }
 
 // schedule writes the given viewpoint to camera.json synchronously. Fire-and-forget:
@@ -46,7 +44,6 @@ func (p *viewpointPersister) schedule(v viewpoint) {
 		logPersistErr("scene_camera_persist", p.path, err)
 		return
 	}
-	p.writes++
 }
 
 // viewpointToPolar converts an FSM viewpoint to the persisted cameraPolar shape. It is the

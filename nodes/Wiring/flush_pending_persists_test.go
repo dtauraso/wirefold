@@ -47,9 +47,6 @@ func TestQuantOffsetScheduleWritesSynchronously(t *testing.T) {
 		t.Fatalf("schedule did not synchronously persist the drag: got (%v,%v,%v) want (%v,%v,%v)",
 			gotR, gotTheta, gotPhi, newScene.R, newScene.Theta, newScene.Phi)
 	}
-	if p.writes != 1 {
-		t.Fatalf("writes=%d want 1", p.writes)
-	}
 }
 
 // TestMoveDispatchQuantOffsetScheduleWritesThroughEnableEditPersist exercises the

@@ -20,15 +20,6 @@ package Wiring
 // the directory-tree form has a per-node position.json to write; root == "" (monolithic
 // topology.json) is a no-op.
 //
-// UNLIKE this package's other four persisters, this one has MULTIPLE writers: every node
-// has its OWN mover goroutine, and commitNodeMoveLocal runs schedule() on that node's own
-// goroutine — so two different nodes' drags can call schedule() on this SAME
-// quantOffsetPersister struct concurrently. They write to DIFFERENT files (position.json is
-// keyed by node id, so no two calls ever race the same os.WriteFile/Rename), but they share
-// this one struct's `writes` test-observability counter, so that counter alone still needs a
-// lock (see mu below) — it is the one place in this file two goroutines can touch the same
-// memory at once.
-//
 // LEGACY FALLBACK: an existing pre-split topology has these fields inline in meta.json
 // instead of a separate position.json/local-polars.json — loader_tree.go's loadTree reads
 // meta.json first (still required — it owns id/type/r/gate) and then overlays position.json
@@ -38,19 +29,20 @@ package Wiring
 import (
 	"fmt"
 	"path/filepath"
-	"sync"
 )
 
 // quantOffsetPersister writes a node's scalar-triple change straight to its
 // position.json as it happens. Owned by MoveDispatch (armed by EnableEditPersist).
 // root == "" disables it (monolithic form / unarmed tests).
+//
+// UNLIKE this package's other four persisters, this one has MULTIPLE writers: every node
+// has its OWN mover goroutine, and commitNodeMoveLocal runs schedule() on that node's own
+// goroutine — so two different nodes' drags can call schedule() on this SAME
+// quantOffsetPersister struct concurrently. That is safe without a lock because they write
+// to DIFFERENT files (position.json is keyed by node id, so no two calls ever race the same
+// os.WriteFile/Rename) and this struct holds no other shared mutable state.
 type quantOffsetPersister struct {
 	root string // tree root; per-node position.json lives at <root>/nodes/<id>/position.json
-	mu   sync.Mutex
-	// writes is a test-observability counter. Guarded by mu because, unlike this package's
-	// other persisters, schedule() can run concurrently on different nodes' own mover
-	// goroutines (see the package doc comment above) — this is the one lock in this file.
-	writes int
 }
 
 // schedule writes the given node's exact position (scene) plus its quantized triple to
@@ -63,9 +55,6 @@ func (p *quantOffsetPersister) schedule(id string, off quantizedOffset, scene po
 		logPersistErr("quant_offset_persist", id, err)
 		return
 	}
-	p.mu.Lock()
-	p.writes++
-	p.mu.Unlock()
 }
 
 // positionFileJSON is the shape of nodes/<id>/position.json — the node's exact scene-polar

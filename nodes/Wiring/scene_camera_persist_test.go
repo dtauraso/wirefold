@@ -108,12 +108,12 @@ func TestPersistLoadsLegacySceneJSONThenWritesNewFile(t *testing.T) {
 }
 
 // TestPersistWriteBurstLandsFinalValue schedules many rapid viewpoint changes (a drag
-// burst) and asserts the FINAL value is what's on disk, with one write per schedule call —
-// this used to assert the opposite (a debounce coalescing the burst into exactly one
-// write); the debounce was removed (see scene_persist.go's header comment: unmeasured,
-// and writeJSONAtomic does no fsync so the OS already coalesces at the page-cache level).
-// What still matters, and what this now asserts, is that the on-disk state after the burst
-// is correct — not how many writes it took to get there.
+// burst) and asserts the FINAL value is what's on disk. Each schedule() call now writes
+// synchronously (the debounce that used to coalesce a burst into one write was removed —
+// see scene_persist.go's header comment: unmeasured, and writeJSONAtomic does no fsync so
+// the OS already coalesces at the page-cache level). What matters, and what this asserts,
+// is that the on-disk state after the burst is correct — not how many writes it took to
+// get there.
 func TestPersistWriteBurstLandsFinalValue(t *testing.T) {
 	td := t.TempDir()
 	md := &MoveDispatch{nodeMovers: map[string]*nodeMover{}}
@@ -124,9 +124,6 @@ func TestPersistWriteBurstLandsFinalValue(t *testing.T) {
 		md.EmitViewpoint(nil) // synchronous write, every call
 	}
 
-	if got := md.persist.vp.writes; got != 50 {
-		t.Fatalf("writes=%d want 50 (one synchronous write per schedule call, no coalescing)", got)
-	}
 	// Final value is the last scheduled viewpoint (i=49).
 	pivot, r, pos, up, ok := loadSceneViewpoint(td)
 	if !ok {

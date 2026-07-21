@@ -72,10 +72,7 @@ func writeSceneOverlays(overlaysPath string, ov overlayState) error {
 // overlaysPersister writes overlay toggles/sets to overlays.json as they happen. Owned by
 // MoveDispatch (armed by EnableEditPersist). path == "" (tests that never arm) → no-op.
 type overlaysPersister struct {
-	path   string // overlays.json path (overlaysFilePath(topologyPath))
-	writes int    // count of completed writes (test observability); single writer
-	// (applyUpdate/handleSaveMsg run only on the stdin/gesture goroutine) so no lock is
-	// needed.
+	path string // overlays.json path (overlaysFilePath(topologyPath))
 }
 
 // schedule writes the given overlay snapshot to overlays.json synchronously.
@@ -87,7 +84,6 @@ func (p *overlaysPersister) schedule(ov overlayState) {
 		logPersistErr("scene_overlays_persist", p.path, err)
 		return
 	}
-	p.writes++
 }
 
 // sceneOverlaysFile is the subset of scene.json the overlay loader reads. Pointer fields

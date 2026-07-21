@@ -113,10 +113,7 @@ func (md *MoveDispatch) LoadSceneSphere(topologyPath string) {
 // LoadSceneSphere's content-fit and by the "save" command (handleSaveMsg); there was never a
 // debounced schedule() for it to begin with.
 type sceneSpherePersister struct {
-	path   string
-	writes int // count of completed writes (test observability); single writer
-	// (flushNow is only ever called from LoadTopology's load path or the stdin/gesture
-	// goroutine's handleSaveMsg) so no lock is needed.
+	path string
 }
 
 // flushNow writes the current sphere synchronously.
@@ -128,5 +125,4 @@ func (p *sceneSpherePersister) flushNow(s sceneSphere) {
 		logPersistErr("scene_sphere_persist", p.path, err)
 		return
 	}
-	p.writes++
 }

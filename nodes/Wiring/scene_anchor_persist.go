@@ -22,9 +22,7 @@ import (
 // anchorPersister writes ring-anchor changes to their port file as they happen. Owned by
 // MoveDispatch (armed by EnableEditPersist).
 type anchorPersister struct {
-	root   string
-	writes int // count of completed writes (test observability); single writer
-	// (applyRingAnchor runs only on the stdin/gesture goroutine) so no lock is needed.
+	root string
 }
 
 // schedule writes the given anchor index to its port file synchronously.
@@ -36,7 +34,6 @@ func (p *anchorPersister) schedule(node, port string, isInput bool, anchorID int
 		logPersistErr("scene_anchor_persist", node+"/"+port, err)
 		return
 	}
-	p.writes++
 }
 
 // writePortAnchor sets ONLY the anchorId field of the port file, preserving the other fields
