@@ -196,17 +196,25 @@ func (b *buildCtx) computeLocalPolars() {
 					}
 					// The stored bearing may have been quantized about a DIFFERENT pole
 					// (pre-feature data quantized about world +y, or a kick since moved
-					// the pole) — re-quantize the bearing about finalPole from the live
-					// offset when one is available, preserving QuantIR/step
-					// constants exactly (QuantIR carries the equal-radii shared-c
-					// contract and must not be recomputed).
-					if mCenter, ok3 := b.centers[mid]; hasOwn && ok3 {
-						d, _ := dirFromOffset(mCenter.sub(ownCenter))
-						et, ep, _ := entry.effectiveSteps()
-						c, psi := azimuthFrom(finalPole, d)
-						entry.QuantITheta = int(math.Round(c / et))
-						entry.QuantIPhi = int(math.Round(psi / ep))
-					}
+					// the pole) — re-quantize the bearing about finalPole. Per
+					// quantized_move.go's requantizePoleTraced doc contract, an unchanged
+					// neighbor's direction is RECONSTRUCTED from its own stored indices
+					// about the OLD pole via fromAxisFrame, never re-measured against a
+					// live cartesian center (that boundary crossing is what the drag path
+					// deliberately avoids for an unchanged neighbor, and what made a load
+					// diverge from a drag here). oldPole is the pole THIS node's stored
+					// indices were quantized about last save — storedPole[n.ID], defaulting
+					// to the zero value dir{} (home, world +y) when absent, which is
+					// exactly the same default LayoutHolder.Pole() returns for a node
+					// that's never called SetPole (e.g. a pre-pole-persistence save).
+					// QuantIR/step constants are preserved exactly (QuantIR carries the
+					// equal-radii shared-c contract and must not be recomputed).
+					oldPole := storedPole[n.ID]
+					et, ep, _ := entry.effectiveSteps()
+					d := fromAxisFrame(oldPole, float64(lp.QuantITheta)*et, float64(lp.QuantIPhi)*ep)
+					c, psi := azimuthFrom(finalPole, d)
+					entry.QuantITheta = int(math.Round(c / et))
+					entry.QuantIPhi = int(math.Round(psi / ep))
 					list = append(list, entry)
 					continue
 				}

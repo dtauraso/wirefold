@@ -331,26 +331,37 @@ func TestRotatingPolePersistReload(t *testing.T) {
 	}
 }
 
-// TestComputeLocalPolarsRequantizesStoredBearingAboutResolvedPole guards the load-time
-// bug where a STORED localPolars entry's bearing was copied verbatim even though the
-// node's pole is resolved from LIVE geometry — so a bearing quantized about a different
-// pole (e.g. pre-deterministic-pole data quantized about a stale rotated pole) would be
-// inconsistent with the resolved pole. Writes a tree whose src/meta.json carries a stored
-// localPolars entry with a bearing that is NOT consistent with the live dst offset, and
-// asserts that after load, reconstructing the stored bearing under the resolved pole
-// (fromAxisFrame) lands within one step cell of the live offset direction, while
-// QuantIR is preserved verbatim.
+// TestComputeLocalPolarsRequantizesStoredBearingAboutResolvedPole guards the LOAD-time
+// contract: a STORED localPolars entry's bearing is RECONSTRUCTED from its own stored
+// (QuantITheta,QuantIPhi) indices about the OLD pole (the persisted LocalPoleTheta/Phi,
+// or home world+y — dir{} — when absent, matching LayoutHolder.Pole()'s own
+// never-set default) and then re-expressed under the freshly-RESOLVED pole — never
+// re-measured against the neighbor's LIVE cartesian center (quantized_move.go
+// requantizePoleTraced's doc contract, mirrored at load time by loader_layout.go
+// computeLocalPolars; a prior version of this test asserted the OPPOSITE — that load
+// chases the live offset — which was the bug: the same graph quantized differently
+// depending on whether it was loaded or dragged, and the drag path is the correct one).
+//
+// Writes a tree whose src/meta.json carries a stored localPolars entry with a bearing
+// that is deliberately inconsistent with the live dst offset, and a resolved pole (from
+// src's one live neighbor "dst", well outside the polar singularity — verified below)
+// that equals home, same as the default old-pole fallback: this is therefore an EXACT
+// index×step round-trip (fromAxisFrame then azimuthFrom about the identical pole),
+// so the reloaded entry must be byte-identical to the stored stale bearing — proof it
+// was reconstructed from the stored index, not re-derived from the live dst center
+// (which would have produced a completely different bearing).
 func TestComputeLocalPolarsRequantizesStoredBearingAboutResolvedPole(t *testing.T) {
 	root := t.TempDir()
 	mk := func(rel, body string) { writeTreeFile(t, root, rel, body) }
 	// src's stored localPolars entry for dst carries a bearing (quantITheta/quantIPhi)
-	// that is deliberately bogus/stale — NOT what src↔dst's live geometry implies about
-	// any pole — so computeLocalPolars must re-quantize this stored bearing about the
-	// freshly-resolved pole rather than trusting the stale numbers. quantIR must
-	// survive untouched. The stored "role" key is retained ONLY for on-disk
-	// compatibility with old meta.json files (unconsumed field, JSON decode
-	// silently ignores it — LocalPolar has no Role field).
-	mk("nodes/src/meta.json", `{"id":"src","type":"FanInSrc","r":100,"scenePolarR":37.4165738677,"scenePolarTheta":1.00685368543,"scenePolarPhi":1.2490457724,"localPolars":[{"to":"dst","role":"source","quantITheta":9999,"quantIPhi":-9999,"quantIR":42}]}`)
+	// that is deliberately bogus/stale relative to src↔dst's live geometry — so this
+	// test can distinguish "reconstructed from the stored index" (must reload
+	// unchanged) from "re-derived from the live offset" (would reload as something
+	// close to dst's live direction instead). quantIR must survive untouched. The
+	// stored "role" key is retained ONLY for on-disk compatibility with old meta.json
+	// files (unconsumed field, JSON decode silently ignores it — LocalPolar has no
+	// Role field).
+	mk("nodes/src/meta.json", `{"id":"src","type":"FanInSrc","r":100,"scenePolarR":37.4165738677,"scenePolarTheta":1.00685368543,"scenePolarPhi":1.2490457724,"localPolars":[{"to":"dst","role":"source","quantITheta":20,"quantIPhi":170,"quantIR":42}]}`)
 	mk("nodes/src/outputs/Out.json", `{"name":"Out"}`)
 	mk("nodes/dst/meta.json", `{"id":"dst","type":"FanInSink","r":100,"scenePolarR":87.7496438739,"scenePolarTheta":0.96453035788,"scenePolarPhi":-2.15879893034}`)
 	mk("nodes/dst/inputs/In.json", `{"name":"In"}`)
@@ -369,9 +380,12 @@ func TestComputeLocalPolarsRequantizesStoredBearingAboutResolvedPole(t *testing.
 	if !ok {
 		t.Fatal("no center for dst")
 	}
-	wantOff := dstCenter.sub(srcCenter)
-	wantDir, _ := dirFromOffset(wantOff)
-	pole := localPole([]vec3{wantOff})
+	liveOff := dstCenter.sub(srcCenter)
+	liveDir, _ := dirFromOffset(liveOff)
+	pole := localPole([]vec3{liveOff})
+	if pole != (dir{Theta: 0, Phi: 0}) {
+		t.Fatalf("test setup bug: expected src's resolved pole to stay home (offset far from the +y singularity), got %+v", pole)
+	}
 
 	var got *LocalPolar
 	for _, lp := range lhSrc.LocalPolarsSnapshot() {
@@ -386,13 +400,13 @@ func TestComputeLocalPolarsRequantizesStoredBearingAboutResolvedPole(t *testing.
 	if got.QuantIR != 42 {
 		t.Fatalf("QuantIR not preserved: got %d want 42", got.QuantIR)
 	}
-	if got.QuantITheta == 9999 || got.QuantIPhi == -9999 {
-		t.Fatalf("stored stale bearing was copied verbatim instead of re-quantized about the resolved pole: %+v", got)
+	if got.QuantITheta != 20 || got.QuantIPhi != 170 {
+		t.Fatalf("stored index was not preserved verbatim across load (home pole in, home pole out is an exact round-trip): got %+v want QuantITheta=20 QuantIPhi=170", got)
 	}
 	st, sp, _ := got.effectiveSteps()
 	gotDir := fromAxisFrame(pole, float64(got.QuantITheta)*st, float64(got.QuantIPhi)*sp)
-	if d := angularDistance(gotDir, wantDir); d > st+sp {
-		t.Fatalf("re-quantized bearing does not match live offset direction within one step cell: angularDistance=%v (steps theta=%v phi=%v) pole=%+v got=%+v want=%+v", d, st, sp, pole, gotDir, wantDir)
+	if d := angularDistance(gotDir, liveDir); d < 60*testDeg {
+		t.Fatalf("reloaded bearing tracked the LIVE dst offset instead of the STORED stale index: got %+v, angularDistance to live=%v (want large — this is the old live-cartesian re-derive bug)", gotDir, d)
 	}
 }
 
