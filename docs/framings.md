@@ -12,7 +12,7 @@ observer**, which requires knowing what this system is and who is looking at it.
 | Correct framing | Framing it replaced | Architecture built for the replaced framing | Status |
 |---|---|---|---|
 | Identity is write-once, so tearing is unrepresentable | A shared struct must be guarded against concurrent read | `geomMu`, plus a widened read invented to make the guard falsifiable | **Done** — `nodeGeom` split into `nodeIdentity` + mutable state, lock deleted |
-| A holder is written only by its owner | Neighbours reach into each other, so holders need guarding | `LayoutHolder.mu`, and two doc comments naming the wrong goroutines | **Done** — contention refuted, comment corrected, no vacuous test shipped |
+| A holder is written only by its owner | Neighbours reach into each other, so holders need guarding | `LayoutHolder.mu` | **Done** — every non-test caller confirmed to run on the owning node's own goroutine; the lock was deleted, not narrowed; the nine tests that had polled live state cross-goroutine were fixed to wait on a happens-before edge instead |
 | Budget is pixels of relative displacement during motion | Every block of a frame must describe the same instant | `SnapshotState`'s accumulate-then-pack, the drain merge | Planned — `task/per-owner-buffer-rows` |
 | Each owner's own event order is the only real one | Events have a global total order | `Trace.mu`, the event channel, the drain's ordering | Planned — same branch. Note the merged log is already only *arrival order at the drain*, which is scheduler order, not causal order |
 | Pack at the rate the consumer consumes | Emission must be driven by change | `emitSnapshot` scattered across `Update`'s arms, tick coalescing | Planned — same branch |
@@ -28,7 +28,7 @@ when written; re-grep before trusting it.
 | ~~`PacedWire.mu`~~ | — | was `inflight`/`delivered` | **DELETED.** The wire became its own goroutine, so it has one owner and nothing to guard — see below |
 | ~~`outbox.mu` + `cond`~~ | — | was the unbounded move queue | **DELETED.** Per-direction channels replaced the shared queue; with no blocking send there is nothing to hold — see below |
 | `Trace.mu` | `Trace/Trace.go:294` | `events`/`closed`/sinks | **Staying.** Cannot be copied — every goroutine's events must land in one place to become one buffer; copies give N partial streams. The *ordering* framing above it is still open (`task/per-owner-buffer-rows`) |
-| `LayoutHolder.mu` | `layout_holder.go:118` | `localPolars`/`pole` | **Examined, UNCONTENDED.** Kept as cheap insurance against a future cross-goroutine `md.layoutHolders[m]` call, NOT because it guards a present race. Do not cite it as evidence that cross-goroutine holder access is expected |
+| ~~`LayoutHolder.mu`~~ | — | was `localPolars`/`pole` | **DELETED.** Every non-test caller ran on the owning node's own goroutine already; a neighbour is reached by message, never by touching its holder — see `docs/layout-holder-architecture.html` |
 | ~~`sceneFileMu`, `entityFileMuMu`, per-path `entityFileMus`~~ | — | were read-modify-write cycles on shared JSON files | **DELETED.** Every one existed because two writers shared one file; the files were split so each writer owns its own — see below |
 | `debouncedPersister.mu` ×5 | `scene_persist.go:64` | `pending` / `has` / `timer` / `writes` | **The last unexamined lock.** Splitting files did not touch it: this is IN-MEMORY debounce state shared between the goroutine that arms the timer and the `time.AfterFunc` goroutine that fires it. Five independent instances |
 
@@ -48,8 +48,7 @@ a cost claim. Check which kind you are making before pulling on any remaining lo
 
 For a while this section said the pair `outbox.mu` and `PacedWire.mu` were unsettled: their
 contention was red-proven, but the claim that *no restructuring makes the sharing go away*
-was asserted and never examined — the same claim that had already been wrong about `geomMu`
-and about `LayoutHolder.mu`.
+was asserted and never examined — the same claim that had already been wrong about `geomMu`.
 
 **`PacedWire.mu` has now been examined, and the assertion was wrong a third time.** The
 question was whether `inflight`/`delivered` separate by owner. They do — but not by
@@ -68,17 +67,17 @@ With no blocked senders there is nothing for a queue to hold, so the queue, its 
 cond, its dedicated sender goroutine and that goroutine's ctx-watcher are all gone —
 goroutine count went **down** by two per mover.
 
-**That is four for four.** `geomMu`, `LayoutHolder.mu`, `PacedWire.mu`, `outbox.mu` — every
-lock this table ever described as necessary has been removed by a restructuring, and in
-every case the restructuring was *giving the state one owner*, not being clever about
-locking. **Treat "no restructuring removes this lock" as unproven wherever you meet it**,
-including in the rows that remain. The question to ask is never "is this lock correct" but
-"who could own this outright".
+**That is five for five.** `geomMu`, `RealClock.mu`, `PacedWire.mu`, `outbox.mu`,
+`LayoutHolder.mu` — every lock this table ever called necessary has been removed by a
+restructuring, and in every case the restructuring was *giving the state one owner*, not
+being clever about locking. **Treat "no restructuring removes this lock" as unproven
+wherever you meet it**, including in the rows that remain. The question to ask is never "is
+this lock correct" but "who could own this outright".
 
 What is left is genuinely different in kind: `Trace.mu` guards an accumulator that cannot be
-copied without producing N partial streams; `LayoutHolder.mu` is already single-owner and
-uncontended; `scene_persist`'s four serialize file I/O, where the observer is the filesystem
-and has no perceptual threshold. None of those is "a lock nobody has thought about".
+copied without producing N partial streams; `scene_persist`'s four serialize in-memory
+debounce state, where the observer is the filesystem and has no perceptual threshold.
+Neither of those is "a lock nobody has thought about".
 
 What IS categorical, and does not depend on any of the above: a torn slice header is wrong
 at any resolution. There is no observer threshold below which corrupted memory is
@@ -94,8 +93,10 @@ The distinction that sorts the other rows is not global-vs-local. It is:
 
 `geomMu` went away because a split made the property structural. `PacedWire.mu` went away
 because giving the wire its own goroutine made ownership structural. `outbox.mu` went away
-because removing blocking sends left its queue with nothing to hold. All three were once
-described as staying, as was `LayoutHolder.mu` before them.
+because removing blocking sends left its queue with nothing to hold. `LayoutHolder.mu` went
+away because every non-test caller was already confined to its own node's goroutine — the
+lock was residue from a since-deleted second goroutine, not insurance against a live race.
+All four were once described as staying.
 
 Every one of those was a **maintained** guarantee wearing the costume of a necessary one.
 The tell is the same each time: the lock is defending an invariant across goroutines that

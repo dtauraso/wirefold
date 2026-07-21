@@ -187,6 +187,15 @@ func TestDragPersistsOnlyDraggedNodeAndRequantizesNeighborsOnDisk(t *testing.T) 
 		t.Fatal("C has no pre-drag LocalPolar entry for A")
 	}
 
+	// Sync point for the post-drag lhB/lhC reads below: B and C each write their own
+	// requantized LocalPolar entry (SetLocalPolar/SetPole, on their OWN goroutine,
+	// inside neighborSetCRequantize) strictly BEFORE logging their own "abc-drag"
+	// breadcrumb in that same call — waiting for both breadcrumbs (rather than polling
+	// lhB/lhC directly, a data race against B's/C's own mover goroutines) establishes
+	// the happens-before edge. See time_node_abc_drag_breadcrumb_test.go.
+	var dbg syncBuffer
+	md.tr.SetDebugSink(&dbg)
+
 	// Tap every routed message so the post-drag absence check below is a genuine proof
 	// (no forbidden cascade kind reaches B or C), not just a sleep-and-hope — same
 	// mechanism as neighbor_setc_test.go's (3).
@@ -209,10 +218,10 @@ func TestDragPersistsOnlyDraggedNodeAndRequantizesNeighborsOnDisk(t *testing.T) 
 	}
 	pollDragConverged(t, md, "A", target)
 
-	// Poll for BOTH B's and C's own LocalPolar entries to A to pick up the requantize
-	// (async moveMsgKindNeighborSetC delivery, same shape as this package's other tests).
-	pollLocalPolarRequantized(t, lhB, "A", lpBBefore)
-	pollLocalPolarRequantized(t, lhC, "A", lpCBefore)
+	// Wait for BOTH B's and C's own "abc-drag" breadcrumbs before reading their
+	// LocalPolar entries to A.
+	waitForAbcDrag(t, &dbg, "B")
+	waitForAbcDrag(t, &dbg, "C")
 
 	// The poll above only proves QuantIR eventually changed; it is not proof that no
 	// FURTHER unwanted cascade message is in flight toward B or C. That proof is the
