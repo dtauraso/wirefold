@@ -88,13 +88,6 @@
   .verdict b { font-family:var(--mono); font-size:11.5px; }
   code { font-family:var(--mono); font-size:.92em; }
   footer { margin-top:46px; padding-top:16px; border-top:1px solid var(--line); color:var(--faint); font-size:12px; }
-
-  .tabs { display:flex; gap:6px; margin:20px 0 28px; border-bottom:1px solid var(--line); }
-  .tab-btn { font-family:var(--mono); font-size:12.5px; font-weight:600; color:var(--muted); background:none; border:none; border-bottom:2px solid transparent; padding:9px 4px 10px; margin-bottom:-1px; cursor:pointer; }
-  .tab-btn.active { color:var(--ink); border-bottom-color:var(--hazard); }
-  .tab-btn:hover { color:var(--ink); }
-  .panel { display:none; }
-  .panel.active { display:block; }
 </style>
 </head>
 <body>
@@ -102,25 +95,21 @@
 <header>
   <div class="head-inner">
     <p class="eyebrow">wirefold · concurrency</p>
-    <h1>the two unsettled locks</h1>
+    <h1>debouncedPersister.mu — the last lock</h1>
     <p class="sub">Most locks in this repo have been deleted — <code>sceneFileMu</code> and
-    <code>entityFileMu</code> are both gone — or settled with a red-proof test
-    (<code>Trace.mu</code>).
-    Two remain unsettled: <code>debouncedPersister.mu</code> (<code>scene_persist.go:63</code>,
-    five instances) and <code>LayoutHolder.mu</code> (<code>layout_holder.go:118</code>, one
-    instance per node). Both survived the file split because what they guard is
-    <b>in memory</b>, not on disk — splitting files cannot reach either.</p>
+    <code>entityFileMu</code> are both gone. <code>LayoutHolder.mu</code> was deleted too
+    (one owner goroutine per node, no lock needed); see
+    <code>docs/layout-holder-architecture.html</code> for that removal. Of the two locks that
+    remain in non-test Go, <code>Trace.mu</code> is settled and red-proven (it guards an
+    accumulator that cannot be copied — NOT event delivery, which is <code>Trace.ch</code>,
+    a buffered channel). That leaves <code>debouncedPersister.mu</code>
+    (<code>nodes/Wiring/scene_persist.go:64</code>, five instances) as the one lock in this
+    repo still in question. See <code>docs/mutex-architecture.html</code> for the whole-system
+    view.</p>
   </div>
 </header>
 
 <div class="wrap">
-
-<div class="tabs" role="tablist">
-  <button class="tab-btn active" data-tab="persister" role="tab" aria-selected="true">debouncedPersister.mu</button>
-  <button class="tab-btn" data-tab="layoutholder" role="tab" aria-selected="false">LayoutHolder.mu</button>
-</div>
-
-<div class="panel active" id="panel-persister" role="tabpanel">
 
 <div class="legend">
   <span><i class="sw g"></i>goroutine</span>
@@ -462,170 +451,62 @@ not a hypothetical one.</p>
 </svg>
 </div>
 
-</div>
-
-<div class="panel" id="panel-layoutholder" role="tabpanel">
-
-<!-- ══ L0 · WHAT THE THING IS ══ -->
-<h2>0 · what a LayoutHolder actually is</h2>
-<p class="cap">Before the lock: this is <b>one node's record of where its neighbours are</b>,
-in polar terms, quantized to integer steps. Real values below are node 9's, read from
-<code>topology/nodes/9/local-polars.json</code>.</p>
+<!-- ══ 8 · THE THREE JOBS ══ -->
+<h2>8 · what the lock is actually doing — three separable jobs</h2>
+<p class="cap">"Guards four fields" is not one job. Each of <code>arm</code>'s and
+<code>take</code>'s three effects fails a different way if <code>mu</code> is deleted, and
+they do not all get fixed by the same replacement.</p>
 
 <div class="plate">
-<svg viewBox="0 0 860 300" role="img" aria-label="A LayoutHolder stores one quantized polar direction per neighbour plus the pole those directions were measured against, so node 9 records integer steps toward node 3 and node 6.">
-  <defs><marker id="alh" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#2E7D9A"/></marker></defs>
+<svg viewBox="0 0 860 330" role="img" aria-label="The lock does three separable jobs: keeps pending and has consistent, makes the AfterFunc-or-Reset timer decision atomic, and hands map ownership from scheduler to flusher by zeroing pending in take.">
+  <text class="tl" x="0" y="14">JOB 1 — TWO FIELDS, ONE INVARIANT</text>
+  <rect class="box" x="0" y="26" width="272" height="112" rx="6"/>
+  <text class="ts" x="12" y="46">arm sets pending AND has :77-78</text>
+  <text class="ts" x="12" y="62">take reads both, clears both :93-96</text>
+  <text class="tf" x="12" y="84">unlocked: timer goroutine could see</text>
+  <text class="tf" x="12" y="98">has==true with a half-written pending,</text>
+  <text class="tf" x="12" y="112">or the stale pending after has flips</text>
+  <text class="tf" x="12" y="126">for a NEWER value</text>
 
-  <text class="tl" x="0" y="14">THE PICTURE — node 9 and its two neighbours</text>
+  <text class="tl" x="294" y="14">JOB 2 — THE TIMER DECISION IS ATOMIC</text>
+  <rect class="box" x="294" y="26" width="272" height="112" rx="6"/>
+  <text class="ts" x="306" y="46">arm: timer==nil ? AfterFunc : Reset :79-83</text>
+  <text class="tf" x="306" y="68">two concurrent arms could both see nil —</text>
+  <text class="tf" x="306" y="82">two timers, one leaks, value written twice</text>
+  <text class="tf" x="306" y="104">stop() racing arm() could Reset a timer</text>
+  <text class="tf" x="306" y="118">just Stopped — a write survives shutdown</text>
 
-  <circle cx="150" cy="120" r="26" fill="var(--flow-wash)" stroke="var(--flow)" stroke-width="1.6"/>
-  <text class="t" x="141" y="125">9</text>
-  <circle cx="330" cy="56" r="20" fill="var(--plate)" stroke="var(--line-strong)" stroke-width="1.2"/>
-  <text class="ts" x="324" y="61">3</text>
-  <circle cx="330" cy="192" r="20" fill="var(--plate)" stroke="var(--line-strong)" stroke-width="1.2"/>
-  <text class="ts" x="324" y="197">6</text>
+  <text class="tl" x="588" y="14">JOB 3 — OWNERSHIP HANDOFF (MAPS ONLY)</text>
+  <rect class="box" x="588" y="26" width="272" height="112" rx="6"/>
+  <text class="ts" x="600" y="46">take() zeroes pending :95</text>
+  <text class="tf" x="600" y="68">anchor / quantOffset are MAP-valued —</text>
+  <text class="tf" x="600" y="82">flush walks away with the only reference</text>
+  <text class="tf" x="600" y="102">unlocked: a schedule landing mid-take is a</text>
+  <text class="tf" x="600" y="116">concurrent map write — Go crashes, not</text>
+  <text class="tf" x="600" y="130">a wrong value</text>
 
-  <path class="arrb" d="M176,110 L306,64" marker-end="url(#alh)"/>
-  <path class="arrb" d="M176,132 L306,184" marker-end="url(#alh)"/>
-  <text class="tb" x="196" y="80">θ=145 · φ=0 · r=28</text>
-  <text class="tb" x="196" y="172">θ=114 · φ=157 · r=25</text>
-  <text class="tf" x="150" y="234">these are INTEGER step counts, not angles —</text>
-  <text class="tf" x="150" y="248">multiply by the step constant to get radians / world units</text>
-
-  <text class="tl" x="470" y="14">WHAT THAT IS IN THE STRUCT</text>
-
-  <rect class="box" x="470" y="28" width="390" height="86" rx="6"/>
-  <text class="ts" x="482" y="48">localPolars []LocalPolar</text>
-  <text class="tf" x="482" y="66">one entry per neighbour: To, QuantITheta,</text>
-  <text class="tf" x="482" y="80">QuantIPhi, QuantIR + per-neighbour step constants</text>
-  <text class="tf" x="482" y="100">layout_holder.go:47 — “where node 3 is, from 9”</text>
-
-  <rect class="box" x="470" y="124" width="390" height="72" rx="6"/>
-  <text class="ts" x="482" y="144">pole dir</text>
-  <text class="tf" x="482" y="162">the measurement pole those integers were</text>
-  <text class="tf" x="482" y="176">quantized ABOUT — without it the same integers</text>
-  <text class="tf" x="482" y="190">mean a different direction on reload</text>
-
-  <line x1="0" y1="262" x2="860" y2="262" stroke="var(--line)"/>
-  <text class="tk" x="0" y="282">WHY IT IS STORED AS INTEGERS</text>
-  <text class="ts" x="222" y="282">a drag updates position by arithmetic on step counts, so repeated drags do not accumulate float drift.</text>
-  <text class="tf" x="0" y="296">That is the whole point of the type — the mutex below is incidental to it.</text>
+  <line x1="0" y1="164" x2="860" y2="164" stroke="var(--line)"/>
+  <text class="tq" x="0" y="184">THE CONSEQUENCE — WHY THIS SPLIT MATTERS FOR ANY REPLACEMENT</text>
+  <rect class="safe" x="0" y="196" width="860" height="118" rx="6"/>
+  <text class="ts" x="12" y="218">An owner-goroutine design gets jobs 1 and 2 for FREE — one goroutine touching pending/has/timer</text>
+  <text class="ts" x="12" y="234">makes both invariants structural, no lock needed.</text>
+  <text class="tw" x="12" y="260">But it only gets job 3 right if the VALUE SENT to the owner is already a snapshot the sender</text>
+  <text class="tw" x="12" y="276">will not touch again.</text>
+  <text class="ts" x="12" y="298">Send a live map to the owner and the concurrent-write bug does not go away — it just moves from</text>
+  <text class="ts" x="12" y="312">"inside the lock" to "across the channel send".</text>
 </svg>
-</div>
-
-<!-- ══ L1 · THE STATE ══ -->
-<h2>1 · what the lock guards — two fields, six methods</h2>
-<p class="cap">One <code>LayoutHolder</code> is embedded in EVERY node kind's struct — one
-instance per node, not a package-wide singleton. Every accessor takes <code>mu</code>;
-none holds it across anything but a slice/field read or write.</p>
-
-<div class="plate">
-<svg viewBox="0 0 860 268" role="img" aria-label="LayoutHolder holds localPolars and pole under one mutex, with six short accessor methods that each lock and unlock it.">
-  <text class="tl" x="0" y="14">THE STRUCT</text>
-  <text class="tl" x="440" y="14">EVERY METHOD THAT TAKES mu</text>
-
-  <rect class="state" x="0" y="28" width="400" height="150" rx="8"/>
-  <text class="t"  x="14" y="50">LayoutHolder</text>
-  <text class="tf" x="14" y="65">nodes/Wiring/layout_holder.go:117</text>
-
-  <rect class="box" x="14" y="78" width="372" height="24" rx="4"/>
-  <text class="tw" x="26" y="95">mu sync.Mutex</text>
-
-  <rect class="box" x="14" y="108" width="372" height="26" rx="4"/>
-  <text class="ts" x="26" y="125">localPolars []LocalPolar</text>
-  <text class="tf" x="230" y="125">one entry per neighbor</text>
-
-  <rect class="box" x="14" y="140" width="372" height="26" rx="4"/>
-  <text class="ts" x="26" y="157">pole dir</text>
-  <text class="tf" x="90" y="157">measurement pole entries were quantized about</text>
-
-  <rect class="gor" x="440" y="28" width="420" height="24" rx="5"/>
-  <text class="ts" x="452" y="44">localPolarSteps(to) :141</text>
-
-  <rect class="gor" x="440" y="56" width="420" height="24" rx="5"/>
-  <text class="ts" x="452" y="72">LoadLocalPolars(lps) :156 — load-time, once</text>
-
-  <rect class="gor" x="440" y="84" width="420" height="24" rx="5"/>
-  <text class="ts" x="452" y="100">SetLocalPolar(to, ...) :165 — the drag writer</text>
-
-  <rect class="gor" x="440" y="112" width="420" height="24" rx="5"/>
-  <text class="ts" x="452" y="128">LocalPolarsSnapshot() :187 — defensive copy out</text>
-
-  <rect class="gor" x="440" y="140" width="420" height="24" rx="5"/>
-  <text class="ts" x="452" y="156">Pole() :197 / SetPole(p) :206</text>
-
-  <line x1="0" y1="196" x2="860" y2="196" stroke="var(--line)"/>
-  <text class="tk" x="0" y="216">ONE PER NODE, NOT SHARED</text>
-  <text class="ts" x="230" y="216">every node kind embeds its own LayoutHolder — contention would be within one node's holder, never across two.</text>
-  <text class="tf" x="0" y="234">Unlike the five persisters (one purpose each), every node in the graph gets one of these — dozens of instances, not five.</text>
-  <text class="tf" x="0" y="250">recordWrite/writes has no equivalent here — there is no debounce, no timer, no disk write in this file at all.</text>
-</svg>
-</div>
-
-<!-- ══ L2 · THE ISSUE ══ -->
-<h2>2 · the issue — every production caller is the owning node's own goroutine</h2>
-<p class="cap">Grepped every non-test caller of all six accessors. <b>Every one runs on the
-holder's own node's goroutine.</b> A node never reaches into a neighbour's holder — it sends
-a message and that neighbour's goroutine writes its own. So in production this is
-single-owner state carrying a mutex.</p>
-
-<div class="plate">
-<svg viewBox="0 0 860 264" role="img" aria-label="Every production caller of the six LayoutHolder accessors runs on the owning node's own goroutine, so the only second party found by the race detector is a test's polling goroutine.">
-  <text class="tl" x="0" y="14">EVERY PRODUCTION CALLER — all on the owning node's goroutine</text>
-
-  <rect class="safe" x="0" y="28" width="420" height="128" rx="6"/>
-  <text class="ts" x="12" y="48">requantizeLocalPolars   quantized_move.go:358</text>
-  <text class="tf" x="12" y="62">“X requantizes its OWN holder … on its own goroutine”</text>
-  <text class="ts" x="12" y="82">neighborSetCRequantize  :246 :264</text>
-  <text class="ts" x="12" y="98">commitNodeMoveLocal     :382</text>
-  <text class="ts" x="12" y="114">armDragAnchor           node_mover.go:289</text>
-  <text class="tf" x="12" y="128">“Runs only on this node’s own goroutine”</text>
-  <text class="ts" x="12" y="148">LoadLocalPolars/SetPole loader.go:637,645 — load-time</text>
-
-  <rect class="state" x="440" y="28" width="420" height="128" rx="6"/>
-  <text class="t"  x="452" y="50">THE ONLY SECOND PARTY IS A TEST</text>
-  <text class="ts" x="452" y="74">Delete the locking from all six accessors and run</text>
-  <text class="ts" x="452" y="90">the package under -race: RED, 5/5 runs.</text>
-  <text class="tf" x="452" y="112">SetLocalPolar (the node’s own mover goroutine)</text>
-  <text class="tf" x="452" y="126">races LocalPolarsSnapshot — called from</text>
-  <text class="tf" x="452" y="140">TestIndividualSnap_OnlyDraggedNodePersists’ own</text>
-  <text class="tf" x="452" y="152">polling goroutine, not from any production path.</text>
-
-  <line x1="0" y1="182" x2="860" y2="182" stroke="var(--line)"/>
-  <text class="tw" x="0" y="202">SO THE QUESTION IS</text>
-  <text class="ts" x="150" y="202">is this lock load-bearing, or is it holding a test’s hand?</text>
-  <text class="tf" x="0" y="222">A red proof that only fires because a TEST reaches into live state is not evidence the production model needs a lock —</text>
-  <text class="tf" x="0" y="236">it is evidence the test observes state it does not own. Those want different fixes: keep the mutex, or give the test a safe read.</text>
-  <text class="tf" x="0" y="256">Decide which before touching it. Removing the lock without addressing the test turns a green suite red for the wrong reason.</text>
-</svg>
-</div>
-
 </div>
 
 <footer>
   Verified against the tree on <span style="font-family:var(--mono)">task/mutex-debounced-persister</span>.
   Line numbers drift — re-grep before trusting them. Companions:
   <span style="font-family:var(--mono)">docs/scene-persist-architecture.html</span>,
+  <span style="font-family:var(--mono)">docs/layout-holder-architecture.html</span>,
   <span style="font-family:var(--mono)">docs/mutex-architecture.html</span>,
   <span style="font-family:var(--mono)">docs/framings.md</span>.
 </footer>
 
 </div>
 
-<script>
-  document.querySelectorAll('.tab-btn').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      var target = btn.getAttribute('data-tab');
-      document.querySelectorAll('.tab-btn').forEach(function (b) {
-        var active = b === btn;
-        b.classList.toggle('active', active);
-        b.setAttribute('aria-selected', String(active));
-      });
-      document.querySelectorAll('.panel').forEach(function (p) {
-        p.classList.toggle('active', p.id === 'panel-' + target);
-      });
-    });
-  });
-</script>
 </body>
 </html>
