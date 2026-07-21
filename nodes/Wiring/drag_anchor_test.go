@@ -116,21 +116,32 @@ func TestDragDeltaAnchoredAtDragStart(t *testing.T) {
 	_, cancel, md := loadDragAnchorTopo(t)
 	defer cancel()
 
-	// Setup (untracked): a bare RootMove call, before any capture/drag-start, that
-	// merely gets src's LocalPolar-to-dst entry into existence (a freshly-loaded
-	// LayoutHolder starts with none) at the topology's own starting distance (R=100,
-	// local-polar index round(100/2)=50). This is deliberately NOT the "drag" under
-	// test — it establishes the baseline the real drag will start from.
-	if !md.RootMove("src", vec3{X: 100, Y: 0, Z: 0}) {
-		t.Fatal("setup RootMove returned false")
-	}
 	lh, ok := md.layoutHolders["src"]
 	if !ok {
 		t.Fatal("no LayoutHolder for src")
 	}
-	waitForLocalPolarIR(t, lh, "dst", 50)
 
+	// Install the tap BEFORE the setup move: requantizeLocalPolars writes src's OWN
+	// LocalPolar entry (SetLocalPolar, on src's own mover goroutine) strictly before it
+	// enqueues src's moveMsgKindNeighborSetC to dst in that SAME call (quantized_move.go
+	// requantizeLocalPolars: requantizePoleTraced at line ~424, then the neighbor sends
+	// below it) — so waiting for the tapped message to be observed here establishes a
+	// happens-before edge (via neighborSetCLog's mutex) for src's LocalPolar write too.
+	// Reading lh directly from this goroutine without that edge is exactly the race this
+	// helper exists to avoid: a concurrent read of the same memory src's mover goroutine
+	// is writing, invisible to `go test` without -race but a genuine data race under it.
 	got := captureNeighborSetC(md, "dst")
+
+	// Setup (untracked): a bare RootMove call, before any drag-start, that merely gets
+	// src's LocalPolar-to-dst entry into existence (a freshly-loaded LayoutHolder starts
+	// with none) at the topology's own starting distance (R=100, local-polar index
+	// round(100/2)=50). This is deliberately NOT the "drag" under test — it establishes
+	// the baseline the real drag will start from.
+	if !md.RootMove("src", vec3{X: 100, Y: 0, Z: 0}) {
+		t.Fatal("setup RootMove returned false")
+	}
+	waitForNeighborSetC(t, got, 1)
+	waitForLocalPolarIR(t, lh, "dst", 50)
 
 	// Drag start: arm src's anchor at its CURRENT triple (index 50 to dst) -- the same
 	// signal gesture.go's gestPending->gestDragging edge sends.
@@ -173,18 +184,25 @@ func TestDragAnchorRearmsOnNewDrag(t *testing.T) {
 	_, cancel, md := loadDragAnchorTopo(t)
 	defer cancel()
 
+	lh, ok := md.layoutHolders["src"]
+	if !ok {
+		t.Fatal("no LayoutHolder for src")
+	}
+
+	// Install the tap BEFORE the setup move — see TestDragDeltaAnchoredAtDragStart's
+	// comment: waiting for the tapped NeighborSetC message establishes a happens-before
+	// edge for src's own LocalPolar write (requantizeLocalPolars writes it, on src's own
+	// goroutine, strictly before enqueueing the tapped message), which a bare poll of lh
+	// from this goroutine does not have on its own.
+	got := captureNeighborSetC(md, "dst")
+
 	// Setup (untracked): establish src's LocalPolar-to-dst entry at the topology's
 	// starting distance before either tracked drag begins.
 	if !md.RootMove("src", vec3{X: 100, Y: 0, Z: 0}) {
 		t.Fatal("setup RootMove returned false")
 	}
-	lh, ok := md.layoutHolders["src"]
-	if !ok {
-		t.Fatal("no LayoutHolder for src")
-	}
+	waitForNeighborSetC(t, got, 1)
 	waitForLocalPolarIR(t, lh, "dst", 50)
-
-	got := captureNeighborSetC(md, "dst")
 
 	// Drag 1: arm at src's current position (R=100, index 50), then move to R=104
 	// (index 52) -- delta vs drag-1's anchor should be +2.
@@ -192,7 +210,7 @@ func TestDragAnchorRearmsOnNewDrag(t *testing.T) {
 	if !md.RootMove("src", vec3{X: 104, Y: 0, Z: 0}) {
 		t.Fatal("RootMove (drag1) returned false")
 	}
-	waitForNeighborSetC(t, got, 1)
+	waitForNeighborSetC(t, got, 2)
 	waitForLocalPolarIR(t, lh, "dst", 52)
 
 	// Drag 2 starts HERE (R=104, index 52) -- re-arm the anchor at this new position.
@@ -208,17 +226,17 @@ func TestDragAnchorRearmsOnNewDrag(t *testing.T) {
 	if !md.RootMove("src", vec3{X: 105.9, Y: 0, Z: 0}) {
 		t.Fatal("RootMove (drag2 move A) returned false")
 	}
-	waitForNeighborSetC(t, got, 2)
+	waitForNeighborSetC(t, got, 3)
 	if !md.RootMove("src", vec3{X: 106.05, Y: 0, Z: 0}) {
 		t.Fatal("RootMove (drag2 move B) returned false")
 	}
-	waitForNeighborSetC(t, got, 3)
+	waitForNeighborSetC(t, got, 4)
 
 	snapshot := got.snapshot()
-	if len(snapshot) < 3 {
-		t.Fatalf("expected 3 NeighborSetC messages, got %d: %+v", len(snapshot), snapshot)
+	if len(snapshot) < 4 {
+		t.Fatalf("expected 4 NeighborSetC messages, got %d: %+v", len(snapshot), snapshot)
 	}
-	moveBDelta := snapshot[2][2]
+	moveBDelta := snapshot[3][2]
 	if moveBDelta == 3 {
 		t.Fatalf("drag 2 move B's DeltaC = 3 (stale drag-1 anchor at index 50 leaked through); want +1 relative to drag 2's OWN start (index 52): %+v", snapshot)
 	}

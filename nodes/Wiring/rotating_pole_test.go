@@ -7,7 +7,6 @@ import (
 	"math"
 	"os"
 	"testing"
-	"time"
 )
 
 // offsetFromDir builds a unit-length Cartesian offset vector pointing in direction d
@@ -149,6 +148,15 @@ func TestRotatingPoleClearsSingularityOnDrag(t *testing.T) {
 		}
 	}
 
+	// Sync point for the post-drag lhSrc read below: src (the neighbor, NOT the dragged
+	// node) writes its own requantized LocalPolar entry (SetLocalPolar/SetPole, on src's
+	// OWN goroutine, inside neighborSetCRequantize) strictly BEFORE it logs its
+	// "abc-drag" breadcrumb in that same call — waiting for the breadcrumb (rather than
+	// polling lhSrc directly, a data race against src's own mover goroutine) establishes
+	// the happens-before edge. See time_node_abc_drag_breadcrumb_test.go.
+	var dbg syncBuffer
+	md.tr.SetDebugSink(&dbg)
+
 	// Drag dst to a position 0.5 degrees off world +y (well inside the 1-degree kick
 	// threshold).
 	home := dir{Theta: 0, Phi: 0}
@@ -180,24 +188,17 @@ func TestRotatingPoleClearsSingularityOnDrag(t *testing.T) {
 	// assignment set-c REQUANTIZE model (node_move.go moveMsgKindNeighborSetC /
 	// neighborSetCRequantize), src STAYS PUT — only dst moved — and re-quantizes its
 	// OWN stored (QuantITheta,QuantIPhi,QuantIR) to dst fresh from the live offset.
-	// Poll for src's own LocalPolar entry's QuantIR to pick up the new c (async
-	// message-delivery race, same shape as the retired moveMsgKindRequantize poll
-	// this replaces).
+	// Wait for src's own "abc-drag" breadcrumb (see the sync-point comment above)
+	// before reading its LocalPolar entry to dst.
+	waitForAbcDrag(t, &dbg, "src")
 	var got LocalPolar
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		for _, lp := range lhSrc.LocalPolarsSnapshot() {
-			if lp.To == "dst" {
-				got = lp
-			}
+	for _, lp := range lhSrc.LocalPolarsSnapshot() {
+		if lp.To == "dst" {
+			got = lp
 		}
-		if got.QuantIR != lpBefore.QuantIR {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("src's local polar to dst never picked up the new set-c: before=%+v after=%+v", lpBefore, got)
-		}
-		time.Sleep(time.Millisecond)
+	}
+	if got.QuantIR == lpBefore.QuantIR {
+		t.Fatalf("src's local polar to dst never picked up the new set-c: before=%+v after=%+v", lpBefore, got)
 	}
 
 	// src's world center must NOT have moved — only dst moved.
@@ -253,6 +254,15 @@ func TestRotatingPolePersistReload(t *testing.T) {
 			preDrag = lp
 		}
 	}
+	// Sync point for the post-drag lhSrc read below: src (the neighbor, NOT the dragged
+	// node) writes its own requantized LocalPolar entry (SetLocalPolar/SetPole, on src's
+	// OWN goroutine, inside neighborSetCRequantize) strictly BEFORE it logs its
+	// "abc-drag" breadcrumb in that same call — waiting for the breadcrumb (rather than
+	// polling lhSrc directly, a data race against src's own mover goroutine) establishes
+	// the happens-before edge. See time_node_abc_drag_breadcrumb_test.go.
+	var dbg syncBuffer
+	md.tr.SetDebugSink(&dbg)
+
 	home := dir{Theta: 0, Phi: 0}
 	near := fromAxisFrame(home, 5*math.Pi/180, 0)
 	target := srcCenter.add(polar2cart(polar{R: 50, Theta: near.Theta, Phi: near.Phi}))
@@ -264,26 +274,19 @@ func TestRotatingPolePersistReload(t *testing.T) {
 	// src is dst's plain (role-free) direct neighbor: under the current single-
 	// assignment set-c REQUANTIZE model, src stays put and re-quantizes its own
 	// bearing AND distance to dst fresh from the live offset
-	// (moveMsgKindNeighborSetC / neighborSetCRequantize). Poll for src's own
-	// LocalPolar entry's QuantIR to pick up the new c (async message-delivery race)
-	// before flushing, so the persisted value is not a stale pre-drag one.
+	// (moveMsgKindNeighborSetC / neighborSetCRequantize). Wait for src's own
+	// "abc-drag" breadcrumb before reading, so the persisted value is not a stale
+	// pre-drag one.
+	waitForAbcDrag(t, &dbg, "src")
 	var before *LocalPolar
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		before = nil
-		for _, lp := range lhSrc.LocalPolarsSnapshot() {
-			if lp.To == "dst" {
-				cp := lp
-				before = &cp
-			}
+	for _, lp := range lhSrc.LocalPolarsSnapshot() {
+		if lp.To == "dst" {
+			cp := lp
+			before = &cp
 		}
-		if before != nil && before.QuantIR != preDrag.QuantIR {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("src's local polar to dst never picked up the new set-c")
-		}
-		time.Sleep(time.Millisecond)
+	}
+	if before == nil || before.QuantIR == preDrag.QuantIR {
+		t.Fatalf("src's local polar to dst never picked up the new set-c: before=%+v preDrag=%+v", before, preDrag)
 	}
 	md.persist.quantOffset.flush()
 

@@ -55,31 +55,6 @@ func pollFlushedPositionFile(t *testing.T, md *MoveDispatch, root, nodeID string
 	}
 }
 
-// pollLocalPolarRequantized waits until lh's own stored LocalPolar entry to the given
-// neighbor id picks up a fresh QuantIR (async moveMsgKindNeighborSetC delivery race) and
-// returns the converged entry. Shared by every test in this package that drives a real
-// drag and then waits for a neighbor's re-quantize to land, rather than re-deriving the
-// same deadline-bounded poll loop at each call site.
-func pollLocalPolarRequantized(t *testing.T, lh *LayoutHolder, to string, before LocalPolar) LocalPolar {
-	t.Helper()
-	var after LocalPolar
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		for _, lp := range lh.LocalPolarsSnapshot() {
-			if lp.To == to {
-				after = lp
-			}
-		}
-		if after.QuantIR != before.QuantIR {
-			return after
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("local polar to %q never picked up the requantize: before=%+v after=%+v", to, before, after)
-		}
-		time.Sleep(time.Millisecond)
-	}
-}
-
 // Individual snapping: dragging a node moves and persists ONLY that node (its grid-snapped
 // scalar triple, quantITheta/quantIPhi/quantIR — the sole persisted position source under
 // the plain-polar model), leaving every other node untouched — no subtree cascade.
@@ -109,6 +84,15 @@ func TestIndividualSnap_OnlyDraggedNodePersists(t *testing.T) {
 		t.Fatal("no center for src before drag")
 	}
 
+	// Sync point for the post-drag lhSrc read below: src (the neighbor, NOT the dragged
+	// node) writes its own requantized LocalPolar entry (SetLocalPolar/SetPole, on src's
+	// OWN goroutine, inside neighborSetCRequantize) strictly BEFORE it logs its
+	// "abc-drag" breadcrumb in that same call — waiting for the breadcrumb (rather than
+	// polling lhSrc directly, a data race against src's own mover goroutine) establishes
+	// the happens-before edge. See time_node_abc_drag_breadcrumb_test.go.
+	var dbg syncBuffer
+	md.tr.SetDebugSink(&dbg)
+
 	dstTarget := vec3{X: 60, Y: 20, Z: -10}
 	if !md.RootMove("dst", dstTarget) {
 		t.Fatal("RootMove(dst) returned false")
@@ -118,10 +102,18 @@ func TestIndividualSnap_OnlyDraggedNodePersists(t *testing.T) {
 	// src is dst's plain (role-free) direct neighbor: per the single-assignment set-c
 	// REQUANTIZE model (node_move.go moveMsgKindNeighborSetC / neighborSetCRequantize),
 	// src STAYS PUT — only dst moved — and re-quantizes its OWN stored local polar
-	// (QuantITheta/QuantIPhi/QuantIR) to dst fresh from the live offset. Poll for src's
-	// own LocalPolar entry's QuantIR to change (the async moveMsgKindNeighborSetC
-	// delivery race, same shape as rotating_pole_test.go's polls).
-	lpAfter := pollLocalPolarRequantized(t, lhSrc, "dst", lpBefore)
+	// (QuantITheta/QuantIPhi/QuantIR) to dst fresh from the live offset. Wait for src's
+	// own "abc-drag" breadcrumb (see the sync-point comment above) before reading.
+	waitForAbcDrag(t, &dbg, "src")
+	var lpAfter LocalPolar
+	for _, lp := range lhSrc.LocalPolarsSnapshot() {
+		if lp.To == "dst" {
+			lpAfter = lp
+		}
+	}
+	if lpAfter.QuantIR == lpBefore.QuantIR {
+		t.Fatalf("src's local polar to dst never picked up the requantize: before=%+v after=%+v", lpBefore, lpAfter)
+	}
 
 	// src's own world center must NOT have moved — only dst moved.
 	srcCenter, ok := md.centerOfNode("src")

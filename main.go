@@ -206,13 +206,6 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 		}()
 	}
 
-	// Each node kind also satisfies UpdateLayout (Node interface, layout_holder.go)
-	// via the embedded Wiring.LayoutHolder, but nothing calls it today: it is just
-	// <-ctx.Done() with no runtime mutation, so a dedicated per-node goroutine
-	// would exist purely to block. Spawning that loop is deferred to the slice
-	// that gives it actual work (drag-time local-polar recomputation); see
-	// memory/project_two_goroutine_node_split.md.
-
 	// Wait for all nodes to exit, but never block forever: in a timed/cancelled
 	// run (e.g. -duration, or SIGINT) a node could still be mid-cycle when ctx is
 	// cancelled. Pacing loops are all ctx-aware (SleepCycle selects on ctx.Done),
