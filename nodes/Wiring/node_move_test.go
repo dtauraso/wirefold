@@ -65,7 +65,21 @@ func TestDecentralizedNodeMove(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	tr := T.New(256)
+	// beadInFlight closes once the wire has emitted a Position event for the placed
+	// src.Out bead — a PRODUCTION happens-before edge proving the wire's own goroutine
+	// drained the Send into its inflight set AND advanced it. Waiting on this instead of a
+	// fixed sleep is what de-flakes the move-revises-in-flight-bead check: the drag below
+	// needs a non-empty inflight, and a wall-clock sleep raced the wire goroutine under
+	// scheduler starvation (parallel -race). onEvent runs on the trace drain goroutine;
+	// sync.Once makes the close idempotent across the bead's many Position events.
+	beadInFlight := make(chan struct{})
+	var beadOnce sync.Once
+	onEvt := func(e T.Event) {
+		if e.Kind == T.KindPosition && e.Node == "src" && e.Port == "Out" {
+			beadOnce.Do(func() { close(beadInFlight) })
+		}
+	}
+	tr := T.NewWithSinkHook(256, nil, onEvt)
 	clk := NewRealClock()
 	_, slotReg, md, _, err := LoadTopology(ctx, path, tr, clk)
 	if err != nil {
@@ -87,10 +101,15 @@ func TestDecentralizedNodeMove(t *testing.T) {
 	if pw.Send(7, bp) != SendPlaced {
 		t.Fatal("Send rejected on fresh wire")
 	}
-	// Give the wire's own goroutine a moment to drain the send into its inflight
-	// state (its next DriveOneCycle, at most one human-clock cycle away) before
-	// the move below asks it to revise that bead's geometry.
-	time.Sleep(cascadeSettle)
+	// Wait on the production happens-before edge (beadInFlight, above) instead of a fixed
+	// sleep: block until the wire has actually drained the Send into inflight and emitted a
+	// Position for it, so the move below is guaranteed to find a non-empty inflight to
+	// revise. The timeout fails loud (rather than flaking) if the wire goroutine never runs.
+	select {
+	case <-beadInFlight:
+	case <-time.After(2 * time.Second):
+		t.Fatal("bead never entered flight (no Position event for src.Out within 2s) — wire goroutine starved?")
+	}
 
 	// Move src — delivered per-goroutine (no central registry). The world target
 	// snaps to a lattice cell (the only position model).
