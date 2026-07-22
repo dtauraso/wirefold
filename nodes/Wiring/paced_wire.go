@@ -2,6 +2,7 @@ package Wiring
 
 import (
 	"context"
+	"fmt"
 
 	T "github.com/dtauraso/wirefold/Trace"
 )
@@ -166,6 +167,17 @@ type PacedWire struct {
 // If production ever needs to build a wire elsewhere, drop this parameter instead and let
 // the tests express arc as ticks*PulseSpeedWuPerTick.
 func NewPacedWire(arcLength float64, pulseSpeed float64) *PacedWire {
+	// pulseSpeed is a uniform POSITIVE constant by model (MODEL.md: world-units-per-tick,
+	// same for every wire). A non-positive value is a construction-time misconfiguration,
+	// not a runtime condition to degrade around: ticksToCross and ReviseInFlightGeometry
+	// both silently no-op the travel math when pulseSpeed<=0 (deadline collapses to the
+	// placement tick), which would teleport every bead to instant delivery instead of
+	// pacing it — a silent, confusing failure far from its cause. Fail loud at the single
+	// construction site instead. This never fires under the one production caller
+	// (PulseSpeedWuPerTick) — it enforces the invariant the rest of the file assumes.
+	if pulseSpeed <= 0 {
+		panic(fmt.Sprintf("NewPacedWire: pulseSpeed must be positive (world-units-per-tick), got %v", pulseSpeed))
+	}
 	return &PacedWire{
 		pulseSpeed: pulseSpeed,
 		inCh:       make(chan placeRequest, wireChanBufferSize),
@@ -312,6 +324,13 @@ func (pw *PacedWire) stepAll(tick int64) {
 			continue
 		}
 		if !b.finalPending {
+			// One-cycle delivery floor, BY DESIGN (not a bug to "fix" for zero-arc beads): a
+			// bead is never advanced in the same cycle it was placed. For a degenerate
+			// zero-arc segment (coincident source/dest ports) ticksToCross is 0, so the model
+			// duration is "instant" — but delivering it in its placement cycle would let a
+			// node place→deliver→refire within one cycle, a same-cycle feedback busy-loop on a
+			// zero-length edge. The floor guarantees every bead is observable for at least one
+			// tick and breaks that loop; a zero-arc bead simply delivers on the NEXT cycle.
 			if nowTick <= b.placementTick {
 				i++
 				continue
@@ -325,6 +344,16 @@ func (pw *PacedWire) stepAll(tick int64) {
 				continue
 			}
 			b.finalPending = true
+		} else if b.streams && pw.Trace != nil {
+			// Already finalPending from a PRIOR cycle: the bead has finished traversing and
+			// is only waiting for outCh space to hand off. advanceBead is skipped for it, so
+			// its last packed position is frozen at the segment end AS OF the cycle it
+			// finalized. A concurrent node-drag moves that endpoint (ReviseInFlightGeometry
+			// rewrites b.seg every cycle), so without a re-emit the bead visibly detaches
+			// from its destination port while it waits. Re-pack it at the CURRENT segment end
+			// (t=1) each waiting cycle so it stays glued to the moving port.
+			p := b.seg.End
+			pw.Trace.Position(b.node, b.port, b.val, p.X, p.Y, p.Z, 1, b.gen)
 		}
 		// Only the FIFO head (i==0) can deliver; a non-head bead simply waits.
 		if i != 0 {
