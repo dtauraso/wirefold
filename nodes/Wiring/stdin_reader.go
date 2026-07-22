@@ -247,6 +247,10 @@ func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *
 			// carries at most one hit to resolve, so draining any more often would be
 			// wasted work and draining less often would resolve against a stale table.
 			md.drainRowTables()
+			// Drain every mover's pending position report (movers → gesture, see
+			// posReport/drainPositions doc comments) into md.positions BEFORE hit
+			// resolution/heldCenters below, same cadence as drainRowTables above.
+			md.drainPositions()
 			msg, decoded := decodeInputRecord(rec)
 			if !decoded {
 				continue

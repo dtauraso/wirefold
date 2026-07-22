@@ -15,7 +15,6 @@ package Wiring
 import (
 	"context"
 	"fmt"
-	"sync/atomic"
 
 	T "github.com/dtauraso/wirefold/Trace"
 )
@@ -83,57 +82,64 @@ type nodeMover struct {
 	// loader's build-wide speed-sink accumulator; nil in bare test construction, which
 	// is fine — ApplySpeedNonBlocking is a no-op on a nil channel.
 	speedCh chan float64
-	// There is no geomMu. m.geom (port_geometry.go) splits into an embedded, write-once
-	// nodeIdentity (Kind/Label/R/SceneCenter — set once at construction in loader.go,
-	// grepped clean of any later write anywhere in this package) and MUTABLE state
-	// (ScenePolar/HasPos/ReachR/Inputs/Outputs-element-AnchorId) written only by
-	// applyCenter and handle's moveMsgKindAnchor case. Every writer AND every reader of
-	// the mutable part — applyCenter, setPortAnchorId (via handle), emitGeometry's
-	// full-struct copy — runs exclusively on nodeMover's OWN inbox-drain goroutine
-	// (run/handle), so there is never more than one goroutine touching that memory. The
-	// one cross-goroutine reader, MoveDispatch.NodeKind (node_move.go), called from the
-	// gesture/stdin-reader goroutine, reads ONLY nm.geom.Kind — a field on the embedded
-	// nodeIdentity, which no writer here ever touches. So the two properties that would
-	// require a lock (a mutable field read cross-goroutine, or an identity field that
-	// could gain a second writer) both provably don't hold, by construction of the type
-	// split, not by coincidence of which byte ranges happen to overlap today.
+	// There is no geomMu, and none is needed: m.geom is now touched by EXACTLY ONE
+	// goroutine — this mover's own inbox-drain goroutine (run/handle). Every writer AND
+	// every reader of it — applyCenter, setPortAnchorId (via handle), emitGeometry's
+	// full-struct copy — runs there and nowhere else. There is no cross-goroutine reader
+	// at all: the former one, MoveDispatch.NodeKind, now reads the SEPARATE immutable
+	// md.kinds table (node_move.go) built once at construction, not nm.geom — so kind
+	// resolution never reaches into a mover's live struct. geom access is safe by plain
+	// single-goroutine confinement, not by a lock and not by a type split.
+	//
+	// (m.geom still splits, in port_geometry.go, into an embedded write-once nodeIdentity
+	// and MUTABLE state; that split predates and outlives this change but is no longer
+	// what makes geom access race-free — confinement is. There is no separate per-node
+	// "Update()" writer goroutine either — that was the retired SLICE 3 architecture.)
 	//
 	// CHECKED BY CODE: TestNodeKindConcurrentWithApplyCenterUnderRace
-	// (node_mover_geom_race_test.go) drives NodeKind's reader loop and applyCenter's
-	// writer loop concurrently under -race with no lock on either side, as a standing
-	// regression check that the split holds (a future change reintroducing a write to an
-	// identity field, or widening NodeKind's read to a whole-struct copy, would make it
-	// fail). There is no separate per-node "Update()" writer goroutine — that was the
-	// retired SLICE 3 architecture.
-	// snap is an atomically-published immutable snapshot of this node's current
-	// center+reachR. Written only by the mover's own goroutine after every center
-	// update; read by any goroutine (stdin reader) to observe the current position
-	// without crossing into the mover's live geom.
-	snap atomic.Pointer[centerSnap]
+	// (node_mover_geom_race_test.go) drives NodeKind (reading immutable md.kinds) and
+	// applyCenter (writing nm.geom) concurrently under -race, as a standing regression
+	// check that NodeKind stays lock-free and never reaches back into mutable mover state
+	// (a future change routing NodeKind through nm.geom would make it fail).
+	// neighborCenters caches THIS node's own view of every DIRECT domain neighbor's
+	// (edge-adjacent node's) last-reported world center — keyed by neighbor id. Written
+	// ONLY by this node's own goroutine (handle: moveMsgKindNeighborSetC's FromCenter,
+	// and the aimed-port pure-reemit's PartnerCenter field), read ONLY by this node's
+	// own goroutine (partnerCenter at emit time, requantizeLocalPolars, and
+	// commitNodeMoveLocal's reach computation) — no cross-goroutine access at all,
+	// unlike the atomic-snapshot pattern this replaced (each mover reading ANOTHER
+	// mover's published pointer). Seeded once at construction (newMoveDispatch) from
+	// load-time geoms for every edge-adjacent neighbor, so a lookup before the first
+	// move always has a valid (if eventually stale-until-first-report) center.
+	neighborCenters map[string]vec3
+	// reportCh is the SEND end of the movers→gesture position-report channel
+	// (MoveDispatch.posReportCh) — the external-observer pattern portTblC/edgeTblC/
+	// nodeTblC already use, generalized to node centers. applyCenter sends this node's
+	// fresh {id, center} on it non-blockingly every time it commits a new center. nil in
+	// bare test construction that skips newMoveDispatch; a nil-channel send inside a
+	// select-with-default is a no-op, never a block.
+	reportCh chan posReport
 	// sendMove routes a moveMsg to another id's OWN dedicated channel (resolveDest, above)
 	// — no shared inbox, no shared mutable state.
 	// Bound to md.enqueueFor(nm): it appends to nm.pending and immediately attempts a
 	// non-blocking flush (never blocks the calling handler goroutine).
 	sendMove func(id string, msg moveMsg)
 	edgeIDs  []string
-	// centerOf resolves another node's current world center, bound to
-	// md.centerOfNode. Unused by any live handler now that the rule/gate/anchor
-	// cascade (which used it to read rule-neighbor centers) is gone; kept wired for
-	// any future direct-neighbor lookup need.
-	centerOf func(id string) (vec3, bool)
-	// commitLocal is the OWNER-GOROUTINE commit path, bound to
-	// md.commitNodeMoveLocal (generalized to every node). It publishes this node's
-	// own snap SYNCHRONOUSLY via applyCenter instead of enqueuing an async self-send,
-	// so it is safe to call from THIS node's own handle() for a moveMsgKindDrag, with
-	// no cross-goroutine self-send and no shared mutable state (each node's quantized
-	// offset lives on its own mover — see nodeMover.quantOffset). nil in tests that
-	// build a bare nodeMover directly.
+	// commitLocal is the OWNER-GOROUTINE commit path, bound at construction to a closure
+	// that calls md.commitNodeMoveLocal with THIS mover (newMoveDispatch), so the commit
+	// never has to look the mover back up by id — there is no nodeMovers directory to look
+	// it up in. It applies this node's own new center SYNCHRONOUSLY via applyCenter instead
+	// of enqueuing an async self-send, so it is safe to call from THIS node's own handle()
+	// for a moveMsgKindDrag, with no cross-goroutine self-send and no shared mutable state
+	// (each node's quantized offset lives on its own mover — see nodeMover.quantOffset). The
+	// id param is VESTIGIAL — handle passes m.id but the closure ignores it and uses its own
+	// captured mover. nil in tests that build a bare nodeMover directly.
 	commitLocal func(id string, newPos vec3)
 	// partnerCenter resolves, per (port,isInput) on this node, the CURRENT world center of
 	// the single partner node connected via one edge (aimed-port model, port_geometry.go
-	// portWorldPosAimed / builders.go partnerCenterFn). Wired by newMoveDispatch from
-	// b.edgeEndpoints + the OTHER nodeMover's atomic snap — a dynamic, always-current lookup
-	// with no shared mutable state. nil only in tests that build a bare nodeMover directly.
+	// portWorldPosAimed / builders.go partnerCenterFn). Wired by newMoveDispatch to read
+	// THIS node's own neighborCenters cache (above) — no cross-goroutine access. nil
+	// only in tests that build a bare nodeMover directly.
 	partnerCenter partnerCenterFn
 	// quantOffset is THIS node's own quantized polar offset (iTheta,iPhi,iR + step
 	// constants) about the scene center — the per-node replacement for the formerly
@@ -146,10 +152,12 @@ type nodeMover struct {
 	quantOffset quantizedOffset
 	// neighborSetC runs THIS node's own plain-neighbor set-c redraw (keep stored
 	// bearing, write only the new c, reposition self) — bound to
-	// md.neighborSetCReposition. Dispatched from moveMsgKindNeighborSetC so a domain
+	// md.neighborSetCRequantize. Dispatched from moveMsgKindNeighborSetC so a domain
 	// neighbor's holder AND world position are written only by that neighbor's OWN
-	// goroutine. nil in tests that build a bare nodeMover directly.
-	neighborSetC func(selfID, fromID string, fromCenter vec3, deltaA, deltaB, deltaC int)
+	// goroutine. selfCenter is THIS node's own current center (nodeWorldPos(m.geom),
+	// read on this node's own goroutine — replaces the old md.centerOfNode(selfID)
+	// atomic read). nil in tests that build a bare nodeMover directly.
+	neighborSetC func(selfID, fromID string, selfCenter, fromCenter vec3, deltaA, deltaB, deltaC int)
 	// pending is THIS node's own outbound retry queue: sendMove appends here and attempts an immediate
 	// non-blocking send; an item that can't be delivered right now (the target's
 	// inbox is momentarily full) stays here and is retried — before any newer item to
@@ -164,8 +172,8 @@ type nodeMover struct {
 	// resolveDest looks up the ONE dedicated directed channel FROM this node TO the
 	// given destination id — the destination's neighborIn[this node's id] if destID is
 	// another node, or the destination edge's srcIn/dstIn depending on which endpoint
-	// this node is (md.nodeMovers/md.edgeMovers are read-only directories after
-	// construction, safe to read from any goroutine). There is no shared inbox to look
+	// this node is (the loader-local nodeMovers map and md.edgeMovers are read-only
+	// directories after construction, safe to read from any goroutine). There is no shared inbox to look
 	// up: every (sender, destination) pair resolves to its OWN channel. nil only in
 	// tests that build a bare nodeMover directly, in which case flushPending is a no-op.
 	resolveDest func(id string) (chan moveMsg, bool)
@@ -200,12 +208,11 @@ func newNodeMover(id string, geom nodeGeom, tr *T.Trace, clockSrc Clock) *nodeMo
 		id: id, geom: geom,
 		extIn: make(chan moveMsg, 8), neighborIn: map[string]chan moveMsg{}, tr: tr,
 		clockSrc: clockSrc, clk: NewRealClock(),
+		// neighborCenters starts empty here; newMoveDispatch seeds every
+		// edge-adjacent neighbor's entry from load-time geoms once edge adjacency
+		// is known (this constructor runs before edges are wired).
+		neighborCenters: map[string]vec3{},
 	}
-	// Seed the atomic snapshot from the initial geometry (even when !HasPos, in which case
-	// nodeWorldPos falls back to the origin) so readers — including another node's aimed-port
-	// partnerCenter lookup — always have a valid center to read before the first center
-	// message arrives.
-	nm.snap.Store(&centerSnap{c: nodeWorldPos(geom), p: geom.ScenePolar, reach: geom.ReachR})
 	return nm
 }
 
@@ -238,6 +245,14 @@ func (m *nodeMover) handle(msg moveMsg) {
 			m.applyCenter(*msg.Center, msg.ReachR)
 			return
 		}
+		// Pure aimed-port re-emit: PartnerCenter (if present) is the SENDER's own
+		// just-committed fresh center — update this node's neighborCenters cache for
+		// that sender BEFORE re-emitting, so partnerCenter (read at emit time, below)
+		// picks up the fresh direction. See moveMsg.PartnerCenter's doc comment for why
+		// this must never be read into Center itself.
+		if msg.PartnerCenter != nil && msg.SenderID != "" {
+			m.neighborCenters[msg.SenderID] = *msg.PartnerCenter
+		}
 		if m.tr != nil {
 			m.emitGeometry()
 		}
@@ -246,7 +261,7 @@ func (m *nodeMover) handle(msg moveMsg) {
 	if msg.Kind == moveMsgKindDrag {
 		// Owner-goroutine drag entry (generalized to EVERY node so no node's quantized
 		// offset is ever touched by a foreign mover goroutine): commit this node's OWN
-		// new position via the local (synchronous-snap-publish) commit path. A drag is
+		// new position via the local (synchronous-apply, reported over reportCh) commit path. A drag is
 		// always a FREE move now -- there is no equal-radii solve and no self-trigger
 		// cascade to run.
 		newPos := msg.Target
@@ -267,8 +282,12 @@ func (m *nodeMover) handle(msg moveMsg) {
 		// (the dragged node) moved to msg.FromCenter; THIS node stays put and re-quantizes
 		// its OWN edge to SenderID from the live offset — theta, phi AND r all fresh —
 		// so both the angle and the distance to SenderID change (neighborSetCRequantize).
+		// Update this node's own neighborCenters cache for SenderID (this message always
+		// carries the sender's freshest committed center, regardless of aimed-port
+		// status) before dispatching.
+		m.neighborCenters[msg.SenderID] = msg.FromCenter
 		if m.neighborSetC != nil {
-			m.neighborSetC(m.id, msg.SenderID, msg.FromCenter, msg.DeltaA, msg.DeltaB, msg.DeltaC)
+			m.neighborSetC(m.id, msg.SenderID, nodeWorldPos(m.geom), msg.FromCenter, msg.DeltaA, msg.DeltaB, msg.DeltaC)
 		}
 		return
 	}
@@ -298,13 +317,18 @@ func (m *nodeMover) armDragAnchor() {
 // applyCenter is the SOLE WRITE of this node's center/reach. It is called ONLY from
 // this nodeMover's own inbox-drain goroutine (handle's moveMsgKindCenter case, driven
 // by fanCenters below), which is what makes that one goroutine the exclusive writer of
-// m.geom/m.snap. It sets the held polar position, publishes the atomic snapshot readers
-// observe cross-goroutine (stdin reader: centerOfNode/heldCenters/heldPolar/fanCenters'
-// partner lookup, edgeMover's partnerCenter), and re-emits this node's live geometry.
+// m.geom. It sets the held polar position, reports the fresh center to the gesture
+// goroutine over reportCh (non-blocking, movers→gesture — see posReport's doc
+// comment; the gesture goroutine's own drainPositions call is what makes this visible
+// to heldCenters/centerOfNode, replacing the old atomic-snapshot cross-goroutine read),
+// and re-emits this node's live geometry.
 func (m *nodeMover) applyCenter(center vec3, reach float64) {
 	setNodeWorld(&m.geom, center)
 	m.geom.ReachR = reach
-	m.snap.Store(&centerSnap{c: center, p: m.geom.ScenePolar, reach: reach})
+	select {
+	case m.reportCh <- posReport{ID: m.id, Center: center}:
+	default:
+	}
 	if m.tr != nil {
 		m.emitGeometry()
 	}

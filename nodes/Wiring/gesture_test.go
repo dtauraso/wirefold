@@ -363,7 +363,7 @@ func TestGestureConnectedPortRingMove(t *testing.T) {
 	edges := map[string]EdgeEndpoints{
 		"e1": {Source: "N1", Target: "N2", SourceHandle: "out", TargetHandle: "in"},
 	}
-	md := newMoveDispatch(geoms, edges, nil, nil, nil, NewRealClock(), nil)
+	md, _ := newMoveDispatch(geoms, edges, nil, nil, nil, NewRealClock(), nil)
 	md.vp.viewpoint = canonicalViewpoint()
 	md.portTbl = []T.PortRow{{Node: "N1", Port: "out", IsInput: false}}
 
@@ -381,7 +381,7 @@ func TestGestureConnectedPortRingMove(t *testing.T) {
 	}
 	// The N1 mover's extIn channel (buffered) must have received an anchor update.
 	select {
-	case msg := <-md.nodeMovers["N1"].extIn:
+	case msg := <-md.extRoute["N1"]:
 		if msg.Kind != moveMsgKindAnchor || msg.NodeID != "N1" || msg.Port != "out" || msg.IsInput {
 			t.Fatalf("anchor msg mismatch: %+v", msg)
 		}

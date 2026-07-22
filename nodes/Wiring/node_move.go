@@ -45,7 +45,7 @@ const (
 	// moveMsgKindDrag is a node's own-goroutine drag entry: the drag itself is routed
 	// to the dragged node's OWN dedicated extIn channel instead of the stdin reader
 	// committing on its behalf. The receiver commits its OWN new position via the owner-goroutine commit
-	// path (commitNodeMoveLocal, which publishes its snap SYNCHRONOUSLY via
+	// path (commitNodeMoveLocal, which applies its own new center SYNCHRONOUSLY via
 	// applyCenter). A drag is always a FREE move -- no equal-radii solve, no
 	// self-trigger cascade.
 	moveMsgKindDrag = "drag"
@@ -77,14 +77,24 @@ const (
 	moveMsgKindDragStart = "dragStart"
 )
 
-// centerSnap is an immutable snapshot of a node's position published by the nodeMover
-// via an atomic.Pointer so readers on other goroutines (stdin reader, etc.) can observe
-// the current center without touching the mover's live geom.
-type centerSnap struct {
-	c     vec3  // world center — cartesian, published for the emit/input boundaries only
-	p     polar // scene polar (r,θ,φ about the scene center) — the polar source of truth for geometry math
-	reach float64
+// posReport is one mover's freshly-committed world center, reported over the
+// movers→gesture report channel (MoveDispatch.posReportCh) the same way
+// portTblC/edgeTblC/nodeTblC hand row tables from the Trace-drain goroutine to the
+// gesture goroutine: an external-observer channel, not a node↔node inbox. Sent
+// non-blockingly by applyCenter (the sole writer of a node's center), drained by
+// drainPositions into md.positions.
+type posReport struct {
+	ID     string
+	Center vec3
 }
+
+// posReportBufSize sizes the buffered movers→gesture report channel. A single drag
+// commits on ONE mover's own clock-paced cycle at a time (applyCenter fires once per
+// commitNodeMoveLocal call, i.e. once per RootMove pointer-move tick on the dragged
+// node), so the channel only ever needs to hold the handful of reports produced
+// between two drainPositions calls (one per stdin dispatch iteration) — generously
+// sized well past that so a drag is never dropped before the gesture goroutine drains.
+const posReportBufSize = 256
 
 // moveMsg is one entry routed to one of a mover's own dedicated channels (there is no
 // shared inbox). kind selects the
@@ -147,19 +157,78 @@ type moveMsg struct {
 	// Target (Kind == "drag"): the raw drag target world position for NodeID's
 	// owner-goroutine commit. Every node is a free move, so this is committed as-is.
 	Target vec3
+	// PartnerCenter (Kind == "center", Center == nil): a pure aimed-port re-emit
+	// request ALSO carries the SENDER's (SenderID's) just-committed fresh center, so
+	// the receiver can update its own nm.neighborCenters[SenderID] cache before
+	// re-emitting — the aimed-port marker's direction reads that cache at emit time
+	// (see nodeMover.neighborCenters / buildPartnerCenterFn's wiring). Kept distinct
+	// from Center (which, if non-nil here, would be misread as "this is YOUR OWN new
+	// center" by the moveMsgKindCenter handler and wrongly move the receiver itself).
+	PartnerCenter *vec3
 	// testDone: see the type comment. Test-only; production leaves it nil.
 	testDone chan struct{}
 }
 
 // MoveDispatch is the pure registry built at load that owns every mover and wires their
-// dedicated channels together — there
-// is no shared dispatch map anymore; md.nodeMovers/md.edgeMovers themselves are the
-// directories a mover's resolveDest closure and the external-entry helpers below look up.
-// It also retains the per-edge source Outs so out-of-package test/verifier callers can
+// dedicated channels together — there is no shared dispatch map anymore. The node-mover
+// directory itself is LOAD-TIME-LOCAL: newMoveDispatch builds it, wires each mover's
+// resolveDest closure to capture it, hands it back to the loader for the remaining
+// construction-time lookups (quantOffset seed, partnerCenter), and then drops it — no
+// nodeMovers FIELD survives. What the runtime still needs from that directory is served by
+// narrow frozen tables instead: md.extRoute (editor→node sends), md.kinds (NodeKind), and
+// md.loadCenters (content-fit). md.edgeMovers is still a field (edges are looked up by every
+// per-commit fan). It also retains the per-edge source Outs so out-of-package test/verifier callers can
 // read an edge's loaded geometry (EdgeOut) without going through a central coordinator.
 type MoveDispatch struct {
-	nodeMovers map[string]*nodeMover
 	edgeMovers map[string]*edgeMover
+	// nodeMoverList is a plain ENUMERATION (not an id-keyed lookup directory) of every
+	// nodeMover built at construction, kept solely so Start can launch one goroutine per
+	// node. Nothing looks a mover up BY ID through this field — every runtime id-keyed
+	// need is served by md.extRoute/md.kinds/md.loadCenters instead (see those fields'
+	// doc comments and newMoveDispatch's doc comment for why the id-keyed directory
+	// itself is load-time-local and dropped after construction).
+	nodeMoverList []*nodeMover
+	// kinds is the immutable node-id → kind directory, built once at construction from
+	// the load-time geoms and never mutated afterward (a node's kind is write-once
+	// identity — port_geometry.go nodeIdentity). It is the whole of what NodeKind needs;
+	// keeping it as its own frozen table (rather than reaching into a mover's geom) makes
+	// the cross-goroutine kind read lock-free BY CONSTRUCTION — there is no writer to race
+	// — and lets the mover directory itself become load-time-local (Job 1).
+	kinds map[string]string
+	// loadCenters is the immutable node-id → LOAD-TIME world center directory, built once
+	// at construction from the same geoms md.positions is seeded from. Distinct from
+	// md.positions (which the gesture goroutine mutates as nodes report drags): loadCenters
+	// is the frozen load-time snapshot the content-fit scene sphere is derived from
+	// (loadTimeCenters → contentFitSceneSphere, scene_sphere_persist.go). Previously this
+	// was re-read live off every mover's geom; freezing it here removes loadTimeCenters'
+	// last dependence on the mover directory.
+	loadCenters map[string]vec3
+	// extRoute is the EDITOR→NETWORK send directory: node id → that node's own
+	// dedicated external-entry channel (nodeMover.extIn). It is the ONLY thing the
+	// external caller (the gesture/stdin goroutine — RootMove's drag, gesture.go's
+	// dragStart and ring-anchor sends) needs from a node: a channel to drop an
+	// addressed entry onto. Distinct from the full mover directory (the loader-local
+	// nodeMovers map) on purpose — the editor addresses a node to SEND to it, it never needs the
+	// mover struct itself; keeping the send path on this narrow table lets the mover
+	// directory become load-time-local (it no longer has to survive as the editor's
+	// lookup). Built once at construction alongside each nodeMover; a read-only
+	// directory afterward, safe from any goroutine.
+	extRoute map[string]chan moveMsg
+	// positions is the gesture goroutine's OWN accumulated map of every node's last-
+	// reported world center — written ONLY by drainPositions (from posReportCh) and by
+	// the one-time SeedPositions call before Start launches any mover goroutine, read
+	// ONLY on the gesture goroutine (heldCenters, centerOfNode). This is the external-
+	// observer pattern portTbl/edgeTbl/nodeTbl already use, generalized to node
+	// centers: movers report, the gesture goroutine drains into its own map, nothing
+	// reads across that boundary the other way.
+	positions map[string]vec3
+	// posReportCh is the buffered movers→gesture report channel every nodeMover's
+	// applyCenter sends its fresh {id, center} on (posReportBufSize). Created once here
+	// at construction and handed to each nodeMover as reportCh; nil in bare test
+	// construction that skips newMoveDispatch, in which case applyCenter's send is a
+	// guarded no-op (nil channel + select-default) and drainPositions is a no-op (nil
+	// channel is never selected).
+	posReportCh chan posReport
 	// edgeOut: edgeId → source *Out, for read-only access by tests/verifiers.
 	edgeOut map[string]*Out
 	// nodeSeeds/edgeSeeds are every node/edge's load-time seed geometry, captured ONCE at
@@ -317,8 +386,9 @@ func (md *MoveDispatch) NodeSeeds() []NodeGeomSeed { return md.nodeSeeds }
 func (md *MoveDispatch) EdgeSeeds() []EdgeGeomSeed { return md.edgeSeeds }
 
 // newMoveDispatch builds the registry from per-node geometry and per-edge endpoints.
-// It creates one nodeMover per node and one edgeMover per edge, registering each under
-// its key (node id / edge id) in md.nodeMovers/md.edgeMovers, and wires the dedicated
+// It creates one nodeMover per node and one edgeMover per edge, registering each edge
+// under its id in md.edgeMovers and each node in the loader-local nodeMovers map (returned,
+// not a field), and wires the dedicated
 // directed channels between adjacent movers. Outs and dest wires are bound later by Bind once node
 // construction has populated them. nodeOrder/edgeOrder are the
 // SPEC order (deterministic directory-sorted order, not map iteration order) used to
@@ -331,7 +401,14 @@ func (md *MoveDispatch) EdgeSeeds() []EdgeGeomSeed { return md.edgeSeeds }
 // appended here.
 // nil in test call sites that construct a MoveDispatch directly with no
 // loader — those edgeMovers then simply have no speed channel to poll.
-func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEndpoints, tr *T.Trace, nodeOrder, edgeOrder []string, clk Clock, speedSinks *[]chan float64) *MoveDispatch {
+// It returns the built *MoveDispatch AND the node-mover directory it built. The directory
+// is LOAD-TIME-LOCAL by design (Job 1): every runtime lookup is served by the frozen
+// md.extRoute/md.kinds/md.loadCenters tables and the resolveDest/partnerCenter closures
+// (which capture the directory), so the only remaining callers of the returned map are the
+// loader's own construction-time seeds (quantOffset, partnerCenter) — after which it is
+// dropped. Tests that build a MoveDispatch this way and need to reach a specific mover take
+// it from this return value; MoveDispatch itself keeps no nodeMovers field.
+func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEndpoints, tr *T.Trace, nodeOrder, edgeOrder []string, clk Clock, speedSinks *[]chan float64) (*MoveDispatch, map[string]*nodeMover) {
 	// nil order (test call sites that don't care about seed order) falls back to sorted
 	// map keys — still deterministic, just not necessarily spec order.
 	if nodeOrder == nil {
@@ -349,17 +426,26 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 		sort.Strings(edgeOrder)
 	}
 	md := &MoveDispatch{
-		nodeMovers:    map[string]*nodeMover{},
 		edgeMovers:    map[string]*edgeMover{},
 		edgeOut:       map[string]*Out{},
 		tr:            tr,
 		ov:            defaultOverlayState(),
 		layoutHolders: map[string]*LayoutHolder{},
+		positions:     map[string]vec3{},
+		posReportCh:   make(chan posReport, posReportBufSize),
+		extRoute:      map[string]chan moveMsg{},
+		kinds:         map[string]string{},
+		loadCenters:   map[string]vec3{},
 	}
+	// nodeMovers is LOAD-TIME-LOCAL — see this function's doc comment. Every mover's
+	// resolveDest closure and the partnerCenter wiring below capture it; the runtime never
+	// reads it (md.extRoute/kinds/loadCenters serve those needs), and it is returned to the
+	// loader for its remaining construction-time seeds, then dropped.
+	nodeMovers := map[string]*nodeMover{}
 	// Static partner-center lookup for the seed pass: every node's center is already known
 	// off the load-time geoms map (no goroutine/atomic-snap needed), so this is the SAME
 	// buildPartnerCenterFn the dynamic movers use below, just closed over geoms directly
-	// instead of md.nodeMovers' atomic snaps. Kept per-node (not shared) to match
+	// instead of the dynamic movers' neighborCenters caches. Kept per-node (not shared) to match
 	// buildPartnerCenterFn's (nodeID, edgeEndpoints, centerOf) shape.
 	seedPartnerCenter := func(nodeID string) partnerCenterFn {
 		return buildPartnerCenterFn(nodeID, edgeEndpoints, func(otherID string) vec3 {
@@ -419,6 +505,7 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 	}
 	for id, g := range geoms {
 		nm := newNodeMover(id, g, tr, clk)
+		nm.reportCh = md.posReportCh
 		if speedSinks != nil {
 			nodeSpeedCh := make(chan float64, 1)
 			nm.speedCh = nodeSpeedCh
@@ -427,9 +514,9 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 		// resolveDest resolves the ONE dedicated directed channel FROM this node
 		// (selfID, captured below) TO destID: another node's own neighborIn[selfID]
 		// slot, or an incident edge's srcIn/dstIn depending on which endpoint this
-		// node is. There is no shared dispatch map to look up — md.nodeMovers/md.edgeMovers are the
-		// read-only directories, safe to read from any goroutine once construction
-		// finishes.
+		// node is. There is no shared dispatch map to look up — the loader-local nodeMovers
+		// map (captured by this closure) and md.edgeMovers are the read-only directories,
+		// safe to read from any goroutine once construction finishes.
 		selfID := id
 		nm.resolveDest = func(destID string) (chan moveMsg, bool) {
 			if em, ok := md.edgeMovers[destID]; ok {
@@ -441,7 +528,7 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 				}
 				return nil, false
 			}
-			if other, ok := md.nodeMovers[destID]; ok {
+			if other, ok := nodeMovers[destID]; ok {
 				if ch, ok := other.neighborIn[selfID]; ok {
 					return ch, true
 				}
@@ -449,13 +536,20 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 			return nil, false
 		}
 		nm.sendMove = md.enqueueFor(nm)
-		nm.centerOf = md.centerOfNode
-		nm.commitLocal = md.commitNodeMoveLocal
+		// commitLocal/neighborSetC capture THIS node's own mover so the owner-goroutine
+		// commit path (commitNodeMoveLocal / neighborSetCRequantize) never has to look the
+		// mover back up by id — there is no nodeMovers field to look it up in. handle passes
+		// m.id purely for the (ignored) signature; the mover is the closure's own nm.
+		ownMover := nm
+		nm.commitLocal = func(_ string, newPos vec3) { md.commitNodeMoveLocal(ownMover, newPos) }
 		nm.neighborSetC = md.neighborSetCRequantize
 		// Go 1.22+ loop semantics give each iteration its own id, so this closure safely
 		// captures THIS iteration's id (no shared-variable capture bug).
 		nm.layoutHolderFn = func() *LayoutHolder { return md.layoutHolders[id] }
-		md.nodeMovers[id] = nm
+		nodeMovers[id] = nm
+		md.extRoute[id] = nm.extIn
+		md.kinds[id] = g.Kind
+		md.nodeMoverList = append(md.nodeMoverList, nm)
 	}
 	for edgeID, ep := range edgeEndpoints {
 		em := newEdgeMover(ep, edgeID, geoms[ep.Source], geoms[ep.Target], tr, clk)
@@ -469,44 +563,63 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 		// created above, srcIn/dstIn) — and each other's own dedicated channel for
 		// node-to-node traffic (neighborIn, the plain-neighbor/partner-reemit fan):
 		// two directed channels per ordered pair, never a shared inbox.
-		if srcNM, ok := md.nodeMovers[ep.Source]; ok {
-			if dstNM, ok := md.nodeMovers[ep.Target]; ok {
+		if srcNM, ok := nodeMovers[ep.Source]; ok {
+			if dstNM, ok := nodeMovers[ep.Target]; ok {
 				if _, exists := dstNM.neighborIn[ep.Source]; !exists {
 					dstNM.neighborIn[ep.Source] = make(chan moveMsg, 8)
 				}
 				if _, exists := srcNM.neighborIn[ep.Target]; !exists {
 					srcNM.neighborIn[ep.Target] = make(chan moveMsg, 8)
 				}
+				// Seed each side's neighborCenters cache from the load-time geoms —
+				// safe here (main goroutine, before Start launches any mover
+				// goroutine) — so a neighbor's aimed-port direction / requantize
+				// offset has a valid center to read before either side ever
+				// commits a move (mirrors the old atomic snap's construction-time
+				// seed). Kept current afterward by moveMsgKindNeighborSetC and the
+				// aimed-port pure-reemit's PartnerCenter field, both handled only
+				// on the OWNING node's own goroutine (see nodeMover.handle).
+				dstNM.neighborCenters[ep.Source] = nodeWorldPos(geoms[ep.Source])
+				srcNM.neighborCenters[ep.Target] = nodeWorldPos(geoms[ep.Target])
 			}
 		}
 	}
 	// Wire each nodeMover's aimed-port lookup: for (port,isInput) on nodeID, find its one
-	// edge (edgeEndpoints) and read the partner's CURRENT center off the partner
-	// nodeMover's atomic snap (md.nodeMovers is a read-only map after this point — only the
-	// individual *nodeMover.snap is read cross-goroutine, via the existing atomic pattern).
-	for id, nm := range md.nodeMovers {
+	// edge (edgeEndpoints) and read the partner's center off THIS node's OWN
+	// neighborCenters cache — written only by this node's own goroutine (handle), read
+	// only by this node's own goroutine (emitGeometry/partnerCenter) — no cross-goroutine
+	// map access, unlike the atomic snap this replaced.
+	for id, nm := range nodeMovers {
+		ownNM := nm
 		nm.partnerCenter = buildPartnerCenterFn(id, edgeEndpoints, func(otherID string) vec3 {
-			other, ok := md.nodeMovers[otherID]
-			if !ok {
-				return vec3{}
-			}
-			if s := other.snap.Load(); s != nil {
-				return s.c
-			}
-			return vec3{}
+			return ownNM.neighborCenters[otherID]
 		})
 	}
 	// Give every nodeMover the ids of its OWN incident edges, so a lock-driven move can
 	// notify its edges via sendMove (resolveDest's per-pair channel lookup) — no cached
 	// channel slice.
-	for id, nm := range md.nodeMovers {
+	for id, nm := range nodeMovers {
 		for edgeID, em := range md.edgeMovers {
 			if em.srcID == id || em.dstID == id {
 				nm.edgeIDs = append(nm.edgeIDs, edgeID)
 			}
 		}
 	}
-	return md
+	// Seed md.positions from these same load-time geoms right here at construction —
+	// the SeedPositions/loadTimeCenters public path exists for callers that build a
+	// MoveDispatch some other way (or want to re-seed later), but every real
+	// newMoveDispatch construction (production and every LoadTopology-based test) gets
+	// this for free immediately, matching how the old atomic snap was seeded at
+	// construction.
+	for id, g := range geoms {
+		c := nodeWorldPos(g)
+		md.positions[id] = c
+		// loadCenters is the frozen load-time snapshot (never mutated by drags, unlike
+		// md.positions) that the content-fit scene sphere is derived from — see the field
+		// doc comment and loadTimeCenters.
+		md.loadCenters[id] = c
+	}
+	return md, nodeMovers
 }
 
 // Bind wires the per-edge source Outs (keyed "source.sourceHandle" in outSink) and
@@ -540,7 +653,8 @@ func (md *MoveDispatch) Bind(outSink map[string]*Out, slotReg SlotRegistry) {
 func (md *MoveDispatch) Start(ctx context.Context) *sync.WaitGroup {
 	md.ctx = ctx
 	wg := new(sync.WaitGroup)
-	for _, nm := range md.nodeMovers {
+	for _, nm := range md.nodeMoverList {
+		nm := nm
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -564,27 +678,70 @@ func (md *MoveDispatch) EdgeOut(edgeID string) *Out {
 	return md.edgeOut[edgeID]
 }
 
-// centerOfNode returns the current world center for a node id by loading the
-// nodeMover's atomically-published snapshot. Safe to call from any goroutine
-// without synchronization — the snap is published via atomic.Pointer after each
-// center update so this never races with the mover's live geom writes.
+// centerOfNode returns the gesture goroutine's last-reported world center for a node
+// id, from md.positions (see MoveDispatch.positions doc comment). GESTURE-GOROUTINE
+// ONLY: every live caller (gesture.go's port-move-grab and node-drag-grab hit
+// handling) runs on the stdin/gesture dispatch loop, the same goroutine drainPositions
+// fills md.positions from.
 func (md *MoveDispatch) centerOfNode(id string) (vec3, bool) {
-	if nm, ok := md.nodeMovers[id]; ok {
-		if s := nm.snap.Load(); s != nil {
-			return s.c, true
+	c, ok := md.positions[id]
+	return c, ok
+}
+
+// drainPositions non-blockingly pulls every pending posReport off md.posReportCh into
+// md.positions — the movers→gesture analogue of drainRowTables, called at the same
+// point in RunStdinReader's dispatch loop. Drains the WHOLE backlog each call (not just
+// one) so a burst of reports between two dispatch iterations is fully absorbed, matching
+// nodeMover.run's own "drain to empty" drain shape. A nil posReportCh (bare test
+// construction that skips newMoveDispatch) makes the receive permanently unselectable,
+// so this is a safe no-op there.
+func (md *MoveDispatch) drainPositions() {
+	for {
+		select {
+		case r := <-md.posReportCh:
+			if md.positions == nil {
+				md.positions = map[string]vec3{}
+			}
+			md.positions[r.ID] = r.Center
+		default:
+			return
 		}
 	}
-	return vec3{}, false
+}
+
+// loadTimeCenters returns the frozen load-time snapshot md.loadCenters (built once at
+// newMoveDispatch construction, keyed by node id → world center at load time — never
+// mutated by a later drag). Used to install the content-fit scene sphere and to seed
+// md.positions (SeedPositions) before the gesture dispatch loop's first iteration, when
+// md.positions/posReportCh have nothing in
+// them yet (movers only ever report a center AFTER a real center commit).
+func (md *MoveDispatch) loadTimeCenters() map[string]vec3 {
+	return md.loadCenters
+}
+
+// SeedPositions seeds md.positions from load-time geometry. Call once on the main
+// goroutine, after newMoveDispatch/LoadTopology and BEFORE Start launches any mover
+// goroutine and before RunStdinReader's dispatch loop begins — so the very first
+// gesture/camera interaction (which reads md.positions via heldCenters/centerOfNode)
+// has data, rather than an empty map that only fills once a mover commits its first real
+// move.
+func (md *MoveDispatch) SeedPositions() {
+	if md.positions == nil {
+		md.positions = map[string]vec3{}
+	}
+	for id, c := range md.loadTimeCenters() {
+		md.positions[id] = c
+	}
 }
 
 // sendMove routes one moveMsg to a node's dedicated external-entry channel (extIn), if
 // the id is a known node. This is the EXTERNAL-caller path — RootMove (drag) and
 // gesture.go's dragStart send — not a mover-to-mover send (those go through a mover's
 // own nm.pending/flushPending onto its OWN dedicated channel, never through this
-// function). md.nodeMovers is a read-only directory once construction finishes, safe to
+// function). md.extRoute is a read-only directory once construction finishes, safe to
 // read from any goroutine.
 func (md *MoveDispatch) sendMove(id string, msg moveMsg) {
-	nm, ok := md.nodeMovers[id]
+	ch, ok := md.extRoute[id]
 	if !ok {
 		return
 	}
@@ -598,11 +755,11 @@ func (md *MoveDispatch) sendMove(id string, msg moveMsg) {
 	// blocking send there (matches prior test behavior; no shutdown path exists in
 	// that setting anyway).
 	if md.ctx == nil {
-		nm.extIn <- msg
+		ch <- msg
 		return
 	}
 	select {
-	case nm.extIn <- msg:
+	case ch <- msg:
 	case <-md.ctx.Done():
 	}
 }
@@ -621,18 +778,6 @@ func (md *MoveDispatch) enqueueFor(nm *nodeMover) func(id string, msg moveMsg) {
 	}
 }
 
-// enqueueFuncFor resolves the send closure for nodeID's own retry queue (the SELF mover
-// whose handler is doing the sending), for use by MoveDispatch methods (fanEdgesAndPartners,
-// requantizeLocalPolars) that are not themselves nodeMover methods. Falls back to the
-// blocking md.sendMove only for the (practically unreached in production) case of a
-// nodeID with no live mover — there is no retry queue to append to in that case.
-func (md *MoveDispatch) enqueueFuncFor(nodeID string) func(id string, msg moveMsg) {
-	if nm, ok := md.nodeMovers[nodeID]; ok {
-		return nm.sendMove
-	}
-	return md.sendMove
-}
-
 // NOTE (neighborSetC drop history): moveMsgKindNeighborSetC (requantizeLocalPolars'
 // per-neighbor fan, quantized_move.go) used to route through a non-blocking
 // sendMoveLossy — "receiver is mid-cascade and will self-requantize on its own next
@@ -643,7 +788,7 @@ func (md *MoveDispatch) enqueueFuncFor(nodeID string) func(id string, msg moveMs
 // drives (TestNeighborSetCDropReachability) showed sendMoveLossy dropping ~98% of
 // NeighborSetC sends (9417/9600 in one run) — the drop path was not a rare backstop,
 // it was silently discarding almost every message. NeighborSetC is now routed through
-// the SENDING node's own retry queue (md.enqueueFuncFor(nodeID) in requantizeLocalPolars,
+// the SENDING node's own retry queue (nm.sendMove in requantizeLocalPolars,
 // see nodeMover.pending), the same decoupling every other per-commit fan in this file
 // already uses (fanEdgesAndPartners) — it gets the same deadlock-avoidance property (the
 // send never blocks the handler goroutine) without ever dropping: an item that can't be
@@ -652,29 +797,12 @@ func (md *MoveDispatch) enqueueFuncFor(nodeID string) func(id string, msg moveMs
 // TestMutuallyAdjacentDragFloodNoDeadlock still passes with this change, so the deadlock
 // risk sendMoveLossy was guarding against does not require a lossy send.
 
-// NodeKind returns the kind string for the given node id, or "" if unknown.
-// Used by applyEdit to resolve the node's kind when snapping a port-anchor
-// world-space direction to the nearest ring-anchor index. Called from the
-// gesture/stdin-reader goroutine (gesture.go:164, :653), which is NOT the
-// nodeMover's own goroutine — this is the ONE genuine cross-goroutine read of
-// nm.geom.
-//
-// It takes NO LOCK. Kind lives on nm.geom's embedded nodeIdentity (port_geometry.go),
-// a type carrying only the fields the loader sets once at construction and that no
-// handler (applyCenter, setPortAnchorId, emitGeometry) ever writes again — grepped
-// clean of any write to nodeIdentity's fields outside the load-time literal. That
-// split makes the "no lock needed" claim true by CONSTRUCTION rather than by
-// coincidence of which byte ranges a particular access happens to touch: identity
-// fields are not merely unwritten-in-practice today, they are not reachable from any
-// writer's field-assignment at all, in a different embedded struct from the mutable
-// ScenePolar/HasPos/ReachR/Inputs/Outputs applyCenter and setPortAnchorId do write.
-// TestNodeKindConcurrentWithApplyCenterUnderRace exercises this concurrently under
-// -race as a regression check on the split holding, not as a proof a lock is needed.
+// NodeKind returns the kind string for the given node id, or "" if unknown. Served from
+// the immutable md.kinds table built once at newMoveDispatch construction; it is never
+// mutated afterward, so this cross-goroutine read is lock-free by construction — there
+// is no writer to race against.
 func (md *MoveDispatch) NodeKind(nodeID string) string {
-	if nm, ok := md.nodeMovers[nodeID]; ok {
-		return nm.geom.Kind
-	}
-	return ""
+	return md.kinds[nodeID]
 }
 
 // Overlay-visibility API (MoveDispatch delegators), the overlayState methods, the

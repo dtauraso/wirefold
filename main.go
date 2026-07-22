@@ -197,6 +197,14 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 	// while the mover/gesture goroutines could already read it on the drag path.
 	md.LoadSceneSphere(topologyPath)
 
+	// Seed md.positions (the gesture goroutine's own node-center cache) from load-time
+	// geometry, BEFORE launching any mover/gesture goroutine — so the very first
+	// gesture/camera interaction has data. Movers only report a center over
+	// posReportCh AFTER a real center commit (drainPositions, RunStdinReader), so
+	// without this seed heldCenters()/centerOfNode would see nothing until the first
+	// drag.
+	md.SeedPositions()
+
 	// Launch the per-node and per-edge move-handler goroutines (decentralized
 	// node-move: each node/edge drains its own inbox and recomputes its own geometry).
 	// moverWG covers every nodeMover/edgeMover goroutine Start launched (see its doc

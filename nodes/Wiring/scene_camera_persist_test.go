@@ -36,7 +36,7 @@ func vpEqual(t *testing.T, gotPivot vec3, gotR float64, gotPos, gotUp dir, wantP
 // reads the file back with loadSceneViewpoint — the exact inverse — asserting equality.
 func TestPersistViewpointRoundTrips(t *testing.T) {
 	td := t.TempDir()
-	md := &MoveDispatch{nodeMovers: map[string]*nodeMover{}}
+	md := &MoveDispatch{}
 	md.EnableViewpointPersist(td)
 
 	wantPivot := vec3{X: 10, Y: 20, Z: 30}
@@ -85,7 +85,7 @@ func TestPersistLoadsLegacySceneJSONThenWritesNewFile(t *testing.T) {
 	}
 	vpEqual(t, pivot, r, pos, up, vec3{}, 5, dir{}, dir{})
 
-	md := &MoveDispatch{nodeMovers: map[string]*nodeMover{}}
+	md := &MoveDispatch{}
 	md.EnableViewpointPersist(td)
 	md.SetViewpoint(vec3{X: 7, Y: 8, Z: 9}, 123, dir{Theta: 1, Phi: 2}, dir{Theta: 0.1, Phi: 0.2})
 	md.EmitViewpoint(nil)
@@ -116,7 +116,7 @@ func TestPersistLoadsLegacySceneJSONThenWritesNewFile(t *testing.T) {
 // get there.
 func TestPersistWriteBurstLandsFinalValue(t *testing.T) {
 	td := t.TempDir()
-	md := &MoveDispatch{nodeMovers: map[string]*nodeMover{}}
+	md := &MoveDispatch{}
 	md.EnableViewpointPersist(td)
 	md.SetViewpoint(vec3{}, 1, dir{}, dir{})
 	for i := 0; i < 50; i++ {
@@ -141,7 +141,7 @@ func TestCameraAndOverlaysFilesDoNotClobber(t *testing.T) {
 	td := t.TempDir()
 
 	// Go persists a camera first.
-	md := &MoveDispatch{nodeMovers: map[string]*nodeMover{}}
+	md := &MoveDispatch{}
 	md.EnableViewpointPersist(td)
 	md.SetViewpoint(vec3{X: 11, Y: 22, Z: 33}, 321, dir{Theta: 0.5, Phi: 1.5}, dir{Theta: 0.05, Phi: 0.15})
 	md.EmitViewpoint(nil)

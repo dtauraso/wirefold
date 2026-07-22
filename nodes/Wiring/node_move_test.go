@@ -30,7 +30,7 @@ func deliver(md *MoveDispatch, nodeID string, x, y, z float64) {
 	center := &vec3{X: x, Y: y, Z: z}
 	acks := make([]chan struct{}, 0, len(md.edgeMovers)+1)
 	nodeAck := make(chan struct{})
-	md.nodeMovers[nodeID].extIn <- moveMsg{Kind: moveMsgKindCenter, NodeID: nodeID, Center: center, testDone: nodeAck}
+	md.extRoute[nodeID] <- moveMsg{Kind: moveMsgKindCenter, NodeID: nodeID, Center: center, testDone: nodeAck}
 	acks = append(acks, nodeAck)
 	for _, em := range md.edgeMovers {
 		if em.srcID != nodeID && em.dstID != nodeID {
@@ -213,8 +213,9 @@ func TestNodeGeometryLabelSidecar(t *testing.T) {
 	// application node goroutines). Emit directly from the movers' held state — the same
 	// direct read the removed ResendGeometry(!started) path used — so this test can assert
 	// on Label/NodeKind without spinning up full node goroutines.
-	for _, nm := range md.nodeMovers {
-		emitNodeGeometryLocked(tr, nm.id, nm.geom, nm.partnerCenter)
+	for _, sd := range md.NodeSeeds() {
+		tr.NodeGeometry(sd.ID, sd.Label, sd.Kind, sd.CX, sd.CY, sd.CZ, sd.Radius, sd.SphereR, sd.Ports,
+			sd.VRX, sd.VRY, sd.VRZ, sd.FRX, sd.FRY, sd.FRZ)
 	}
 
 	tr.Close()
@@ -433,6 +434,7 @@ func TestRootMoveContinuousPositionLocalPolarRequantize(t *testing.T) {
 	const eps = 1e-9
 	deadline := time.Now().Add(2 * time.Second)
 	for {
+		md.drainPositions()
 		c, ok := md.centerOfNode("src")
 		if ok && math.Abs(c.X-target.X) <= eps && math.Abs(c.Y-target.Y) <= eps && math.Abs(c.Z-target.Z) <= eps {
 			break
