@@ -134,7 +134,7 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 			sd.VRX, sd.VRY, sd.VRZ, sd.FRX, sd.FRY, sd.FRZ)
 	}
 	for _, sd := range md.EdgeSeeds() {
-		tr.Geometry(sd.Label, sd.SrcNode, sd.DstNode, sd.SX, sd.SY, sd.SZ, sd.EX, sd.EY, sd.EZ)
+		tr.Geometry(sd.Label, sd.SrcNode, sd.DstNode, sd.SrcPort, sd.DstPort, sd.SX, sd.SY, sd.SZ, sd.EX, sd.EY, sd.EZ)
 	}
 	// Sparse, one-time startup sanity check (CLAUDE.md DEBUG BREADCRUMB channel): every
 	// node LoadTopology returned should have gotten a row-seed entry above. A mismatch

@@ -223,12 +223,29 @@ func (s *SnapshotState) writeInteriorBlock(buf []byte, off int, b *snapshotBuild
 }
 
 // writeEdgeBlock writes the Edge block: stable row order (insertion order of edge labels).
+// The endpoint coordinates are DERIVED from the same per-node Port block data
+// (SnapshotState.portWorldPos), not read from e.sx..ez directly: the node's port
+// geometry and the edge's own last emitted segment can straddle different buildSnapshot
+// frames during a continuous drag (different goroutines), which perpetually lags the
+// rendered edge endpoint one drag-step behind the port sphere it should be pinned to.
+// Deriving from the Port block instead makes a node-geometry update move the port AND
+// the edge endpoint in the SAME frame, unconditionally. e.sx..ez remain the FALLBACK for
+// an edge whose endpoint port hasn't resolved yet (edges can register before their
+// endpoint nodes do, see onEdgeGeometry).
 func (s *SnapshotState) writeEdgeBlock(buf []byte, off int, b *snapshotBuild) int {
 	edgeBuf := buf[off : off+int(b.edgeCount)*BufEdgeStride]
 	for i, e := range s.edges {
+		sx, sy, sz := e.sx, e.sy, e.sz
+		if px, py, pz, ok := s.portWorldPos(e.srcNode, e.srcPort, false); ok {
+			sx, sy, sz = px, py, pz
+		}
+		ex, ey, ez := e.ex, e.ey, e.ez
+		if px, py, pz, ok := s.portWorldPos(e.dstNode, e.dstPort, true); ok {
+			ex, ey, ez = px, py, pz
+		}
 		SetEdgeRow(edgeBuf, i,
-			float32(e.sx), float32(e.sy), float32(e.sz),
-			float32(e.ex), float32(e.ey), float32(e.ez), e.selected,
+			float32(sx), float32(sy), float32(sz),
+			float32(ex), float32(ey), float32(ez), e.selected,
 			b.edgeLabelOffs[i], b.edgeLabelLens[i])
 	}
 	return off + int(b.edgeCount)*BufEdgeStride

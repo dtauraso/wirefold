@@ -211,6 +211,17 @@ type Event struct {
 	// from them as a LineCurve3. Set on geometry events only (keyed by Edge).
 	SX, SY, SZ float64
 	EX, EY, EZ float64
+	// SrcPort/DstPort carry this edge's endpoint PORT NAMES (source OUT-port, dest
+	// IN-port) on geometry events (KindGeometry). Buffer/snapshot.go uses these,
+	// together with Node/Target (the endpoint node ids), to look up the SAME
+	// per-node port world position the Port block was just written from, and
+	// derives the Edge block's SX..EZ from that lookup rather than from the
+	// stale SX..EZ this event carries — a node-geometry event and an edge-geometry
+	// event land on different goroutines and can straddle a buildSnapshot frame
+	// during a drag, so the emitted SX..EZ above can be one cycle stale; the port
+	// lookup is not. Not Port (singular; already used by send/recv events) because
+	// an edge names BOTH its endpoint ports.
+	SrcPort, DstPort string
 	// NX/NY/NZ carry the node's center world position on node-geometry events
 	// (KindNodeGeometry), and Ports carries that node's per-port world geometry.
 	// Keyed by Node (the node id). Set on node-geometry events only.
@@ -423,9 +434,14 @@ func (t *Trace) Position(node, port string, value int, x, y, z, f float64, bead 
 // them to node-row indices so the on-surface selection highlight has the edge-graph
 // adjacency (the JSON/pump path ignores them — it keys segments by Edge). Carried on
 // the existing Node (source) and Target (dest) fields; unused on geometry otherwise.
-func (t *Trace) Geometry(edge, src, dst string, sx, sy, sz, ex, ey, ez float64) {
+// srcPort/dstPort are the edge's endpoint port names (source OUT-port, dest IN-port);
+// Buffer/snapshot.go uses them to derive the Edge block's endpoints from the Port
+// block instead of trusting sx..ez, which can be one clock cycle stale mid-drag
+// (see Event.SrcPort/DstPort doc comment).
+func (t *Trace) Geometry(edge, src, dst, srcPort, dstPort string, sx, sy, sz, ex, ey, ez float64) {
 	t.emit(Event{
 		Kind: KindGeometry, Edge: edge, Node: src, Target: dst,
+		SrcPort: srcPort, DstPort: dstPort,
 		SX: sx, SY: sy, SZ: sz,
 		EX: ex, EY: ey, EZ: ez,
 	})
