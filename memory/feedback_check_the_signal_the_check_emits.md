@@ -21,8 +21,11 @@ the wrong object, then treating its silence as evidence. A check that cannot fai
 reads exactly like a passing one.
 
 **The six, all one session, all "checked the object next to the one that mattered":**
-`$?` instead of stdout (see the verify recipe in CLAUDE.md, which owns this fact
-now — `stop-checks.sh` always exits 0 and speaks the hook's JSON protocol);
+`$?` instead of stdout (see the verify recipe in CLAUDE.md — raw `stop-checks.sh`
+always exits 0 and speaks the hook's JSON protocol; the terminal fix is now
+`scripts/verify.sh`, a `--cli` wrapper that exits NONZERO on failure, so at the
+terminal `$?` is finally the right channel — but only for verify.sh, never raw
+stop-checks.sh);
 `git branch -d`'s unmerged-*commit* check on a branch whose entire content was its
 `branch.<name>.description` (git has no safety check for descriptions — they are
 local config and deletion is unrecoverable); `git status` on the file I edited
