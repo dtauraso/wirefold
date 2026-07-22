@@ -270,10 +270,12 @@ func injectClosures(ctx context.Context, v reflect.Value, name string, pb PortBi
 			if o != nil && o.EdgeLabel != "" {
 				g := o.Geom()
 				dst := ""
+				dstPort := ""
 				if o.pw != nil {
 					dst = o.pw.Target
+					dstPort = o.pw.TargetHandle
 				}
-				tr.Geometry(o.EdgeLabel, name, dst,
+				tr.Geometry(o.EdgeLabel, name, dst, o.port, dstPort,
 					g.Start.X, g.Start.Y, g.Start.Z,
 					g.End.X, g.End.Y, g.End.Z)
 			}

@@ -577,7 +577,7 @@ func (m *edgeMover) recomputeGeometry() {
 	}
 	// Emit this edge's own segment so the renderer redraws the wire from Go's endpoints.
 	if m.tr != nil {
-		m.tr.Geometry(m.edgeID, m.srcID, m.dstID,
+		m.tr.Geometry(m.edgeID, m.srcID, m.dstID, m.srcH, m.dstH,
 			seg.Start.X, seg.Start.Y, seg.Start.Z,
 			seg.End.X, seg.End.Y, seg.End.Z)
 	}

@@ -313,7 +313,13 @@ type NodeGeomSeed struct {
 // degenerate 0,0,0→0,0,0 segment.
 type EdgeGeomSeed struct {
 	Label, SrcNode, DstNode string
-	SX, SY, SZ, EX, EY, EZ  float64
+	// SrcPort/DstPort are the edge's endpoint port names (source OUT-port, dest
+	// IN-port) — carried alongside the seed segment so main.go's seed tr.Geometry
+	// call can thread port identity onto the seed row the same way the node's own
+	// live EmitGeometry does (Buffer/snapshot.go derives the Edge block's endpoint
+	// coordinates from the Port block by this identity).
+	SrcPort, DstPort       string
+	SX, SY, SZ, EX, EY, EZ float64
 }
 
 // NodeSeeds returns every node's load-time seed geometry in SPEC ORDER (see
@@ -422,6 +428,7 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 		}
 		md.edgeSeeds = append(md.edgeSeeds, EdgeGeomSeed{
 			Label: label, SrcNode: ep.Source, DstNode: ep.Target,
+			SrcPort: ep.SourceHandle, DstPort: ep.TargetHandle,
 			SX: sx, SY: sy, SZ: sz, EX: ex, EY: ey, EZ: ez,
 		})
 	}

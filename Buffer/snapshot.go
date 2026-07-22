@@ -292,6 +292,17 @@ type edgeSnapState struct {
 	ex, ey, ez float64
 	srcNode    string
 	dstNode    string
+	// srcPort/dstPort are this edge's endpoint PORT NAMES (source OUT-port, dest
+	// IN-port). buildSnapshot uses them, together with srcNode/dstNode, to look up
+	// the SAME per-node port world position the Port block was just written from
+	// (portWorldPos) and derive the Edge block's SX..EZ from that lookup instead of
+	// from sx..ez above — sx..ez are only ever a snapshot of what the edge's own
+	// goroutine last emitted, which can be one clock cycle stale mid-drag relative
+	// to the node's own live port geometry (see CLAUDE.md/the edge-tube drift fix).
+	// sx..ez remain the FALLBACK for an edge whose endpoint port hasn't resolved yet
+	// (edges can register before their endpoint nodes do, see below).
+	srcPort string
+	dstPort string
 	// selected is PERSISTENT (not a transient event flag): 1 marks this edge as the
 	// current click-selected edge. Set/cleared by KindSelect (Edge field); exclusive with
 	// node selection. Not reset in clearTransients.
@@ -643,6 +654,30 @@ func (s *SnapshotState) onEdgeGeometry(ev T.Event) {
 	if ev.Target != "" {
 		e.dstNode = ev.Target
 	}
+	if ev.SrcPort != "" {
+		e.srcPort = ev.SrcPort
+	}
+	if ev.DstPort != "" {
+		e.dstPort = ev.DstPort
+	}
+}
+
+// portWorldPos looks up the CURRENT world position of one (node, port) pair from the
+// same per-node port data writePortBlock (pack.go) writes the Port block from. Returns
+// ok=false when the node hasn't registered yet, or has registered but doesn't (yet)
+// carry a port of that name/direction — both legitimate during load, when an edge can
+// register before its endpoint nodes do.
+func (s *SnapshotState) portWorldPos(nodeID, portName string, isInput bool) (x, y, z float64, ok bool) {
+	idx, exists := s.nodeIndex[nodeID]
+	if !exists {
+		return 0, 0, 0, false
+	}
+	for _, p := range s.nodes[idx].ports {
+		if p.name == portName && p.isInput == isInput {
+			return p.px, p.py, p.pz, true
+		}
+	}
+	return 0, 0, 0, false
 }
 
 // onLayoutLink registers one LAYOUT-link pair (Node=one endpoint, Target=the other), sourced
