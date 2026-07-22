@@ -40,12 +40,12 @@ func writeXTNY(t *testing.T) string {
 	t.Helper()
 	root := writeXTN(t)
 	mk := func(rel, body string) { writeTreeFile(t, root, rel, body) }
-	mk("nodes/y/meta.json", `{"id":"y","type":"FanInSrc","r":100,"scenePolarR":60,"scenePolarTheta":0.5,"scenePolarPhi":2.0}`)
+	mk("nodes/y/meta.json", `{"id":"y","type":"SrcNode","r":100,"scenePolarR":60,"scenePolarTheta":0.5,"scenePolarPhi":2.0}`)
 	mk("nodes/y/outputs/Out.json", `{"name":"Out"}`)
-	mk("nodes/z/meta.json", `{"id":"z","type":"FanInSink","r":100,"scenePolarR":70,"scenePolarTheta":1.4,"scenePolarPhi":-0.6}`)
+	mk("nodes/z/meta.json", `{"id":"z","type":"SinkNode","r":100,"scenePolarR":70,"scenePolarTheta":1.4,"scenePolarPhi":-0.6}`)
 	mk("nodes/z/inputs/In.json", `{"name":"In"}`)
 	mk("edges/eYZ.json", `{"label":"eYZ","kind":"data","source":"y","sourceHandle":"Out","target":"z","targetHandle":"In"}`)
-	mk("nodes/iso/meta.json", `{"id":"iso","type":"FanInSrc","r":100,"scenePolarR":50,"scenePolarTheta":2.5,"scenePolarPhi":1.0}`)
+	mk("nodes/iso/meta.json", `{"id":"iso","type":"SrcNode","r":100,"scenePolarR":50,"scenePolarTheta":2.5,"scenePolarPhi":1.0}`)
 	mk("nodes/iso/outputs/Out.json", `{"name":"Out"}`)
 	return root
 }
@@ -261,8 +261,8 @@ func TestAbcDragResetAloneClearsGotDragMsgAndEmits(t *testing.T) {
 	var frames syncBuffer
 	snap := B.NewSnapshotState(&frames)
 
-	snap.Update(T.Event{Kind: T.KindNodeGeometry, Node: "a", NodeKind: "FanInSrc", Label: "a"})
-	snap.Update(T.Event{Kind: T.KindNodeGeometry, Node: "b", NodeKind: "FanInSink", Label: "b"})
+	snap.Update(T.Event{Kind: T.KindNodeGeometry, Node: "a", NodeKind: "SrcNode", Label: "a"})
+	snap.Update(T.Event{Kind: T.KindNodeGeometry, Node: "b", NodeKind: "SinkNode", Label: "b"})
 	snap.Update(T.Event{Kind: T.KindAbcDrag, Node: "a"})
 
 	before := lastFrame([]byte(frames.String()))
@@ -301,8 +301,8 @@ func TestAbcDragDeltaReachesBufferNodeColumns(t *testing.T) {
 	var frames syncBuffer
 	snap := B.NewSnapshotState(&frames)
 
-	snap.Update(T.Event{Kind: T.KindNodeGeometry, Node: "a", NodeKind: "FanInSrc", Label: "a"})
-	snap.Update(T.Event{Kind: T.KindNodeGeometry, Node: "b", NodeKind: "FanInSink", Label: "b"})
+	snap.Update(T.Event{Kind: T.KindNodeGeometry, Node: "a", NodeKind: "SrcNode", Label: "a"})
+	snap.Update(T.Event{Kind: T.KindNodeGeometry, Node: "b", NodeKind: "SinkNode", Label: "b"})
 
 	snap.Update(T.Event{Kind: T.KindAbcDrag, Node: "a", DeltaA: 3, DeltaB: -7, DeltaC: 2})
 	snap.Update(T.Event{Kind: T.KindAbcDrag, Node: "b", DeltaA: 0, DeltaB: 0, DeltaC: 0})

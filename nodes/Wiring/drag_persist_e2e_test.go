@@ -31,14 +31,14 @@ func writeStar3(t *testing.T) string {
 	// Scene-polar (r, theta, phi) triples — arbitrary but distinct, spread the three
 	// nodes apart so a drag on A demonstrably changes the quantized bearing to both
 	// leaves, not just their distance.
-	mk("nodes/A/meta.json", `{"id":"A","type":"FanInSrc","r":100,"scenePolarR":150,"scenePolarTheta":1.2,"scenePolarPhi":0.3}`)
+	mk("nodes/A/meta.json", `{"id":"A","type":"SrcNode","r":100,"scenePolarR":150,"scenePolarTheta":1.2,"scenePolarPhi":0.3}`)
 	mk("nodes/A/outputs/Out.json", `{"name":"Out"}`)
-	mk("nodes/B/meta.json", `{"id":"B","type":"FanInSink","r":100,"scenePolarR":100,"scenePolarTheta":1.0,"scenePolarPhi":1.2}`)
+	mk("nodes/B/meta.json", `{"id":"B","type":"SinkNode","r":100,"scenePolarR":100,"scenePolarTheta":1.0,"scenePolarPhi":1.2}`)
 	mk("nodes/B/inputs/In.json", `{"name":"In"}`)
-	mk("nodes/C/meta.json", `{"id":"C","type":"FanInSink","r":100,"scenePolarR":90,"scenePolarTheta":0.9,"scenePolarPhi":-1.0}`)
+	mk("nodes/C/meta.json", `{"id":"C","type":"SinkNode","r":100,"scenePolarR":90,"scenePolarTheta":0.9,"scenePolarPhi":-1.0}`)
 	mk("nodes/C/inputs/In.json", `{"name":"In"}`)
 	// Both edges share A's single "Out" output port — a fan-OUT, symmetric with the
-	// fan-IN this package's faninSrc/faninSink kinds already exercise (two edges sharing
+	// fan-IN this package's srcNode/sinkNode kinds already exercise (two edges sharing
 	// one destination "In" port). validate.go only checks the port NAME is declared on
 	// the kind, not that a handle is used by at most one edge.
 	mk("edges/eAB.json", `{"label":"eAB","kind":"data","source":"A","sourceHandle":"Out","target":"B","targetHandle":"In"}`)

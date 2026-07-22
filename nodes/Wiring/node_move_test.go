@@ -49,8 +49,8 @@ func TestDecentralizedNodeMove(t *testing.T) {
 	// Initial positions are scene polar about the origin: src (100,0,0), dst (0,0,0).
 	const topo = `{
 	  "nodes": [
-	    {"id":"src","type":"FanInSrc","scenePolarR":100,"scenePolarTheta":1.5707963267948966,"scenePolarPhi":0,"outputs":[{"name":"Out"}]},
-	    {"id":"dst","type":"FanInSink","scenePolarR":0,"scenePolarTheta":0,"scenePolarPhi":0,"inputs":[{"name":"In"}]}
+	    {"id":"src","type":"SrcNode","scenePolarR":100,"scenePolarTheta":1.5707963267948966,"scenePolarPhi":0,"outputs":[{"name":"Out"}]},
+	    {"id":"dst","type":"SinkNode","scenePolarR":0,"scenePolarTheta":0,"scenePolarPhi":0,"inputs":[{"name":"In"}]}
 	  ],
 	  "edges": [
 	    {"label":"e0","kind":"data","source":"src","sourceHandle":"Out","target":"dst","targetHandle":"In"}
@@ -109,8 +109,8 @@ func TestDecentralizedNodeMove(t *testing.T) {
 	}
 	srcCenter := vec3{X: nx, Y: ny, Z: nz}
 	dstCenter := dstCenterHeld
-	srcGeom := nodeGeom{nodeIdentity: nodeIdentity{Kind: "FanInSrc"}, HasPos: true, ScenePolar: cart2polar(srcCenter), Outputs: []portGeom{{Name: "Out"}}}
-	dstGeom := nodeGeom{nodeIdentity: nodeIdentity{Kind: "FanInSink"}, HasPos: true, ScenePolar: cart2polar(dstCenter), Inputs: []portGeom{{Name: "In"}}}
+	srcGeom := nodeGeom{nodeIdentity: nodeIdentity{Kind: "SrcNode"}, HasPos: true, ScenePolar: cart2polar(srcCenter), Outputs: []portGeom{{Name: "Out"}}}
+	dstGeom := nodeGeom{nodeIdentity: nodeIdentity{Kind: "SinkNode"}, HasPos: true, ScenePolar: cart2polar(dstCenter), Inputs: []portGeom{{Name: "In"}}}
 	// Polar-torus port-to-port model: segment/arc between the two ports' world points.
 	wantSeg := edgeSegment(srcGeom, dstGeom, "Out", "In")
 	wantArc := edgeArcPolar(srcGeom, dstGeom, "Out", "In")
@@ -181,8 +181,8 @@ func TestNodeGeometryLabelSidecar(t *testing.T) {
 	// "src" carries an explicit human label; "dst" omits data.label → label falls back to id.
 	const topo = `{
 	  "nodes": [
-	    {"id":"src","type":"FanInSrc","data":{"label":"Source Node"},"outputs":[{"name":"Out"}]},
-	    {"id":"dst","type":"FanInSink","inputs":[{"name":"In"}]}
+	    {"id":"src","type":"SrcNode","data":{"label":"Source Node"},"outputs":[{"name":"Out"}]},
+	    {"id":"dst","type":"SinkNode","inputs":[{"name":"In"}]}
 	  ],
 	  "edges": [
 	    {"label":"e0","kind":"data","source":"src","sourceHandle":"Out","target":"dst","targetHandle":"In"}
@@ -224,7 +224,7 @@ func TestNodeGeometryLabelSidecar(t *testing.T) {
 	wantLabel := map[string]string{"src": "Source Node", "dst": "dst"}
 	// Expected Go kind per node id: the node's `type` field, carried on node-geometry
 	// for the new-system kind→color sidecar (row-keyed).
-	wantKind := map[string]string{"src": "FanInSrc", "dst": "FanInSink"}
+	wantKind := map[string]string{"src": "SrcNode", "dst": "SinkNode"}
 
 	// First-seen node id order == buffer node-row order. Collect it and verify each
 	// node-geometry event's Label matches.
@@ -259,8 +259,8 @@ func TestNodeGeometryLabelSidecar(t *testing.T) {
 func TestMoverCenterRace(t *testing.T) {
 	const topo = `{
 	  "nodes": [
-	    {"id":"src","type":"FanInSrc","outputs":[{"name":"Out"}]},
-	    {"id":"dst","type":"FanInSink","inputs":[{"name":"In"}]}
+	    {"id":"src","type":"SrcNode","outputs":[{"name":"Out"}]},
+	    {"id":"dst","type":"SinkNode","inputs":[{"name":"In"}]}
 	  ],
 	  "edges": [
 	    {"label":"e0","kind":"data","source":"src","sourceHandle":"Out","target":"dst","targetHandle":"In"}
@@ -313,8 +313,8 @@ func TestMoverCenterRace(t *testing.T) {
 func TestOutGeomRace(t *testing.T) {
 	const topo = `{
 	  "nodes": [
-	    {"id":"src","type":"FanInSrc","outputs":[{"name":"Out"}]},
-	    {"id":"dst","type":"FanInSink","inputs":[{"name":"In"}]}
+	    {"id":"src","type":"SrcNode","outputs":[{"name":"Out"}]},
+	    {"id":"dst","type":"SinkNode","inputs":[{"name":"In"}]}
 	  ],
 	  "edges": [
 	    {"label":"e0","kind":"data","source":"src","sourceHandle":"Out","target":"dst","targetHandle":"In"}
@@ -380,8 +380,8 @@ func TestOutGeomRace(t *testing.T) {
 func TestRootMoveContinuousPositionLocalPolarRequantize(t *testing.T) {
 	const topo = `{
 	  "nodes": [
-	    {"id":"src","type":"FanInSrc","outputs":[{"name":"Out"}]},
-	    {"id":"dst","type":"FanInSink","inputs":[{"name":"In"}]}
+	    {"id":"src","type":"SrcNode","outputs":[{"name":"Out"}]},
+	    {"id":"dst","type":"SinkNode","inputs":[{"name":"In"}]}
 	  ],
 	  "edges": [
 	    {"label":"e0","kind":"data","source":"src","sourceHandle":"Out","target":"dst","targetHandle":"In"}

@@ -602,15 +602,13 @@ func (m *edgeMover) recomputeGeometry() {
 	if m.out != nil {
 		m.out.publishGeom(outGeom{ArcLength: arc, SimLatencyMs: lat, Start: seg.Start, End: seg.End})
 	}
-	// Re-derive this edge's own in-flight beads from the new arc + segment. This edge
-	// does NOT touch pw.inflight itself: the dest wire is its own goroutine now, and a
-	// fan-in wire is shared by several source edges, so no single edge can own it. Post
-	// the revision over reviseCh (keyed by THIS edge's source identity so only its own
-	// beads are rebased) and let the wire's goroutine apply it. Fire-and-forget, no tick
-	// threaded — the wire stamps its own clock reading (MODEL.md: each goroutine reads
-	// its own clock).
+	// Re-derive this edge's in-flight beads from the new arc + segment. This edge does NOT
+	// touch pw.inflight itself: the dest wire is its own goroutine now. Post the revision
+	// over reviseCh and let the wire's goroutine apply it. Fire-and-forget, no tick threaded
+	// — the wire stamps its own clock reading (MODEL.md: each goroutine reads its own clock).
+	// One edge per wire (fan-in removed), so the revision applies to all of the wire's beads.
 	if m.dest != nil {
-		m.dest.sendRevise(reviseReq{node: m.srcID, port: m.srcH, arc: arc, seg: seg})
+		m.dest.sendRevise(reviseReq{arc: arc, seg: seg})
 	}
 	// Emit this edge's own segment so the renderer redraws the wire from Go's endpoints.
 	if m.tr != nil {

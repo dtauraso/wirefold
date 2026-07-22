@@ -46,7 +46,7 @@ func TestNodeKindConcurrentWithApplyCenterUnderRace(t *testing.T) {
 			default:
 			}
 			if k := md.NodeKind("src"); k == "" {
-				t.Errorf("NodeKind(src) returned empty; want %q", "FanInSrc")
+				t.Errorf("NodeKind(src) returned empty; want %q", "SrcNode")
 			}
 		}
 	}()

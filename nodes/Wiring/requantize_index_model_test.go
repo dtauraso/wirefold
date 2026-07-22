@@ -192,7 +192,7 @@ func TestPersistedPoleDrivesReloadWorldPositions(t *testing.T) {
 	// (60°) is nowhere near +y) would resolve to HOME, not tiltedPole.
 	root := t.TempDir()
 	mk := func(rel, body string) { writeTreeFile(t, root, rel, body) }
-	mk("nodes/self/meta.json", `{"id":"self","type":"FanInSink","scenePolarR":0,"scenePolarTheta":0,"scenePolarPhi":0}`)
+	mk("nodes/self/meta.json", `{"id":"self","type":"SinkNode","scenePolarR":0,"scenePolarTheta":0,"scenePolarPhi":0}`)
 	mk("nodes/self/inputs/In.json", `{"name":"In"}`)
 	// "far" gets a REAL position, at exactly dirFar/40 from self (self sits at the
 	// origin) — its center IS resolvable at reload, so computeLocalPolars re-derives
@@ -201,7 +201,7 @@ func TestPersistedPoleDrivesReloadWorldPositions(t *testing.T) {
 	// is internally consistent regardless of which pole was used — the test below
 	// exposes a wrong pole by reconstructing under the INDEPENDENTLY known-correct
 	// tiltedPole, not under lhSelf.Pole() itself.
-	mk("nodes/far/meta.json", fmt.Sprintf(`{"id":"far","type":"FanInSrc","scenePolarR":40,"scenePolarTheta":%v,"scenePolarPhi":%v}`, dirFar.Theta, dirFar.Phi))
+	mk("nodes/far/meta.json", fmt.Sprintf(`{"id":"far","type":"SrcNode","scenePolarR":40,"scenePolarTheta":%v,"scenePolarPhi":%v}`, dirFar.Theta, dirFar.Phi))
 	mk("nodes/far/outputs/Out.json", `{"name":"Out"}`)
 	mk("edges/e0.json", `{"label":"e0","kind":"data","source":"far","sourceHandle":"Out","target":"self","targetHandle":"In"}`)
 
