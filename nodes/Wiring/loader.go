@@ -496,6 +496,20 @@ func (b *buildCtx) buildMoveDispatch() {
 			nm.quantOffset = off
 		}
 	}
+
+	// Each unique dest wire is its own goroutine (PacedWire.run, launched by Start). Give
+	// it its clock source and a speed sink (it is a clock-owning goroutine, so a global
+	// playback-speed change must reach it too), and hand the set to MoveDispatch to launch.
+	// b.destWire is keyed per destination port, so its values are exactly the unique wires
+	// (a fan-in port's several edges share one).
+	for _, pw := range b.destWire {
+		pw.clockSrc = b.clk
+		wireSpeedCh := make(chan float64, 1)
+		pw.speedCh = wireSpeedCh
+		b.speedSinks = append(b.speedSinks, wireSpeedCh)
+		md.wires = append(md.wires, pw)
+	}
+
 	b.md = md
 }
 

@@ -13,11 +13,18 @@ goroutine, and so does each wire (`PacedWire`): the wire is an ACTIVE
 GOROUTINE with a channel on each end — a channel in from its source
 node, a channel out to its destination node. The wire goroutine owns its
 own beads (`inflight`/`delivered`) and its own geometry; nothing outside
-it locks or reaches into that state. This is not a new goroutine per
-edge — it is the same per-edge goroutine that already existed to revise
-in-flight geometry as a node was dragged, now given ownership of the
-beads it was reaching across a lock to revise. Goroutine count is
-unchanged; what changed is who owns the state. The network is
+it locks or reaches into that state. The wire has its OWN goroutine
+(`PacedWire.run`, one per unique destination wire, launched by `Start`) —
+not stepped by another. It must: a destination **input port is one wire**,
+and several source edges can **fan in** to it, so no single edge's
+goroutine can own the shared wire. Incident edges only POST geometry
+revisions to the wire over a channel (`reviseCh`, keyed by the edge's
+source so only that edge's beads are rebased); the wire's own goroutine is
+the sole thing that touches `inflight`. (An earlier design had the wire
+driven by an incident edge's goroutine to hold goroutine count fixed —
+correct for a 1:1 edge:wire, but for fan-in it put N edge goroutines onto
+one wire's beads, a data race and a cross-edge geometry clobber. The wire
+owning its own goroutine is the fix.) The network is
 self-scheduling: there is no central runner, no walker, no underlying
 layer that "runs" the nodes. The network IS the running program.
 

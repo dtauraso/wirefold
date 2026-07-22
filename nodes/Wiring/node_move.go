@@ -181,6 +181,11 @@ type moveMsg struct {
 // read an edge's loaded geometry (EdgeOut) without going through a central coordinator.
 type MoveDispatch struct {
 	edgeMovers map[string]*edgeMover
+	// wires is every UNIQUE destination wire (one per destination input port — a fan-in
+	// port's several edges share one wire). Each is an active goroutine of its own
+	// (PacedWire.run), launched by Start. Populated at construction from the loader's
+	// per-port destWire map; a plain slice enumeration for launching, never an id lookup.
+	wires []*PacedWire
 	// nodeMoverList is a plain ENUMERATION (not an id-keyed lookup directory) of every
 	// nodeMover built at construction, kept solely so Start can launch one goroutine per
 	// node. Nothing looks a mover up BY ID through this field — every runtime id-keyed
@@ -666,6 +671,16 @@ func (md *MoveDispatch) Start(ctx context.Context) *sync.WaitGroup {
 		go func() {
 			defer wg.Done()
 			em.run(ctx)
+		}()
+	}
+	// One goroutine per unique dest wire: each owns its own inflight/geometry and paces
+	// on its own clock (PacedWire.run). This is what makes a fan-in dest wire single-owner.
+	for _, pw := range md.wires {
+		pw := pw
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			pw.run(ctx)
 		}()
 	}
 	return wg
