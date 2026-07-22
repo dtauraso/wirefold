@@ -152,6 +152,12 @@ docs, and the auto-memory dir, costing tokens and time.
     - The RAW `scripts/stop-checks.sh` (no `--cli`) is the **Stop-hook** entry point ONLY: it speaks the hook's JSON protocol — a failure is a `{"decision":"block","reason":…}` object on stdout while it **ALWAYS exits 0**. So `stop-checks.sh; echo $?` reads a constant and `stop-checks.sh && …` is green on a red tree. Use `verify.sh` at the terminal; if you must call stop-checks.sh directly, clean means *empty stdout* (`[ -z "$(bash scripts/stop-checks.sh 2>/dev/null)" ]`), never the exit code.
     - Caveats verify does NOT cover: `tsc --noEmit` alone won't refresh `out/webview.js` (verify's npm build does), and an extension-host change still needs VS Code "Developer: Reload Window" (reopening a file only reloads the webview).
 - One logical change per commit.
+- **Don't weaken tests to go green.** `tools/check-test-integrity.sh` (in the verify suite)
+  flags this branch's test changes when they SHED strength — net assertions removed, or a
+  newly added `t.Skip`/`.only`/`os.Exit`/`recover()` — because a passing suite and a
+  suite-edited-to-pass look identical to every other check. It is detection, not prohibition:
+  fix the code, don't loosen the test. A genuinely-wrong assertion or a retired test is fine,
+  but say so — put `[allow-test-weakening]` (with why) in a commit message on the branch.
 - Push each commit to the current task branch.
 - **Cost markers:** only record a `($N.NN)` cost marker on a commit (or bundle of commits) when the work was sized at **≥$5 expected** beforehand. Sub-$5 work lands without a marker. Bundle small commits into ≥$5 chunks for marker purposes. Pre-v0 sub-$5 markers stay as historical record but are no longer the convention.
 - **Branch hygiene:** task-named branches (`task/<short-kebab-description>`) that merge to `main` quickly. Avoid long-lived feature branches like the v0 `visual-editor` pattern.
