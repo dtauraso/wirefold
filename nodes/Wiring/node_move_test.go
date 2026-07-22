@@ -433,6 +433,7 @@ func TestRootMoveContinuousPositionLocalPolarRequantize(t *testing.T) {
 	const eps = 1e-9
 	deadline := time.Now().Add(2 * time.Second)
 	for {
+		md.drainPositions()
 		c, ok := md.centerOfNode("src")
 		if ok && math.Abs(c.X-target.X) <= eps && math.Abs(c.Y-target.Y) <= eps && math.Abs(c.Z-target.Z) <= eps {
 			break

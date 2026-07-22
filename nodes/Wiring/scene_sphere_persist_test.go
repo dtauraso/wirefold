@@ -45,9 +45,8 @@ func TestSceneSphereDefaultsFromContentFit(t *testing.T) {
 		"a": {id: "a", geom: nodeGeom{HasPos: true, ScenePolar: cart2polar(vec3{X: 0, Y: 0, Z: 0})}},
 		"b": {id: "b", geom: nodeGeom{HasPos: true, ScenePolar: cart2polar(vec3{X: 100, Y: 0, Z: 0})}},
 	}
-	for _, nm := range md.nodeMovers {
-		nm.snap.Store(&centerSnap{c: nodeWorldPos(nm.geom)})
-	}
+	// LoadSceneSphere's content-fit path now reads loadTimeCenters() (nodeWorldPos off
+	// each mover's geom directly), not an atomic snap — the geom set above is enough.
 	md.LoadSceneSphere(t.TempDir()) // no scene.json → content-fit
 	if md.sceneSphere.Radius <= 0 {
 		t.Fatalf("content-fit sphere has non-positive radius: %+v", md.sceneSphere)
@@ -76,9 +75,6 @@ func TestSceneSphereContentFitSurvivesReloadAfterMove(t *testing.T) {
 		md.nodeMovers = map[string]*nodeMover{
 			"a": {id: "a", geom: nodeGeom{HasPos: true, ScenePolar: cart2polar(vec3{X: 0, Y: 0, Z: 0})}},
 			"b": {id: "b", geom: nodeGeom{HasPos: true, ScenePolar: cart2polar(vec3{X: bx, Y: 0, Z: 0})}},
-		}
-		for _, nm := range md.nodeMovers {
-			nm.snap.Store(&centerSnap{c: nodeWorldPos(nm.geom)})
 		}
 		return md
 	}

@@ -45,7 +45,7 @@ const (
 	// moveMsgKindDrag is a node's own-goroutine drag entry: the drag itself is routed
 	// to the dragged node's OWN dedicated extIn channel instead of the stdin reader
 	// committing on its behalf. The receiver commits its OWN new position via the owner-goroutine commit
-	// path (commitNodeMoveLocal, which publishes its snap SYNCHRONOUSLY via
+	// path (commitNodeMoveLocal, which applies its own new center SYNCHRONOUSLY via
 	// applyCenter). A drag is always a FREE move -- no equal-radii solve, no
 	// self-trigger cascade.
 	moveMsgKindDrag = "drag"
@@ -77,14 +77,24 @@ const (
 	moveMsgKindDragStart = "dragStart"
 )
 
-// centerSnap is an immutable snapshot of a node's position published by the nodeMover
-// via an atomic.Pointer so readers on other goroutines (stdin reader, etc.) can observe
-// the current center without touching the mover's live geom.
-type centerSnap struct {
-	c     vec3  // world center — cartesian, published for the emit/input boundaries only
-	p     polar // scene polar (r,θ,φ about the scene center) — the polar source of truth for geometry math
-	reach float64
+// posReport is one mover's freshly-committed world center, reported over the
+// movers→gesture report channel (MoveDispatch.posReportCh) the same way
+// portTblC/edgeTblC/nodeTblC hand row tables from the Trace-drain goroutine to the
+// gesture goroutine: an external-observer channel, not a node↔node inbox. Sent
+// non-blockingly by applyCenter (the sole writer of a node's center), drained by
+// drainPositions into md.positions.
+type posReport struct {
+	ID     string
+	Center vec3
 }
+
+// posReportBufSize sizes the buffered movers→gesture report channel. A single drag
+// commits on ONE mover's own clock-paced cycle at a time (applyCenter fires once per
+// commitNodeMoveLocal call, i.e. once per RootMove pointer-move tick on the dragged
+// node), so the channel only ever needs to hold the handful of reports produced
+// between two drainPositions calls (one per stdin dispatch iteration) — generously
+// sized well past that so a drag is never dropped before the gesture goroutine drains.
+const posReportBufSize = 256
 
 // moveMsg is one entry routed to one of a mover's own dedicated channels (there is no
 // shared inbox). kind selects the
@@ -147,6 +157,14 @@ type moveMsg struct {
 	// Target (Kind == "drag"): the raw drag target world position for NodeID's
 	// owner-goroutine commit. Every node is a free move, so this is committed as-is.
 	Target vec3
+	// PartnerCenter (Kind == "center", Center == nil): a pure aimed-port re-emit
+	// request ALSO carries the SENDER's (SenderID's) just-committed fresh center, so
+	// the receiver can update its own nm.neighborCenters[SenderID] cache before
+	// re-emitting — the aimed-port marker's direction reads that cache at emit time
+	// (see nodeMover.neighborCenters / buildPartnerCenterFn's wiring). Kept distinct
+	// from Center (which, if non-nil here, would be misread as "this is YOUR OWN new
+	// center" by the moveMsgKindCenter handler and wrongly move the receiver itself).
+	PartnerCenter *vec3
 	// testDone: see the type comment. Test-only; production leaves it nil.
 	testDone chan struct{}
 }
@@ -160,6 +178,21 @@ type moveMsg struct {
 type MoveDispatch struct {
 	nodeMovers map[string]*nodeMover
 	edgeMovers map[string]*edgeMover
+	// positions is the gesture goroutine's OWN accumulated map of every node's last-
+	// reported world center — written ONLY by drainPositions (from posReportCh) and by
+	// the one-time SeedPositions call before Start launches any mover goroutine, read
+	// ONLY on the gesture goroutine (heldCenters, centerOfNode). This is the external-
+	// observer pattern portTbl/edgeTbl/nodeTbl already use, generalized to node
+	// centers: movers report, the gesture goroutine drains into its own map, nothing
+	// reads across that boundary the other way.
+	positions map[string]vec3
+	// posReportCh is the buffered movers→gesture report channel every nodeMover's
+	// applyCenter sends its fresh {id, center} on (posReportBufSize). Created once here
+	// at construction and handed to each nodeMover as reportCh; nil in bare test
+	// construction that skips newMoveDispatch, in which case applyCenter's send is a
+	// guarded no-op (nil channel + select-default) and drainPositions is a no-op (nil
+	// channel is never selected).
+	posReportCh chan posReport
 	// edgeOut: edgeId → source *Out, for read-only access by tests/verifiers.
 	edgeOut map[string]*Out
 	// nodeSeeds/edgeSeeds are every node/edge's load-time seed geometry, captured ONCE at
@@ -355,6 +388,8 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 		tr:            tr,
 		ov:            defaultOverlayState(),
 		layoutHolders: map[string]*LayoutHolder{},
+		positions:     map[string]vec3{},
+		posReportCh:   make(chan posReport, posReportBufSize),
 	}
 	// Static partner-center lookup for the seed pass: every node's center is already known
 	// off the load-time geoms map (no goroutine/atomic-snap needed), so this is the SAME
@@ -419,6 +454,7 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 	}
 	for id, g := range geoms {
 		nm := newNodeMover(id, g, tr, clk)
+		nm.reportCh = md.posReportCh
 		if speedSinks != nil {
 			nodeSpeedCh := make(chan float64, 1)
 			nm.speedCh = nodeSpeedCh
@@ -449,7 +485,6 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 			return nil, false
 		}
 		nm.sendMove = md.enqueueFor(nm)
-		nm.centerOf = md.centerOfNode
 		nm.commitLocal = md.commitNodeMoveLocal
 		nm.neighborSetC = md.neighborSetCRequantize
 		// Go 1.22+ loop semantics give each iteration its own id, so this closure safely
@@ -477,23 +512,28 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 				if _, exists := srcNM.neighborIn[ep.Target]; !exists {
 					srcNM.neighborIn[ep.Target] = make(chan moveMsg, 8)
 				}
+				// Seed each side's neighborCenters cache from the load-time geoms —
+				// safe here (main goroutine, before Start launches any mover
+				// goroutine) — so a neighbor's aimed-port direction / requantize
+				// offset has a valid center to read before either side ever
+				// commits a move (mirrors the old atomic snap's construction-time
+				// seed). Kept current afterward by moveMsgKindNeighborSetC and the
+				// aimed-port pure-reemit's PartnerCenter field, both handled only
+				// on the OWNING node's own goroutine (see nodeMover.handle).
+				dstNM.neighborCenters[ep.Source] = nodeWorldPos(geoms[ep.Source])
+				srcNM.neighborCenters[ep.Target] = nodeWorldPos(geoms[ep.Target])
 			}
 		}
 	}
 	// Wire each nodeMover's aimed-port lookup: for (port,isInput) on nodeID, find its one
-	// edge (edgeEndpoints) and read the partner's CURRENT center off the partner
-	// nodeMover's atomic snap (md.nodeMovers is a read-only map after this point — only the
-	// individual *nodeMover.snap is read cross-goroutine, via the existing atomic pattern).
+	// edge (edgeEndpoints) and read the partner's center off THIS node's OWN
+	// neighborCenters cache — written only by this node's own goroutine (handle), read
+	// only by this node's own goroutine (emitGeometry/partnerCenter) — no cross-goroutine
+	// map access, unlike the atomic snap this replaced.
 	for id, nm := range md.nodeMovers {
+		ownNM := nm
 		nm.partnerCenter = buildPartnerCenterFn(id, edgeEndpoints, func(otherID string) vec3 {
-			other, ok := md.nodeMovers[otherID]
-			if !ok {
-				return vec3{}
-			}
-			if s := other.snap.Load(); s != nil {
-				return s.c
-			}
-			return vec3{}
+			return ownNM.neighborCenters[otherID]
 		})
 	}
 	// Give every nodeMover the ids of its OWN incident edges, so a lock-driven move can
@@ -505,6 +545,15 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 				nm.edgeIDs = append(nm.edgeIDs, edgeID)
 			}
 		}
+	}
+	// Seed md.positions from these same load-time geoms right here at construction —
+	// the SeedPositions/loadTimeCenters public path exists for callers that build a
+	// MoveDispatch some other way (or want to re-seed later), but every real
+	// newMoveDispatch construction (production and every LoadTopology-based test) gets
+	// this for free immediately, matching how the old atomic snap was seeded at
+	// construction.
+	for id, g := range geoms {
+		md.positions[id] = nodeWorldPos(g)
 	}
 	return md
 }
@@ -564,17 +613,65 @@ func (md *MoveDispatch) EdgeOut(edgeID string) *Out {
 	return md.edgeOut[edgeID]
 }
 
-// centerOfNode returns the current world center for a node id by loading the
-// nodeMover's atomically-published snapshot. Safe to call from any goroutine
-// without synchronization — the snap is published via atomic.Pointer after each
-// center update so this never races with the mover's live geom writes.
+// centerOfNode returns the gesture goroutine's last-reported world center for a node
+// id, from md.positions (see MoveDispatch.positions doc comment). GESTURE-GOROUTINE
+// ONLY: every live caller (gesture.go's port-move-grab and node-drag-grab hit
+// handling) runs on the stdin/gesture dispatch loop, the same goroutine drainPositions
+// fills md.positions from.
 func (md *MoveDispatch) centerOfNode(id string) (vec3, bool) {
-	if nm, ok := md.nodeMovers[id]; ok {
-		if s := nm.snap.Load(); s != nil {
-			return s.c, true
+	c, ok := md.positions[id]
+	return c, ok
+}
+
+// drainPositions non-blockingly pulls every pending posReport off md.posReportCh into
+// md.positions — the movers→gesture analogue of drainRowTables, called at the same
+// point in RunStdinReader's dispatch loop. Drains the WHOLE backlog each call (not just
+// one) so a burst of reports between two dispatch iterations is fully absorbed, matching
+// nodeMover.run's own "drain to empty" drain shape. A nil posReportCh (bare test
+// construction that skips newMoveDispatch) makes the receive permanently unselectable,
+// so this is a safe no-op there.
+func (md *MoveDispatch) drainPositions() {
+	for {
+		select {
+		case r := <-md.posReportCh:
+			if md.positions == nil {
+				md.positions = map[string]vec3{}
+			}
+			md.positions[r.ID] = r.Center
+		default:
+			return
 		}
 	}
-	return vec3{}, false
+}
+
+// loadTimeCenters reads every mover's node center directly off its LOAD-TIME geom
+// (nodeWorldPos, no atomic/channel involved). Safe to call ONLY before Start launches
+// any mover goroutine — at that point this (main) goroutine is the sole writer/reader of
+// every nm.geom, since no mover goroutine has started mutating it yet. Used to install
+// the content-fit scene sphere and to seed md.positions (SeedPositions) before the
+// gesture dispatch loop's first iteration, when md.positions/posReportCh have nothing in
+// them yet (movers only ever report a center AFTER a real center commit).
+func (md *MoveDispatch) loadTimeCenters() map[string]vec3 {
+	centers := make(map[string]vec3, len(md.nodeMovers))
+	for id, nm := range md.nodeMovers {
+		centers[id] = nodeWorldPos(nm.geom)
+	}
+	return centers
+}
+
+// SeedPositions seeds md.positions from load-time geometry. Call once on the main
+// goroutine, after newMoveDispatch/LoadTopology and BEFORE Start launches any mover
+// goroutine and before RunStdinReader's dispatch loop begins — so the very first
+// gesture/camera interaction (which reads md.positions via heldCenters/centerOfNode)
+// has data, rather than an empty map that only fills once a mover commits its first real
+// move.
+func (md *MoveDispatch) SeedPositions() {
+	if md.positions == nil {
+		md.positions = map[string]vec3{}
+	}
+	for id, c := range md.loadTimeCenters() {
+		md.positions[id] = c
+	}
 }
 
 // sendMove routes one moveMsg to a node's dedicated external-entry channel (extIn), if

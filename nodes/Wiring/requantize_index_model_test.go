@@ -21,17 +21,17 @@ import (
 
 const testDeg = math.Pi / 180
 
-// fakeNodeMover installs a minimal *nodeMover in md.nodeMovers whose only working part
-// is the atomically-published center snapshot centerOfNode reads — enough to exercise
-// the OLD model's md.centerOfNode(id) call path (which the new model no longer makes)
-// without standing up a full mover goroutine.
+// fakeNodeMover installs a minimal *nodeMover in md.nodeMovers. requantizePoleTraced
+// (the function every test below exercises) reads nothing off md at all — center is
+// accepted only so call sites below can keep documenting which OLD-model cartesian
+// value (a live md.centerOfNode(id) read) the new stored-index model must NOT track;
+// it has no effect on requantizePoleTraced's behavior.
 func fakeNodeMover(md *MoveDispatch, id string, center vec3) {
 	if md.nodeMovers == nil {
 		md.nodeMovers = map[string]*nodeMover{}
 	}
-	nm := &nodeMover{id: id}
-	nm.snap.Store(&centerSnap{c: center})
-	md.nodeMovers[id] = nm
+	_ = center
+	md.nodeMovers[id] = &nodeMover{id: id}
 }
 
 // TestRequantizeUsesStoredIndicesNotLiveCartesian is the DECISIVE test for the

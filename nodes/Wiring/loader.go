@@ -461,6 +461,13 @@ func (b *buildCtx) buildMoveDispatch() {
 		edgeOrder[i] = e.Label
 	}
 	md := newMoveDispatch(b.nodeGeoms, b.edgeEndpoints, b.tr, nodeOrder, edgeOrder, b.clk, &b.speedSinks)
+	// Seed md.positions (the gesture goroutine's own node-center cache, see its doc
+	// comment) from these same load-time geoms right away — every caller of
+	// LoadTopology (production main.go and every test) gets a MoveDispatch whose
+	// centerOfNode/heldCenters already see every node's loaded position, matching what
+	// the old atomic snap gave for free at construction. main.go's own SeedPositions
+	// call (belt-and-suspenders, before Start) is a no-op re-seed of the same data.
+	md.SeedPositions()
 	if b.hasScene {
 		// Persisted scene sphere: install it now so md.sceneSphere is consistent straight out
 		// of LoadTopology (a fresh/legacy scene has none — main.go's LoadSceneSphere then
