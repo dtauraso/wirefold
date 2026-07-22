@@ -178,6 +178,17 @@ type moveMsg struct {
 type MoveDispatch struct {
 	nodeMovers map[string]*nodeMover
 	edgeMovers map[string]*edgeMover
+	// extRoute is the EDITOR→NETWORK send directory: node id → that node's own
+	// dedicated external-entry channel (nodeMover.extIn). It is the ONLY thing the
+	// external caller (the gesture/stdin goroutine — RootMove's drag, gesture.go's
+	// dragStart and ring-anchor sends) needs from a node: a channel to drop an
+	// addressed entry onto. Distinct from the full mover directory (md.nodeMovers)
+	// on purpose — the editor addresses a node to SEND to it, it never needs the
+	// mover struct itself; keeping the send path on this narrow table lets the mover
+	// directory become load-time-local (it no longer has to survive as the editor's
+	// lookup). Built once at construction alongside each nodeMover; a read-only
+	// directory afterward, safe from any goroutine.
+	extRoute map[string]chan moveMsg
 	// positions is the gesture goroutine's OWN accumulated map of every node's last-
 	// reported world center — written ONLY by drainPositions (from posReportCh) and by
 	// the one-time SeedPositions call before Start launches any mover goroutine, read
@@ -390,6 +401,7 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 		layoutHolders: map[string]*LayoutHolder{},
 		positions:     map[string]vec3{},
 		posReportCh:   make(chan posReport, posReportBufSize),
+		extRoute:      map[string]chan moveMsg{},
 	}
 	// Static partner-center lookup for the seed pass: every node's center is already known
 	// off the load-time geoms map (no goroutine/atomic-snap needed), so this is the SAME
@@ -491,6 +503,7 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 		// captures THIS iteration's id (no shared-variable capture bug).
 		nm.layoutHolderFn = func() *LayoutHolder { return md.layoutHolders[id] }
 		md.nodeMovers[id] = nm
+		md.extRoute[id] = nm.extIn
 	}
 	for edgeID, ep := range edgeEndpoints {
 		em := newEdgeMover(ep, edgeID, geoms[ep.Source], geoms[ep.Target], tr, clk)
@@ -681,7 +694,7 @@ func (md *MoveDispatch) SeedPositions() {
 // function). md.nodeMovers is a read-only directory once construction finishes, safe to
 // read from any goroutine.
 func (md *MoveDispatch) sendMove(id string, msg moveMsg) {
-	nm, ok := md.nodeMovers[id]
+	ch, ok := md.extRoute[id]
 	if !ok {
 		return
 	}
@@ -695,11 +708,11 @@ func (md *MoveDispatch) sendMove(id string, msg moveMsg) {
 	// blocking send there (matches prior test behavior; no shutdown path exists in
 	// that setting anyway).
 	if md.ctx == nil {
-		nm.extIn <- msg
+		ch <- msg
 		return
 	}
 	select {
-	case nm.extIn <- msg:
+	case ch <- msg:
 	case <-md.ctx.Done():
 	}
 }

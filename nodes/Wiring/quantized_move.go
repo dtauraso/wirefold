@@ -328,7 +328,7 @@ func (md *MoveDispatch) commitNodeMoveLocal(nodeID string, newPos vec3) {
 // here for that reason: the reset belongs at the real drag-start edge (the
 // pending→dragging transition in gesture.go), not on every move tick RootMove sees.
 func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
-	if _, ok := md.nodeMovers[nodeID]; !ok {
+	if _, ok := md.extRoute[nodeID]; !ok {
 		return false
 	}
 	// Route the drag itself to the dragged node's OWN inbox instead of committing on

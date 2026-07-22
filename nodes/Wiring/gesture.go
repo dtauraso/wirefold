@@ -653,8 +653,8 @@ func (g *gestureState) reset(vp *viewpoint) {
 func (md *MoveDispatch) applyRingAnchor(node, port string, isInput bool, dir vec3) {
 	anchorID := snapToRingAnchorIndex(md.NodeKind(node), dir)
 	msg := moveMsg{Kind: moveMsgKindAnchor, NodeID: node, Port: port, IsInput: isInput, AnchorId: anchorID}
-	if nm, ok := md.nodeMovers[node]; ok {
-		nm.extIn <- msg
+	if ch, ok := md.extRoute[node]; ok {
+		ch <- msg
 	}
 	for _, em := range md.edgeMovers {
 		incident := (isInput && em.dstID == node && em.dstH == port) ||
