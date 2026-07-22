@@ -64,9 +64,11 @@ const speedFullSetTopo = `{
 //	nodeMover, one per node (exactly 7 nodes above)     = 7   (the mover
 //	                                                            is no longer the odd one out
 //	                                                            pacing on a bare wall timer)
+//	PacedWire, one per unique dest port (1 edge → 1)    = 1   (the wire is its own
+//	                                                            clock-owning goroutine now)
 //
-// Total = 4 + 2 + 1 + 3 + 1 + 7 = 18.
-const expectedSpeedSinkCount = 18
+// Total = 4 + 2 + 1 + 3 + 1 + 7 + 1 = 19.
+const expectedSpeedSinkCount = 19
 
 // TestSpeedSinksCoverEveryClockOwningGoroutine asserts LoadTopology's speed-sink list
 // has EXACTLY the expected count for this fixture — over the FULL set, not a sample.

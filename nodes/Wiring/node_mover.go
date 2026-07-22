@@ -602,12 +602,15 @@ func (m *edgeMover) recomputeGeometry() {
 	if m.out != nil {
 		m.out.publishGeom(outGeom{ArcLength: arc, SimLatencyMs: lat, Start: seg.Start, End: seg.End})
 	}
-	// Re-derive an in-flight bead on this edge from the new arc + segment (no-op if
-	// none in flight); this runs on the SAME goroutine that owns the dest wire's
-	// bead state (this is that wire's own goroutine — see edgeMover.run), so no
-	// lock is needed.
+	// Re-derive this edge's own in-flight beads from the new arc + segment. This edge
+	// does NOT touch pw.inflight itself: the dest wire is its own goroutine now, and a
+	// fan-in wire is shared by several source edges, so no single edge can own it. Post
+	// the revision over reviseCh (keyed by THIS edge's source identity so only its own
+	// beads are rebased) and let the wire's goroutine apply it. Fire-and-forget, no tick
+	// threaded — the wire stamps its own clock reading (MODEL.md: each goroutine reads
+	// its own clock).
 	if m.dest != nil {
-		m.dest.ReviseInFlightGeometry(m.clk.Tick(), arc, seg)
+		m.dest.sendRevise(reviseReq{node: m.srcID, port: m.srcH, arc: arc, seg: seg})
 	}
 	// Emit this edge's own segment so the renderer redraws the wire from Go's endpoints.
 	if m.tr != nil {
@@ -617,16 +620,16 @@ func (m *edgeMover) recomputeGeometry() {
 	}
 }
 
-// run is the edge's per-goroutine loop. It IS the wire's own goroutine
-// (MODEL.md "The network" — PacedWire is an active goroutine, and it is this
-// same per-edge goroutine that already existed to revise in-flight geometry,
-// not an additional one): every cycle it drains any pending move/speed
-// messages without blocking, then drives its dest wire's ONE cycle of bead
-// ownership (DriveOneCycle — placement drain, position-step, delivery
-// handoff), then paces to the next cycle on its OWN clock copy. This is what
-// lets ReviseInFlightGeometry (called from handle, below, on this SAME
-// goroutine) touch pw.inflight with no lock: there is exactly one goroutine
-// on either side of that call.
+// run is the edge's per-goroutine loop. Every cycle it drains any pending move/speed
+// messages without blocking, reacting to an endpoint move by recomputing its own
+// per-edge segment/arc (handle -> recomputeGeometry) and POSTING the revision to its
+// dest wire over reviseCh, then paces to the next cycle on its own clock copy.
+//
+// It does NOT drive or mutate the dest wire's bead state: the wire is its own goroutine
+// (PacedWire.run) now. That is the single-owner fix for fan-in — a destination input
+// port is one shared wire, so if each incident edge's own goroutine drove/revised it,
+// N fan-in edges would be N goroutines racing one pw.inflight. Now the wire owns
+// inflight alone and edges only hand it revisions.
 func (m *edgeMover) run(ctx context.Context) {
 	// Copy taken ONCE at this goroutine's start (run IS the goroutine). If no clockSrc was
 	// given (bare test construction), keep the inert placeholder newEdgeMover
@@ -669,9 +672,12 @@ func (m *edgeMover) run(ctx context.Context) {
 				break drain
 			}
 		}
-		if m.dest != nil {
-			m.dest.DriveOneCycle(ctx, m.clk.Tick())
-		}
+		// The edge no longer drives its dest wire — the wire has its OWN goroutine now
+		// (PacedWire.run, launched by Start), which is what makes a shared fan-in wire
+		// single-owner. This loop's remaining job is to react to endpoint-move messages
+		// (handle -> recomputeGeometry, which posts a revision to the wire over reviseCh)
+		// and stay drained; it still paces on its own clock so a cycle always comes back
+		// around to drain the inbox.
 		if err := m.clk.SleepCycle(ctx); err != nil {
 			return
 		}

@@ -80,8 +80,8 @@ type placeRequest struct {
 // / ticksToCross is a pure function of the wire's own single clock reading
 // (MODEL.md "Geometry and time").
 //
-// Every field here is touched by EXACTLY ONE goroutine: this wire's own (folded
-// into edgeMover.run via driveOneCycle — see the PacedWire doc comment below).
+// Every field here is touched by EXACTLY ONE goroutine: this wire's own (PacedWire.run
+// and its DriveOneCycle/reviseEdge helpers — see the PacedWire doc comment below).
 // There is no lock; ownership replaces locking.
 type inflightBead struct {
 	val           int
@@ -110,33 +110,38 @@ func (pw *PacedWire) ticksToCross(arc float64) float64 {
 	return arc / pw.pulseSpeed
 }
 
-// PacedWire is an ACTIVE GOROUTINE (MODEL.md "The network"), not a passive
-// struct: a channel in from its source node, a channel out to its destination
-// node. It is NOT a separate goroutine of its own — it is driven by the same
-// per-edge goroutine that already existed to revise in-flight geometry on a
-// node-move (edgeMover.run, node_mover.go), now given ownership of the beads it
-// used to reach across a lock to revise. Goroutine count is therefore
-// unchanged; what changed is who owns the state.
+// PacedWire is an ACTIVE GOROUTINE (MODEL.md "The network"), not a passive struct: a
+// channel in from its source node, a channel out to its destination node, and its OWN
+// goroutine (run, launched once per unique wire by MoveDispatch.Start) that times bead
+// traversal on its own clock.
+//
+// It owns its own goroutine BECAUSE a destination input port is one wire that several
+// source edges can fan into. An earlier design had the wire driven by an incident edge's
+// goroutine (edgeMover.run) to keep goroutine count unchanged — correct for a 1:1
+// edge:wire, but for fan-in it meant every incident edge's goroutine drove and revised the
+// ONE shared wire, N goroutines racing one pw.inflight (and clobbering each other's
+// per-edge geometry). Giving the wire its own goroutine restores single-owner: edges only
+// POST geometry revisions over reviseCh; only run() ever touches inflight.
 //
 //   - inCh is the wire's IN-CHANNEL: the source node's own goroutine calls Send,
 //     a non-blocking buffered-channel send, and moves on (MODEL.md "Sending" — no
 //     back-pressure, ever).
 //   - outCh is the wire's OUT-CHANNEL: the destination node's own goroutine calls
 //     RecvTick/Recv, a non-blocking buffered-channel receive.
+//   - reviseCh is the wire's REVISE-CHANNEL: an incident edge's own goroutine posts a
+//     reviseReq (its new per-edge arc/segment) when an endpoint moves; run() applies it.
 //   - inflight/nextGen/teardownGen/pulseSpeed are owned EXCLUSIVELY by the wire's
-//     own goroutine (driveOneCycle, called every cycle from edgeMover.run) — no
-//     lock guards them; there is exactly one writer and one reader (the same
-//     goroutine). Do not reintroduce a mutex here "for safety": a lock on top of
-//     single-goroutine ownership is dead weight, and if a second goroutine ever
-//     needs to touch this state again, that is a sign the ownership model broke,
-//     not a reason to add one back.
+//     own goroutine (run and its DriveOneCycle/reviseEdge helpers) — no lock guards
+//     them; there is exactly one writer and one reader (the same goroutine). Do not
+//     reintroduce a mutex here "for safety": a lock on top of single-goroutine ownership
+//     is dead weight, and if a second goroutine ever needs to touch this state again,
+//     that is a sign the ownership model broke, not a reason to add one back.
 type PacedWire struct {
 	inCh  chan placeRequest
 	outCh chan deliveredBead
 
-	// Owned exclusively by this wire's own goroutine (driveOneCycle and its
-	// helpers, and ReviseInFlightGeometry — both called only from edgeMover.run,
-	// which IS this wire's goroutine). No mu.
+	// Owned exclusively by this wire's own goroutine (PacedWire.run and its
+	// DriveOneCycle/reviseEdge helpers). No mu.
 	inflight []inflightBead
 	// nextGen mints a unique id for each placed bead and is also bumped on
 	// teardown to invalidate ALL outstanding beads at once.
@@ -147,9 +152,42 @@ type PacedWire struct {
 	teardownGen uint64
 	pulseSpeed  float64
 
+	// clockSrc/clk: this wire's OWN clock. run() copies clockSrc once at goroutine
+	// start into clk and reads only clk thereafter — the same per-goroutine-clock
+	// pattern nodeMover/edgeMover use. nil clockSrc in bare test construction (no
+	// loader): those tests drive the wire manually via DriveOneCycle from their own
+	// goroutine and never launch run(), so clk stays the newNodeMover-style default.
+	clockSrc Clock
+	clk      Clock
+	// speedCh delivers a global playback-speed change to THIS wire's own clk copy,
+	// polled each run() cycle. The wire is a clock-owning goroutine, so it gets its
+	// own speed sink from the loader's build-wide accumulator (buildMoveDispatch);
+	// nil in bare test construction (never selected).
+	speedCh chan float64
+	// reviseCh is how an incident edge's own goroutine (edgeMover.recomputeGeometry)
+	// hands this wire a geometry revision WITHOUT touching pw.inflight itself. The
+	// edge computes its new per-edge arc/segment and posts a reviseReq; run() drains
+	// it and applies reviseEdge on THIS wire's own goroutine, so inflight has exactly
+	// one owner even when N fan-in edges share this one wire (they all post here; only
+	// run() mutates inflight). This is what makes a shared fan-in dest wire safe — the
+	// old direct edgeMover.ReviseInFlightGeometry call had every fan-in edge's
+	// goroutine mutating the same inflight, a data race.
+	reviseCh chan reviseReq
+
 	Target       string   // destination node id — authoritative slot identity
 	TargetHandle string   // destination input-port name — authoritative slot identity
 	Trace        *T.Trace // injected by loader; used for breadcrumb diagnostics only
+}
+
+// reviseReq is one edge's geometry revision, handed to its dest wire's own goroutine
+// over reviseCh. node/port are the edge's SOURCE identity (matching inflightBead.node/
+// port), so reviseEdge revises ONLY that edge's beads — a fan-in wire holds beads from
+// several source edges of different lengths, and moving one source must not rewrite the
+// others' geometry. arc/seg are the new per-edge arc length and straight segment.
+type reviseReq struct {
+	node, port string
+	arc        float64
+	seg        wireSegment
 }
 
 // NewPacedWire creates an empty PacedWire with its in/out channels ready. arcLength
@@ -182,6 +220,12 @@ func NewPacedWire(arcLength float64, pulseSpeed float64) *PacedWire {
 		pulseSpeed: pulseSpeed,
 		inCh:       make(chan placeRequest, wireChanBufferSize),
 		outCh:      make(chan deliveredBead, wireChanBufferSize),
+		// reviseCh is generously buffered like inCh: geometry revisions arrive only on a
+		// node move (far rarer than bead traffic), and run() drains the whole backlog each
+		// cycle. clk defaults to a live RealClock so a bare wire whose run() is never
+		// launched (tests driving DriveOneCycle themselves) still has a non-nil clock.
+		reviseCh: make(chan reviseReq, wireChanBufferSize),
+		clk:      NewRealClock(),
 	}
 }
 
@@ -264,18 +308,85 @@ func (pw *PacedWire) Recv() (int, bool) {
 // hasn't drained yet simply leaves the bead retried next cycle, still at the
 // FIFO head).
 //
-// In production this is called ONLY by edgeMover.run (node_mover.go), once per
-// cycle, on that goroutine's OWN clock tick — the wire's goroutine IS the edge's
-// goroutine (MODEL.md "The network"). It is exported so tests that build a bare
-// PacedWire directly (no full loader topology, hence no edgeMover to drive it)
-// can spawn their own driving goroutine that mimics production's per-cycle drive,
-// exactly as StepOnceAt's callers used to.
+// In production this is called ONLY by PacedWire.run (this wire's own goroutine), once
+// per cycle, on that goroutine's OWN clock tick (MODEL.md "The network"). It is exported
+// so tests that build a bare PacedWire directly (no full loader topology, hence no
+// Start-launched run goroutine) can spawn their own driving goroutine that mimics
+// production's per-cycle drive, exactly as StepOnceAt's callers used to.
 func (pw *PacedWire) DriveOneCycle(ctx context.Context, tick int64) {
 	if ctx.Err() != nil {
 		return
 	}
 	pw.drainPlacements(tick)
 	pw.stepAll(tick)
+}
+
+// run is this wire's OWN goroutine (MODEL.md "The network": each wire is an active
+// goroutine). It is launched once per unique dest wire by MoveDispatch.Start. Each cycle
+// it: copies its clock once at start; polls its speed sink and applies any playback-speed
+// change to its own clk; drains every pending reviseReq (posted by incident edges) and
+// applies each with THIS wire's own single tick reading; drives one bead cycle
+// (DriveOneCycle); then paces to the next cycle on its own clock (SleepCycle).
+//
+// This is the ownership fix for fan-in: a destination input port is ONE wire, but several
+// source edges can feed it. Previously each incident edge's own goroutine (edgeMover.run)
+// drove and revised this shared wire, so N fan-in edges meant N goroutines mutating one
+// pw.inflight — a data race and a cross-edge geometry clobber. Now exactly ONE goroutine
+// (this run) owns inflight; edges only POST revisions over reviseCh.
+func (pw *PacedWire) run(ctx context.Context) {
+	// Clock copy taken ONCE at goroutine start (run IS the goroutine). A nil clockSrc
+	// (bare test construction) keeps the RealClock default newPacedWire seeded — but such
+	// wires are driven by their test via DriveOneCycle and never launch run(), so this
+	// path is production-only in practice.
+	if pw.clockSrc != nil {
+		pw.clk = pw.clockSrc.Copy()
+	}
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		// One clock reading per cycle (MODEL.md): use it for both the revisions and the
+		// drive so a bead's rebase fraction and its advance are measured against the same
+		// tick. A speed change drained this cycle applies to the NEXT tick reading.
+		tick := pw.clk.Tick()
+	drain:
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case sp := <-pw.speedCh:
+				if rc, ok := pw.clk.(*RealClock); ok {
+					rc.SetSpeed(sp)
+				}
+			case r := <-pw.reviseCh:
+				pw.reviseEdge(r.node, r.port, tick, r.arc, r.seg)
+			default:
+				break drain
+			}
+		}
+		pw.DriveOneCycle(ctx, tick)
+		if err := pw.clk.SleepCycle(ctx); err != nil {
+			return
+		}
+	}
+}
+
+// sendRevise posts one edge's geometry revision onto this wire's reviseCh — the
+// non-blocking, fire-and-forget handoff an incident edge's own goroutine
+// (edgeMover.recomputeGeometry) uses instead of reaching into pw.inflight. Non-blocking so
+// the edge never back-pressures on the wire (MODEL.md "Sending"); the buffer is sized like
+// inCh and revisions are rare (one per node move), so a full buffer would itself signal a
+// bug. A momentarily-dropped revision self-heals: the bead keeps its prior geometry until
+// the next move posts a fresh revision. Emits one breadcrumb on the (should-never-happen)
+// full case, matching Send.
+func (pw *PacedWire) sendRevise(r reviseReq) {
+	select {
+	case pw.reviseCh <- r:
+	default:
+		if pw.Trace != nil {
+			pw.Trace.Breadcrumb("wire-revise-buffer-full", pw.Target, pw.TargetHandle, "")
+		}
+	}
 }
 
 // drainPlacements pops every placement currently queued on inCh (non-blocking)
@@ -381,37 +492,63 @@ func (pw *PacedWire) stepAll(tick int64) {
 // arc/seg every cycle, so the new geometry takes effect without any relaunch.
 // No-op when no bead is in flight.
 //
-// Called only by this wire's own goroutine (edgeMover.recomputeGeometry, itself
-// running on the SAME goroutine as DriveOneCycle — see the PacedWire doc comment):
-// tick is that goroutine's own clock reading, taken once per call. There is no
-// second clock copy involved anymore, so the two-copy skew the old
-// caller-pinned-tick contract had to tolerate cannot arise here.
+// This is the ALL-BEADS form, retained for bare-wire unit tests (one edge under test, so
+// every bead is that edge's). PRODUCTION revises through reviseEdge (source-filtered),
+// applied by run() from a reviseReq — see reviseEdge. Called only by the wire's own
+// goroutine (or the test goroutine driving a bare wire); tick is that goroutine's own
+// clock reading.
 func (pw *PacedWire) ReviseInFlightGeometry(tick int64, newArc float64, newSeg wireSegment) {
 	if len(pw.inflight) == 0 {
 		return
 	}
 	nowTick := float64(tick)
 	for i := range pw.inflight {
+		pw.rebaseBead(&pw.inflight[i], nowTick, newArc, newSeg)
+	}
+}
+
+// reviseEdge is the fan-in-safe revision: it rebases ONLY the in-flight beads whose
+// SOURCE identity matches (node, port) — one edge's beads — leaving beads from other
+// source edges sharing this wire untouched. It is the production revision path, applied
+// by run() from a reviseReq an incident edge posted on reviseCh; ReviseInFlightGeometry
+// (all beads) is retained for bare-wire unit tests, where every bead belongs to the one
+// edge under test so the distinction is moot. Called only by this wire's own goroutine.
+func (pw *PacedWire) reviseEdge(node, port string, tick int64, newArc float64, newSeg wireSegment) {
+	if len(pw.inflight) == 0 {
+		return
+	}
+	nowTick := float64(tick)
+	for i := range pw.inflight {
 		b := &pw.inflight[i]
-		t := 0.0
-		if b.arc > 0 && pw.pulseSpeed > 0 {
-			// elapsed ticks / old ticksToCross = fraction covered.
-			t = (nowTick - b.placementTick) / (b.arc / pw.pulseSpeed)
-			if t < 0 {
-				t = 0
-			}
-			if t > 1 {
-				t = 1
-			}
+		if b.node != node || b.port != port {
+			continue // a different fan-in edge's bead — its geometry is unchanged
 		}
-		b.arc = newArc
-		b.seg = newSeg
-		// Rebase placementTick so elapsed-since-placement maps to the same fraction t
-		// on the NEW arc: remainingTicks = (1−t)·newArc/pulseSpeed, so the covered part
-		// is t·newArc/pulseSpeed ticks ⇒ placementTick' = nowTick − t·(newArc/pulseSpeed).
-		if pw.pulseSpeed > 0 {
-			b.placementTick = nowTick - t*(newArc/pw.pulseSpeed)
+		pw.rebaseBead(b, nowTick, newArc, newSeg)
+	}
+}
+
+// rebaseBead re-derives one in-flight bead's remaining travel for a new arc/segment,
+// PRESERVING its fractional progress t (not distance): remaining = (1−t)·newArc/pulseSpeed.
+// See ReviseInFlightGeometry's doc. Called only by this wire's own goroutine.
+func (pw *PacedWire) rebaseBead(b *inflightBead, nowTick, newArc float64, newSeg wireSegment) {
+	t := 0.0
+	if b.arc > 0 && pw.pulseSpeed > 0 {
+		// elapsed ticks / old ticksToCross = fraction covered.
+		t = (nowTick - b.placementTick) / (b.arc / pw.pulseSpeed)
+		if t < 0 {
+			t = 0
 		}
+		if t > 1 {
+			t = 1
+		}
+	}
+	b.arc = newArc
+	b.seg = newSeg
+	// Rebase placementTick so elapsed-since-placement maps to the same fraction t
+	// on the NEW arc: remainingTicks = (1−t)·newArc/pulseSpeed, so the covered part
+	// is t·newArc/pulseSpeed ticks ⇒ placementTick' = nowTick − t·(newArc/pulseSpeed).
+	if pw.pulseSpeed > 0 {
+		b.placementTick = nowTick - t*(newArc/pw.pulseSpeed)
 	}
 }
 
