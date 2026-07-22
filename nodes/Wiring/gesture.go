@@ -653,16 +653,18 @@ func (g *gestureState) reset(vp *viewpoint) {
 func (md *MoveDispatch) applyRingAnchor(node, port string, isInput bool, dir vec3) {
 	anchorID := snapToRingAnchorIndex(md.NodeKind(node), dir)
 	msg := moveMsg{Kind: moveMsgKindAnchor, NodeID: node, Port: port, IsInput: isInput, AnchorId: anchorID}
-	if ch, ok := md.extRoute[node]; ok {
-		ch <- msg
-	}
+	// Both sends are ctx-guarded (sendMove for the node, sendExtCtx for each incident
+	// edge) — matching the drag/dragStart path. A raw blocking `ch <- msg` here could park
+	// this stdin/gesture goroutine forever on shutdown (target's run loop already returned)
+	// or stall it if a fast ring-drag fills the 8-slot extIn faster than the ~16ms drain.
+	md.sendMove(node, msg)
 	for _, em := range md.edgeMovers {
 		incident := (isInput && em.dstID == node && em.dstH == port) ||
 			(!isInput && em.srcID == node && em.srcH == port)
 		if !incident {
 			continue
 		}
-		em.extIn <- msg
+		md.sendExtCtx(em.extIn, msg)
 	}
 	// Persist the snapped anchor index to the port file (debounced, fire-and-forget).
 	if md.persist.anchor != nil {

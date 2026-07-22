@@ -317,7 +317,7 @@ export function EdgeTubes({ capacity, layoutLinkCapacity }: { capacity: number; 
     if (!snap) return;
     const decoded = decodeSnapshot(snap);
     if (!decoded) return;
-    const { edgeCount: bufEdgeCount, edgeView, nodeView, layoutLinkCount, layoutLinkView, overlayView } = decoded;
+    const { nodeCount, edgeCount: bufEdgeCount, edgeView, nodeView, layoutLinkCount, layoutLinkView, overlayView } = decoded;
 
     const n = Math.min(bufEdgeCount, capacity);
     if (n !== edgeCount) setEdgeCount(n);
@@ -353,24 +353,36 @@ export function EdgeTubes({ capacity, layoutLinkCapacity }: { capacity: number; 
     const via = linkViaScratch.current;
     via.length = linkN;
     for (let i = 0; i < linkN; i++) {
+      // A LayoutLink's EdgeRow/SrcNodeRow/DstNodeRow are raw i32s off the wire, indexing
+      // the SEPARATELY-sized Edge/Node DataViews (byteLength = count × STRIDE). LayoutLink
+      // count is independent of edge/node count, so a stale or skewed row (e.g. a future
+      // runtime add/remove landing a link before its edge/node row) would index PAST the
+      // view and throw RangeError — inside useFrame, killing the whole render loop. Bound
+      // every row against its block's count, exactly like the edge loop above; an
+      // out-of-range link is skipped (never rendered from garbage), not crashed on.
       const edgeRow = readLayoutLinkEdgeRow(layoutLinkView, i);
-      let seg: EdgeSeg;
-      if (edgeRow >= 0) {
+      let seg: EdgeSeg | null = null;
+      if (edgeRow >= 0 && edgeRow < bufEdgeCount) {
         seg = {
           sx: readEdgeSX(edgeView, edgeRow), sy: readEdgeSY(edgeView, edgeRow), sz: readEdgeSZ(edgeView, edgeRow),
           ex: readEdgeEX(edgeView, edgeRow), ey: readEdgeEY(edgeView, edgeRow), ez: readEdgeEZ(edgeView, edgeRow),
         };
         via[i] = true;
-      } else {
+      } else if (edgeRow < 0) {
         const srcRow = readLayoutLinkSrcNodeRow(layoutLinkView, i);
         const dstRow = readLayoutLinkDstNodeRow(layoutLinkView, i);
-        seg = {
-          sx: readNodeCX(nodeView, srcRow), sy: readNodeCY(nodeView, srcRow), sz: readNodeCZ(nodeView, srcRow),
-          ex: readNodeCX(nodeView, dstRow), ey: readNodeCY(nodeView, dstRow), ez: readNodeCZ(nodeView, dstRow),
-        };
+        if (srcRow >= 0 && srcRow < nodeCount && dstRow >= 0 && dstRow < nodeCount) {
+          seg = {
+            sx: readNodeCX(nodeView, srcRow), sy: readNodeCY(nodeView, srcRow), sz: readNodeCZ(nodeView, srcRow),
+            ex: readNodeCX(nodeView, dstRow), ey: readNodeCY(nodeView, dstRow), ez: readNodeCZ(nodeView, dstRow),
+          };
+        }
+        via[i] = false;
+      } else {
+        // edgeRow >= bufEdgeCount: out of range — skip this link rather than index past the view.
         via[i] = false;
       }
-      linkHandles.current[i]?.update(seg);
+      if (seg) linkHandles.current[i]?.update(seg);
     }
     // viaEdge drives per-slot material — a prop, so commit it only when the vector changes.
     const viaChanged = linkViaEdge.length !== linkN || via.some((v, i) => v !== linkViaEdge[i]);

@@ -168,6 +168,16 @@ type nodeMover struct {
 	// same retain-and-retry shape PacedWire already uses for its outCh delivery
 	// handoff (full → retry next cycle, bead stays in inflight) — reused rather than
 	// a second invented pattern.
+	//
+	// INTENTIONALLY UNBOUNDED (no cap). The model forbids dropping a cascade message
+	// (MODEL.md: "the cascade never drops a message"; an earlier lossy sender dropped ~98%
+	// of sends under load and was removed) — a size cap would reintroduce exactly that
+	// loss, so it is NOT the right hardening. Growth is only possible if a destination's
+	// channel stays full FOREVER, which requires that destination's own run loop to have
+	// stopped draining while this node keeps sending to it. That only happened via the one
+	// unguarded blocking-send path (applyRingAnchor), now ctx-guarded (sendExtCtx) so no
+	// goroutine parks holding a full extIn: every live mover drains its own channels every
+	// cycle, so pending drains and never grows without bound in practice.
 	pending []pendingSend
 	// resolveDest looks up the ONE dedicated directed channel FROM this node TO the
 	// given destination id — the destination's neighborIn[this node's id] if destID is
