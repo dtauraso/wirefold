@@ -19,8 +19,8 @@ import (
 
 const dragAnchorTopo = `{
   "nodes": [
-    {"id":"src","type":"FanInSrc","outputs":[{"name":"Out"}]},
-    {"id":"dst","type":"FanInSink","inputs":[{"name":"In"}]}
+    {"id":"src","type":"SrcNode","outputs":[{"name":"Out"}]},
+    {"id":"dst","type":"SinkNode","inputs":[{"name":"In"}]}
   ],
   "edges": [
     {"label":"e0","kind":"data","source":"src","sourceHandle":"Out","target":"dst","targetHandle":"In"}

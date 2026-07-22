@@ -164,14 +164,13 @@ type PacedWire struct {
 	// own speed sink from the loader's build-wide accumulator (buildMoveDispatch);
 	// nil in bare test construction (never selected).
 	speedCh chan float64
-	// reviseCh is how an incident edge's own goroutine (edgeMover.recomputeGeometry)
-	// hands this wire a geometry revision WITHOUT touching pw.inflight itself. The
-	// edge computes its new per-edge arc/segment and posts a reviseReq; run() drains
-	// it and applies reviseEdge on THIS wire's own goroutine, so inflight has exactly
-	// one owner even when N fan-in edges share this one wire (they all post here; only
-	// run() mutates inflight). This is what makes a shared fan-in dest wire safe — the
-	// old direct edgeMover.ReviseInFlightGeometry call had every fan-in edge's
-	// goroutine mutating the same inflight, a data race.
+	// reviseCh is how the incident edge's own goroutine (edgeMover.recomputeGeometry)
+	// hands this wire a geometry revision WITHOUT touching pw.inflight itself. The edge
+	// computes its new arc/segment and posts a reviseReq; run() drains it and applies
+	// ReviseInFlightGeometry on THIS wire's own goroutine, so inflight has exactly one
+	// owner (the wire's goroutine, not the edge's). Keeping the revise off the edge's
+	// goroutine is what lets the wire own its goroutine cleanly; it was also load-bearing
+	// under the removed fan-in model, where a shared wire had several edge goroutines.
 	reviseCh chan reviseReq
 
 	Target       string   // destination node id — authoritative slot identity
@@ -179,15 +178,13 @@ type PacedWire struct {
 	Trace        *T.Trace // injected by loader; used for breadcrumb diagnostics only
 }
 
-// reviseReq is one edge's geometry revision, handed to its dest wire's own goroutine
-// over reviseCh. node/port are the edge's SOURCE identity (matching inflightBead.node/
-// port), so reviseEdge revises ONLY that edge's beads — a fan-in wire holds beads from
-// several source edges of different lengths, and moving one source must not rewrite the
-// others' geometry. arc/seg are the new per-edge arc length and straight segment.
+// reviseReq is an edge's geometry revision, handed to its dest wire's own goroutine over
+// reviseCh: the new arc length and straight segment. It carries NO source identity: fan-in
+// is removed from the model (validateNoFanIn), so a wire has exactly one incident edge and
+// every in-flight bead on it is that edge's — the revision applies to all of them.
 type reviseReq struct {
-	node, port string
-	arc        float64
-	seg        wireSegment
+	arc float64
+	seg wireSegment
 }
 
 // NewPacedWire creates an empty PacedWire with its in/out channels ready. arcLength
@@ -359,7 +356,7 @@ func (pw *PacedWire) run(ctx context.Context) {
 					rc.SetSpeed(sp)
 				}
 			case r := <-pw.reviseCh:
-				pw.reviseEdge(r.node, r.port, tick, r.arc, r.seg)
+				pw.ReviseInFlightGeometry(tick, r.arc, r.seg)
 			default:
 				break drain
 			}
@@ -492,11 +489,11 @@ func (pw *PacedWire) stepAll(tick int64) {
 // arc/seg every cycle, so the new geometry takes effect without any relaunch.
 // No-op when no bead is in flight.
 //
-// This is the ALL-BEADS form, retained for bare-wire unit tests (one edge under test, so
-// every bead is that edge's). PRODUCTION revises through reviseEdge (source-filtered),
-// applied by run() from a reviseReq — see reviseEdge. Called only by the wire's own
-// goroutine (or the test goroutine driving a bare wire); tick is that goroutine's own
-// clock reading.
+// It rebases EVERY in-flight bead — correct because a wire has exactly one incident edge
+// (fan-in is removed), so all its beads are that edge's. Production applies it from run()
+// draining a reviseReq off reviseCh; bare-wire unit tests call it directly. Called only by
+// the wire's own goroutine (or the test goroutine driving a bare wire); tick is that
+// goroutine's own clock reading.
 func (pw *PacedWire) ReviseInFlightGeometry(tick int64, newArc float64, newSeg wireSegment) {
 	if len(pw.inflight) == 0 {
 		return
@@ -504,26 +501,6 @@ func (pw *PacedWire) ReviseInFlightGeometry(tick int64, newArc float64, newSeg w
 	nowTick := float64(tick)
 	for i := range pw.inflight {
 		pw.rebaseBead(&pw.inflight[i], nowTick, newArc, newSeg)
-	}
-}
-
-// reviseEdge is the fan-in-safe revision: it rebases ONLY the in-flight beads whose
-// SOURCE identity matches (node, port) — one edge's beads — leaving beads from other
-// source edges sharing this wire untouched. It is the production revision path, applied
-// by run() from a reviseReq an incident edge posted on reviseCh; ReviseInFlightGeometry
-// (all beads) is retained for bare-wire unit tests, where every bead belongs to the one
-// edge under test so the distinction is moot. Called only by this wire's own goroutine.
-func (pw *PacedWire) reviseEdge(node, port string, tick int64, newArc float64, newSeg wireSegment) {
-	if len(pw.inflight) == 0 {
-		return
-	}
-	nowTick := float64(tick)
-	for i := range pw.inflight {
-		b := &pw.inflight[i]
-		if b.node != node || b.port != port {
-			continue // a different fan-in edge's bead — its geometry is unchanged
-		}
-		pw.rebaseBead(b, nowTick, newArc, newSeg)
 	}
 }
 

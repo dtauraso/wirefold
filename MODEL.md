@@ -14,19 +14,16 @@ GOROUTINE with a channel on each end — a channel in from its source
 node, a channel out to its destination node. The wire goroutine owns its
 own beads (`inflight`/`delivered`) and its own geometry; nothing outside
 it locks or reaches into that state. The wire has its OWN goroutine
-(`PacedWire.run`, one per unique destination wire, launched by `Start`) —
-not stepped by another. It must: a destination **input port is one wire**,
-and several source edges can **fan in** to it, so no single edge's
-goroutine can own the shared wire. Incident edges only POST geometry
-revisions to the wire over a channel (`reviseCh`, keyed by the edge's
-source so only that edge's beads are rebased); the wire's own goroutine is
-the sole thing that touches `inflight`. (An earlier design had the wire
-driven by an incident edge's goroutine to hold goroutine count fixed —
-correct for a 1:1 edge:wire, but for fan-in it put N edge goroutines onto
-one wire's beads, a data race and a cross-edge geometry clobber. The wire
-owning its own goroutine is the fix.) The network is
-self-scheduling: there is no central runner, no walker, no underlying
-layer that "runs" the nodes. The network IS the running program.
+(`PacedWire.run`, one per wire, launched by `Start`) — not stepped by
+another. The incident edge only POSTS geometry revisions to the wire over
+a channel (`reviseCh`) when an endpoint moves; the wire's own goroutine is
+the sole thing that touches `inflight`. **An input port is one wire fed by
+exactly one edge** — fan-in (several edges into one port) is not part of
+the model; multiple sources into one node use distinct input ports (see
+§Node lifecycle). So a wire has exactly one incident edge, and its own
+goroutine owns its beads with no sharing. The
+network is self-scheduling: there is no central runner, no walker, no
+underlying layer that "runs" the nodes. The network IS the running program.
 
 A channel here does NOT mean a blocking, backpressured handshake — see
 §Sending below. The source places a bead on its out-channel and moves
@@ -87,16 +84,21 @@ A bead crosses a wire in one direction:
 The wire times its own delivery. There is no TS-driven delivery signal —
 the renderer is told where the bead is, not asked when it has arrived.
 
-## Node lifecycle and fan-in
+## Node lifecycle
 
 - A destination node receives beads over its input port's channel and
   holds them in node-local state.
 - When the node's firing rule is satisfied, it fires.
-- **Fan-in:** several beads can be in flight on one wire at once, each
-  carrying its own placement geometry — geometry travels WITH the bead,
-  never stored as one shared value on the wire, so fan-in is safe. The
-  node receives from that one wire's channel and accumulates received
-  beads in node-local state. Distinct inputs are distinct wires.
+- **One edge per input port.** An input port is one wire, fed by EXACTLY
+  ONE edge — fan-in (several edges into one port) is not part of the model.
+  A node that needs several sources uses DISTINCT input ports, each its own
+  wire (e.g. a gate's separate left/right ports). Multiple beads may still
+  be in flight on one wire at once — its single source emitting repeatedly —
+  each carrying its OWN placement geometry: geometry travels WITH the bead,
+  never stored as one shared value on the wire, so the wire reshaping
+  mid-flight (a node drag) re-derives each bead correctly. The loader
+  rejects a fan-in topology at parse (`validateNoFanIn`); the guard
+  `tools/check-no-fan-in.sh` keeps it out of the committed diagram.
 
 ## Sending
 
@@ -285,7 +287,7 @@ and none is a source of truth.
 ## Allowed vocabulary
 
 - bead, in-flight, held (node-local) state
-- channel, input port, output port, fan-in
+- channel, input port, output port (one edge per input port — no fan-in)
 - arc length, pulse speed (world-units per tick), ticks-to-cross,
   tick-count processing window
 - tick, human-speed clock (the one system monotonic clock scaled to ticks

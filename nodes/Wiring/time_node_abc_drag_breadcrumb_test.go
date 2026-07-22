@@ -47,8 +47,8 @@ func (s *syncBuffer) String() string {
 	return s.buf.String()
 }
 
-// writeXTN lays down a 3-node topology: "x" (FanInSrc, the node that will be dragged),
-// "t" (a real HoldNewSendOld node — a "time node") and "n" (FanInSink, a plain non-time
+// writeXTN lays down a 3-node topology: "x" (SrcNode, the node that will be dragged),
+// "t" (a real HoldNewSendOld node — a "time node") and "n" (SinkNode, a plain non-time
 // node) — both t and n are direct neighbors of x via one edge each, so dragging x sends
 // BOTH a moveMsgKindNeighborSetC. Both are positive cases now: every drag-message
 // recipient must log an abc-drag breadcrumb, regardless of kind.
@@ -56,11 +56,11 @@ func writeXTN(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 	mk := func(rel, body string) { writeTreeFile(t, root, rel, body) }
-	mk("nodes/x/meta.json", `{"id":"x","type":"FanInSrc","r":100,"scenePolarR":40,"scenePolarTheta":1.0,"scenePolarPhi":1.2}`)
+	mk("nodes/x/meta.json", `{"id":"x","type":"SrcNode","r":100,"scenePolarR":40,"scenePolarTheta":1.0,"scenePolarPhi":1.2}`)
 	mk("nodes/x/outputs/Out.json", `{"name":"Out"}`)
 	mk("nodes/t/meta.json", `{"id":"t","type":"HoldNewSendOld","data":{"state":{"held":0}},"r":100,"scenePolarR":90,"scenePolarTheta":0.9,"scenePolarPhi":-2.1}`)
 	mk("nodes/t/inputs/FromPrevHoldNewSendOldNode.json", `{"name":"FromPrevHoldNewSendOldNode"}`)
-	mk("nodes/n/meta.json", `{"id":"n","type":"FanInSink","r":100,"scenePolarR":90,"scenePolarTheta":2.0,"scenePolarPhi":0.4}`)
+	mk("nodes/n/meta.json", `{"id":"n","type":"SinkNode","r":100,"scenePolarR":90,"scenePolarTheta":2.0,"scenePolarPhi":0.4}`)
 	mk("nodes/n/inputs/In.json", `{"name":"In"}`)
 	mk("edges/eXT.json", `{"label":"eXT","kind":"chain","source":"x","sourceHandle":"Out","target":"t","targetHandle":"FromPrevHoldNewSendOldNode"}`)
 	mk("edges/eXN.json", `{"label":"eXN","kind":"data","source":"x","sourceHandle":"Out","target":"n","targetHandle":"In"}`)
@@ -168,7 +168,7 @@ func parseBreadcrumbLines(t *testing.T, raw string) []breadcrumbLine {
 
 // TestEveryDragRecipientLogsAbcDragBreadcrumb drags x and asserts that EVERY direct
 // neighbor that receives a moveMsgKindNeighborSetC — both the time node t (HoldNewSendOld)
-// and the non-time node n (FanInSink) — emits exactly one "abc-drag" breadcrumb matching
+// and the non-time node n (SinkNode) — emits exactly one "abc-drag" breadcrumb matching
 // its freshly re-quantized abc, keyed node=<recipient> port=x.
 func TestEveryDragRecipientLogsAbcDragBreadcrumb(t *testing.T) {
 	root := writeXTN(t)
@@ -290,7 +290,7 @@ func TestEveryDragRecipientLogsAbcDragBreadcrumb(t *testing.T) {
 
 	// (a) t (HoldNewSendOld, a "time node") must emit its abc-drag breadcrumb.
 	checkOne("t", tLines, lpTAfter)
-	// (b) n (FanInSink, NOT a time node) must ALSO emit its abc-drag breadcrumb — the old
+	// (b) n (SinkNode, NOT a time node) must ALSO emit its abc-drag breadcrumb — the old
 	// kind gate is gone; every drag-message recipient is logged.
 	checkOne("n", nLines, lpNAfter)
 
