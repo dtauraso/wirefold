@@ -93,11 +93,34 @@ ever meaningful, and the only one a reader can act on.
    Consequence still OPEN — the tear: with per-block buffers, the Edge buffer can arrive a
    tick behind the Node buffer, and if the Edge block keeps shipping copied `SX..EZ`
    endpoints, that stale-copy gap is a visible ~32px separation during a fast drag. Two ways
-   to close it, undecided: (a) edge stores no endpoint and references the node/port row
+   to close it: (a) edge stores no endpoint and references the node/port row
    (tear unrepresentable, but hinges on no endpoint ever moving independent of a node); or
    (b) edge keeps its copy but re-quantizes in the node's tick via the existing one-hop
-   `neighborSetC` mechanism, so its buffer is never a stale tick behind. Decide before
-   touching the Edge block.
+   `neighborSetC` mechanism, so its buffer is never a stale tick behind.
+
+   **DECIDED: (a) — edge references the PORT row; no stored endpoint.** A code trace
+   (`node_mover.go`, `Buffer/pack.go`, `Buffer/snapshot.go`) established the facts:
+   - Today the edge endpoint (`SX..EZ`) is a *stored copy* set in `onEdgeGeometry`
+     (`snapshot.go:636-637`) from an edge-geometry event the **edgeMover's own goroutine**
+     emits (`node_mover.go:580-582`), one async channel hop AFTER the node move
+     (`quantized_move.go:71-83` enqueues to the edge non-blocking). So a lag already exists;
+     what hides it is that one drain goroutine packs Node+Edge into one frame and ships them
+     together (`snapshot.go:362-389`). The split removes that "shipped-together" coupling and
+     turns the transient lag into a persistent cross-buffer skew — the tear is real.
+   - Option (b) is mis-worded against the code: `neighborSetC` is the *other node's*
+     distance/angle re-quantize, NOT what refreshes the dragged edge's endpoint. The endpoint
+     is computed on the edge's own goroutine by design; to land it in the node's tick you'd
+     move endpoint computation into the node goroutine, breaking the per-owner model this
+     refactor exists to reach. (b) fights the model.
+   - **Hinge for (a) — resolved.** Edge endpoints are PORT ANCHORS (`srcH`/`dstH` =
+     `SourceHandle`, `node_mover.go:431-432,478`). Ports ARE independently draggable
+     (`setPortAnchorId`, `node_mover.go:218-220`), so an endpoint does move independent of the
+     node CENTER. But ports are packed as rows in the **Port block, owned by the node's mover,
+     shipped with the node** (`pack.go:310-322`, `px/py/pz`). Referencing the PORT row (not the
+     node center, not a copied coordinate) makes the endpoint carry no independent value: the
+     tear is unrepresentable because the edge has nothing of its own to go stale. The packer
+     already resolves edge→port this exact way for LayoutLink (`edgeRowForPair`,
+     `pack.go:243-249`). So (a) holds by referencing the port row.
 2. **Row identity across frames.** Node row order is stable today because the accumulator
    assigns it. With owners publishing independently, the packer needs the same stable
    ordering, from a table built once at load. `portTable` / `edgeTable` / `nodeTable`
