@@ -82,11 +82,22 @@ ever meaningful, and the only one a reader can act on.
 
 ## Open questions — settle before writing code
 
-1. **Who decides when to pack a frame?** Today the drain emits on tick coalescing, driven
-   by events arriving. With no accumulator there is no arrival to trigger on. Likely a
-   packer that runs on the frame cadence — but that makes emission periodic rather than
-   change-driven, and Go currently emits only when something changes. Either accept
-   constant traffic, or give each row a dirty flag and skip packing when none are set.
+1. **Who decides when to pack a frame? — DECIDED: N per-block buffers, no global packer.**
+   Each block (Node, Edge, Bead, …) is its own binary content buffer, streamed change-driven
+   by its owner(s): the Bead buffer streams every tick because beads churn; the Node buffer
+   streams only on a move. This restores "Go emits only when something changes" per buffer
+   without a shared frame trigger or a dirty-flag over one, and removes the single-frame
+   packer. (Earlier drafts weighed a periodic packer vs a dirty-flag; both are moot — there
+   is no single frame to trigger.)
+
+   Consequence still OPEN — the tear: with per-block buffers, the Edge buffer can arrive a
+   tick behind the Node buffer, and if the Edge block keeps shipping copied `SX..EZ`
+   endpoints, that stale-copy gap is a visible ~32px separation during a fast drag. Two ways
+   to close it, undecided: (a) edge stores no endpoint and references the node/port row
+   (tear unrepresentable, but hinges on no endpoint ever moving independent of a node); or
+   (b) edge keeps its copy but re-quantizes in the node's tick via the existing one-hop
+   `neighborSetC` mechanism, so its buffer is never a stale tick behind. Decide before
+   touching the Edge block.
 2. **Row identity across frames.** Node row order is stable today because the accumulator
    assigns it. With owners publishing independently, the packer needs the same stable
    ordering, from a table built once at load. `portTable` / `edgeTable` / `nodeTable`
