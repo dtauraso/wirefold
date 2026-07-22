@@ -24,16 +24,16 @@ type Node struct {
 	// (injectSpeedChans). nil on a test build with no loader.
 	SpeedCh                    <-chan float64
 	FromPrevHoldNewSendOldNode *Wiring.In
-	ToNext                     Wiring.OutMulti
+	ToNext                     Wiring.Broadcast
 }
 
-// placeHeld appends the ToNext fan-out beads (held value) to items WITHOUT driving
+// placeHeld appends the ToNext broadcast beads (held value) to items WITHOUT driving
 // them, returning the extended set. Invariant: gatecommon.NoValue (the empty-Held
 // sentinel) is never sent on an output channel — a fire whose Held is NoValue places
 // nothing on ToNext. Only the SEND is suppressed; Held still updates to the received
 // value in the caller. Delivery is timed by each wire's own goroutine, so the whole
-// fan-out animates concurrently with no further driving from this node.
-func placeHeld(outs Wiring.OutMulti, held int, items []Wiring.DriveItem) []Wiring.DriveItem {
+// broadcast animates concurrently with no further driving from this node.
+func placeHeld(outs Wiring.Broadcast, held int, items []Wiring.DriveItem) []Wiring.DriveItem {
 	if held == gatecommon.NoValue {
 		return items
 	}
@@ -111,7 +111,7 @@ func (in *Node) Update(ctx context.Context) {
 					in.EmitHeldBead(value)
 				}
 
-				// Place the ToNext fan-out beads WITHOUT walkers. prevHeld is
+				// Place the ToNext broadcast beads WITHOUT walkers. prevHeld is
 				// the OLD held value (captured before updating in.Held) so the
 				// ordering is explicit.
 				var items []Wiring.DriveItem
@@ -119,7 +119,7 @@ func (in *Node) Update(ctx context.Context) {
 				items = placeHeld(in.ToNext, prevHeld, items)
 				in.Held = value
 
-				// No live bead placed (suppressed sentinel fan-out) ⇒ no real
+				// No live bead placed (suppressed sentinel broadcast) ⇒ no real
 				// output transit ⇒ no processing window to observe. Otherwise
 				// the window length is the LONGEST ToNext edge's ticksToCross
 				// (arcLength/pulseSpeed, ms-latency / MsPerTick) counted from

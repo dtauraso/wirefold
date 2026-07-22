@@ -28,7 +28,7 @@ func stepWire(ctx context.Context, pw *Wiring.PacedWire, clk Wiring.Clock) {
 
 // TestFireOnReceiveLean covers holdnewsendold's core fire-on-receive
 // contract on the one real clock: on receive it fires and forwards the
-// PRIOR held value (starts at Held's zero value) to every ToNext fan-out
+// PRIOR held value (starts at Held's zero value) to every ToNext broadcast
 // entry, then stores the new value in Held.
 func TestFireOnReceiveLean(t *testing.T) {
 	const latMs = 40.0
@@ -60,7 +60,7 @@ func TestFireOnReceiveLean(t *testing.T) {
 		Clock:                      clk,
 		Held:                       99, // seed a non-zero prior value to forward
 		FromPrevHoldNewSendOldNode: Wiring.NewInPaced(inPw, ctx, "in", "FromPrevHoldNewSendOldNode", tr),
-		ToNext: Wiring.OutMulti{
+		ToNext: Wiring.Broadcast{
 			Wiring.NewPacedOutNoGeom(outPw0, ctx, "in", "ToNext0", tr,
 				Wiring.RuleFireAndForget, latMs*Wiring.PulseSpeedWuPerMs, latMs, ""),
 			Wiring.NewPacedOutNoGeom(outPw1, ctx, "in", "ToNext1", tr,

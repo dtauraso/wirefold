@@ -24,7 +24,7 @@ func validateSpec(spec *topoSpec) error {
 	// Build per-kind port sets needed by the handle and required-port checks.
 	kindInPorts := map[string]map[string]bool{}
 	kindOutPorts := map[string]map[string]bool{}
-	kindOutMultiPorts := map[string]map[string]bool{}
+	kindBroadcastPorts := map[string]map[string]bool{}
 	for kind, bind := range Registry {
 		ins := map[string]bool{}
 		outs := map[string]bool{}
@@ -35,14 +35,14 @@ func validateSpec(spec *topoSpec) error {
 				ins[p.Name] = true
 			case PortOut:
 				outs[p.Name] = true
-			case PortOutMulti:
+			case PortBroadcast:
 				outMultis[p.Name] = true
 				outs[p.Name] = true
 			}
 		}
 		kindInPorts[kind] = ins
 		kindOutPorts[kind] = outs
-		kindOutMultiPorts[kind] = outMultis
+		kindBroadcastPorts[kind] = outMultis
 	}
 
 	// Check 1: unknown node kinds.
@@ -100,7 +100,7 @@ func validateSpec(spec *topoSpec) error {
 			errs = append(errs, fmt.Sprintf("edge %q references unknown node id %q as its source", e.Label, e.Source))
 		} else {
 			srcHandle := e.SourceHandle
-			if base, isMulti := outMultiBaseName(srcHandle, srcKind, kindOutMultiPorts); isMulti {
+			if base, isMulti := broadcastBaseName(srcHandle, srcKind, kindBroadcastPorts); isMulti {
 				srcHandle = base
 			}
 			if !kindOutPorts[srcKind][srcHandle] {

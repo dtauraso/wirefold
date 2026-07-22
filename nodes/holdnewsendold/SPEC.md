@@ -30,13 +30,13 @@
 | Name | Direction | EdgeKind | Notes |
 |------|-----------|----------|-------|
 | FromPrevHoldNewSendOldNode | in | chain | receives value from upstream chain holdnewsendold |
-| ToNext | out | chain | fan-out to downstream nodes (multi-output) |
+| ToNext | out | chain | broadcast to downstream nodes (multi-output) |
 
 ## Firing rule
 
 On each value received from FromPrevHoldNewSendOldNode:
 1. Fire.
-2. Fan-out the current Held value concurrently on all ToNext outputs.
+2. Broadcast the current Held value concurrently on all ToNext outputs.
 3. Update Held to value.
 
 The HoldNewSendOld is a pure forwarder: it holds the last value and re-emits it on the next fire (feedback now lives on the Pacer kind, not here).

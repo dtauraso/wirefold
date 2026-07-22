@@ -78,17 +78,17 @@ func (n *Node) clock() Wiring.Clock {
 	return n.Clock
 }
 
-// fanOutPlace places v on every wired fan-out output (same cycle — preserves
-// concurrent fan-out) without driving them. Returns false only on a
+// broadcastPlace places v on every wired broadcast output (same cycle — preserves
+// concurrent broadcast) without driving them. Returns false only on a
 // structural, TERMINAL failure (DriveItem.Failed() — a nil Out), mirroring
 // EmitOneDriven's false-return-stops-the-goroutine convention. A momentarily
 // full paced-wire buffer (DriveItem.BufferFull()) is TRANSIENT — the wire's
 // own goroutine drains it every cycle — so it must NOT stop this node's
-// goroutine; that bead is simply dropped from this cycle's fan-out (a
+// goroutine; that bead is simply dropped from this cycle's broadcast (a
 // breadcrumb was already emitted by PacedWire.Send) and the next Fire cycle
 // tries again. Delivery is timed by each wire's own goroutine — this node no
 // longer pins or steps a tick.
-func (n *Node) fanOutPlace(v int) bool {
+func (n *Node) broadcastPlace(v int) bool {
 	if n.ToHoldNewSendOld.Wired() && n.ToHoldNewSendOld.PlaceDrivenAt(v).Failed() {
 		return false
 	}
@@ -162,20 +162,20 @@ func (n *Node) updateFeedbackRing(ctx context.Context, working, backup *[]int, i
 
 			// PEEK the end (do NOT reslice) and SEND. Buffer unchanged. Node 1
 			// places the same bead on every wired output the same cycle
-			// (fanOutPlace — preserves concurrent fan-out) so node 2
+			// (broadcastPlace — preserves concurrent broadcast) so node 2
 			// (ToHoldNewSendOld) and node 6 (ToExcitatory) traverse in lockstep.
 			v := (*working)[len(*working)-1]
 			if n.Fire != nil {
 				n.Fire()
 			}
-			if !n.fanOutPlace(v) {
+			if !n.broadcastPlace(v) {
 				return
 			}
 			awaiting = true
 		}
 
 		// One step per cycle: sleep and poll FeedbackIn non-blocking. Each
-		// fan-out wire's own goroutine advances its in-flight beads; this node
+		// broadcast wire's own goroutine advances its in-flight beads; this node
 		// is never parked across the traversal and no longer steps the wires
 		// itself.
 		Wiring.ApplySpeedNonBlocking(clk, n.SpeedCh)
@@ -248,7 +248,7 @@ func (n *Node) Update(ctx context.Context) {
 
 	// Plain emit path (FeedbackIn not wired): Input is a periodic SOURCE. It pops
 	// the end and fans the value to every wired output (2 and 3), then sleeps ONE
-	// CADENCE — a sleep timer of (one human cycle) × (the fan-out edge length) —
+	// CADENCE — a sleep timer of (one human cycle) × (the broadcast edge length) —
 	// before firing the next value. The bead is stepped one position per human
 	// cycle DURING that sleep, so it traverses the edge across the cadence; with
 	// equal-length output edges (assumed) both outputs stay in lockstep. With
@@ -262,7 +262,7 @@ func (n *Node) Update(ctx context.Context) {
 	// (gatecommon/gate.go: fire when now()-dwellStart >= fireDwellTicks). Tick()
 	// freezes on Halt, so the cadence — and therefore emission — freezes on pause
 	// just like every other node kind. The multiplication factor is the only
-	// Input-specific part: the cadence is one tick per unit of the fan-out edge
+	// Input-specific part: the cadence is one tick per unit of the broadcast edge
 	// length, recomputed each pass so a drag re-paces it.
 	lastFireTick := clk.Tick() - int64(inputCadenceTicks(n)) // fire on the first pass
 	for {
@@ -276,7 +276,7 @@ func (n *Node) Update(ctx context.Context) {
 			}
 			v := popEnd(&working, &backup, init)
 			emitBeads() // array changed (pop, maybe refill) → restream interior
-			if !n.fanOutPlace(v) {
+			if !n.broadcastPlace(v) {
 				return
 			}
 			lastFireTick = now
@@ -291,7 +291,7 @@ func (n *Node) Update(ctx context.Context) {
 }
 
 // inputCadenceTicks is Input's fire cadence in clock ticks: the CROSSING TIME of
-// the primary fan-out edge, ArcLength / PulseSpeedWuPerTick (= ticksToCross), so
+// the primary broadcast edge, ArcLength / PulseSpeedWuPerTick (= ticksToCross), so
 // exactly one bead crosses the edge per cadence — no overlap. Measured in ticks,
 // so it freezes on pause with Tick(). Recomputed live so a drag that changes the
 // edge length re-paces emission.

@@ -124,7 +124,7 @@ type moveMsg struct {
 	// Center (Kind == "center"): the re-propagated world center for NodeID under the
 	// polar layout. Each owning node/edge goroutine writes it onto its held geom
 	// and re-emits its own geometry. (RootMove is the decentralized node-to-node
-	// message cascade entry; there is no central fan-out step.)
+	// message cascade entry; there is no central broadcast step.)
 	Center *vec3
 	// Centers (Kind == "centers"): batched per-edge re-propagation. Maps node id → new
 	// world center for every moved endpoint of THIS edge in a single frame, so an edge
@@ -790,7 +790,7 @@ func (md *MoveDispatch) sendExtCtx(ch chan moveMsg, msg moveMsg) {
 // nm's own pending retry queue and attempts an immediate flush — never blocking the
 // calling handler goroutine. Bound once per node at construction (nm.sendMove =
 // md.enqueueFor(nm)) so every send a nodeMover's own handle performs — including the
-// ones fanEdgesAndPartners/requantizeLocalPolars make on that node's behalf — goes
+// ones broadcastToEdgesAndPartners/requantizeLocalPolars make on that node's behalf — goes
 // through nm's own retry queue, never a raw blocking channel write and never a second
 // mover's queue (there is no shared outbox to route through anymore).
 func (md *MoveDispatch) enqueueFor(nm *nodeMover) func(id string, msg moveMsg) {
@@ -812,7 +812,7 @@ func (md *MoveDispatch) enqueueFor(nm *nodeMover) func(id string, msg moveMsg) {
 // it was silently discarding almost every message. NeighborSetC is now routed through
 // the SENDING node's own retry queue (nm.sendMove in requantizeLocalPolars,
 // see nodeMover.pending), the same decoupling every other per-commit fan in this file
-// already uses (fanEdgesAndPartners) — it gets the same deadlock-avoidance property (the
+// already uses (broadcastToEdgesAndPartners) — it gets the same deadlock-avoidance property (the
 // send never blocks the handler goroutine) without ever dropping: an item that can't be
 // delivered right now stays with the sender and is retried on the sender's own next
 // loop cycle instead of being handed to a separate sender goroutine or dropped.
