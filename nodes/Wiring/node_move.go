@@ -195,24 +195,26 @@ type MoveDispatch struct {
 	// the same way vp/ov/gest are, so a bare test-constructed MoveDispatch only has to
 	// reason about one zero-value sub-struct instead of six loose nilable fields.
 	persist persisters
-	// portRows resolves a numeric buffer PORT-ROW index (carried on a new-system raw hit)
-	// back to its (node, port, isInput) identity. Wired to the buffer SnapshotState's
-	// port-row table in main.go (new-system only); nil on the old path and in unit tests, in
-	// which case the gesture FSM falls back to parsing the legacy port-id string. Go owns the
-	// topology and wrote the Port block, so it — not TS — maps a port row to a (node, port).
-	portRows PortRowResolver
-	// edgeRows resolves a numeric buffer EDGE-ROW index (carried on a new-system raw hit)
-	// back to its edge label. Wired to the buffer SnapshotState's edge-row table in main.go
-	// (new-system only); nil on the old path and in unit tests, in which case the gesture
-	// FSM falls back to the raw hit's Id string. Go owns the topology and wrote the Edge
-	// block, so it — not TS — maps an edge row to its label.
-	edgeRows EdgeRowResolver
-	// nodeRows resolves a numeric buffer NODE-ROW index (carried on a new-system raw hit)
-	// back to its node id. Wired to the buffer SnapshotState's node-row table in main.go
-	// (new-system only); nil on the old path and in unit tests, in which case the gesture
-	// FSM falls back to the raw hit's Id string. Go owns the topology and wrote the Node
-	// block, so it — not TS — maps a node row to its id.
-	nodeRows NodeRowResolver
+	// portTbl/edgeTbl/nodeTbl are this (stdin/gesture) goroutine's OWN plain-field copies of
+	// the buffer's row-lookup tables, filled by drainRowTables from portTblC/edgeTblC/
+	// nodeTblC (below) — never read or written by any other goroutine, so no lock/atomic is
+	// needed (CLAUDE.md model: ownership over sharing). portFromHit/edgeFromHit/nodeFromHit
+	// (gesture.go) read these directly. nil until the first table arrives (startup: a hit
+	// can arrive before Buffer ever sends one) — the lookups below treat nil exactly like an
+	// empty table (out-of-range), the same not-found sentinel the old atomic.Load-then-nil-
+	// check gave.
+	portTbl []T.PortRow
+	edgeTbl []string
+	nodeTbl []string
+	// portTblC/edgeTblC/nodeTblC are the receive ends of the depth-1, replace-latest
+	// channels the Trace-drain goroutine's Buffer.SnapshotState sends rebuilt row tables on
+	// (SetPortTableChan/SetEdgeTableChan/SetNodeTableChan in main.go wire the SAME channel
+	// object to both the Buffer send side and this receive side). nil on the old path and in
+	// unit tests, in which case drainRowTables is a no-op (a receive on a nil channel is
+	// never selected) and portTbl/edgeTbl/nodeTbl stay whatever a test set them to directly.
+	portTblC chan []T.PortRow
+	edgeTblC chan []string
+	nodeTblC chan []string
 	// sel groups the CURRENTLY-SELECTED (click-select) and CURRENTLY-HOVERED (pointer hover)
 	// UI-only state (selection_state.go) — pure routing-directory-parked UI state, owned by
 	// Go but not part of the dispatch/persist/camera concerns. Grouped the same way
@@ -256,41 +258,44 @@ func (md *MoveDispatch) SetMsgTap(tap func(destID string, msg moveMsg)) {
 	md.msgTap.Store(&tap)
 }
 
-// NodeRowResolver maps a numeric buffer NODE-ROW index to its node id. Implemented by
-// Buffer.SnapshotState (which wrote the Node block in this same row order). Kept as an
-// interface here so the Wiring package needs no dependency on the Buffer package — main.go
-// injects the concrete resolver.
-type NodeRowResolver interface {
-	LookupNodeRow(row int) (nodeID string, ok bool)
+// SetNodeTableChan wires the receive end of the depth-1, replace-latest node-row-table
+// channel (the send end is Buffer.SnapshotState.SetNodeTableChan on the SAME channel
+// object — main.go creates it and wires both ends). Called once at startup after
+// LoadTopology. drainRowTables (called at the top of each stdin dispatch iteration) is what
+// actually moves a pending value into md.nodeTbl; this just installs the channel.
+func (md *MoveDispatch) SetNodeTableChan(ch chan []string) { md.nodeTblC = ch }
+
+// SetEdgeTableChan is the edge-row analogue of SetNodeTableChan.
+func (md *MoveDispatch) SetEdgeTableChan(ch chan []string) { md.edgeTblC = ch }
+
+// SetPortTableChan is the port-row analogue of SetNodeTableChan.
+func (md *MoveDispatch) SetPortTableChan(ch chan []T.PortRow) { md.portTblC = ch }
+
+// drainRowTables non-blockingly pulls the latest pending value (if any) off each of
+// portTblC/edgeTblC/nodeTblC into md.portTbl/md.edgeTbl/md.nodeTbl. Called at the top of
+// every stdin dispatch iteration (RunStdinReader, stdin_reader.go) — BEFORE any hit
+// resolution in that iteration — so a hit resolves against the freshest table delivered so
+// far, matching the freshness the old atomic.Load gave. A nil channel (unwired: tests, or a
+// build that never calls the Set*TableChan setters) makes every case here permanently
+// unselectable, so this is a safe no-op in that case; md.portTbl/edgeTbl/nodeTbl then stay
+// whatever a test set them to directly (or nil, at startup, before Buffer's first send).
+func (md *MoveDispatch) drainRowTables() {
+	select {
+	case tbl := <-md.portTblC:
+		md.portTbl = tbl
+	default:
+	}
+	select {
+	case tbl := <-md.edgeTblC:
+		md.edgeTbl = tbl
+	default:
+	}
+	select {
+	case tbl := <-md.nodeTblC:
+		md.nodeTbl = tbl
+	default:
+	}
 }
-
-// SetNodeRowResolver injects the node-row resolver (new-system only). Called once at
-// startup after LoadTopology.
-func (md *MoveDispatch) SetNodeRowResolver(r NodeRowResolver) { md.nodeRows = r }
-
-// EdgeRowResolver maps a numeric buffer EDGE-ROW index to its edge label. Implemented by
-// Buffer.SnapshotState (which wrote the Edge block in this same row order). Kept as an
-// interface here so the Wiring package needs no dependency on the Buffer package — main.go
-// injects the concrete resolver.
-type EdgeRowResolver interface {
-	LookupEdgeRow(row int) (label string, ok bool)
-}
-
-// SetEdgeRowResolver injects the edge-row resolver (new-system only). Called once at
-// startup after LoadTopology.
-func (md *MoveDispatch) SetEdgeRowResolver(r EdgeRowResolver) { md.edgeRows = r }
-
-// PortRowResolver maps a numeric buffer PORT-ROW index to its (node, port, isInput)
-// identity. Implemented by Buffer.SnapshotState (which wrote the Port block in this same
-// row order). Kept as an interface here so the Wiring package needs no dependency on the
-// Buffer package — main.go injects the concrete resolver.
-type PortRowResolver interface {
-	LookupPortRow(row int) (node, port string, isInput, ok bool)
-}
-
-// SetPortRowResolver injects the port-row resolver (new-system only). Called once at
-// startup after LoadTopology.
-func (md *MoveDispatch) SetPortRowResolver(r PortRowResolver) { md.portRows = r }
 
 // NodeGeomSeed is one node's load-time seed geometry, exported in spec order and consumed
 // by main.go's pre-launch tr.NodeGeometry loop (see the row-seeding comment in main.go).

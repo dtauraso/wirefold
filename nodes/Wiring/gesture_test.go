@@ -3,6 +3,8 @@ package Wiring
 import (
 	"math"
 	"testing"
+
+	T "github.com/dtauraso/wirefold/Trace"
 )
 
 // gesture_test.go — drive the gesture state machine (gesture.go) with raw pointer/wheel
@@ -109,7 +111,7 @@ func TestGestureWheelPansOverNodeAndEdgeHit(t *testing.T) {
 		{Kind: "port", PortRow: 0},
 	} {
 		md := newGestureMD(canonicalViewpoint())
-		md.SetNodeRowResolver(stubNodeRows{"N7"})
+		md.nodeTbl = []string{"N7"}
 		before := md.vp.pivot
 		ev := rawEvent("wheel", 400, 300)
 		ev.DeltaX = 10
@@ -143,49 +145,11 @@ func TestGestureCtrlWheelZoomsToCursor(t *testing.T) {
 	}
 }
 
-// stubNodeRows is a fixed node-row table for the new-system node-hit resolution tests: it
-// maps a numeric buffer NODE-ROW index → node id, mirroring Buffer's
-// SnapshotState.LookupNodeRow without pulling in the Buffer package.
-type stubNodeRows []string
-
-func (t stubNodeRows) LookupNodeRow(row int) (nodeID string, ok bool) {
-	if row < 0 || row >= len(t) {
-		return "", false
-	}
-	return t[row], true
-}
-
-// stubPortRows is a fixed port-row table for the new-system port-hit resolution tests: it
-// maps a numeric buffer PORT-ROW index → (node, port, isInput), mirroring Buffer's
-// SnapshotState.LookupPortRow without pulling in the Buffer package.
-type stubPortRows []PortRowEntryStub
-
-// PortRowEntryStub mirrors Buffer.PortRowEntry for the resolver stub.
-type PortRowEntryStub struct {
-	Node    string
-	Port    string
-	IsInput bool
-}
-
-func (t stubPortRows) LookupPortRow(row int) (node, port string, isInput, ok bool) {
-	if row < 0 || row >= len(t) {
-		return "", "", false, false
-	}
-	e := t[row]
-	return e.Node, e.Port, e.IsInput, true
-}
-
-// stubEdgeRows is a fixed edge-row table for the new-system edge-hit resolution test: it
-// maps a numeric buffer EDGE-ROW index → edge label, mirroring Buffer's
-// SnapshotState.LookupEdgeRow without pulling in the Buffer package.
-type stubEdgeRows []string
-
-func (t stubEdgeRows) LookupEdgeRow(row int) (label string, ok bool) {
-	if row < 0 || row >= len(t) {
-		return "", false
-	}
-	return t[row], true
-}
+// Row-table lookups (nodeFromHit/edgeFromHit/portFromHit, gesture.go) now read directly off
+// MoveDispatch's own portTbl/edgeTbl/nodeTbl fields (this goroutine's plain-field copy,
+// filled by drainRowTables from the channels Buffer.SnapshotState sends on — see
+// node_move.go's doc comments). Tests in this package can set those fields directly instead
+// of injecting a resolver stub.
 
 // Click-select is Go-owned for EDGES too: a click on an edge (new-system: a numeric buffer
 // EDGE-ROW hit) resolves the row → edge label via the injected edge-row table and sets
@@ -193,8 +157,8 @@ func (t stubEdgeRows) LookupEdgeRow(row int) (label string, ok bool) {
 // clears the edge selection, and an empty click clears both.
 func TestGestureClickSelectsEdgeGoOwned(t *testing.T) {
 	md := newGestureMD(canonicalViewpoint())
-	md.SetEdgeRowResolver(stubEdgeRows{"e0", "e1"})
-	md.SetNodeRowResolver(stubNodeRows{"N7"})
+	md.edgeTbl = []string{"e0", "e1"}
+	md.nodeTbl = []string{"N7"}
 
 	// First select a node so we can prove edge-select clears it.
 	nd := rawEvent("pointerdown", 400, 300)
@@ -244,7 +208,7 @@ func TestGestureClickSelectsEdgeGoOwned(t *testing.T) {
 // empty space clears it. (No camera change — covered by TestGestureClickNoCameraChange.)
 func TestGestureClickSelectsNodeGoOwned(t *testing.T) {
 	md := newGestureMD(canonicalViewpoint())
-	md.SetNodeRowResolver(stubNodeRows{"N7"})
+	md.nodeTbl = []string{"N7"}
 
 	down := rawEvent("pointerdown", 400, 300)
 	down.Hit = rawHit{Kind: "node", NodeRow: 0}
@@ -276,8 +240,8 @@ func TestGestureClickSelectsNodeGoOwned(t *testing.T) {
 // asserts md.sel.hoverNode/hoverPort track the hit.
 func TestGestureHoverTracksNodeAndPort(t *testing.T) {
 	md := newGestureMD(canonicalViewpoint())
-	md.SetPortRowResolver(stubPortRows{{Node: "A", Port: "in", IsInput: true}})
-	md.SetNodeRowResolver(stubNodeRows{"N7"})
+	md.portTbl = []T.PortRow{{Node: "A", Port: "in", IsInput: true}}
+	md.nodeTbl = []string{"N7"}
 
 	// Move over node N7's torus ring → hovered node.
 	mv := rawEvent("pointermove", 400, 300)
@@ -316,7 +280,7 @@ func TestGestureHoverTracksNodeAndPort(t *testing.T) {
 // still resolve to a node select on pointer-up. Empty-space two-finger tap preserves selection.
 func TestGestureSecondaryTapSelectsThroughDrift(t *testing.T) {
 	md := newGestureMD(canonicalViewpoint())
-	md.SetNodeRowResolver(stubNodeRows{"N7"})
+	md.nodeTbl = []string{"N7"}
 
 	// Two-finger tap ON a node, with drift well past gestureMoveSlopPx between down and up.
 	down := rawEvent("pointerdown", 400, 300)
@@ -401,7 +365,7 @@ func TestGestureConnectedPortRingMove(t *testing.T) {
 	}
 	md := newMoveDispatch(geoms, edges, nil, nil, nil, NewRealClock(), nil)
 	md.vp.viewpoint = canonicalViewpoint()
-	md.SetPortRowResolver(stubPortRows{{Node: "N1", Port: "out", IsInput: false}})
+	md.portTbl = []T.PortRow{{Node: "N1", Port: "out", IsInput: false}}
 
 	// Grab the CONNECTED out-port of N1.
 	down := rawEvent("pointerdown", 400, 300)
@@ -449,7 +413,7 @@ func TestGestureClickNoCameraChange(t *testing.T) {
 func TestGestureSelectModeOffStillHighlights(t *testing.T) {
 	md := newGestureMD(canonicalViewpoint())
 	md.ov.selSpherePolesVisible = false
-	md.SetNodeRowResolver(stubNodeRows{"A"})
+	md.nodeTbl = []string{"A"}
 
 	down := rawEvent("pointerdown", 400, 300)
 	down.Hit = rawHit{Kind: "node", NodeRow: 0}
