@@ -531,23 +531,24 @@ func (md *MoveDispatch) applySelect(ev rawInputMsg, tr *T.Trace) {
 
 // nodeFromHit resolves a node hit to its node id. A node hit carries only a numeric buffer
 // NODE-ROW index (the node InstancedMesh instanceId == its buffer node row); Go maps it back
-// through its own node-row table (nodeRows), since Go owns the topology and wrote the Node
-// block in that same row order.
+// through its own node-row table (md.nodeTbl, this goroutine's own copy — see nodeTbl's doc
+// comment on MoveDispatch), since Go owns the topology and wrote the Node block in that same
+// row order.
 func (md *MoveDispatch) nodeFromHit(h rawHit) (node string, ok bool) {
-	if md.nodeRows != nil && h.NodeRow >= 0 {
-		return md.nodeRows.LookupNodeRow(h.NodeRow)
+	if h.NodeRow < 0 || h.NodeRow >= len(md.nodeTbl) {
+		return "", false
 	}
-	return "", false
+	return md.nodeTbl[h.NodeRow], true
 }
 
 // edgeFromHit resolves an edge hit to its edge label. An edge hit carries only a numeric
 // buffer EDGE-ROW index (no label string); Go maps it back through its own edge-row table
-// (edgeRows), since Go owns the topology and wrote the Edge block in that same row order.
+// (md.edgeTbl), since Go owns the topology and wrote the Edge block in that same row order.
 func (md *MoveDispatch) edgeFromHit(h rawHit) (label string, ok bool) {
-	if md.edgeRows != nil && h.EdgeRow >= 0 {
-		return md.edgeRows.LookupEdgeRow(h.EdgeRow)
+	if h.EdgeRow < 0 || h.EdgeRow >= len(md.edgeTbl) {
+		return "", false
 	}
-	return "", false
+	return md.edgeTbl[h.EdgeRow], true
 }
 
 // gestWheel mirrors interaction-handlers.ts handleWheelNative: ctrl+wheel = zoom-to-cursor
@@ -689,11 +690,12 @@ func (md *MoveDispatch) portConnected(node, port string, isInput bool) bool {
 
 // portFromHit resolves a port hit to its (node, port, isInput) identity. On the new-system
 // A port hit carries only a numeric buffer PORT-ROW index (no name string); Go maps it
-// back through its own port-row table (portRows), since Go owns the topology and wrote the
-// Port block in that same row order.
+// back through its own port-row table (md.portTbl), since Go owns the topology and wrote
+// the Port block in that same row order.
 func (md *MoveDispatch) portFromHit(h rawHit) (node, port string, isInput, ok bool) {
-	if md.portRows != nil && h.PortRow >= 0 {
-		return md.portRows.LookupPortRow(h.PortRow)
+	if h.PortRow < 0 || h.PortRow >= len(md.portTbl) {
+		return "", "", false, false
 	}
-	return "", "", false, false
+	e := md.portTbl[h.PortRow]
+	return e.Node, e.Port, e.IsInput, true
 }

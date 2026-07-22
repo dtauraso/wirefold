@@ -46,22 +46,15 @@ package Buffer
 import (
 	"encoding/binary"
 	"io"
-	"sync/atomic"
 
 	T "github.com/dtauraso/wirefold/Trace"
 )
 
-// PortRowEntry is one row of the port-row resolution table: the (node, port) identity
-// that a numeric buffer PORT-ROW index resolves to. Go writes the buffer Port block in a
-// fixed flattened order (node-row order × each node's Ports order); this table is built in
-// that SAME order, so port row i ↔ table entry i. It is the authoritative row→(node,port)
-// map the gesture FSM uses to turn a raw port-row hit back into a topology edit — the
-// numeric buffer carries no port-name strings (no sidecar).
-type PortRowEntry struct {
-	Node    string
-	Port    string
-	IsInput bool
-}
+// PortRowEntry is Trace.PortRow (its Trace-package type has the full ownership-handoff
+// comment). This alias keeps the Buffer-package name every existing caller in this file
+// already used; T.PortRow lives in Trace, not Buffer, precisely so this table's element
+// type can be shared with nodes/Wiring without either package importing the other.
+type PortRowEntry = T.PortRow
 
 // SnapshotState accumulates full-world render state from trace events.
 type SnapshotState struct {
@@ -110,27 +103,28 @@ type SnapshotState struct {
 	// out receives framed binary snapshots. Nil = silent discard.
 	out io.Writer
 
-	// portTable publishes the current flattened port-row table (same order as the Port
-	// block) as an immutable slice. Rebuilt on node-geometry changes (the only place ports
-	// change) on the Trace-drain goroutine and read via LookupPortRow from the stdin/gesture
-	// goroutine — the atomic pointer hands off an immutable snapshot with no lock.
-	portTable atomic.Pointer[[]PortRowEntry]
+	// portTableC hands the current flattened port-row table (same order as the Port block)
+	// from this drain goroutine to the stdin/gesture goroutine over a depth-1,
+	// replace-latest channel — ownership handoff, not shared state (CLAUDE.md model: the
+	// drain goroutine owns SnapshotState, the stdin/gesture goroutine is a separate owner).
+	// Rebuilt on node-geometry changes (the only place ports change) and sent non-blocking
+	// drop-old via sendLatestTableNonBlocking; nil until SetPortTableChan wires it (tests /
+	// unwired builds), in which case rebuildPortTable's send is a harmless no-op. The
+	// receiving side (nodes/Wiring's MoveDispatch.portTbl, drained once per stdin dispatch
+	// iteration) is the sole reader.
+	portTableC chan []T.PortRow
 
-	// edgeTable publishes the current edge-row table (the edge labels in the SAME stable
-	// row order as the Edge block) as an immutable slice. Rebuilt whenever a new edge is
-	// registered (onEdgeGeometry) on the Trace-drain goroutine and read via LookupEdgeRow
-	// from the gesture goroutine — the atomic pointer hands off an immutable snapshot with
-	// no lock. This is the edge analogue of portTable: a numeric edge-row hit resolves to
-	// its edge label so the gesture FSM can mark the Go-owned edge selection.
-	edgeTable atomic.Pointer[[]string]
+	// edgeTableC is the edge-row analogue of portTableC: the edge labels in the SAME stable
+	// row order as the Edge block, handed to the stdin/gesture goroutine over a depth-1,
+	// replace-latest channel whenever a new edge registers (onEdgeGeometry). nil until
+	// SetEdgeTableChan wires it.
+	edgeTableC chan []string
 
-	// nodeTable publishes the current node-row table (the node ids in the SAME stable row
-	// order as the Node block) as an immutable slice. Rebuilt whenever a new node registers
-	// (onNodeGeometry) on the Trace-drain goroutine and read via LookupNodeRow from the
-	// gesture goroutine — the atomic pointer hands off an immutable snapshot with no lock.
-	// This is the node analogue of portTable/edgeTable: a numeric node-row hit resolves to
-	// its node id so the gesture FSM can drag/select the Go-owned node.
-	nodeTable atomic.Pointer[[]string]
+	// nodeTableC is the node-row analogue of portTableC/edgeTableC: the node ids in the
+	// SAME stable row order as the Node block, handed to the stdin/gesture goroutine over a
+	// depth-1, replace-latest channel whenever a new node registers (onNodeGeometry). nil
+	// until SetNodeTableChan wires it.
+	nodeTableC chan []string
 
 	// pendingEvents accumulates the per-tick causal trace events since the last snapshot
 	// emit (the same accumulate-then-flush lifecycle as the transient node event flags).
@@ -533,57 +527,75 @@ func (s *SnapshotState) PortCount() int {
 // BuildSnapshot exposes the snapshot builder for tests.
 func (s *SnapshotState) BuildSnapshot() []byte { return s.buildSnapshot() }
 
-// rebuildPortTable rebuilds and atomically publishes the port-row table in the SAME
-// flattened order buildSnapshot writes the Port block: for each node in stable node-row
-// order, that node's ports in node-geometry Ports order. Called from the Trace-drain
-// goroutine whenever a node-geometry event changes the port set. The published slice is
-// immutable — LookupPortRow reads it lock-free from another goroutine.
+// sendLatestTableNonBlocking delivers v on ch WITHOUT ever blocking the caller (the Trace
+// drain goroutine, which must never stall waiting on the stdin/gesture goroutine). ch is a
+// depth-1 buffered channel; if it already holds a stale pending table (the stdin/gesture
+// goroutine hasn't drained it yet), that stale value is dropped and replaced — LATEST WINS
+// is correct here for the same reason it's correct for clock speed/held values
+// (nodes/Wiring/clock.go SendSpeedNonBlocking/SendLatestNonBlocking): a row table is
+// current absolute state, not an event stream a reader must see every element of. ch may be
+// nil (unwired in tests / builds that never call the Set*TableChan setters below), in which
+// case this is a no-op — a nil channel send/receive is never selected.
+func sendLatestTableNonBlocking[V any](ch chan V, v V) {
+	if ch == nil {
+		return
+	}
+	select {
+	case ch <- v:
+		return
+	default:
+	}
+	// Buffer full: drain the stale value, then place the new one. Both steps are
+	// non-blocking; if the reader raced us and drained it first between the two selects,
+	// the second send below still succeeds (buffer now empty).
+	select {
+	case <-ch:
+	default:
+	}
+	select {
+	case ch <- v:
+	default:
+	}
+}
+
+// SetPortTableChan wires the depth-1, replace-latest channel this drain goroutine hands the
+// port-row table to (the stdin/gesture goroutine's MoveDispatch.portTbl is the sole
+// reader). Call once at startup after LoadTopology, before any node goroutine can emit
+// node-geometry (main.go). nil (never called) makes rebuildPortTable's send a no-op.
+func (s *SnapshotState) SetPortTableChan(ch chan []T.PortRow) { s.portTableC = ch }
+
+// SetEdgeTableChan is the edge-row analogue of SetPortTableChan.
+func (s *SnapshotState) SetEdgeTableChan(ch chan []string) { s.edgeTableC = ch }
+
+// SetNodeTableChan is the node-row analogue of SetPortTableChan.
+func (s *SnapshotState) SetNodeTableChan(ch chan []string) { s.nodeTableC = ch }
+
+// rebuildPortTable rebuilds the port-row table in the SAME flattened order buildSnapshot
+// writes the Port block: for each node in stable node-row order, that node's ports in
+// node-geometry Ports order. Called from the Trace-drain goroutine whenever a node-geometry
+// event changes the port set — on every node-geometry re-emit, so potentially high
+// frequency during a drag — and hands the fresh table off via a non-blocking, drop-old send
+// so this goroutine never stalls on a busy stdin/gesture reader.
 func (s *SnapshotState) rebuildPortTable() {
-	tbl := make([]PortRowEntry, 0, s.PortCount())
+	tbl := make([]T.PortRow, 0, s.PortCount())
 	for i := range s.nodes {
 		node := s.nodeIDs[i]
 		for _, p := range s.nodes[i].ports {
-			tbl = append(tbl, PortRowEntry{Node: node, Port: p.name, IsInput: p.isInput})
+			tbl = append(tbl, T.PortRow{Node: node, Port: p.name, IsInput: p.isInput})
 		}
 	}
-	s.portTable.Store(&tbl)
+	sendLatestTableNonBlocking(s.portTableC, tbl)
 }
 
-// LookupPortRow resolves a numeric buffer PORT-ROW index to its (node, port, isInput)
-// identity via the published port-row table. ok=false for an out-of-range row or before
-// any port has been registered. Safe to call from a goroutine other than the Trace drain
-// (reads an immutable atomically-published slice). This is the row→(node,port) resolution
-// the gesture FSM uses for wiring/handhold — the numeric buffer carries no port strings.
-func (s *SnapshotState) LookupPortRow(row int) (node, port string, isInput, ok bool) {
-	tbl := s.portTable.Load()
-	if tbl == nil || row < 0 || row >= len(*tbl) {
-		return "", "", false, false
-	}
-	e := (*tbl)[row]
-	return e.Node, e.Port, e.IsInput, true
-}
-
-// rebuildNodeTable rebuilds and atomically publishes the node-row table — the node ids in
-// the SAME stable row order buildSnapshot writes the Node block (node id insertion order).
-// Called from the Trace-drain goroutine whenever a new node registers. The published slice
-// is immutable — LookupNodeRow reads it lock-free from the gesture goroutine.
+// rebuildNodeTable rebuilds the node-row table — the node ids in the SAME stable row order
+// buildSnapshot writes the Node block (node id insertion order). Called from the
+// Trace-drain goroutine whenever a new node registers (low frequency: once per node) and
+// hands the fresh table off via the same non-blocking, drop-old send as rebuildPortTable,
+// for uniformity.
 func (s *SnapshotState) rebuildNodeTable() {
 	tbl := make([]string, len(s.nodeIDs))
 	copy(tbl, s.nodeIDs)
-	s.nodeTable.Store(&tbl)
-}
-
-// LookupNodeRow resolves a numeric buffer NODE-ROW index to its node id via the published
-// node-row table. ok=false for an out-of-range row or before any node registers. This is the
-// node analogue of LookupPortRow/LookupEdgeRow: a numeric node-row hit (the node
-// InstancedMesh instanceId == its buffer node row) resolves back to the node id here in Go,
-// so the numeric buffer carries no node id strings and the webview forwards only the row.
-func (s *SnapshotState) LookupNodeRow(row int) (nodeID string, ok bool) {
-	tbl := s.nodeTable.Load()
-	if tbl == nil || row < 0 || row >= len(*tbl) {
-		return "", false
-	}
-	return (*tbl)[row], true
+	sendLatestTableNonBlocking(s.nodeTableC, tbl)
 }
 
 // --- internal helpers --------------------------------------------------------
@@ -794,27 +806,14 @@ func (s *SnapshotState) clearSelectedEdges() {
 	}
 }
 
-// rebuildEdgeTable rebuilds and atomically publishes the edge-row table — the edge labels
-// in the SAME stable row order buildSnapshot writes the Edge block (edge label insertion
-// order). Called from the Trace-drain goroutine whenever a new edge registers. The
-// published slice is immutable — LookupEdgeRow reads it lock-free from another goroutine.
+// rebuildEdgeTable rebuilds the edge-row table — the edge labels in the SAME stable row
+// order buildSnapshot writes the Edge block (edge label insertion order). Called from the
+// Trace-drain goroutine whenever a new edge registers (low frequency: once per edge) and
+// hands the fresh table off via the same non-blocking, drop-old send as rebuildPortTable.
 func (s *SnapshotState) rebuildEdgeTable() {
 	tbl := make([]string, len(s.edgeLabels))
 	copy(tbl, s.edgeLabels)
-	s.edgeTable.Store(&tbl)
-}
-
-// LookupEdgeRow resolves a numeric buffer EDGE-ROW index to its edge label via the
-// published edge-row table. ok=false for an out-of-range row or before any edge registers.
-// Safe to call from a goroutine other than the Trace drain (reads an immutable atomically-
-// published slice). This is the row→edge resolution the gesture FSM uses to mark the
-// Go-owned edge selection — the numeric buffer carries no edge label strings.
-func (s *SnapshotState) LookupEdgeRow(row int) (label string, ok bool) {
-	tbl := s.edgeTable.Load()
-	if tbl == nil || row < 0 || row >= len(*tbl) {
-		return "", false
-	}
-	return (*tbl)[row], true
+	sendLatestTableNonBlocking(s.edgeTableC, tbl)
 }
 
 // nodeRowIndex returns the buffer node-row index for a node id, or -1 when the id is

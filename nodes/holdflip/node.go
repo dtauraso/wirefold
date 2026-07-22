@@ -2,7 +2,6 @@ package holdflip
 
 import (
 	"context"
-	"sync/atomic"
 
 	"github.com/dtauraso/wirefold/nodes/Wiring"
 	"github.com/dtauraso/wirefold/nodes/gatecommon"
@@ -24,7 +23,10 @@ import (
 //     held each pulse — when held changes the next pulse carries the
 //     flipped new value.
 //
-// held is shared via sync/atomic so the two goroutines don't race.
+// held is owned by the MAIN loop; the drive goroutine gets its own channel
+// (DriveHeldCh) that the main loop sends the latest held value on
+// (Wiring.SendLatestNonBlocking) whenever it changes — the same
+// per-goroutine-channel shape as DriveSpeedCh below.
 type Node struct {
 	Wiring.LayoutHolder
 	Fire         func()
@@ -56,20 +58,20 @@ type Node struct {
 func (g *Node) Update(ctx context.Context) {
 	Wiring.TryEmit(g.EmitGeometry)
 
-	// held is shared between the drive goroutine and this main loop.
-	var held atomic.Int64
-	held.Store(gatecommon.NoValue)
+	// held is owned by this main loop; heldCh delivers it to the drive
+	// goroutine (buffered-1, latest-wins).
 	if g.EmitHeldBead != nil {
 		g.EmitHeldBead(gatecommon.NoValue) // startup: empty interior
 	}
+	heldCh := make(chan int64, 1)
 
 	// DRIVE goroutine: continuously pulse the FLIPPED current held value to Out.
 	// Delegates to gatecommon.DriveHeld (shared with Pulse's identical-shaped
 	// drive goroutine; PlaceDriven + per-cycle StepOnce, sleeping one cycle
-	// between steps), so this self-paces at the wire rate. Reading held each
+	// between steps), so this self-paces at the wire rate. Draining heldCh each
 	// iteration means the next pulse after an input update carries the new
 	// flipped value. Stops on ctx cancel.
-	gatecommon.DriveHeld(ctx, g.Out, &held, func(h int64) int {
+	gatecommon.DriveHeld(ctx, g.Out, heldCh, func(h int64) int {
 		if h == gatecommon.NoValue {
 			return gatecommon.NoValue // no value yet; emit sentinel so wire doesn't carry garbage
 		}
@@ -103,7 +105,7 @@ func (g *Node) Update(ctx context.Context) {
 			g.Fire()
 		}
 		newHeld := int64(v)
-		held.Store(newHeld)
+		Wiring.SendLatestNonBlocking(heldCh, newHeld)
 		if newHeld != lastDisplayed && g.EmitHeldBead != nil {
 			g.EmitHeldBead(v)
 		}

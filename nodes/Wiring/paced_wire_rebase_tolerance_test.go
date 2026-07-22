@@ -50,9 +50,11 @@ func TestReviseInFlightGeometryNoSkewWithSingleClockCopy(t *testing.T) {
 	newSeg := wireSegment{Start: vec3{}, End: vec3{X: 1}}
 	pw.ReviseInFlightGeometry(nowTick, arc, newSeg)
 
-	segs := pw.InFlightSegments()
-	if len(segs) != 1 {
-		t.Fatalf("expected 1 in-flight bead, got %d", len(segs))
+	// No concurrent driver here: this test calls DriveOneCycle inline on its own
+	// goroutine (never spawns a second one to drive the wire), so a direct
+	// pw.inflight read is same-goroutine and race-free.
+	if len(pw.inflight) != 1 {
+		t.Fatalf("expected 1 in-flight bead, got %d", len(pw.inflight))
 	}
 	rebasedPlacementTick := pw.inflight[0].placementTick
 	gotT := (float64(nowTick) - rebasedPlacementTick) / crossTicks

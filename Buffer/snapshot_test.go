@@ -14,15 +14,51 @@ import (
 	T "github.com/dtauraso/wirefold/Trace"
 )
 
+// recvLatestOrNil non-blockingly drains ch, returning its latest sent value or the zero
+// value if nothing has been sent yet. Mirrors, for tests, the "nothing published yet" case
+// the removed atomic.Pointer's nil-Load used to cover: SnapshotState now hands its row
+// tables to the stdin/gesture goroutine over a channel (see SetPortTableChan et al.)
+// instead of publishing them for on-demand Load, so a test that wants "the latest table"
+// drains the channel itself, exactly as nodes/Wiring's MoveDispatch.drainRowTables does.
+func recvLatestOrNil[V any](ch chan V) (v V) {
+	select {
+	case v = <-ch:
+	default:
+	}
+	return
+}
+
+// lookupNodeOrEdgeRow mirrors the removed SnapshotState.LookupNodeRow/LookupEdgeRow's
+// row-resolution logic exactly (out-of-range/empty → ok=false) against a []string table
+// (node ids or edge labels) already drained off the channel — both tables share this shape.
+func lookupNodeOrEdgeRow(tbl []string, row int) (string, bool) {
+	if row < 0 || row >= len(tbl) {
+		return "", false
+	}
+	return tbl[row], true
+}
+
+// lookupPortRow mirrors the removed SnapshotState.LookupPortRow's row-resolution logic
+// exactly (out-of-range/empty → ok=false) against a table already drained off the channel.
+func lookupPortRow(tbl []T.PortRow, row int) (node, port string, isInput, ok bool) {
+	if row < 0 || row >= len(tbl) {
+		return "", "", false, false
+	}
+	e := tbl[row]
+	return e.Node, e.Port, e.IsInput, true
+}
+
 // TestLookupPortRow verifies the port-row resolution table the gesture FSM uses: a numeric
 // buffer PORT-ROW index maps back to its (node, port, isInput) in the SAME flattened order
 // the Port block is written (node-row order × each node's Ports order). No port name crosses
 // the buffer — the table IS the row→(node,port) authority.
 func TestLookupPortRow(t *testing.T) {
 	s := NewSnapshotState(nil)
+	ch := make(chan []T.PortRow, 1)
+	s.SetPortTableChan(ch)
 
-	// Out-of-range before any node registers.
-	if _, _, _, ok := s.LookupPortRow(0); ok {
+	// Out-of-range before any node registers (channel never sent on).
+	if _, _, _, ok := lookupPortRow(recvLatestOrNil(ch), 0); ok {
 		t.Fatalf("LookupPortRow(0) before any port: want ok=false")
 	}
 
@@ -39,6 +75,7 @@ func TestLookupPortRow(t *testing.T) {
 			{Name: "in", IsInput: true, DY: 1},
 		},
 	})
+	tbl := recvLatestOrNil(ch)
 
 	cases := []struct {
 		row     int
@@ -51,7 +88,7 @@ func TestLookupPortRow(t *testing.T) {
 		{2, "n1", "in", true},
 	}
 	for _, c := range cases {
-		node, port, isInput, ok := s.LookupPortRow(c.row)
+		node, port, isInput, ok := lookupPortRow(tbl, c.row)
 		if !ok || node != c.node || port != c.port || isInput != c.isInput {
 			t.Errorf("LookupPortRow(%d): got (%q,%q,%v,%v), want (%q,%q,%v,true)",
 				c.row, node, port, isInput, ok, c.node, c.port, c.isInput)
@@ -59,10 +96,10 @@ func TestLookupPortRow(t *testing.T) {
 	}
 
 	// Out-of-range row → ok=false.
-	if _, _, _, ok := s.LookupPortRow(3); ok {
+	if _, _, _, ok := lookupPortRow(tbl, 3); ok {
 		t.Errorf("LookupPortRow(3) out of range: want ok=false")
 	}
-	if _, _, _, ok := s.LookupPortRow(-1); ok {
+	if _, _, _, ok := lookupPortRow(tbl, -1); ok {
 		t.Errorf("LookupPortRow(-1): want ok=false")
 	}
 }
@@ -317,6 +354,8 @@ func TestLatchedSelPersistsThroughDeselect(t *testing.T) {
 // versa). Also exercises LookupEdgeRow: an edge row resolves to its label.
 func TestEdgeSelectionExclusiveWithNode(t *testing.T) {
 	s := NewSnapshotState(nil)
+	edgeCh := make(chan []string, 1)
+	s.SetEdgeTableChan(edgeCh)
 	s.Update(T.Event{Kind: T.KindNodeGeometry, Node: "n1", Radius: 1})
 	s.Update(T.Event{Kind: T.KindNodeGeometry, Node: "n2", Radius: 1})
 	// Two edges (KindGeometry registers them in first-seen order → rows 0,1).
@@ -324,13 +363,14 @@ func TestEdgeSelectionExclusiveWithNode(t *testing.T) {
 	s.Update(T.Event{Kind: T.KindGeometry, Edge: "e1", Node: "n2", Target: "n1"})
 
 	// Edge-row table resolves rows → labels in stable order.
-	if l, ok := s.LookupEdgeRow(0); !ok || l != "e0" {
+	edgeTbl := recvLatestOrNil(edgeCh)
+	if l, ok := lookupNodeOrEdgeRow(edgeTbl, 0); !ok || l != "e0" {
 		t.Fatalf("LookupEdgeRow(0)=%q,%v want e0,true", l, ok)
 	}
-	if l, ok := s.LookupEdgeRow(1); !ok || l != "e1" {
+	if l, ok := lookupNodeOrEdgeRow(edgeTbl, 1); !ok || l != "e1" {
 		t.Fatalf("LookupEdgeRow(1)=%q,%v want e1,true", l, ok)
 	}
-	if _, ok := s.LookupEdgeRow(2); ok {
+	if _, ok := lookupNodeOrEdgeRow(edgeTbl, 2); ok {
 		t.Fatalf("LookupEdgeRow(2) ok=true want false (out of range)")
 	}
 

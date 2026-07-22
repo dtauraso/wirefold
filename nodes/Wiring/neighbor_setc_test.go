@@ -11,18 +11,9 @@ package Wiring
 import (
 	"context"
 	"math"
-	"sync"
 	"testing"
 	"time"
 )
-
-// tappedMsg is a minimal recorded (destID, kind, senderID) tuple from md.SetMsgTap,
-// used by this file's message-trace assertion.
-type tappedMsg struct {
-	destID   string
-	kind     string
-	senderID string
-}
 
 // TestNeighborSetCRequantizesEdgeNeighborStaysPut drives the real move path
 // (writeTree's plain 2-node src/dst graph — no cascade role on either end) and
@@ -65,19 +56,6 @@ func TestNeighborSetCRequantizesEdgeNeighborStaysPut(t *testing.T) {
 	// the happens-before edge. See time_node_abc_drag_breadcrumb_test.go.
 	var dbg syncBuffer
 	md.tr.SetDebugSink(&dbg)
-
-	// Tap every routed message so we can assert (3): this drag is exactly one hop —
-	// src receives nothing but the new moveMsgKindNeighborSetC (senderID=dst) — with
-	// no equalize/trigger/gate-place/requantize cascade kind (those kinds no longer
-	// exist in the vocabulary at all).
-	var mu sync.Mutex
-	var recorded []tappedMsg
-	md.SetMsgTap(func(destID string, msg moveMsg) {
-		mu.Lock()
-		recorded = append(recorded, tappedMsg{destID: destID, kind: msg.Kind, senderID: msg.SenderID})
-		mu.Unlock()
-	})
-	defer md.SetMsgTap(nil)
 
 	// Drag dst off its prior bearing from src AND farther away, so both the angle and
 	// the distance src re-quantizes to dst demonstrably change (a purely radial drag
@@ -139,33 +117,18 @@ func TestNeighborSetCRequantizesEdgeNeighborStaysPut(t *testing.T) {
 		t.Fatalf("(2) the drag was chosen to move dst off src's prior bearing, so theta or phi should have changed: before=%+v after=%+v", lpBefore, lpAfter)
 	}
 
-	// (3) src receives exactly one moveMsgKindNeighborSetC (senderID=dst), and none of
-	// the old cascade kinds — those kinds don't even exist in the vocabulary anymore,
-	// so this is a belt-and-suspenders check against reintroducing one. A plain
-	// moveMsgKindCenter re-emit to src (dst's own commit fanning its incident edge's
-	// geometry to partners) is expected and is NOT a cascade — it carries no position
-	// write (nodeMover.handle's nil-Center branch is a pure re-emit).
-	mu.Lock()
-	trace := append([]tappedMsg(nil), recorded...)
-	mu.Unlock()
-	setCCount := 0
-	forbidden := map[string]bool{"equalize": true, "trigger": true, "gatePlace": true, "requantize": true}
-	for _, m := range trace {
-		if m.destID != "src" {
-			continue
-		}
-		if forbidden[m.kind] {
-			t.Fatalf("(3) src should never receive a %q cascade message; got %+v in trace %+v", m.kind, m, trace)
-		}
-		if m.kind == moveMsgKindNeighborSetC {
-			if m.senderID != "dst" {
-				t.Fatalf("(3) src's neighborSetC should be sent by dst; got %+v", m)
-			}
-			setCCount++
-		}
-	}
-	if setCCount != 1 {
-		t.Fatalf("(3) expected exactly one moveMsgKindNeighborSetC (senderID=dst) routed to src; got %d in trace %+v", setCCount, trace)
+	// (3) src receives exactly one moveMsgKindNeighborSetC: neighborSetCRequantize logs
+	// exactly one "abc-drag" breadcrumb for src per received moveMsgKindNeighborSetC
+	// (see its doc comment / quantized_move.go), so src's abc-drag count IS the
+	// neighborSetC receipt count — a genuine production outcome, not an intercepted
+	// in-flight message. The old cascade kinds ("equalize"/"trigger"/"gatePlace"/
+	// "requantize") don't exist anywhere in moveMsgKind's vocabulary any more (grep
+	// node_move.go's moveMsgKind* constants: only anchor/center/centers/drag/
+	// neighborSetC/dragStart remain) — a message of those kinds is unrepresentable by
+	// construction, not merely absent at runtime, so there is nothing left to tap for.
+	srcDeltas := abcDragDeltasFor(t, &dbg, "src")
+	if len(srcDeltas) != 1 {
+		t.Fatalf("(3) expected exactly one abc-drag (== one moveMsgKindNeighborSetC) delivered to src; got %d: %+v", len(srcDeltas), srcDeltas)
 	}
 
 }
@@ -196,16 +159,13 @@ func TestNeighborSetCDeltaIsDraggedNodesOwnTripleChange(t *testing.T) {
 		t.Fatal("dst has no pre-drag LocalPolar entry for src")
 	}
 
-	var mu sync.Mutex
-	var recorded []moveMsg
-	md.SetMsgTap(func(destID string, msg moveMsg) {
-		if destID == "src" && msg.Kind == moveMsgKindNeighborSetC {
-			mu.Lock()
-			recorded = append(recorded, msg)
-			mu.Unlock()
-		}
-	})
-	defer md.SetMsgTap(nil)
+	// src is the recipient of the neighborSetC dst's drag fans out: its "abc-drag"
+	// breadcrumb carries the exact (DeltaA,DeltaB,DeltaC) dst computed for that fan (see
+	// neighborSetCRequantize) — the same production channel the removed msgTap used to
+	// intercept in flight, and race-free (waitForAbcDrag establishes the happens-before
+	// edge for dstToSrcAfter below, same argument as neighbor_setc's other test).
+	var dbg syncBuffer
+	md.tr.SetDebugSink(&dbg)
 
 	dstBefore, ok := md.centerOfNode("dst")
 	if !ok {
@@ -217,22 +177,10 @@ func TestNeighborSetCDeltaIsDraggedNodesOwnTripleChange(t *testing.T) {
 	}
 	pollDragConverged(t, md, "dst", target)
 
-	deadline := time.Now().Add(2 * time.Second)
-	var got moveMsg
-	for {
-		mu.Lock()
-		n := len(recorded)
-		if n > 0 {
-			got = recorded[n-1]
-		}
-		mu.Unlock()
-		if n > 0 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("src never received a moveMsgKindNeighborSetC from dst")
-		}
-		time.Sleep(time.Millisecond)
+	waitForAbcDrag(t, &dbg, "src")
+	got := abcDragDeltasFor(t, &dbg, "src")
+	if len(got) != 1 {
+		t.Fatalf("expected exactly one abc-drag (== one moveMsgKindNeighborSetC) delivered to src; got %d: %+v", len(got), got)
 	}
 
 	var dstToSrcAfter LocalPolar
@@ -244,9 +192,9 @@ func TestNeighborSetCDeltaIsDraggedNodesOwnTripleChange(t *testing.T) {
 	wantA := dstToSrcAfter.QuantITheta - dstToSrcBefore.QuantITheta
 	wantB := dstToSrcAfter.QuantIPhi - dstToSrcBefore.QuantIPhi
 	wantC := dstToSrcAfter.QuantIR - dstToSrcBefore.QuantIR
-	if got.DeltaA != wantA || got.DeltaB != wantB || got.DeltaC != wantC {
+	if got[0][0] != wantA || got[0][1] != wantB || got[0][2] != wantC {
 		t.Fatalf("neighborSetC delta should be dst's own triple change (new-old): got=(%d,%d,%d) want=(%d,%d,%d) (before=%+v after=%+v)",
-			got.DeltaA, got.DeltaB, got.DeltaC, wantA, wantB, wantC, dstToSrcBefore, dstToSrcAfter)
+			got[0][0], got[0][1], got[0][2], wantA, wantB, wantC, dstToSrcBefore, dstToSrcAfter)
 	}
 
 }

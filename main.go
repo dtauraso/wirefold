@@ -102,6 +102,32 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 	// useful (which topology loaded, how many nodes). Sparse: once per run.
 	tr.Breadcrumb("topology-loaded", topologyPath, "", fmt.Sprintf("nodes=%d", len(nodes)))
 
+	// Hand the buffer's three row-lookup tables from the Trace-drain goroutine (which owns
+	// SnapshotState and rebuilds these on every node/edge-geometry change) to the
+	// stdin/gesture goroutine (which owns MoveDispatch and resolves raw hits against them)
+	// over depth-1, replace-latest channels — ownership handoff, not a shared atomic (see
+	// Buffer/snapshot.go portTableC / nodes/Wiring/node_move.go portTblC doc comments). Each
+	// channel is created once here and wired to BOTH ends: Buffer's Set*TableChan is the
+	// send side (rebuild* calls sendLatestTableNonBlocking on it), Wiring's Set*TableChan is
+	// the receive side (drainRowTables, called at the top of every stdin dispatch
+	// iteration, pulls the latest pending value into MoveDispatch's own plain field). A port
+	// hit carries only a numeric buffer PORT-ROW index; it resolves back to its (node, port)
+	// via the port-row table. Likewise an edge hit's EDGE-ROW index resolves to its edge
+	// label, and a node hit's NODE-ROW index resolves to its node id — no port/edge/node
+	// string ever crosses the TS↔Go bridge. Wired BEFORE the row-seed loop below (which
+	// itself queues tr.NodeGeometry/tr.Geometry through the drain goroutine) so the very
+	// first rebuild*Table send has somewhere to land — a table rebuilt while unwired would
+	// be silently dropped (sendLatestTableNonBlocking on a nil channel is a no-op).
+	portTblC := make(chan []T.PortRow, 1)
+	edgeTblC := make(chan []string, 1)
+	nodeTblC := make(chan []string, 1)
+	snapState.SetPortTableChan(portTblC)
+	snapState.SetEdgeTableChan(edgeTblC)
+	snapState.SetNodeTableChan(nodeTblC)
+	md.SetPortTableChan(portTblC)
+	md.SetEdgeTableChan(edgeTblC)
+	md.SetNodeTableChan(nodeTblC)
+
 	// Seed the buffer's node/edge row tables from the diagram itself — SPEC ORDER,
 	// prefilled with the diagram's own load-time geometry — BEFORE any node goroutine
 	// starts (the launch loop below). This makes row order a deterministic projection of
@@ -149,21 +175,6 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 	// <topologyPath>/view/scene.json itself and installs it into the gesture-FSM viewpoint,
 	// so the buffer camera columns carry a real, non-degenerate saved pose from the first
 	// frame (pan works immediately). Absent/malformed file → a fixed non-degenerate default.
-	//
-	// Wire the buffer's port-row table into the gesture FSM so a port hit (which carries
-	// only a numeric buffer PORT-ROW index) resolves back to its (node, port) here in Go —
-	// Go owns the topology and wrote the Port block in that row order.
-	md.SetPortRowResolver(snapState)
-	// Likewise the edge-row table: an edge hit carries only a numeric buffer EDGE-ROW index;
-	// Go resolves it back to its edge label here (Go wrote the Edge block in that row order)
-	// to mark the Go-owned edge selection.
-	md.SetEdgeRowResolver(snapState)
-	// Likewise the node-row table: a node hit carries only a numeric buffer NODE-ROW index;
-	// Go resolves it back to its node id here (Go wrote the Node block in that row order) to
-	// drag/select the Go-owned node — no node id crosses the bridge.
-	md.SetNodeRowResolver(snapState)
-	// Initial camera viewpoint = FILE DATA: Go reads the saved camera from
-	// <topologyPath>/view/scene.json and installs it into the gesture-FSM viewpoint.
 	W.SeedInitialViewpoint(topologyPath, md, tr)
 	// Restore persisted overlay visibility: seed md.ov from scene.json and emit each flag so
 	// the buffer streams the saved overlay state from the first frame. Seed BEFORE

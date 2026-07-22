@@ -236,6 +236,17 @@ func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *
 			if !ok {
 				return
 			}
+			// Drain the latest port/edge/node row tables the Trace-drain goroutine has
+			// published since our last iteration BEFORE any hit resolution below (a
+			// "raw-input" record's rawHit carries only numeric rows; portFromHit/
+			// edgeFromHit/nodeFromHit in gesture.go resolve them against md.portTbl/
+			// edgeTbl/nodeTbl) — this is the ownership-handoff replacement for the old
+			// atomic.Load-on-demand: same "always resolve against the newest table"
+			// guarantee, now via a depth-1 replace-latest channel this goroutine alone
+			// drains. Once per dispatch iteration is the right cadence: a single record
+			// carries at most one hit to resolve, so draining any more often would be
+			// wasted work and draining less often would resolve against a stale table.
+			md.drainRowTables()
 			msg, decoded := decodeInputRecord(rec)
 			if !decoded {
 				continue

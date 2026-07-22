@@ -2,7 +2,6 @@ package Wiring
 
 import (
 	"context"
-	"sync/atomic"
 
 	T "github.com/dtauraso/wirefold/Trace"
 )
@@ -150,14 +149,6 @@ type PacedWire struct {
 	Target       string   // destination node id — authoritative slot identity
 	TargetHandle string   // destination input-port name — authoritative slot identity
 	Trace        *T.Trace // injected by loader; used for breadcrumb diagnostics only
-
-	// snap is an atomically-published, READ-ONLY snapshot of every in-flight
-	// bead's current segment (FIFO order), republished by driveOneCycle every
-	// cycle. It exists so a non-owning goroutine — test-only inspection
-	// (InFlightSegments) — can observe this wire's in-flight geometry without
-	// racing the owning goroutine's live inflight slice. Production code never
-	// reads it: per MODEL.md §Sending, nothing queries wire occupancy.
-	snap atomic.Pointer[[]wireSegment]
 }
 
 // NewPacedWire creates an empty PacedWire with its in/out channels ready. arcLength
@@ -273,29 +264,6 @@ func (pw *PacedWire) DriveOneCycle(ctx context.Context, tick int64) {
 	}
 	pw.drainPlacements(tick)
 	pw.stepAll(tick)
-	pw.publishSnap()
-}
-
-// publishSnap republishes the atomic in-flight-segment snapshot (see the snap
-// field doc). Called only by this wire's own goroutine, once per DriveOneCycle.
-func (pw *PacedWire) publishSnap() {
-	segs := make([]wireSegment, len(pw.inflight))
-	for i, b := range pw.inflight {
-		segs[i] = b.seg
-	}
-	pw.snap.Store(&segs)
-}
-
-// InFlightSegments returns a snapshot of every in-flight bead's current segment,
-// in FIFO order. Safe to call from ANY goroutine (reads the atomically-published
-// snapshot, never this wire's live inflight slice). This is a read-only debug/test
-// inspection point only — production never queries wire occupancy (MODEL.md
-// §Sending).
-func (pw *PacedWire) InFlightSegments() []wireSegment {
-	if s := pw.snap.Load(); s != nil {
-		return *s
-	}
-	return nil
 }
 
 // drainPlacements pops every placement currently queued on inCh (non-blocking)

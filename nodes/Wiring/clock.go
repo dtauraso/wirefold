@@ -228,6 +228,35 @@ func SendSpeedNonBlocking(ch chan float64, speed float64) {
 	}
 }
 
+// SendLatestNonBlocking is the int64 twin of SendSpeedNonBlocking, used for
+// delivering a "held" value from a node's main loop (the owner) to its own
+// spawned DriveHeld goroutine(s) over a buffered-1, latest-wins channel — the
+// same non-blocking drain-then-send shape, because held (like speed) is
+// absolute state, not an event stream: a goroutine that wakes up cares only
+// about the CURRENT held value, not every intermediate one it missed while
+// asleep. ch must be a channel this call's caller alone sends on (the node's
+// own main-loop goroutine, which owns the held value); sending from two
+// goroutines onto the same ch would race the drain-then-send pair below. A
+// node driving two outputs off one held value (e.g. Pulse's Out/Out2) must
+// pass a DIFFERENT channel per DriveHeld goroutine and call this once per
+// channel — passing the same channel to two DriveHeld goroutines would starve
+// whichever one loses a given receive (exactly the speedCh rationale above).
+func SendLatestNonBlocking(ch chan int64, v int64) {
+	select {
+	case ch <- v:
+		return
+	default:
+	}
+	select {
+	case <-ch:
+	default:
+	}
+	select {
+	case ch <- v:
+	default:
+	}
+}
+
 // inertClock is GONE (per-goroutine-clock.md API demolition item 3). It existed only
 // because an INJECTED clock could be ABSENT: an unwired In needed a non-nil thing to
 // return from a port accessor, and reflectBuild's type-matched field injection meant a

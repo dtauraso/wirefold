@@ -2,7 +2,6 @@ package gatecommon
 
 import (
 	"context"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -20,14 +19,14 @@ func TestDriveHeldChanModePlacesMultipleValues(t *testing.T) {
 	ch := make(chan int, 8)
 	out := Wiring.NewOutChanForTest(ch, "n1", "out", nil)
 
-	var held atomic.Int64
-	held.Store(7)
+	heldCh := make(chan int64, 1)
+	heldCh <- 7
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	// Chan mode (out.Paced() == false): DriveHeld never touches clk/speedCh, so nil is safe.
-	DriveHeld(ctx, out, &held, func(v int64) int { return int(v) }, nil, nil)
+	DriveHeld(ctx, out, heldCh, func(v int64) int { return int(v) }, nil, nil)
 
 	received := 0
 	deadline := time.After(2 * time.Second)

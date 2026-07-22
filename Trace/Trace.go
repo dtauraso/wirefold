@@ -166,6 +166,19 @@ type PortGeom struct {
 	DX, DY, DZ float64
 }
 
+// PortRow is one row of the port-row table Buffer.SnapshotState hands off to the
+// stdin/gesture goroutine over a channel (Buffer/snapshot.go rebuildPortTable /
+// nodes/Wiring's MoveDispatch.portTbl): the (node, port, isInput) identity a numeric
+// buffer PORT-ROW index resolves to. Defined here (Trace) rather than in Buffer or
+// Wiring because both packages already depend on Trace and neither depends on the
+// other — this keeps the ownership-handoff channel's element type shared without
+// introducing a new inter-package dependency.
+type PortRow struct {
+	Node    string
+	Port    string
+	IsInput bool
+}
+
 type Event struct {
 	Step  int    `json:"step"`
 	Kind  string `json:"kind"`

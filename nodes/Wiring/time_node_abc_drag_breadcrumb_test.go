@@ -17,6 +17,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -109,6 +111,43 @@ func waitForAbcDragCount(t *testing.T, dbg *syncBuffer, node string, want int) {
 		}
 		time.Sleep(time.Millisecond)
 	}
+}
+
+// abcDragDeltaRe matches the "delta=(a,b,c)" substring an "abc-drag" breadcrumb's Value
+// carries — the exact same deltaA/deltaB/deltaC ints neighborSetCRequantize passes to
+// both Trace.Breadcrumb and Trace.AbcDrag in the same call (node_move.go/quantized_move.go),
+// so parsing it here reads the identical production payload the now-removed msgTap used
+// to intercept in flight.
+var abcDragDeltaRe = regexp.MustCompile(`delta=\((-?\d+),(-?\d+),(-?\d+)\)`)
+
+// abcDragDeltasFor returns every "abc-drag" breadcrumb's (DeltaA,DeltaB,DeltaC) triple
+// recorded so far for node, in the order they were written to dbg (dbg is append-only
+// and single-writer per node — see waitForAbcDrag's happens-before argument). Callers
+// must have already synced past the Nth breadcrumb they care about via
+// waitForAbcDragCount before reading, exactly as every other reader of dbg/lh in this
+// package does.
+func abcDragDeltasFor(t *testing.T, dbg *syncBuffer, node string) [][3]int {
+	t.Helper()
+	var out [][3]int
+	for _, b := range parseBreadcrumbLines(t, dbg.String()) {
+		if b.Label != "abc-drag" || b.Node != node {
+			continue
+		}
+		m := abcDragDeltaRe.FindStringSubmatch(b.Value)
+		if m == nil {
+			t.Fatalf("abc-drag breadcrumb for %s missing delta=(...): %q", node, b.Value)
+		}
+		var d [3]int
+		for i := 0; i < 3; i++ {
+			n, err := strconv.Atoi(m[i+1])
+			if err != nil {
+				t.Fatalf("parse delta component %q: %v", m[i+1], err)
+			}
+			d[i] = n
+		}
+		out = append(out, d)
+	}
+	return out
 }
 
 func parseBreadcrumbLines(t *testing.T, raw string) []breadcrumbLine {

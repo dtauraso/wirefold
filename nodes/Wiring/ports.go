@@ -19,7 +19,6 @@ package Wiring
 import (
 	"context"
 	"fmt"
-	"sync/atomic"
 
 	T "github.com/dtauraso/wirefold/Trace"
 )
@@ -123,12 +122,11 @@ func ParseSendRule(s string) (SendRule, error) {
 }
 
 // outGeom is an immutable snapshot of an Out's per-edge geometry, published by the
-// owning edgeMover goroutine (recomputeGeometry) via atomic.Pointer and LOADED by
-// cross-goroutine readers on the source node goroutine (placement / PlaceDriven /
-// the EmitGeometry closure). Writes happen only on the owning
-// goroutine, reads via atomic load — no lock, no coordinator. This mirrors the
-// nodeMover.snap / centerSnap publish/observe pattern (MODEL.md: per-goroutine
-// ownership, cross-goroutine reads via atomic snapshots).
+// owning edgeMover goroutine (recomputeGeometry) and delivered to each reader
+// goroutine over its OWN buffered-1, latest-wins channel (geomEcho / geomSend
+// below) — never a shared field read by more than one goroutine. This mirrors
+// per-goroutine-clock.md's speedCh Delivery pattern (SendSpeedNonBlocking /
+// ApplySpeedNonBlocking): the producer sends, each consumer owns its own copy.
 //
 //   - ArcLength / SimLatencyMs: this edge's own travel-time, computed from this
 //     edge's port-to-port geometry (chord length of this specific segment). SendWire
@@ -156,11 +154,30 @@ type Out struct {
 	node  string
 	port  string
 	trace *T.Trace
-	// geom is this edge's per-edge geometry, published as an immutable snapshot via
-	// atomic.Pointer. Seeded at construction (NewOutPaced) and republished by the
-	// owning edgeMover on every drag tick; read only via Geom() (atomic load). Never
-	// accessed as bare fields across goroutines.
-	geom atomic.Pointer[outGeom]
+	// geomEcho / geomSend are buffered-1, latest-wins channels fed the SAME
+	// outGeom snapshot by publishGeom on every LIVE update (edgeMover.recomputeGeometry
+	// on a drag tick). The load-time file geometry is NOT sent through them — sendCur /
+	// echoCur are initialized to it directly in NewOutPaced. TWO
+	// channels because up to two INDEPENDENT goroutines observe this Out's
+	// geometry over its lifetime, and each must own a private copy rather than
+	// share one field:
+	//   - geomEcho is drained exactly ONCE, by the EmitGeometry closure
+	//     (builders.go, via echoGeom) on the node's own startup goroutine, to
+	//     echo the seed geometry into the trace at construction time.
+	//   - geomSend is drained every cycle, via Geom() below, by whichever ONE
+	//     goroutine actually places beads on this Out — the node's own Update
+	//     goroutine for most kinds, or the dedicated DriveHeld goroutine for
+	//     Pulse/HoldFlip (see gatecommon/drive.go). Exactly one goroutine ever
+	//     calls PlaceDrivenAt/placement on a given Out, so exactly one
+	//     goroutine ever drains geomSend.
+	// sendCur is the owned local cache for geomSend, mutated only by that one
+	// goroutine inside Geom(); echoCur plays the same role for geomEcho inside
+	// echoGeom(). Nil channels (chan-mode test Outs, which never publish) are
+	// safe: a non-blocking receive on a nil channel simply never fires.
+	geomEcho chan outGeom
+	geomSend chan outGeom
+	sendCur  outGeom
+	echoCur  outGeom
 	// EdgeLabel is the TS edge id for this output port's wire. Set by the loader
 	// so the node's EmitGeometry closure can stream the authoritative curve via
 	// tr.Geometry(EdgeLabel, Start..End) on startup.
@@ -170,23 +187,77 @@ type Out struct {
 	Rule SendRule
 }
 
-// Geom loads the current per-edge geometry snapshot. Returns the zero outGeom when
-// none has been published (chan-mode test Outs never publish). Safe from any
-// goroutine — reads the atomically-published snapshot, never the writer's live state.
+// Geom returns the current per-edge geometry snapshot as seen by THIS Out's one
+// sending goroutine: it non-blockingly drains any newer value off geomSend into
+// the goroutine-owned sendCur cache, then returns sendCur. Must only be called
+// from the single goroutine that places beads on this Out (see the geomSend
+// doc comment above) — calling it from two goroutines would race sendCur.
+// Returns the zero outGeom when nothing has ever been published (chan-mode
+// test Outs never publish, and o.geomSend is nil).
 func (o *Out) Geom() outGeom {
 	if o == nil {
 		return outGeom{}
 	}
-	if g := o.geom.Load(); g != nil {
-		return *g
-	}
-	return outGeom{}
+	drainGeomNonBlocking(o.geomSend, &o.sendCur)
+	return o.sendCur
 }
 
-// publishGeom atomically publishes a fresh per-edge geometry snapshot. Called only
-// on the owning goroutine (edgeMover.recomputeGeometry) and at construction.
+// echoGeom is Geom()'s counterpart for the OTHER reader: the EmitGeometry
+// closure (builders.go), which drains its own geomEcho channel into echoCur
+// exactly once, at node startup, to echo the seed geometry into the trace.
+// Must only ever be called from that one startup call site.
+func (o *Out) echoGeom() outGeom {
+	if o == nil {
+		return outGeom{}
+	}
+	drainGeomNonBlocking(o.geomEcho, &o.echoCur)
+	return o.echoCur
+}
+
+// publishGeom fans a fresh per-edge geometry snapshot out to both reader
+// channels, latest-wins (dropping any undrained stale value first). Called
+// only on the owning goroutine (edgeMover.recomputeGeometry) for LIVE updates;
+// the load-time file geometry is set directly on sendCur/echoCur in
+// NewOutPaced, not published here. Both channels are nil on a chan-mode Out
+// (test-only, never published to); sendGeomNonBlocking on a nil channel is a
+// silent no-op, matching Geom()/echoGeom()'s "never published" zero-value
+// return.
 func (o *Out) publishGeom(g outGeom) {
-	o.geom.Store(&g)
+	sendGeomNonBlocking(o.geomEcho, g)
+	sendGeomNonBlocking(o.geomSend, g)
+}
+
+// drainGeomNonBlocking folds the latest pending value off ch (if any) into
+// *cur, without blocking. A nil ch (chan-mode Out, or an unpublished port)
+// simply never selects the receive case, leaving *cur at its zero value.
+func drainGeomNonBlocking(ch chan outGeom, cur *outGeom) {
+	select {
+	case g := <-ch:
+		*cur = g
+	default:
+	}
+}
+
+// sendGeomNonBlocking delivers g to ch, latest-wins: if the buffer already
+// holds an undrained stale value (the reader hasn't woken to drain it since
+// the last publish), that stale value is dropped and replaced — mirrors
+// SendSpeedNonBlocking (clock.go) for the same reason (absolute state, not an
+// event stream). A nil ch (chan-mode Out) makes every case here select
+// `default`, so this is a silent no-op.
+func sendGeomNonBlocking(ch chan outGeom, g outGeom) {
+	select {
+	case ch <- g:
+		return
+	default:
+	}
+	select {
+	case <-ch:
+	default:
+	}
+	select {
+	case ch <- g:
+	default:
+	}
 }
 
 // placement builds the per-bead beadPlacement this Out hands to the wire: the
@@ -418,8 +489,20 @@ func NewOutPaced(pw *PacedWire, ctx context.Context, node, port string, tr *T.Tr
 	if rule == "" {
 		rule = RuleConsumeGated
 	}
-	o := &Out{pw: pw, ctx: ctx, node: node, port: port, trace: tr, Rule: rule, EdgeLabel: edgeLabel}
-	// Seed the atomic snapshot so the first placement reads valid geometry before any move.
-	o.publishGeom(outGeom{ArcLength: arcLength, SimLatencyMs: simLatencyMs, Start: seg.Start, End: seg.End})
+	// The initial geometry is the LOAD-TIME geometry the loader derived from the
+	// topology file (arcLength/simLatencyMs/seg) — not a synthetic seed. Initialize
+	// each reader's owned cache to it directly, before either reader goroutine starts
+	// (happens-before), so the first echo/placement reads valid file geometry with no
+	// channel bootstrap. The channels then carry ONLY live edgeMover updates (drags);
+	// until the first one arrives, a non-blocking drain finds them empty and leaves the
+	// cache at this file value.
+	fileGeom := outGeom{ArcLength: arcLength, SimLatencyMs: simLatencyMs, Start: seg.Start, End: seg.End}
+	o := &Out{
+		pw: pw, ctx: ctx, node: node, port: port, trace: tr, Rule: rule, EdgeLabel: edgeLabel,
+		geomEcho: make(chan outGeom, 1),
+		geomSend: make(chan outGeom, 1),
+		sendCur:  fileGeom,
+		echoCur:  fileGeom,
+	}
 	return o
 }

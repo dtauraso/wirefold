@@ -2,7 +2,6 @@ package pulse
 
 import (
 	"context"
-	"sync/atomic"
 
 	"github.com/dtauraso/wirefold/nodes/Wiring"
 	"github.com/dtauraso/wirefold/nodes/gatecommon"
@@ -25,7 +24,12 @@ import (
 //     wire rate and re-reads held each pulse — when held changes the next
 //     pulse carries the new value.
 //
-// held is shared via sync/atomic so the two goroutines don't race.
+// held is owned by the MAIN loop; each drive goroutine gets its OWN channel
+// (Out1HeldCh/Out2HeldCh) that the main loop sends the latest held value on
+// (Wiring.SendLatestNonBlocking) whenever it changes — the same
+// per-goroutine-channel shape as SpeedCh/Out1SpeedCh/Out2SpeedCh below, and
+// for the same reason: two DriveHeld goroutines sharing one channel would
+// steal values from each other.
 //
 // The output is NOT precondition-gated: Pulse self-emits noValue from the start
 // (like the Input bootstrap), it is not inert until fed.
@@ -66,28 +70,34 @@ type Node struct {
 // driveOutput runs a continuous-drive goroutine on out, always emitting the
 // current value of held. Delegates to gatecommon.DriveHeld (shared with
 // HoldFlip's identical-shaped drive goroutine) with an identity transform.
-func driveOutput(ctx context.Context, out *Wiring.Out, held *atomic.Int64, clk Wiring.Clock, speedCh <-chan float64) {
-	gatecommon.DriveHeld(ctx, out, held, func(h int64) int { return int(h) }, clk, speedCh)
+func driveOutput(ctx context.Context, out *Wiring.Out, heldCh <-chan int64, clk Wiring.Clock, speedCh <-chan float64) {
+	gatecommon.DriveHeld(ctx, out, heldCh, func(h int64) int { return int(h) }, clk, speedCh)
 }
 
 func (g *Node) Update(ctx context.Context) {
 	Wiring.TryEmit(g.EmitGeometry)
 
-	// held is shared between the drive goroutine(s) and this main loop.
-	var held atomic.Int64
-	held.Store(gatecommon.NoValue)
+	// held is owned by this main loop; cur is the main loop's OWN local copy
+	// (mirrors the seed the atomic used to carry — gatecommon.NoValue).
+	var cur int64 = gatecommon.NoValue
 	if g.EmitHeldBead != nil {
 		g.EmitHeldBead(gatecommon.NoValue) // startup: empty interior
 	}
 
+	// Each drive goroutine gets its OWN buffered-1, latest-wins channel — a
+	// single channel cannot serve two receivers without one stealing values
+	// from the other (see the doc comment on Out1SpeedCh/Out2SpeedCh).
+	out1HeldCh := make(chan int64, 1)
+	out2HeldCh := make(chan int64, 1)
+
 	// DRIVE goroutine: continuously pulse the current held value to Out. g.Clock is
 	// the ORIGIN clock; DriveHeld Copies it independently at its own goroutine's start
 	// — never hand a copy to a second goroutine.
-	driveOutput(ctx, g.Out, &held, g.Clock, g.Out1SpeedCh)
+	driveOutput(ctx, g.Out, out1HeldCh, g.Clock, g.Out1SpeedCh)
 
 	// Optional SECOND drive goroutine for Out2.
 	if g.Out2 != nil && g.Out2.Wired() {
-		driveOutput(ctx, g.Out2, &held, g.Clock, g.Out2SpeedCh)
+		driveOutput(ctx, g.Out2, out2HeldCh, g.Clock, g.Out2SpeedCh)
 	}
 
 	// MAIN loop frame: do activities (non-blocking input check + update held),
@@ -103,10 +113,12 @@ func (g *Node) Update(ctx context.Context) {
 		if g.Fire != nil {
 			g.Fire()
 		}
-		if int64(v) != held.Load() && g.EmitHeldBead != nil {
+		if int64(v) != cur && g.EmitHeldBead != nil {
 			g.EmitHeldBead(v) // show the new interior bead IMMEDIATELY
 		}
-		held.Store(int64(v))
+		cur = int64(v)
+		Wiring.SendLatestNonBlocking(out1HeldCh, cur)
+		Wiring.SendLatestNonBlocking(out2HeldCh, cur)
 	}
 
 	// Copy taken ONCE at this goroutine's start (Update IS the goroutine); each
