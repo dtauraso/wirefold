@@ -82,28 +82,25 @@ type nodeMover struct {
 	// loader's build-wide speed-sink accumulator; nil in bare test construction, which
 	// is fine — ApplySpeedNonBlocking is a no-op on a nil channel.
 	speedCh chan float64
-	// There is no geomMu. m.geom (port_geometry.go) splits into an embedded, write-once
-	// nodeIdentity (Kind/Label/R/SceneCenter — set once at construction in loader.go,
-	// grepped clean of any later write anywhere in this package) and MUTABLE state
-	// (ScenePolar/HasPos/ReachR/Inputs/Outputs-element-AnchorId) written only by
-	// applyCenter and handle's moveMsgKindAnchor case. Every writer AND every reader of
-	// the mutable part — applyCenter, setPortAnchorId (via handle), emitGeometry's
-	// full-struct copy — runs exclusively on nodeMover's OWN inbox-drain goroutine
-	// (run/handle), so there is never more than one goroutine touching that memory. The
-	// one cross-goroutine reader, MoveDispatch.NodeKind (node_move.go), called from the
-	// gesture/stdin-reader goroutine, reads ONLY nm.geom.Kind — a field on the embedded
-	// nodeIdentity, which no writer here ever touches. So the two properties that would
-	// require a lock (a mutable field read cross-goroutine, or an identity field that
-	// could gain a second writer) both provably don't hold, by construction of the type
-	// split, not by coincidence of which byte ranges happen to overlap today.
+	// There is no geomMu, and none is needed: m.geom is now touched by EXACTLY ONE
+	// goroutine — this mover's own inbox-drain goroutine (run/handle). Every writer AND
+	// every reader of it — applyCenter, setPortAnchorId (via handle), emitGeometry's
+	// full-struct copy — runs there and nowhere else. There is no cross-goroutine reader
+	// at all: the former one, MoveDispatch.NodeKind, now reads the SEPARATE immutable
+	// md.kinds table (node_move.go) built once at construction, not nm.geom — so kind
+	// resolution never reaches into a mover's live struct. geom access is safe by plain
+	// single-goroutine confinement, not by a lock and not by a type split.
+	//
+	// (m.geom still splits, in port_geometry.go, into an embedded write-once nodeIdentity
+	// and MUTABLE state; that split predates and outlives this change but is no longer
+	// what makes geom access race-free — confinement is. There is no separate per-node
+	// "Update()" writer goroutine either — that was the retired SLICE 3 architecture.)
 	//
 	// CHECKED BY CODE: TestNodeKindConcurrentWithApplyCenterUnderRace
-	// (node_mover_geom_race_test.go) drives NodeKind's reader loop and applyCenter's
-	// writer loop concurrently under -race with no lock on either side, as a standing
-	// regression check that the split holds (a future change reintroducing a write to an
-	// identity field, or widening NodeKind's read to a whole-struct copy, would make it
-	// fail). There is no separate per-node "Update()" writer goroutine — that was the
-	// retired SLICE 3 architecture.
+	// (node_mover_geom_race_test.go) drives NodeKind (reading immutable md.kinds) and
+	// applyCenter (writing nm.geom) concurrently under -race, as a standing regression
+	// check that NodeKind stays lock-free and never reaches back into mutable mover state
+	// (a future change routing NodeKind through nm.geom would make it fail).
 	// neighborCenters caches THIS node's own view of every DIRECT domain neighbor's
 	// (edge-adjacent node's) last-reported world center — keyed by neighbor id. Written
 	// ONLY by this node's own goroutine (handle: moveMsgKindNeighborSetC's FromCenter,
@@ -128,13 +125,15 @@ type nodeMover struct {
 	// non-blocking flush (never blocks the calling handler goroutine).
 	sendMove func(id string, msg moveMsg)
 	edgeIDs  []string
-	// commitLocal is the OWNER-GOROUTINE commit path, bound to
-	// md.commitNodeMoveLocal (generalized to every node). It applies this node's own
-	// new center SYNCHRONOUSLY via applyCenter instead of enqueuing an async self-send,
-	// so it is safe to call from THIS node's own handle() for a moveMsgKindDrag, with
-	// no cross-goroutine self-send and no shared mutable state (each node's quantized
-	// offset lives on its own mover — see nodeMover.quantOffset). nil in tests that
-	// build a bare nodeMover directly.
+	// commitLocal is the OWNER-GOROUTINE commit path, bound at construction to a closure
+	// that calls md.commitNodeMoveLocal with THIS mover (newMoveDispatch), so the commit
+	// never has to look the mover back up by id — there is no nodeMovers directory to look
+	// it up in. It applies this node's own new center SYNCHRONOUSLY via applyCenter instead
+	// of enqueuing an async self-send, so it is safe to call from THIS node's own handle()
+	// for a moveMsgKindDrag, with no cross-goroutine self-send and no shared mutable state
+	// (each node's quantized offset lives on its own mover — see nodeMover.quantOffset). The
+	// id param is VESTIGIAL — handle passes m.id but the closure ignores it and uses its own
+	// captured mover. nil in tests that build a bare nodeMover directly.
 	commitLocal func(id string, newPos vec3)
 	// partnerCenter resolves, per (port,isInput) on this node, the CURRENT world center of
 	// the single partner node connected via one edge (aimed-port model, port_geometry.go

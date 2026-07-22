@@ -7,17 +7,16 @@ import (
 	"time"
 )
 
-// node_mover_geom_race_test.go — regression check on the nodeIdentity/mutable-state
-// split (port_geometry.go, node_mover.go). There is NO geomMu: MoveDispatch.NodeKind,
-// called from a goroutine OTHER than the mover's own inbox-drain goroutine, reads
-// nm.geom.Kind (on the embedded, write-once nodeIdentity) with no lock, while
+// node_mover_geom_race_test.go — regression check that MoveDispatch.NodeKind stays
+// lock-free and never reaches back into a mover's live geom. NodeKind, called from a
+// goroutine OTHER than the mover's own inbox-drain goroutine, reads the immutable
+// md.kinds table (built once at newMoveDispatch construction, never mutated), while
 // applyCenter (driven from the mover's own goroutine via RootMove/moveMsgKindCenter)
-// concurrently writes the MUTABLE ScenePolar/HasPos/ReachR fields, also with no lock.
-// This drives both concurrently under -race: it must stay clean, because Kind lives in
-// a struct no writer here ever touches — not because the byte ranges happen not to
-// overlap today. If a future change ever made NodeKind read something mutable (e.g. a
-// whole-struct copy, matching emitGeometry's own pattern) or made a handler write an
-// identity field, this test would start reporting a real DATA RACE.
+// concurrently writes nm.geom's MUTABLE ScenePolar/HasPos/ReachR fields. The two touch
+// DISJOINT memory — an immutable table vs. a single-goroutine-confined struct — so this
+// drives both concurrently under -race and it must stay clean. If a future change ever
+// routed NodeKind back through nm.geom (e.g. reading nm.geom.Kind directly again),
+// this test would start reporting a real DATA RACE.
 func TestNodeKindConcurrentWithApplyCenterUnderRace(t *testing.T) {
 	root := writeTree(t)
 	md := loadTreeMD(t, root)
