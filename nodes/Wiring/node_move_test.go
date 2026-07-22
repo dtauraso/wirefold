@@ -123,35 +123,35 @@ func TestDecentralizedNodeMove(t *testing.T) {
 		t.Fatalf("Out segment = %+v..%+v, want %+v..%+v", out.Geom().Start, out.Geom().End, wantSeg.Start, wantSeg.End)
 	}
 
-	// In-flight bead's geometry was revised to the new segment (still in flight).
-	// pw is owned exclusively by its own goroutine now (the edgeMover md.Start
-	// launched) — read its state via the atomic InFlightSegments snapshot rather
-	// than the live (unexported, unlocked) inflight slice.
-	segs := pw.InFlightSegments()
-	var revisedSeg wireSegment
-	stillInFlight := len(segs) > 0
-	if stillInFlight {
-		revisedSeg = segs[0]
-	}
-	if !stillInFlight {
-		t.Fatal("bead left flight unexpectedly during move")
-	}
-	if !approxEq(revisedSeg.End.X, wantSeg.End.X) || !approxEq(revisedSeg.Start.X, wantSeg.Start.X) {
-		t.Fatalf("in-flight segment not revised: got %+v..%+v", revisedSeg.Start, revisedSeg.End)
-	}
-
-	// Give the trace a moment, then assert the node re-emitted node-geometry and the
-	// edge re-emitted its segment.
-	time.Sleep(5 * time.Millisecond)
+	// "In-flight bead's geometry was revised to the new segment (still in flight)"
+	// is now proven from two PRODUCTION-EMITTED trace facts instead of peeking
+	// pw's live (unexported, unlocked, cross-goroutine-unsafe) inflight slice:
+	//
+	//   (a) SEGMENT REVISED — the edgeMover emits a KindGeometry event for e0
+	//       carrying the new SX..EZ (checked below as sawEdgeGeom, against the
+	//       known-authoritative wantSeg endpoints — comparing to an EXPECTED
+	//       value, not re-deriving one from a point).
+	//   (b) BEAD STILL IN FLIGHT ON THE REVISED GEOMETRY — the wire only emits a
+	//       KindPosition ("edge-bead") event for a bead that is still in flight,
+	//       so an edge-bead event for this wire's source/port AFTER the revise
+	//       proves the bead was still traveling on the new segment.
+	//
+	// Neither needs on-segment/collinearity math. Wait a few tick periods after
+	// the move (deliver's ack only guarantees the FIRST DriveOneCycle post-revise
+	// ran; a later cycle's own Position emit needs real time to elapse) before
+	// closing the trace, since Events() is only safe to read post-Close.
+	time.Sleep(5 * tickPeriod)
 	tr.Close()
 	events := tr.Events()
 	var sawNodeGeom, sawEdgeGeom bool
-	for _, e := range events {
+	var edgeGeomStep = -1
+	for i, e := range events {
 		if e.Kind == T.KindNodeGeometry && e.Node == "src" {
 			sawNodeGeom = true
 		}
 		if e.Kind == T.KindGeometry && e.Edge == "e0" && approxEq(e.EX, wantSeg.End.X) {
 			sawEdgeGeom = true
+			edgeGeomStep = i
 		}
 	}
 	if !sawNodeGeom {
@@ -159,6 +159,16 @@ func TestDecentralizedNodeMove(t *testing.T) {
 	}
 	if !sawEdgeGeom {
 		t.Fatal("edge 'e0' did not re-emit its re-derived segment on move")
+	}
+	var stillInFlight bool
+	for _, e := range events[edgeGeomStep+1:] {
+		if e.Kind == T.KindPosition && e.Node == "src" && e.Port == "Out" {
+			stillInFlight = true
+			break
+		}
+	}
+	if !stillInFlight {
+		t.Fatal("no edge-bead position event for src.Out after the geometry revise — bead left flight unexpectedly during move")
 	}
 }
 
