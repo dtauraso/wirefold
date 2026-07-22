@@ -745,15 +745,22 @@ func (md *MoveDispatch) sendMove(id string, msg moveMsg) {
 	if !ok {
 		return
 	}
-	// Blocking send with a ctx-cancel escape hatch: this is the bare external-entry
-	// send used by callers (RootMove, gesture.go) that have no owning mover goroutine
-	// to thread a ctx from. Without the ctx.Done() arm, a send into a torn-down/full
-	// extIn on shutdown parks this goroutine forever (the target's own run loop has
-	// already returned on the same ctx cancel, so nothing will ever drain it). md.ctx
-	// is nil only in tests that build a bare MoveDispatch without Start — a nil
-	// Context's Done() channel would panic, so guard it and fall back to a plain
-	// blocking send there (matches prior test behavior; no shutdown path exists in
-	// that setting anyway).
+	md.sendExtCtx(ch, msg)
+}
+
+// sendExtCtx does a ctx-cancel-guarded blocking send onto a mover's own external-entry
+// channel (extIn). It is the raw-channel form of sendMove, for a destination — an edge
+// mover — that isn't addressable through extRoute (edges aren't nodes). Both external-entry
+// send sites (sendMove's node send and applyRingAnchor's edge send) route through here so
+// there is ONE ctx-guarded send path, not two hand-copied selects that can drift.
+//
+// The ctx.Done() arm is load-bearing: without it, a send into a torn-down or momentarily
+// full extIn on shutdown parks the calling (gesture/stdin) goroutine forever — the target's
+// own run loop has already returned on the same ctx cancel, so nothing will ever drain it.
+// md.ctx is nil only in tests that build a bare MoveDispatch without Start; a nil Context's
+// Done() would panic, so fall back to a plain blocking send there (no shutdown path exists
+// in that setting anyway).
+func (md *MoveDispatch) sendExtCtx(ch chan moveMsg, msg moveMsg) {
 	if md.ctx == nil {
 		ch <- msg
 		return
