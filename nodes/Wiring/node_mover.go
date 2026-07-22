@@ -173,8 +173,8 @@ type nodeMover struct {
 	// resolveDest looks up the ONE dedicated directed channel FROM this node TO the
 	// given destination id — the destination's neighborIn[this node's id] if destID is
 	// another node, or the destination edge's srcIn/dstIn depending on which endpoint
-	// this node is (md.nodeMovers/md.edgeMovers are read-only directories after
-	// construction, safe to read from any goroutine). There is no shared inbox to look
+	// this node is (the loader-local nodeMovers map and md.edgeMovers are read-only
+	// directories after construction, safe to read from any goroutine). There is no shared inbox to look
 	// up: every (sender, destination) pair resolves to its OWN channel. nil only in
 	// tests that build a bare nodeMover directly, in which case flushPending is a no-op.
 	resolveDest func(id string) (chan moveMsg, bool)

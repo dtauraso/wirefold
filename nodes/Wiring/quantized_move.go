@@ -41,7 +41,7 @@ func (md *MoveDispatch) heldEdges() []sphereEdge {
 func (md *MoveDispatch) fanEdgesAndPartners(newCenters map[string]vec3, enqueue func(id string, msg moveMsg)) {
 	// Per-edge: send ONE batched message carrying every moved endpoint of that edge,
 	// so an edge whose both endpoints moved this frame recomputes/emits exactly once.
-	// enqueue (the sending node's own retry queue — see enqueueFuncFor) appends the
+	// enqueue (the sending node's own retry queue — nm.sendMove) appends the
 	// message to nm.pending and attempts an immediate non-blocking send on the
 	// destination's own directed channel (extIn or the sender's slot in the
 	// destination's neighborIn map), retrying next cycle if that channel isn't ready
@@ -430,7 +430,7 @@ func (md *MoveDispatch) requantizeLocalPolars(nm *nodeMover, newPos vec3) {
 	// hop (neighborSetCReposition). Routed as a message on M's own directed inbound
 	// channel (M's neighborIn[X] slot) instead of reaching into M's LayoutHolder from
 	// X's (this) goroutine — each M's holder and center are written only by M's own
-	// goroutine. Sent via X's OWN retry queue (md.enqueueFuncFor(nodeID), the same
+	// goroutine. Sent via X's OWN retry queue (nm.sendMove, the same
 	// handle every other fan in this commit path uses — see commitNodeMoveLocal's
 	// fanEdgesAndPartners call above) instead of the direct-to-inbox sendMoveLossy
 	// this used before: measured under the same mutually-adjacent concurrent-drag

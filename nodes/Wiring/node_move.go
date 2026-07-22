@@ -207,8 +207,8 @@ type MoveDispatch struct {
 	// dedicated external-entry channel (nodeMover.extIn). It is the ONLY thing the
 	// external caller (the gesture/stdin goroutine — RootMove's drag, gesture.go's
 	// dragStart and ring-anchor sends) needs from a node: a channel to drop an
-	// addressed entry onto. Distinct from the full mover directory (md.nodeMovers)
-	// on purpose — the editor addresses a node to SEND to it, it never needs the
+	// addressed entry onto. Distinct from the full mover directory (the loader-local
+	// nodeMovers map) on purpose — the editor addresses a node to SEND to it, it never needs the
 	// mover struct itself; keeping the send path on this narrow table lets the mover
 	// directory become load-time-local (it no longer has to survive as the editor's
 	// lookup). Built once at construction alongside each nodeMover; a read-only
@@ -386,8 +386,9 @@ func (md *MoveDispatch) NodeSeeds() []NodeGeomSeed { return md.nodeSeeds }
 func (md *MoveDispatch) EdgeSeeds() []EdgeGeomSeed { return md.edgeSeeds }
 
 // newMoveDispatch builds the registry from per-node geometry and per-edge endpoints.
-// It creates one nodeMover per node and one edgeMover per edge, registering each under
-// its key (node id / edge id) in md.nodeMovers/md.edgeMovers, and wires the dedicated
+// It creates one nodeMover per node and one edgeMover per edge, registering each edge
+// under its id in md.edgeMovers and each node in the loader-local nodeMovers map (returned,
+// not a field), and wires the dedicated
 // directed channels between adjacent movers. Outs and dest wires are bound later by Bind once node
 // construction has populated them. nodeOrder/edgeOrder are the
 // SPEC order (deterministic directory-sorted order, not map iteration order) used to
@@ -444,7 +445,7 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 	// Static partner-center lookup for the seed pass: every node's center is already known
 	// off the load-time geoms map (no goroutine/atomic-snap needed), so this is the SAME
 	// buildPartnerCenterFn the dynamic movers use below, just closed over geoms directly
-	// instead of md.nodeMovers' atomic snaps. Kept per-node (not shared) to match
+	// instead of the dynamic movers' neighborCenters caches. Kept per-node (not shared) to match
 	// buildPartnerCenterFn's (nodeID, edgeEndpoints, centerOf) shape.
 	seedPartnerCenter := func(nodeID string) partnerCenterFn {
 		return buildPartnerCenterFn(nodeID, edgeEndpoints, func(otherID string) vec3 {
@@ -513,9 +514,9 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 		// resolveDest resolves the ONE dedicated directed channel FROM this node
 		// (selfID, captured below) TO destID: another node's own neighborIn[selfID]
 		// slot, or an incident edge's srcIn/dstIn depending on which endpoint this
-		// node is. There is no shared dispatch map to look up — md.nodeMovers/md.edgeMovers are the
-		// read-only directories, safe to read from any goroutine once construction
-		// finishes.
+		// node is. There is no shared dispatch map to look up — the loader-local nodeMovers
+		// map (captured by this closure) and md.edgeMovers are the read-only directories,
+		// safe to read from any goroutine once construction finishes.
 		selfID := id
 		nm.resolveDest = func(destID string) (chan moveMsg, bool) {
 			if em, ok := md.edgeMovers[destID]; ok {
