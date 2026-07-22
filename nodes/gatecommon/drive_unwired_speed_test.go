@@ -2,7 +2,6 @@ package gatecommon
 
 import (
 	"context"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -27,8 +26,8 @@ func TestDriveHeldChanModeStillObeysSpeed(t *testing.T) {
 	ch := make(chan int, 8)
 	out := Wiring.NewOutChanForTest(ch, "n1", "out", nil)
 
-	var held atomic.Int64
-	held.Store(7)
+	heldCh := make(chan int64, 1)
+	heldCh <- 7
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -38,7 +37,7 @@ func TestDriveHeldChanModeStillObeysSpeed(t *testing.T) {
 
 	// Chan mode: out.Paced() == false. Before the fix, DriveHeld would never
 	// touch clk/speedCh at all in this mode.
-	DriveHeld(ctx, out, &held, func(v int64) int { return int(v) }, clk, speedCh)
+	DriveHeld(ctx, out, heldCh, func(v int64) int { return int(v) }, clk, speedCh)
 
 	// Drain a couple of placements first to confirm the loop is alive and
 	// unaffected (chan mode still places every cycle regardless of speed).

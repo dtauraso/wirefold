@@ -2,19 +2,29 @@ package gatecommon
 
 import (
 	"context"
-	"sync/atomic"
 	"time"
 
 	"github.com/dtauraso/wirefold/nodes/Wiring"
 )
 
 // DriveHeld runs a continuous-drive goroutine on out, repeatedly emitting
-// transform(held.Load()). It is the shared shape behind Pulse's and HoldFlip's
-// "hold one atomic value, continuously pulse a (possibly transformed) view of
-// it to Out" goroutines. transform is applied fresh on every iteration (e.g.
-// identity for Pulse, "1-h with NoValue passthrough" for HoldFlip); re-reading
-// held each pulse means when held changes, the next pulse carries the new
-// value.
+// transform(cur), where cur is this goroutine's OWN local copy of the held
+// value, kept current by draining heldCh non-blocking once per cycle. It is
+// the shared shape behind Pulse's and HoldFlip's "hold one value (owned by
+// the caller's main loop), continuously pulse a (possibly transformed) view
+// of it to Out" goroutines. transform is applied fresh on every iteration
+// (e.g. identity for Pulse, "1-h with NoValue passthrough" for HoldFlip);
+// draining heldCh each cycle means when the main loop sends a new held value,
+// the next pulse carries it.
+//
+// heldCh is a buffered-1, latest-wins channel (same shape as speedCh below):
+// the caller's main loop OWNS held and sends it non-blocking via
+// Wiring.SendLatestNonBlocking whenever it changes; this goroutine is the
+// sole reader. cur is seeded to gatecommon.NoValue (the same seed the caller's
+// main loop stores into held before spawning this goroutine) and only
+// changes when heldCh actually delivers a value — this preserves the old
+// atomic.Load() behavior exactly, since the main loop's pre-spawn seed and
+// this goroutine's local seed start equal.
 //
 // The wire's own goroutine advances in-flight beads every cycle (one
 // position-step per tick, never jumping); this goroutine only PLACES a new
@@ -74,9 +84,10 @@ import (
 // call — passing the same channel to two DriveHeld goroutines would starve
 // whichever one loses a given receive. nil is fine (chan mode, or a caller
 // with no speed channel to give): ApplySpeedNonBlocking is then a no-op.
-func DriveHeld(ctx context.Context, out *Wiring.Out, held *atomic.Int64, transform func(int64) int, clk Wiring.Clock, speedCh <-chan float64) {
+func DriveHeld(ctx context.Context, out *Wiring.Out, heldCh <-chan int64, transform func(int64) int, clk Wiring.Clock, speedCh <-chan float64) {
 	go func() {
 		paced := out.Paced()
+		cur := int64(NoValue)
 		var c Wiring.Clock
 		sleep := func(ctx context.Context) error {
 			select {
@@ -119,6 +130,15 @@ func DriveHeld(ctx context.Context, out *Wiring.Out, held *atomic.Int64, transfo
 				return
 			}
 
+			// Drain heldCh to latest, non-blocking, once per cycle — the
+			// caller's main loop is the sole sender (buffered-1, latest-wins),
+			// so a single non-blocking receive is always enough to catch up.
+			select {
+			case v := <-heldCh:
+				cur = v
+			default:
+			}
+
 			// Chan mode (!paced): place every cycle exactly as before (immediate
 			// send, synchronous chan semantics).
 			place := !paced
@@ -133,7 +153,7 @@ func DriveHeld(ctx context.Context, out *Wiring.Out, held *atomic.Int64, transfo
 				// else: geometry not yet known — don't place this cycle.
 			}
 			if place {
-				di := out.PlaceDrivenAt(transform(held.Load()))
+				di := out.PlaceDrivenAt(transform(cur))
 				if di.Failed() {
 					return
 				}
