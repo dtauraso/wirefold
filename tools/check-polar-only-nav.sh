@@ -41,8 +41,13 @@ if [ ${#NAV_FILES[@]} -eq 0 ]; then
   exit 1
 fi
 
-# Banned symbols: Cartesian rotation/axis math that belongs in polar.ts.
-PATTERN='setFromUnitVectors|\.cross\(|new THREE\.Raycaster|\.unproject\(|setFromAxisAngle|setFromMatrixColumn|new THREE\.Spherical'
+# Banned symbols: Cartesian rotation/axis math that belongs in polar.ts. Includes raw
+# spherical trig (Math.atan2/Math.acos) — a live-center position reconstruction (the
+# cart2polar(node - movingCenter) "blow-up" MODEL.md forbids) would express itself as raw
+# atan2/acos even when it dodges the THREE.js helpers below, so the guard's stated purpose
+# ("no Cartesian math in nav") only holds if raw trig is banned too. Legitimate cases use
+# the `// polar-nav-ok` escape hatch, same as the THREE helpers.
+PATTERN='setFromUnitVectors|\.cross\(|new THREE\.Raycaster|\.unproject\(|setFromAxisAngle|setFromMatrixColumn|new THREE\.Spherical|Math\.atan2|Math\.acos'
 
 # Lines marked `// polar-nav-ok` are exempted (node-drag/pan — not in the rotation path).
 hits=$(grep -anE "$PATTERN" "${NAV_FILES[@]}" 2>/dev/null | grep -v 'polar-nav-ok' || true)
@@ -50,7 +55,7 @@ hits=$(grep -anE "$PATTERN" "${NAV_FILES[@]}" 2>/dev/null | grep -v 'polar-nav-o
 if [ -n "$hits" ]; then
   echo "✗ polar-nav violation(s) found — all rotation/axis math must live in polar.ts:"
   echo "$hits"
-  echo "  (banned: setFromUnitVectors, .cross(, new THREE.Raycaster, .unproject(, setFromAxisAngle, setFromMatrixColumn, new THREE.Spherical)"
+  echo "  (banned: setFromUnitVectors, .cross(, new THREE.Raycaster, .unproject(, setFromAxisAngle, setFromMatrixColumn, new THREE.Spherical, Math.atan2, Math.acos)"
   exit 1
 fi
 

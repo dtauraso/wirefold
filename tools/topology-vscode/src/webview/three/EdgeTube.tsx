@@ -284,6 +284,15 @@ const LayoutLinkOverlay = forwardRef<EdgeHandle, { viaEdge: boolean }>(
 );
 
 export function EdgeTubes({ capacity, layoutLinkCapacity }: { capacity: number; layoutLinkCapacity: number }) {
+  // The useState below REFLECTS the decoded buffer; it AUTHORS nothing (render + forward
+  // only — MODEL.md "Editor surface"). Each value is re-derived from Go's latest snapshot on
+  // decode — the mount counts (edgeCount/linkCount), the Go-selected edge row (selRow), the
+  // overlay flag (showDouble), and the per-link viaEdge flags — none is a source of truth and
+  // none is written from user interaction: a click/drag goes to Go as raw-input, Go streams
+  // the new buffer back, and these follow it. They are React mount-control + buffer-echo, not
+  // a domain store (contrast the per-frame COORDINATES, which bypass state entirely via the
+  // imperative slot handles below).
+  //
   // Number of edge slots to MOUNT (not their coordinates). Changes only when edges are
   // added/removed — never during a drag — so its one-frame commit latency is invisible.
   const [edgeCount, setEdgeCount] = useState(0);

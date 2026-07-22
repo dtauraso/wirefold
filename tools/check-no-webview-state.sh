@@ -66,6 +66,33 @@ while IFS= read -r line; do
 done < <(grep -arnE '\buseSyncExternalStore\b' \
   --include="*.ts" --include="*.tsx" "$WEBVIEW_DIR" 2>/dev/null || true)
 
+# 4. No useReducer anywhere. A reducer is a domain state MACHINE (dispatched actions
+#    mutating held state) — exactly the "author domain state on the TS side" the model
+#    forbids. There is no legitimate render-local use, so this is an unconditional ban
+#    (a plain tripwire: none exists today, so any first one is a deliberate regression).
+while IFS= read -r line; do
+  [[ -z "$line" ]] && continue
+  report "reducer: $line  (useReducer in the webview — a domain state machine must live in Go)"
+done < <(grep -arnE '\buseReducer\b' \
+  --include="*.ts" --include="*.tsx" "$WEBVIEW_DIR" 2>/dev/null || true)
+
+# 5. createContext only in the allowed render-infra files. A React Context is a common
+#    vector for a smuggled domain store (a provider holding node/edge/camera values read
+#    across the tree). The ONLY sanctioned use is render-infra plumbing that authors no
+#    domain data — today scene-env.tsx's EnvTexContext (a THREE.Texture handle). Anywhere
+#    else it is presumed a domain store and forbidden; add a file here only for genuine
+#    render-infra context, never for domain values.
+while IFS= read -r line; do
+  [[ -z "$line" ]] && continue
+  f="${line%%:*}"
+  base="$(basename "$f")"
+  case "$base" in
+    scene-env.tsx) continue ;;
+  esac
+  report "context: $line  (createContext outside the allowed render-infra files — domain state must live in Go)"
+done < <(grep -arnE '\bcreateContext\b' \
+  --include="*.ts" --include="*.tsx" "$WEBVIEW_DIR" 2>/dev/null || true)
+
 if [[ $HITS -eq 0 ]]; then
   echo "no-webview-state: clean (webview holds no domain state; render + forward only, Go owns the model)"
   exit 0
