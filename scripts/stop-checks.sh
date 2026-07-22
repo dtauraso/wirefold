@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Fast deterministic checks for the Stop hook. Skips slow test suites.
-# Returns nonzero (and prints why) if anything fails.
+# Fast deterministic checks. Skips slow test suites. Two output modes (see MODE below):
+#   default (hook)  — prints {"decision":"block",...} JSON on stdout and exits 0 (Stop hook).
+#   --cli           — prints the failure reason to stderr and exits NONZERO (terminal use;
+#                     scripts/verify.sh is the front door). Run `bash scripts/verify.sh`.
 set -u
 # Resolve the repo root via an ASSIGNMENT, not `cd "$(...)" || ...`.
 #
@@ -24,6 +26,19 @@ cd "$ROOT" || {
   echo "stop-checks: MISCONFIGURED — cannot cd to repo root '$ROOT'." >&2
   exit 1
 }
+
+# Output MODE. Two callers, two failure-signalling contracts — ONE set of checks below so
+# they can never drift (the reason this is a flag, not a second script):
+#   - hook (default): the Stop hook wires this in .claude/settings.json. The hook protocol
+#     signals failure by printing {"decision":"block",...} JSON on stdout and MUST exit 0;
+#     a nonzero exit would be read as a hook error, not a blocked stop.
+#   - cli (--cli): for a human/agent at the terminal. Prints the failure reason plainly and
+#     EXITS NONZERO, so the reflexive `&& echo ok` / `$?` / `if ...; then` habit is correct
+#     here. scripts/verify.sh is the obvious front door to this mode.
+MODE="hook"
+if [ "${1:-}" = "--cli" ]; then
+  MODE="cli"
+fi
 
 # Files to consider for the EXPENSIVE language builds. This is the union of:
 #   - the working tree (uncommitted changes), and
@@ -162,11 +177,22 @@ for chk_path in "${guards[@]}"; do
 done
 
 if [ $fail -ne 0 ]; then
+  if [ "$MODE" = "cli" ]; then
+    # CLI mode: human-readable reason to stderr, NONZERO exit — the obvious-correct signal.
+    printf 'stop-checks: FAILED\n\n%b\n' "$out" >&2
+    exit 1
+  fi
+  # Hook mode: the Stop-hook JSON-on-stdout contract, exit 0 (a nonzero exit here would be
+  # read as a hook error, not a blocked stop).
   python3 -c "
 import json, sys
 reason = 'Pre-stop checks failed. Fix before stopping:\n\n' + sys.stdin.read()
 print(json.dumps({'decision': 'block', 'reason': reason}))
 " <<< "$(printf '%b' "$out")"
   exit 0
+fi
+
+if [ "$MODE" = "cli" ]; then
+  echo "stop-checks: clean" >&2
 fi
 exit 0
