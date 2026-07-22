@@ -268,7 +268,7 @@ func injectClosures(ctx context.Context, v reflect.Value, name string, pb PortBi
 		emitNodeGeometryLocked(tr, name, geom, partnerCenter)
 		for _, o := range *sourceOuts {
 			if o != nil && o.EdgeLabel != "" {
-				g := o.Geom()
+				g := o.echoGeom()
 				dst := ""
 				dstPort := ""
 				if o.pw != nil {
