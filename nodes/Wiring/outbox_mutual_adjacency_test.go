@@ -3,7 +3,7 @@
 //
 //  1. The restructure is load-bearing against the cascade deadlock described in the
 //     (branch-local, since-stripped) cascade-deadlock-fix.md: two mutually-adjacent
-//     nodeMovers, both mid-handle (commitNodeMoveLocal -> fanEdgesAndPartners), each
+//     nodeMovers, both mid-handle (commitNodeMoveLocal -> broadcastToEdgesAndPartners), each
 //     fanning to the other under sustained concurrent drag load, must never hang.
 //  2. Nothing a nodeMover sends is ever dropped, and per-destination delivery order is
 //     exactly enqueue order (nm.pending's retain-and-retry is FIFO per destination),
@@ -24,7 +24,7 @@ import (
 // TestMutuallyAdjacentDragFloodNoDeadlock drives the real production path end to end:
 // two mutually-adjacent nodes (src/dst over edge e0, the writeTree fixture), each
 // dragged concurrently. Every commit's handle() runs commitNodeMoveLocal ->
-// fanEdgesAndPartners, which sends a partner re-emit via the COMMITTING node's own
+// broadcastToEdgesAndPartners, which sends a partner re-emit via the COMMITTING node's own
 // nm.sendMove (== md.enqueueFor(nm), wired at newMoveDispatch) -- so a concurrent drag
 // on BOTH endpoints of the same edge puts both directions' pending-retry queues and
 // both nodes' channels in play at once, the "both mid-handle, each fanning to the
@@ -74,7 +74,7 @@ func TestMutuallyAdjacentDragFloodNoDeadlock(t *testing.T) {
 
 	select {
 	case <-done:
-		// Both drags' RootMove calls returned and every commit's fan-out drained --
+		// Both drags' RootMove calls returned and every commit's broadcast drained --
 		// no mutual-adjacency deadlock.
 	case <-time.After(dragDuration + 8*time.Second):
 		// Generous margin over the drag's own duration: this only distinguishes
@@ -194,7 +194,7 @@ func TestMutuallyAdjacentDragFloodNoDeadlockStress(t *testing.T) {
 
 	select {
 	case <-done:
-		// All workers' RootMove calls returned and every commit's fan-out drained --
+		// All workers' RootMove calls returned and every commit's broadcast drained --
 		// consistent with no mutual-adjacency deadlock at this load. See the RED-PROOF
 		// RESULT above for what actually licenses that reading of a passing run.
 	case <-time.After(45 * time.Second):
@@ -271,7 +271,7 @@ func TestOutboxFIFOPerTargetOrderNoDrop(t *testing.T) {
 	}
 
 	// Single sender goroutine (matches production: one handler goroutine's
-	// fanEdgesAndPartners/requantizeLocalPolars call sends every outbound message for
+	// broadcastToEdgesAndPartners/requantizeLocalPolars call sends every outbound message for
 	// that mover sequentially, via nm.sendMove == md.enqueueFor(nm)). AnchorId carries
 	// the send sequence number so delivery order is directly checkable. This is the
 	// same append-then-flush nm.sendMove performs, plus nm.run's own retry-loop call

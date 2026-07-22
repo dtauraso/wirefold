@@ -52,7 +52,7 @@ type beadPlacement struct {
 	// Position-stream context. Start/End are this edge's straight-segment endpoints
 	// (source OUT-port world pos, dest IN-port world pos). Node/Port are the SOURCE
 	// node id + output port — the position trace key, matching the send event so the
-	// renderer routes by source+sourceHandle (fan-out).
+	// renderer routes by source+sourceHandle (broadcast).
 	Start, End vec3
 	Node, Port string
 }
@@ -280,7 +280,7 @@ func (pw *PacedWire) Send(v int, bp beadPlacement) SendOutcome {
 // DESTINATION node's own goroutine. Returns immediately: ok=false when the wire's
 // own goroutine has not yet handed a delivered bead onto outCh. Also returns the
 // tick the delivered bead actually landed on (deliveredBead.deliverTick, stamped
-// by the wire's own goroutine at handoff time) — callers proving same-tick fan-out
+// by the wire's own goroutine at handoff time) — callers proving same-tick broadcast
 // delivery must use this instead of re-reading a live clock after the fact.
 func (pw *PacedWire) RecvTick() (int, int64, bool) {
 	select {

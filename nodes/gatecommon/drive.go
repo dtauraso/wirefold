@@ -80,7 +80,7 @@ import (
 // speedCh delivers a speed change to THIS goroutine's own clock copy
 // (per-goroutine-clock.md "Delivery"). Each DriveHeld call spawns an
 // INDEPENDENT goroutine with its own clock copy, so a node driving two Outs
-// (Pulse's Out/Out2, or any future fan-out) must pass a DIFFERENT channel per
+// (Pulse's Out/Out2, or any future broadcast) must pass a DIFFERENT channel per
 // call — passing the same channel to two DriveHeld goroutines would starve
 // whichever one loses a given receive. nil is fine (chan mode, or a caller
 // with no speed channel to give): ApplySpeedNonBlocking is then a no-op.

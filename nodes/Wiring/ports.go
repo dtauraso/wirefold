@@ -1,6 +1,6 @@
 // ports.go — typed port wrappers that bake tracing into send/recv.
 //
-// Nodes hold In / Out / OutMulti fields instead of raw channels.
+// Nodes hold In / Out / Broadcast fields instead of raw channels.
 // TryRecv / TrySend emit the corresponding trace event on success,
 // so a node cannot forget to trace, nor can it mis-type a port name
 // string — the port name lives in the wrapper and is set by
@@ -440,14 +440,15 @@ func (o *Out) PlaceDrivenAt(v int) DriveItem {
 	return DriveItem{outcome: DriveSentChan}
 }
 
-// OutMulti is a fanout port: a slice of Outs sharing one logical name.
-type OutMulti []*Out
+// Broadcast is a broadcast port: a slice of Outs the node emits the same
+// value onto, each its own independent 1:1 wire.
+type Broadcast []*Out
 
 // PlaceDrivenAllAt places value v (no walker) on EVERY Out in the set, emitting
 // the SendWire trace for each and appending a DriveItem per Out to dst. Delivery
-// is timed by each wire's own goroutine, so the whole fan-out animates
+// is timed by each wire's own goroutine, so the whole broadcast animates
 // concurrently. Chan-mode Outs send immediately and contribute inert items.
-func (outs OutMulti) PlaceDrivenAllAt(v int, dst []DriveItem) []DriveItem {
+func (outs Broadcast) PlaceDrivenAllAt(v int, dst []DriveItem) []DriveItem {
 	for _, o := range outs {
 		if o == nil {
 			continue

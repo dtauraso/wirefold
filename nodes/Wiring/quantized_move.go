@@ -1,6 +1,6 @@
 // quantized_move.go — the quantized double-link local-polar move math split out of
 // node_move.go: pure move, no logic changes. Held-state snapshots (heldCenters/
-// heldEdges), the fan-out to edges/partners on a re-propagated center, pole requantizing,
+// heldEdges), the broadcast to edges/partners on a re-propagated center, pole requantizing,
 // the one-hop neighborSetC propagation, the owner-goroutine commit (commitNodeMoveLocal),
 // RootMove (the decentralized drag entry), requantizeLocalPolars, and reachRFromPolar.
 //
@@ -30,15 +30,15 @@ func (md *MoveDispatch) heldEdges() []sphereEdge {
 	return edges
 }
 
-// fanEdgesAndPartners messages every incident edge's mover (batched per-edge Centers) and
+// broadcastToEdgesAndPartners messages every incident edge's mover (batched per-edge Centers) and
 // every aimed-port partner (pure re-emit), for the given already-applied set of moved node
 // centers. It never writes the moved node's OWN snap — that responsibility belongs to
 // whichever caller applied the moved node's own center via applyCenter directly (every
 // live caller is owner-goroutine; the old central "self-send into own inbox" path,
 // fanCenters, was removed — it deadlocked/staled when its only caller turned out to run
 // on the moved node's own goroutine too. See commitNodeMoveLocal for the applyCenter +
-// fanEdgesAndPartners pattern).
-func (md *MoveDispatch) fanEdgesAndPartners(newCenters map[string]vec3, enqueue func(id string, msg moveMsg)) {
+// broadcastToEdgesAndPartners pattern).
+func (md *MoveDispatch) broadcastToEdgesAndPartners(newCenters map[string]vec3, enqueue func(id string, msg moveMsg)) {
 	// Per-edge: send ONE batched message carrying every moved endpoint of that edge,
 	// so an edge whose both endpoints moved this frame recomputes/emits exactly once.
 	// enqueue (the sending node's own retry queue — nm.sendMove) appends the
@@ -200,7 +200,7 @@ func (md *MoveDispatch) requantizePoleTraced(lh *LayoutHolder, updates map[strin
 // theta, phi AND r all fresh (about selfID's rotating pole, via requantizePoleTraced with
 // fromID as the single fresh update); selfID's OTHER neighbors are carried forward as
 // index x step, not re-derived. There is NO reposition: only fromID moved, so the incident
-// fromID-selfID edge redraws from fromID's own commit (fanEdgesAndPartners on fromID's
+// fromID-selfID edge redraws from fromID's own commit (broadcastToEdgesAndPartners on fromID's
 // side). Single hop — no forward past selfID, no cascade. No-op for an unknown selfID.
 // deltaA/deltaB/deltaC are the DRAGGED node fromID's OWN quantized-triple change for its
 // edge to selfID (computed once on fromID's goroutine, see requantizeLocalPolars) —
@@ -286,7 +286,7 @@ func (md *MoveDispatch) commitNodeMoveLocal(nm *nodeMover, newPos vec3) {
 	reach := reachRFromPolar(polars, edges)
 
 	nm.applyCenter(newPos, reach[nodeID])
-	md.fanEdgesAndPartners(map[string]vec3{nodeID: newPos}, nm.sendMove)
+	md.broadcastToEdgesAndPartners(map[string]vec3{nodeID: newPos}, nm.sendMove)
 
 	if md.quantizedLayout {
 		off := measureScalar(nodePolar, nm.quantOffset)
@@ -315,7 +315,7 @@ func (md *MoveDispatch) commitNodeMoveLocal(nm *nodeMover, newPos vec3) {
 // position (commitLocal — fan + persist + requantize, no cross-goroutine self-send).
 // commitLocal's requantizeLocalPolars then sends every direct domain neighbor a single
 // moveMsgKindNeighborSetC assignment (see that function's doc comment) — there is no
-// equal-radii solve, no rule-node cascade, no gate-anchor fan-out; a drag never touches
+// equal-radii solve, no rule-node cascade, no gate-anchor broadcast; a drag never touches
 // any node's position but its own. Returns false for an unknown node.
 //
 // NOTE: RootMove runs ONCE PER POINTER-MOVE EVENT, not once per drag (two bugs — commits
@@ -432,7 +432,7 @@ func (md *MoveDispatch) requantizeLocalPolars(nm *nodeMover, newPos vec3) {
 	// X's (this) goroutine — each M's holder and center are written only by M's own
 	// goroutine. Sent via X's OWN retry queue (nm.sendMove, the same
 	// handle every other fan in this commit path uses — see commitNodeMoveLocal's
-	// fanEdgesAndPartners call above) instead of the direct-to-inbox sendMoveLossy
+	// broadcastToEdgesAndPartners call above) instead of the direct-to-inbox sendMoveLossy
 	// this used before: measured under the same mutually-adjacent concurrent-drag
 	// flood TestMutuallyAdjacentDragFloodNoDeadlock drives, sendMoveLossy dropped
 	// ~98% of NeighborSetC sends (9417/9600 in one run, TestNeighborSetCDropReachability)

@@ -167,7 +167,7 @@ func parseEmbeddedPorts(nodesDir, pkgDir string, visited map[string]bool) ([]por
 }
 
 // chanDirection returns ("in", true) for *Wiring.In, ("out", true) for *Wiring.Out
-// or Wiring.OutMulti, and ("", false) for anything else.
+// or Wiring.Broadcast, and ("", false) for anything else.
 func chanDirection(expr ast.Expr) (string, bool) {
 	// *Wiring.In or *Wiring.Out — pointer to selector
 	if star, ok := expr.(*ast.StarExpr); ok {
@@ -183,9 +183,10 @@ func chanDirection(expr ast.Expr) (string, bool) {
 		}
 		return "", false
 	}
-	// Wiring.OutMulti — bare selector (type alias, no pointer)
+	// Wiring.Broadcast — bare selector (type alias, no pointer): a broadcast output port
+	// (one logical output emitting the same value onto N independent wires).
 	if sel, ok := expr.(*ast.SelectorExpr); ok {
-		if pkg, ok := sel.X.(*ast.Ident); ok && pkg.Name == "Wiring" && sel.Sel.Name == "OutMulti" {
+		if pkg, ok := sel.X.(*ast.Ident); ok && pkg.Name == "Wiring" && sel.Sel.Name == "Broadcast" {
 			return "outMulti", true
 		}
 	}
