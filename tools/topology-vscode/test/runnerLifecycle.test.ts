@@ -122,8 +122,12 @@ describe("lastSnapshot cache (getLastSnapshot) — resend replacement", () => {
   // clone transfer primitive (Node's structuredClone with a transfer list — the same
   // detach semantics a MessagePort/Electron IPC transfer performs), then asserting
   // getLastSnapshot() still returns the untouched bytes.
+  // Frames are now [len:u32-LE][blockTag:u8][block bytes] — this helper builds a
+  // BUF_BLOCK_TAG_SCENE-tagged frame so handleFd3 accepts it and strips the tag,
+  // leaving the caller's `bytes` as the cached/posted payload (unchanged from before
+  // the tag was introduced).
   function framed(bytes: number[]): Uint8Array {
-    const body = new Uint8Array(bytes);
+    const body = new Uint8Array([0, ...bytes]); // 0 = BUF_BLOCK_TAG_SCENE
     const out = new Uint8Array(4 + body.length);
     new DataView(out.buffer).setUint32(0, body.length, true);
     out.set(body, 4);
@@ -196,11 +200,13 @@ describe("fd3 partial-frame parse state does not survive a respawn", () => {
   // the stale bytes and froze/starved the scene. run() now mints fresh parse state at every
   // spawn (freshStreamState), so a dead process's tail can never prefix the next stream.
 
-  // Build a length-prefixed fd3 frame: [len:u32-LE][body].
+  // Build a length-prefixed, BUF_BLOCK_TAG_SCENE-tagged fd3 frame:
+  // [len:u32-LE][blockTag:u8=0][body].
   function frameBuf(body: number[]): Buffer {
-    const out = Buffer.alloc(4 + body.length);
-    out.writeUInt32LE(body.length, 0);
-    Buffer.from(body).copy(out, 4);
+    const tagged = [0, ...body]; // 0 = BUF_BLOCK_TAG_SCENE
+    const out = Buffer.alloc(4 + tagged.length);
+    out.writeUInt32LE(tagged.length, 0);
+    Buffer.from(tagged).copy(out, 4);
     return out;
   }
 

@@ -433,7 +433,16 @@ func TestSnapshotFraming(t *testing.T) {
 	}
 
 	// The last frame (position trigger) must carry 1 bead, 1 node, 1 edge.
-	payload := frames[len(frames)-1]
+	// Each frame is now [blockTag:u8][snapshot bytes]; strip the tag before reading
+	// snapshot header fields.
+	tagged := frames[len(frames)-1]
+	if len(tagged) < 1 {
+		t.Fatalf("last frame too short to carry a block tag")
+	}
+	if tagged[0] != BufBlockTagScene {
+		t.Fatalf("last frame block tag: got %d, want BufBlockTagScene", tagged[0])
+	}
+	payload := tagged[1:]
 	beadCount := readU32(payload, 4)
 	nodeCount := readU32(payload, 8)
 	edgeCount := readU32(payload, 12)

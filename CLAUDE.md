@@ -70,7 +70,13 @@ was tried and removed: it had no Edge-block column and could not affect a single
 its only consumer was a test importing the schema barrel, not production code.)
 
 **Bridge surface:** **Go → TS** is the binary content buffer (`buffer-snapshot`) and
-NOTHING ELSE — Go reporting the whole scene. There is **no id/label/kind sidecar**: node
+NOTHING ELSE — Go reporting the whole scene. It rides fd 3 as a tagged frame,
+`[len:u32-LE][tag byte][block bytes]` (len counts the tag byte plus the block
+bytes); today there is exactly one tag, `BufBlockTagScene`/`BUF_BLOCK_TAG_SCENE`
+(`Buffer/frame_tags.go`, mirrored in `tools/topology-vscode/src/schema/frame-tags.ts`),
+carrying the whole combined snapshot — the tag is the discriminator reserved for a
+future split into N per-block buffers; no split exists yet, and this is still one
+buffer, not a sidecar. There is **no id/label/kind sidecar**: node
 identity is the buffer's **row index**, kind is a numeric column, and the human label rides
 the buffer's Label section via off/len columns on the Node block. (A test asserts the
 removed sidecar message is rejected; do not reintroduce one.)

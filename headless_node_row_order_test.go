@@ -20,6 +20,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/binary"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -187,6 +188,10 @@ func TestHeadlessNodeRowOrderIsDeterministic(t *testing.T) {
 
 // readOneSnapshotFrame reads one length-prefixed fd3 frame ([len:u32-LE][bytes]) from r.
 // Shared by the headless snapshot tests (was in the deleted headless_clock_test.go).
+// readOneSnapshotFrame reads one fd-3 frame — [len:u32-LE][blockTag:u8][block bytes]
+// (len counts the tag byte plus the block bytes) — validates the tag is
+// Buffer.BufBlockTagScene (the only value today), and returns the block bytes alone
+// (tag stripped), matching what the ext host hands the webview.
 func readOneSnapshotFrame(r *bufio.Reader) ([]byte, error) {
 	var lenBuf [4]byte
 	if _, err := io.ReadFull(r, lenBuf[:]); err != nil {
@@ -197,5 +202,11 @@ func readOneSnapshotFrame(r *bufio.Reader) ([]byte, error) {
 	if _, err := io.ReadFull(r, buf); err != nil {
 		return nil, err
 	}
-	return buf, nil
+	if len(buf) < 1 {
+		return nil, fmt.Errorf("readOneSnapshotFrame: frame too short to carry a block tag")
+	}
+	if buf[0] != B.BufBlockTagScene {
+		return nil, fmt.Errorf("readOneSnapshotFrame: unexpected block tag %d", buf[0])
+	}
+	return buf[1:], nil
 }

@@ -54,6 +54,10 @@ func readU32(buf []byte, off int) uint32 { return binary.LittleEndian.Uint32(buf
 
 // lastFrame extracts the payload of the LAST complete [u32 len][payload] frame in raw.
 // Returns nil if no complete frame is present yet.
+// lastFrame returns the most recent complete fd-3 frame's SNAPSHOT bytes, with the
+// leading blockTag byte stripped (frames are [len:u32-LE][blockTag:u8][block bytes],
+// len counting the tag byte plus block bytes; today the sole tag is
+// B.BufBlockTagScene, so stripping it here is equivalent to validating it).
 func lastFrame(raw []byte) []byte {
 	var last []byte
 	off := 0
@@ -63,7 +67,9 @@ func lastFrame(raw []byte) []byte {
 		if off+n > len(raw) {
 			break
 		}
-		last = raw[off : off+n]
+		if n >= 1 {
+			last = raw[off+1 : off+n]
+		}
 		off += n
 	}
 	return last

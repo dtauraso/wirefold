@@ -9,7 +9,11 @@
 // already removed end-to-end (see main.go, Trace/Trace.go); there is no
 // separate JSON stream and no pending migration.
 //
-// Frame format: [len:u32-LE][snapshot bytes]
+// Frame format: [len:u32-LE][blockTag:u8][snapshot bytes]  (len counts the tag byte
+// PLUS the snapshot bytes). blockTag is the discriminator defined in frame_tags.go —
+// today there is exactly one value, BufBlockTagScene, carrying the WHOLE combined
+// snapshot below unchanged; it is the protocol foundation for eventually splitting
+// this single buffer into N per-block buffers, each tagged with its own owner.
 //
 // Snapshot layout (little-endian, packed):
 //
@@ -859,13 +863,14 @@ func (s *SnapshotState) emitSnapshot() {
 	snap := s.buildSnapshot()
 	if s.out != nil {
 		var hdr [4]byte
-		binary.LittleEndian.PutUint32(hdr[:], uint32(len(snap)))
+		binary.LittleEndian.PutUint32(hdr[:], uint32(1+len(snap)))
 		// Write errors are intentionally ignored: this is the fire-and-forget Go→TS render
 		// stream (CLAUDE.md — no ack, no delivery signal), emitted every tick. Logging on
 		// failure would be a per-tick firehose (see log-flood lesson), and there is no caller
 		// that could act on the error. A dead peer (broken pipe) is a lifecycle event: the
 		// host tears the Go process down, so there is nothing to recover here.
 		_, _ = s.out.Write(hdr[:])
+		_, _ = s.out.Write([]byte{BufBlockTagScene})
 		_, _ = s.out.Write(snap)
 	}
 	s.clearTransients()

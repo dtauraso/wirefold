@@ -13,6 +13,7 @@ import * as os from "os";
 import { TRACE_EVENT_KINDS } from "../src/schema/trace-kinds";
 import { splitFrames } from "../src/runCommand";
 import { decodeBufferLog } from "../src/buffer-log";
+import { BUF_BLOCK_TAG_SCENE } from "../src/schema/frame-tags";
 
 const KIND_SET = new Set<string>(TRACE_EVENT_KINDS);
 const REPO_ROOT = path.resolve(__dirname, "../../..");
@@ -66,7 +67,12 @@ describe("buffer-decoded .probe log equivalence", () => {
     fd3!.on("data", (d: Buffer) => {
       const { frames, rest } = splitFrames(fd3Buf, d);
       fd3Buf = rest;
-      for (const ab of frames) {
+      for (const framed of frames) {
+        // Each frame is now [blockTag:u8][block bytes]; strip the tag (see
+        // frame-tags.ts / Buffer/frame_tags.go) before decoding, same as handleFd3.
+        const tag = new DataView(framed).getUint8(0);
+        if (tag !== BUF_BLOCK_TAG_SCENE) continue;
+        const ab = framed.slice(1);
         const out = decodeBufferLog(ab);
         for (const l of out.split("\n")) if (l) bufLines.push(l);
       }

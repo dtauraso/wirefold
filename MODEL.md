@@ -168,7 +168,14 @@ when a bead has arrived. Go owns the clock.
   traversal timing, node positions, per-edge curve geometry, shading
   parameters, camera pose, selection, and overlay visibility. It packs
   the whole scene into a **binary content buffer** (`Buffer/`) and streams
-  it as length-prefixed frames on fd 3 every change.
+  it as TAGGED, length-prefixed frames on fd 3 every change: `[len:u32-LE]
+  [tag byte][block bytes]` (`len` counts the tag byte plus the block
+  bytes). Today there is exactly ONE tag value, `BufBlockTagScene` /
+  `BUF_BLOCK_TAG_SCENE` (`Buffer/frame_tags.go`, mirrored by hand in
+  `tools/topology-vscode/src/schema/frame-tags.ts`), carrying the whole
+  combined snapshot below — the tag is the discriminator this protocol
+  reserves for eventually splitting that one buffer into N per-block
+  buffers, each streamed as its own tagged frame; no such split exists yet.
 - **Go → TS is the binary content buffer** (`buffer-snapshot`) ALONE — no
   sidecar. Each node's kind is a numeric `KindId` column (TS maps it to
   `NODE_DEFS` colors), its label rides the buffer's self-sizing label section,
@@ -193,10 +200,12 @@ when a bead has arrived. Go owns the clock.
   Camera row onto the three.js camera). Nothing in this tree owns traversal
   timing, positions, or geometry.
 - **Bridge surface — binary BOTH ways.** **Go → TS:** the binary content
-  buffer ALONE (`buffer-snapshot` on fd 3) — stated in full under "Go → TS is
-  the binary content buffer" above; not restated here, so the two copies cannot
-  drift apart. **TS → Go:** framed binary records on stdin (`[len:u32-LE][record]`,
-  symmetric with fd 3) — `raw-input` (raw pointer/wheel + the stateless raycast
+  buffer ALONE (`buffer-snapshot`, carried as a tagged frame on fd 3) — stated
+  in full under "Go → TS is the binary content buffer" above; not restated
+  here, so the two copies cannot drift apart. **TS → Go:** framed binary records
+  on stdin (`[len:u32-LE][record]`, symmetric in framing style with fd 3, though
+  stdin records carry no block-tag byte — that discriminator exists only on the
+  fd-3 direction) — `raw-input` (raw pointer/wheel + the stateless raycast
   hit as numeric rows; Go's gesture FSM decides what each gesture MEANS), the
   geometry-CRUD `edit` (`op` = update — the sole remaining op; a `create` /
   `delete` op pair was removed end-to-end, no live TS sender ever emitted them.

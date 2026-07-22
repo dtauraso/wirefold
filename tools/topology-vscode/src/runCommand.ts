@@ -7,6 +7,7 @@ import { buildBinary, maxGoMtime, killOrphanedSims } from "./goBuild";
 import { frameRecord } from "./schema/input-layout";
 import { PROBE_DIR, PROBE_FILES } from "./probe-files";
 import { decodeBufferLog } from "./buffer-log";
+import { BUF_BLOCK_TAG_SCENE } from "./schema/frame-tags";
 
 
 /** Format a Go-side error as a probe JSONL line (src="go", kind="error"). */
@@ -69,10 +70,13 @@ export function splitJsonlLines(buf: string, chunk: string): { lines: string[]; 
 // splitFrames is the pure length-prefix framing step for fd3: given the carried-over
 // partial Buffer and a freshly-arrived binary chunk, it returns every COMPLETE frame
 // payload (as an ArrayBuffer, ready to transfer zero-copy) and the trailing partial
-// `rest` to carry into the next call. Frames are [len:u32-LE][payload bytes]; a frame
-// split across two chunks is reassembled; multiple frames in one chunk all come out;
-// a trailing partial (len header not yet complete, or payload bytes not yet complete)
-// is buffered. handleFd3 owns dispatch; this owns only the framing.
+// `rest` to carry into the next call. Frames are [len:u32-LE][blockTag:u8][block bytes]
+// (len counts the tag byte plus the block bytes); the returned payload STILL INCLUDES
+// the leading tag byte — handleFd3 reads and strips it, this function only knows
+// length-prefix framing, not the tag's meaning. A frame split across two chunks is
+// reassembled; multiple frames in one chunk all come out; a trailing partial (len
+// header not yet complete, or payload bytes not yet complete) is buffered. handleFd3
+// owns dispatch; this owns only the framing.
 export function splitFrames(buf: Buffer, chunk: Buffer): { frames: ArrayBuffer[]; rest: Buffer } {
   let rest = buf.length > 0 ? Buffer.concat([buf, chunk]) : chunk;
   const frames: ArrayBuffer[] = [];
@@ -378,7 +382,18 @@ export class BuildAndRunRunner {
   private handleFd3(chunk: Buffer) {
     const { frames, rest } = splitFrames(this.stream.fd3Buf, chunk);
     this.stream.fd3Buf = rest;
-    for (const ab of frames) {
+    for (const framed of frames) {
+      // Read and strip the block-tag byte (see frame-tags.ts / Buffer/frame_tags.go).
+      // Today there is exactly one tag, BUF_BLOCK_TAG_SCENE, carrying the whole combined
+      // snapshot exactly as before; every downstream consumer below gets the SAME plain
+      // snapshot bytes (tag-free) it always did.
+      const tag = new DataView(framed).getUint8(0);
+      const ab = framed.slice(1);
+      if (tag !== BUF_BLOCK_TAG_SCENE) {
+        // No other tag exists yet — an unrecognized tag would mean a protocol drift
+        // between Go and the ext host. Drop it rather than misinterpreting the bytes.
+        continue;
+      }
       // Decode the snapshot's EVENT block into full trace-event .probe lines (the buffer-
       // decoded log — the DECODE of the same binary that replaces Go's JSON-on-stdout path).
       if (this.probeFile) {
