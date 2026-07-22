@@ -21,19 +21,6 @@ import (
 
 const testDeg = math.Pi / 180
 
-// fakeNodeMover installs a minimal *nodeMover in md.nodeMovers. requantizePoleTraced
-// (the function every test below exercises) reads nothing off md at all — center is
-// accepted only so call sites below can keep documenting which OLD-model cartesian
-// value (a live md.centerOfNode(id) read) the new stored-index model must NOT track;
-// it has no effect on requantizePoleTraced's behavior.
-func fakeNodeMover(md *MoveDispatch, id string, center vec3) {
-	if md.nodeMovers == nil {
-		md.nodeMovers = map[string]*nodeMover{}
-	}
-	_ = center
-	md.nodeMovers[id] = &nodeMover{id: id}
-}
-
 // TestRequantizeUsesStoredIndicesNotLiveCartesian is the DECISIVE test for the
 // stored-index model: an unchanged neighbor "far" has its stored abc-indices encoding
 // direction D1, while md's live cartesian centers for "far"/"self" encode a DIFFERENT
@@ -65,10 +52,6 @@ func TestRequantizeUsesStoredIndicesNotLiveCartesian(t *testing.T) {
 	// Live cartesian centers deliberately encode D2 for "far" — a fresh md.centerOfNode
 	// read here would source D2, not the stored D1. requantizePoleTraced (new model)
 	// must never make this call for an unchanged neighbor.
-	selfCenter := vec3{X: 0, Y: 0, Z: 0}
-	fakeNodeMover(md, "self", selfCenter)
-	fakeNodeMover(md, "far", selfCenter.add(offsetFromDir(dirLive).scale(999)))
-
 	// A fresh, in-zone neighbor "near" forces the pole to tilt off home — identically
 	// in both models, since the tilt is driven solely by the max-Y ("closest to +y")
 	// offset, and D1/D2 share the same Y-component (cos(70°)) regardless of bearing.
@@ -132,9 +115,7 @@ func TestRequantizeIndexTimesStepIsAuthoritative(t *testing.T) {
 	// singular zone, so the pole must stay home this call.
 	liveDir := dir{Theta: trueDir.Theta + 25*testDeg, Phi: trueDir.Phi + 60*testDeg}
 
-	selfCenter := vec3{X: 0, Y: 0, Z: 0}
-	fakeNodeMover(md, "self", selfCenter)
-	fakeNodeMover(md, "farB", selfCenter.add(offsetFromDir(liveDir).scale(500)))
+	_ = liveDir
 
 	before := lh.LocalPolarsSnapshot()
 

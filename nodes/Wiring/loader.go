@@ -314,6 +314,11 @@ type buildCtx struct {
 
 	// Phase 5: the MoveDispatch.
 	md *MoveDispatch
+	// nodeMovers is the LOAD-TIME-LOCAL node-mover directory newMoveDispatch returns
+	// alongside md (see that function's doc comment) — used only by the remaining
+	// construction-time seeds below (buildNodes' LayoutHolder wiring), then dropped;
+	// MoveDispatch itself keeps no id-keyed nodeMovers field.
+	nodeMovers map[string]*nodeMover
 
 	// speedSinks accumulates the SEND end of every speed channel created for
 	// any clock-owning goroutine across the whole build — edge movers
@@ -460,7 +465,8 @@ func (b *buildCtx) buildMoveDispatch() {
 	for i, e := range b.spec.Edges {
 		edgeOrder[i] = e.Label
 	}
-	md := newMoveDispatch(b.nodeGeoms, b.edgeEndpoints, b.tr, nodeOrder, edgeOrder, b.clk, &b.speedSinks)
+	md, nodeMovers := newMoveDispatch(b.nodeGeoms, b.edgeEndpoints, b.tr, nodeOrder, edgeOrder, b.clk, &b.speedSinks)
+	b.nodeMovers = nodeMovers
 	// Seed md.positions (the gesture goroutine's own node-center cache, see its doc
 	// comment) from these same load-time geoms right away — every caller of
 	// LoadTopology (production main.go and every test) gets a MoveDispatch whose
@@ -486,7 +492,7 @@ func (b *buildCtx) buildMoveDispatch() {
 	// nodeMover's zero-value quantOffset, matching the old map's zero-value-on-miss read.
 	md.quantizedLayout = true
 	for id, off := range b.quantizedOffsets {
-		if nm, ok := md.nodeMovers[id]; ok {
+		if nm, ok := nodeMovers[id]; ok {
 			nm.quantOffset = off
 		}
 	}
@@ -622,7 +628,7 @@ func (b *buildCtx) buildNodes() error {
 		// (buildMoveDispatch runs before buildNodes) so the INITIAL geometry emit and every
 		// later re-emit compute a connected port's aim identically.
 		var pc partnerCenterFn
-		if nm, ok := b.md.nodeMovers[n.ID]; ok {
+		if nm, ok := b.nodeMovers[n.ID]; ok {
 			pc = nm.partnerCenter
 		}
 		nd, err := bind.Build(b.ctx, n.ID, n.Data, pb, b.tr, b.nodeGeoms[n.ID], pc)

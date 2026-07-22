@@ -338,12 +338,12 @@ func TestNodeMoverGoroutineCountDropsByTwo(t *testing.T) {
 	// Let every goroutine actually start running (go statements return immediately).
 	after := stableGoroutineCount(t)
 
-	wantMovers := len(md.nodeMovers) + len(md.edgeMovers)
+	wantMovers := len(md.extRoute) + len(md.edgeMovers)
 	gotDelta := after - before
 	if gotDelta != wantMovers {
 		t.Fatalf("goroutine count after Start: delta=%d, want exactly %d (one goroutine per mover: "+
 			"%d nodeMovers + %d edgeMovers, no dedicated sender/watcher goroutines)",
-			gotDelta, wantMovers, len(md.nodeMovers), len(md.edgeMovers))
+			gotDelta, wantMovers, len(md.extRoute), len(md.edgeMovers))
 	}
 }
 

@@ -18,13 +18,12 @@ import (
 // doc comment) so heldCenters() observes each center, mirroring a live post-layout dispatch
 // after SeedPositions/drainPositions.
 func homeMD(v viewpoint, centers map[string]vec3) *MoveDispatch {
-	md := &MoveDispatch{nodeMovers: map[string]*nodeMover{}, positions: map[string]vec3{}}
+	md := &MoveDispatch{positions: map[string]vec3{}, kinds: map[string]string{}}
 	md.vp.viewpoint = v
 	for id, c := range centers {
 		cc := c
-		nm := &nodeMover{id: id, geom: nodeGeom{nodeIdentity: nodeIdentity{Kind: "Hold"}, HasPos: true, ScenePolar: cart2polar(cc)}}
 		md.positions[id] = cc
-		md.nodeMovers[id] = nm
+		md.kinds[id] = "Hold"
 	}
 	return md
 }
@@ -81,7 +80,7 @@ func TestGestureHomeFramesUnknownKindAtRenderRadius(t *testing.T) {
 	// the mover's kind to an unrecognized one so nodeBodyRadius takes the (110,60) fallback.
 	centers := map[string]vec3{"x": {X: 0, Y: 0, Z: 0}}
 	md := homeMD(stale, centers)
-	md.nodeMovers["x"].geom.Kind = "NotAKind"
+	md.kinds["x"] = "NotAKind"
 
 	const fov, aspect = 50.0, 800.0 / 600.0
 	md.HandleRawInput(rawInputMsg{Kind: "home", Fov: fov, RectWidth: aspect, RectHeight: 1}, nil, nil)

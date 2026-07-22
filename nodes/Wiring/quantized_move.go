@@ -91,7 +91,7 @@ func (md *MoveDispatch) fanEdgesAndPartners(newCenters map[string]vec3, enqueue 
 		}
 	}
 	for partnerID, movedID := range partners {
-		if _, ok := md.nodeMovers[partnerID]; !ok {
+		if _, ok := md.extRoute[partnerID]; !ok {
 			continue
 		}
 		// Center is deliberately nil (see the doc comment above): this is a PURE
@@ -263,9 +263,9 @@ func (md *MoveDispatch) neighborSetCRequantize(selfID, fromID string, selfCenter
 // (nodeMover.quantOffset — never a shared map, so no other mover goroutine's commit
 // can race this write even for a different node id), and requantizes nodeID's
 // local-polar double-links against its (unmoved) neighbors.
-func (md *MoveDispatch) commitNodeMoveLocal(nodeID string, newPos vec3) {
+func (md *MoveDispatch) commitNodeMoveLocal(nm *nodeMover, newPos vec3) {
+	nodeID := nm.id
 	edges := md.heldEdges()
-	nm, ok := md.nodeMovers[nodeID]
 	// reach[nodeID] only ever needs nodeID's own fresh polar plus its DIRECT
 	// neighbors' polar (reachRFromPolar only accumulates reach for an edge's
 	// SOURCE, from that edge's Target) — nm.neighborCenters (this node's own
@@ -274,10 +274,8 @@ func (md *MoveDispatch) commitNodeMoveLocal(nodeID string, newPos vec3) {
 	// the fixed, write-once md.sceneSphere.Center (never mutated after load), so this
 	// stays race-free without the old all-nodes atomic-snapshot read (heldPolar).
 	polars := map[string]polar{}
-	if ok {
-		for id, c := range nm.neighborCenters {
-			polars[id] = cart2polar(c.sub(md.sceneSphere.Center))
-		}
+	for id, c := range nm.neighborCenters {
+		polars[id] = cart2polar(c.sub(md.sceneSphere.Center))
 	}
 	// Single cart2polar boundary conversion for this drag target — newPos is mouse-
 	// derived cartesian (gesture.go ray/plane unproject); everything downstream
@@ -287,12 +285,10 @@ func (md *MoveDispatch) commitNodeMoveLocal(nodeID string, newPos vec3) {
 	polars[nodeID] = nodePolar
 	reach := reachRFromPolar(polars, edges)
 
-	if ok {
-		nm.applyCenter(newPos, reach[nodeID])
-	}
-	md.fanEdgesAndPartners(map[string]vec3{nodeID: newPos}, md.enqueueFuncFor(nodeID))
+	nm.applyCenter(newPos, reach[nodeID])
+	md.fanEdgesAndPartners(map[string]vec3{nodeID: newPos}, nm.sendMove)
 
-	if md.quantizedLayout && ok {
+	if md.quantizedLayout {
 		off := measureScalar(nodePolar, nm.quantOffset)
 		nm.quantOffset = off
 		if md.persist.quantOffset != nil {
@@ -300,7 +296,7 @@ func (md *MoveDispatch) commitNodeMoveLocal(nodeID string, newPos vec3) {
 		}
 	}
 
-	md.requantizeLocalPolars(nodeID, newPos)
+	md.requantizeLocalPolars(nm, newPos)
 }
 
 // RootMove handles a node-drag under the flat absolute scene-polar layout: every node
@@ -357,7 +353,8 @@ func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
 // holder is mutated only by its own node's goroutine, exactly like quantOffset. M keeps
 // its own stored bearing to X and repositions itself at the new distance along it (see
 // neighborSetCReposition) — unconditional for every neighbor.
-func (md *MoveDispatch) requantizeLocalPolars(nodeID string, newPos vec3) {
+func (md *MoveDispatch) requantizeLocalPolars(nm *nodeMover, newPos vec3) {
+	nodeID := nm.id
 	lhX, okX := md.layoutHolders[nodeID]
 	if !okX {
 		return
@@ -392,16 +389,13 @@ func (md *MoveDispatch) requantizeLocalPolars(nodeID string, newPos vec3) {
 	// comes off X's OWN nodeMover.neighborCenters cache (this node's own goroutine,
 	// updated only by this same goroutine's handle — no cross-goroutine read), not a
 	// cross-goroutine atomic snap read of M's mover.
-	nmX := md.nodeMovers[nodeID]
 	updatesX := map[string]vec3{}
-	if nmX != nil {
-		for m := range neighbors {
-			cM, ok := nmX.neighborCenters[m]
-			if !ok {
-				continue
-			}
-			updatesX[m] = cM.sub(newPos)
+	for m := range neighbors {
+		cM, ok := nm.neighborCenters[m]
+		if !ok {
+			continue
 		}
+		updatesX[m] = cM.sub(newPos)
 	}
 	if len(updatesX) == 0 {
 		return
@@ -421,13 +415,10 @@ func (md *MoveDispatch) requantizeLocalPolars(nodeID string, newPos vec3) {
 	// previous drag, since armDragAnchor always overwrites. Computed once, on X's own
 	// goroutine — per CLAUDE.md's model (each goroutine reports what it itself picked
 	// up). Pure observability: it does not gate or alter the requantize below in any way.
-	if nmX != nil && !nmX.dragAnchorArmed {
-		nmX.armDragAnchor()
+	if !nm.dragAnchorArmed {
+		nm.armDragAnchor()
 	}
-	oldByTo := map[string]LocalPolar{}
-	if nmX != nil {
-		oldByTo = nmX.dragAnchorByTo
-	}
+	oldByTo := nm.dragAnchorByTo
 	md.requantizePoleTraced(lhX, updatesX)
 	writePersist(nodeID, lhX)
 
@@ -454,7 +445,7 @@ func (md *MoveDispatch) requantizeLocalPolars(nodeID string, newPos vec3) {
 	// each other) but via non-blocking send-and-retain-on-nm.pending, retried every
 	// cycle of the sender's own clock-paced run loop, instead of a drop. Unconditional
 	// for every neighbor — there is no rule/gate/anchor cascade left to defer to.
-	enqueue := md.enqueueFuncFor(nodeID)
+	enqueue := nm.sendMove
 	lpByTo := map[string]LocalPolar{}
 	for _, lp := range lhX.LocalPolarsSnapshot() {
 		lpByTo[lp.To] = lp

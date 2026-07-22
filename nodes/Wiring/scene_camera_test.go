@@ -72,7 +72,7 @@ func TestLoadSceneViewpointMatchesCameraPolar(t *testing.T) {
 
 	// The loaded pose is installed into the FSM and is non-degenerate; a pan then moves the
 	// pivot within a valid basis (the exact thing the old zero-value viewpoint broke).
-	md := &MoveDispatch{nodeMovers: map[string]*nodeMover{}}
+	md := &MoveDispatch{}
 	SeedInitialViewpoint(dir, md, nil)
 	if !vecClose(md.vp.pivot, vec3{10, 20, 30}, 1e-9) || math.Abs(md.vp.r-250) > 1e-9 {
 		t.Fatalf("SeedInitialViewpoint did not install the loaded pose: %+v", md.vp.viewpoint)
@@ -93,7 +93,7 @@ func TestSeedInitialViewpointAbsentFileUsesDefault(t *testing.T) {
 		t.Fatalf("loadSceneViewpoint: ok=true for an absent scene.json")
 	}
 
-	md := &MoveDispatch{nodeMovers: map[string]*nodeMover{}}
+	md := &MoveDispatch{}
 	SeedInitialViewpoint(dir, md, nil)
 
 	// Default: pivot=origin, r=defaultViewpointR, pos=+Z (square-on), up=+Y.
