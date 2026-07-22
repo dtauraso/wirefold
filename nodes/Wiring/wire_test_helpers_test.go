@@ -27,8 +27,9 @@ func writeTreeFile(t *testing.T, root, rel, body string) {
 // cascadeSettle is the fixed wall-clock window some drag/neighbor tests sleep after a
 // polled convergence, to let any (unwanted) further cascade land before asserting
 // absence. It is a widening window, NOT the proof of absence — the proof is an
-// SetMsgTap forbidden-kind check (see neighbor_setc_test.go / drag_persist_e2e_test.go);
-// a fixed sleep alone can silently pass for the wrong reason under load.
+// "abc-drag" breadcrumb count check (see neighbor_setc_test.go / drag_persist_e2e_test.go,
+// abcDragDeltasFor): a fixed sleep alone can silently pass for the wrong reason under
+// load.
 const cascadeSettle = 20 * time.Millisecond
 
 // approxEq is the float tolerance used by geometry/position wire tests.

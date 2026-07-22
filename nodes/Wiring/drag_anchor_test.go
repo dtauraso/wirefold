@@ -11,7 +11,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"sync"
 	"testing"
 	"time"
 
@@ -32,43 +31,6 @@ const dragAnchorTopo = `{
   }}
 }`
 
-// captureNeighborSetC installs a msgTap that records every DeltaA/DeltaB/DeltaC carried
-// by a moveMsgKindNeighborSetC message addressed to wantDest, in delivery order.
-// Safe for concurrent use: the tap fires from the sender's own goroutine.
-type neighborSetCLog struct {
-	mu  sync.Mutex
-	got [][3]int
-}
-
-func (l *neighborSetCLog) add(d [3]int) {
-	l.mu.Lock()
-	l.got = append(l.got, d)
-	l.mu.Unlock()
-}
-
-func (l *neighborSetCLog) snapshot() [][3]int {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return append([][3]int(nil), l.got...)
-}
-
-func (l *neighborSetCLog) len() int {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return len(l.got)
-}
-
-func captureNeighborSetC(md *MoveDispatch, wantDest string) *neighborSetCLog {
-	log := &neighborSetCLog{}
-	md.SetMsgTap(func(destID string, msg moveMsg) {
-		if destID != wantDest || msg.Kind != moveMsgKindNeighborSetC {
-			return
-		}
-		log.add([3]int{msg.DeltaA, msg.DeltaB, msg.DeltaC})
-	})
-	return log
-}
-
 func loadDragAnchorTopo(t *testing.T) (context.Context, context.CancelFunc, *MoveDispatch) {
 	t.Helper()
 	dir := t.TempDir()
@@ -88,22 +50,6 @@ func loadDragAnchorTopo(t *testing.T) (context.Context, context.CancelFunc, *Mov
 	return ctx, cancel, md
 }
 
-// waitForNeighborSetC blocks until at least n NeighborSetC messages have been
-// captured, or fails the test on timeout.
-func waitForNeighborSetC(t *testing.T, log *neighborSetCLog, n int) {
-	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		if log.len() >= n {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for %d NeighborSetC messages, got %d", n, log.len())
-		}
-		time.Sleep(time.Millisecond)
-	}
-}
-
 // TestDragDeltaAnchoredAtDragStart is the core regression: a drag delivered as
 // multiple successive RootMove calls, where the SECOND move's quantized radial index
 // is UNCHANGED from the first move's (so the naive current-minus-previous-move delta
@@ -121,16 +67,15 @@ func TestDragDeltaAnchoredAtDragStart(t *testing.T) {
 		t.Fatal("no LayoutHolder for src")
 	}
 
-	// Install the tap BEFORE the setup move: requantizeLocalPolars writes src's OWN
-	// LocalPolar entry (SetLocalPolar, on src's own mover goroutine) strictly before it
-	// enqueues src's moveMsgKindNeighborSetC to dst in that SAME call (quantized_move.go
-	// requantizeLocalPolars: requantizePoleTraced at line ~424, then the neighbor sends
-	// below it) — so waiting for the tapped message to be observed here establishes a
-	// happens-before edge (via neighborSetCLog's mutex) for src's LocalPolar write too.
-	// Reading lh directly from this goroutine without that edge is exactly the race this
-	// helper exists to avoid: a concurrent read of the same memory src's mover goroutine
-	// is writing, invisible to `go test` without -race but a genuine data race under it.
-	got := captureNeighborSetC(md, "dst")
+	// dst is the "abc-drag" recipient of every neighborSetC src fans out; its breadcrumb
+	// carries the exact (DeltaA,DeltaB,DeltaC) src computed for that fan (see
+	// neighborSetCRequantize) — this is the production channel the removed msgTap used
+	// to intercept in flight. Wire the debug sink BEFORE the setup move so no breadcrumb
+	// is missed, same happens-before argument as waitForAbcDrag's doc comment: src writes
+	// its own LocalPolar entry strictly before logging the breadcrumb, in the same call
+	// on src's own goroutine.
+	var dbg syncBuffer
+	md.tr.SetDebugSink(&dbg)
 
 	// Setup (untracked): a bare RootMove call, before any drag-start, that merely gets
 	// src's LocalPolar-to-dst entry into existence (a freshly-loaded LayoutHolder starts
@@ -140,7 +85,7 @@ func TestDragDeltaAnchoredAtDragStart(t *testing.T) {
 	if !md.RootMove("src", vec3{X: 100, Y: 0, Z: 0}) {
 		t.Fatal("setup RootMove returned false")
 	}
-	waitForNeighborSetC(t, got, 1)
+	waitForAbcDragCount(t, &dbg, "dst", 1)
 	waitForLocalPolarIR(t, lh, "dst", 50)
 
 	// Drag start: arm src's anchor at its CURRENT triple (index 50 to dst) -- the same
@@ -153,7 +98,7 @@ func TestDragDeltaAnchoredAtDragStart(t *testing.T) {
 	if !md.RootMove("src", vec3{X: 101.9, Y: 0, Z: 0}) {
 		t.Fatal("RootMove #1 returned false")
 	}
-	waitForNeighborSetC(t, got, 1)
+	waitForAbcDragCount(t, &dbg, "dst", 2)
 
 	// Move 2: src 101.9 -> 102.05 (R 102.05, round(102.05/2)=51 -- SAME quantized index
 	// as move 1, so the naive move-to-move delta is 0). The drag's TOTAL offset from the
@@ -161,18 +106,19 @@ func TestDragDeltaAnchoredAtDragStart(t *testing.T) {
 	if !md.RootMove("src", vec3{X: 102.05, Y: 0, Z: 0}) {
 		t.Fatal("RootMove #2 returned false")
 	}
-	waitForNeighborSetC(t, got, 2)
+	waitForAbcDragCount(t, &dbg, "dst", 3)
 
-	snapshot := got.snapshot()
-	if len(snapshot) < 2 {
-		t.Fatalf("expected at least 2 NeighborSetC messages, got %d: %+v", len(snapshot), snapshot)
+	deltas := abcDragDeltasFor(t, &dbg, "dst")
+	if len(deltas) < 3 {
+		t.Fatalf("expected at least 3 abc-drag deltas for dst, got %d: %+v", len(deltas), deltas)
 	}
-	move2Delta := snapshot[1]
+	// deltas[0] = setup, deltas[1] = move #1, deltas[2] = move #2.
+	move2Delta := deltas[2]
 	if move2Delta[2] == 0 {
-		t.Fatalf("move #2's reported DeltaC = 0 (move-to-move delta); want the drag's cumulative offset from its start (+1, non-zero) — this is the exact bug: %+v", snapshot)
+		t.Fatalf("move #2's reported DeltaC = 0 (move-to-move delta); want the drag's cumulative offset from its start (+1, non-zero) — this is the exact bug: %+v", deltas)
 	}
 	if move2Delta[2] != 1 {
-		t.Fatalf("move #2's reported DeltaC = %d, want +1 (cumulative offset from drag-start anchor, index 50->51): %+v", move2Delta[2], snapshot)
+		t.Fatalf("move #2's reported DeltaC = %d, want +1 (cumulative offset from drag-start anchor, index 50->51): %+v", move2Delta[2], deltas)
 	}
 }
 
@@ -189,19 +135,17 @@ func TestDragAnchorRearmsOnNewDrag(t *testing.T) {
 		t.Fatal("no LayoutHolder for src")
 	}
 
-	// Install the tap BEFORE the setup move — see TestDragDeltaAnchoredAtDragStart's
-	// comment: waiting for the tapped NeighborSetC message establishes a happens-before
-	// edge for src's own LocalPolar write (requantizeLocalPolars writes it, on src's own
-	// goroutine, strictly before enqueueing the tapped message), which a bare poll of lh
-	// from this goroutine does not have on its own.
-	got := captureNeighborSetC(md, "dst")
+	// See TestDragDeltaAnchoredAtDragStart's comment: wire the debug sink before the
+	// setup move so the "abc-drag" breadcrumb trail for dst is complete from the start.
+	var dbg syncBuffer
+	md.tr.SetDebugSink(&dbg)
 
 	// Setup (untracked): establish src's LocalPolar-to-dst entry at the topology's
 	// starting distance before either tracked drag begins.
 	if !md.RootMove("src", vec3{X: 100, Y: 0, Z: 0}) {
 		t.Fatal("setup RootMove returned false")
 	}
-	waitForNeighborSetC(t, got, 1)
+	waitForAbcDragCount(t, &dbg, "dst", 1)
 	waitForLocalPolarIR(t, lh, "dst", 50)
 
 	// Drag 1: arm at src's current position (R=100, index 50), then move to R=104
@@ -210,7 +154,7 @@ func TestDragAnchorRearmsOnNewDrag(t *testing.T) {
 	if !md.RootMove("src", vec3{X: 104, Y: 0, Z: 0}) {
 		t.Fatal("RootMove (drag1) returned false")
 	}
-	waitForNeighborSetC(t, got, 2)
+	waitForAbcDragCount(t, &dbg, "dst", 2)
 	waitForLocalPolarIR(t, lh, "dst", 52)
 
 	// Drag 2 starts HERE (R=104, index 52) -- re-arm the anchor at this new position.
@@ -226,22 +170,23 @@ func TestDragAnchorRearmsOnNewDrag(t *testing.T) {
 	if !md.RootMove("src", vec3{X: 105.9, Y: 0, Z: 0}) {
 		t.Fatal("RootMove (drag2 move A) returned false")
 	}
-	waitForNeighborSetC(t, got, 3)
+	waitForAbcDragCount(t, &dbg, "dst", 3)
 	if !md.RootMove("src", vec3{X: 106.05, Y: 0, Z: 0}) {
 		t.Fatal("RootMove (drag2 move B) returned false")
 	}
-	waitForNeighborSetC(t, got, 4)
+	waitForAbcDragCount(t, &dbg, "dst", 4)
 
-	snapshot := got.snapshot()
-	if len(snapshot) < 4 {
-		t.Fatalf("expected 4 NeighborSetC messages, got %d: %+v", len(snapshot), snapshot)
+	deltas := abcDragDeltasFor(t, &dbg, "dst")
+	if len(deltas) < 4 {
+		t.Fatalf("expected 4 abc-drag deltas for dst, got %d: %+v", len(deltas), deltas)
 	}
-	moveBDelta := snapshot[3][2]
+	// deltas[0] = setup, [1] = drag1, [2] = drag2 move A, [3] = drag2 move B.
+	moveBDelta := deltas[3][2]
 	if moveBDelta == 3 {
-		t.Fatalf("drag 2 move B's DeltaC = 3 (stale drag-1 anchor at index 50 leaked through); want +1 relative to drag 2's OWN start (index 52): %+v", snapshot)
+		t.Fatalf("drag 2 move B's DeltaC = 3 (stale drag-1 anchor at index 50 leaked through); want +1 relative to drag 2's OWN start (index 52): %+v", deltas)
 	}
 	if moveBDelta != 1 {
-		t.Fatalf("drag 2 move B's DeltaC = %d, want +1 (drag 2's cumulative offset from ITS OWN start, not the last move-to-move step which is 0): %+v", moveBDelta, snapshot)
+		t.Fatalf("drag 2 move B's DeltaC = %d, want +1 (drag 2's cumulative offset from ITS OWN start, not the last move-to-move step which is 0): %+v", moveBDelta, deltas)
 	}
 }
 

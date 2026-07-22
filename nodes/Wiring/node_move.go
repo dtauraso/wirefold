@@ -30,7 +30,6 @@ import (
 	"context"
 	"sort"
 	"sync"
-	"sync/atomic"
 
 	T "github.com/dtauraso/wirefold/Trace"
 )
@@ -229,15 +228,6 @@ type MoveDispatch struct {
 	// path (RootMove) to each node's own LayoutHolder; MoveDispatch does not own
 	// or copy LocalPolars itself, it just routes the update to the owning node.
 	layoutHolders map[string]*LayoutHolder
-	// msgTap is a TEST-ONLY observability seam: when non-nil, sendMove invokes it with
-	// every (destID, msg) it routes, BEFORE the send. nil in production — production code
-	// never calls SetMsgTap, so msgTap.Load() is always nil there (one atomic load, no
-	// lock, no allocation). This exists only so tests can assert the message trace
-	// between movers (e.g. the neighborSetC single-hop propagation) is exactly what's
-	// expected. It is pure observation — it never authors domain state or changes
-	// routing. Stored as an atomic.Pointer (not a plain field) because sendMove is the
-	// one chokepoint every mover goroutine calls concurrently.
-	msgTap atomic.Pointer[func(destID string, msg moveMsg)]
 	// ctx is the process-lifetime context, captured in Start. sendMove (the bare
 	// blocking directory send, used by external entry points like RootMove with
 	// no owning mover goroutine to thread a ctx from) selects on ctx.Done() so a
@@ -246,16 +236,6 @@ type MoveDispatch struct {
 	// calling Start — sendMove treats a nil ctx as "no cancellation available"
 	// and falls back to the plain blocking send (matches prior test behavior).
 	ctx context.Context
-}
-
-// SetMsgTap installs (or clears, with nil) the test-only message-trace hook. Test-only —
-// production code never calls this.
-func (md *MoveDispatch) SetMsgTap(tap func(destID string, msg moveMsg)) {
-	if tap == nil {
-		md.msgTap.Store(nil)
-		return
-	}
-	md.msgTap.Store(&tap)
 }
 
 // SetNodeTableChan wires the receive end of the depth-1, replace-latest node-row-table
@@ -604,9 +584,6 @@ func (md *MoveDispatch) centerOfNode(id string) (vec3, bool) {
 // function). md.nodeMovers is a read-only directory once construction finishes, safe to
 // read from any goroutine.
 func (md *MoveDispatch) sendMove(id string, msg moveMsg) {
-	if tap := md.msgTap.Load(); tap != nil {
-		(*tap)(id, msg)
-	}
 	nm, ok := md.nodeMovers[id]
 	if !ok {
 		return
@@ -630,19 +607,15 @@ func (md *MoveDispatch) sendMove(id string, msg moveMsg) {
 	}
 }
 
-// enqueueFor returns nm's own non-blocking send function: it fires the msgTap (at enqueue time, so tap-based tests'
-// counts/ordering match today's behavior), appends the message to nm's own pending
-// retry queue, and attempts an immediate flush — never blocking the calling handler
-// goroutine. Bound once per node at construction (nm.sendMove = md.enqueueFor(nm)) so
-// every send a nodeMover's own handle performs — including the ones
-// fanEdgesAndPartners/requantizeLocalPolars make on that node's behalf — goes through
-// nm's own retry queue, never a raw blocking channel write and never a second mover's
-// queue (there is no shared outbox to route through anymore).
+// enqueueFor returns nm's own non-blocking send function: it appends the message to
+// nm's own pending retry queue and attempts an immediate flush — never blocking the
+// calling handler goroutine. Bound once per node at construction (nm.sendMove =
+// md.enqueueFor(nm)) so every send a nodeMover's own handle performs — including the
+// ones fanEdgesAndPartners/requantizeLocalPolars make on that node's behalf — goes
+// through nm's own retry queue, never a raw blocking channel write and never a second
+// mover's queue (there is no shared outbox to route through anymore).
 func (md *MoveDispatch) enqueueFor(nm *nodeMover) func(id string, msg moveMsg) {
 	return func(id string, msg moveMsg) {
-		if tap := md.msgTap.Load(); tap != nil {
-			(*tap)(id, msg)
-		}
 		nm.pending = append(nm.pending, pendingSend{destID: id, msg: msg})
 		nm.flushPending()
 	}

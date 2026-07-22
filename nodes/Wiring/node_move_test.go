@@ -410,14 +410,14 @@ func TestRootMoveContinuousPositionLocalPolarRequantize(t *testing.T) {
 	// Sync points for the two LayoutHolder reads below, both racy against a live mover
 	// goroutine if read via a bare poll (data race under -race, not just theoretically):
 	//   - lhSrc is written by src's OWN mover goroutine (requantizeLocalPolars) strictly
-	//     BEFORE that same call enqueues src's moveMsgKindNeighborSetC to dst — waiting
-	//     for the tapped message (captureNeighborSetC, same mechanism drag_anchor_test.go
-	//     uses) establishes a happens-before edge for lhSrc's write.
+	//     BEFORE that same call enqueues src's moveMsgKindNeighborSetC to dst, which src
+	//     must send before dst can ever process it and log its own "abc-drag" breadcrumb
+	//     — so waiting for dst's breadcrumb (below) transitively establishes a
+	//     happens-before edge for lhSrc's write too, not just lhDst's.
 	//   - lhDst is written by dst's OWN mover goroutine (neighborSetCRequantize) strictly
 	//     BEFORE that same call logs its "abc-drag" breadcrumb — waiting for the
 	//     breadcrumb (same mechanism time_node_abc_drag_breadcrumb_test.go uses)
 	//     establishes a happens-before edge for lhDst's write.
-	got := captureNeighborSetC(md, "dst")
 	var dbg syncBuffer
 	tr.SetDebugSink(&dbg)
 
@@ -442,7 +442,7 @@ func TestRootMoveContinuousPositionLocalPolarRequantize(t *testing.T) {
 		}
 		time.Sleep(time.Millisecond)
 	}
-	waitForNeighborSetC(t, got, 1)
+	waitForAbcDrag(t, &dbg, "dst")
 
 	// (b) src's local polar to dst reconstructs the distance to a whole tick of the
 	// LOCAL-POLAR grid (localStepR/localStepTheta/localStepPhi — small, uniform cells,

@@ -16,7 +16,6 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"sync"
 	"testing"
 	"time"
 )
@@ -196,18 +195,6 @@ func TestDragPersistsOnlyDraggedNodeAndRequantizesNeighborsOnDisk(t *testing.T) 
 	var dbg syncBuffer
 	md.tr.SetDebugSink(&dbg)
 
-	// Tap every routed message so the post-drag absence check below is a genuine proof
-	// (no forbidden cascade kind reaches B or C), not just a sleep-and-hope — same
-	// mechanism as neighbor_setc_test.go's (3).
-	var mu sync.Mutex
-	var recorded []tappedMsg
-	md.SetMsgTap(func(destID string, msg moveMsg) {
-		mu.Lock()
-		recorded = append(recorded, tappedMsg{destID: destID, kind: msg.Kind, senderID: msg.SenderID})
-		mu.Unlock()
-	})
-	defer md.SetMsgTap(nil)
-
 	// Drag A far enough, off both leaves' prior bearings, that quantization actually
 	// changes the neighbor indices for BOTH B and C (a purely radial move along an
 	// existing bearing would leave theta/phi unchanged for that one neighbor and not
@@ -224,18 +211,20 @@ func TestDragPersistsOnlyDraggedNodeAndRequantizesNeighborsOnDisk(t *testing.T) 
 	waitForAbcDrag(t, &dbg, "C")
 
 	// The poll above only proves QuantIR eventually changed; it is not proof that no
-	// FURTHER unwanted cascade message is in flight toward B or C. That proof is the
-	// forbidden-kind message-tap check below (same mechanism as
-	// neighbor_setc_test.go's (3)); the sleep that follows only widens the window for
-	// the tap to observe anything that lands.
+	// FURTHER unwanted cascade message is in flight toward B or C. neighborSetCRequantize
+	// logs exactly one "abc-drag" breadcrumb per moveMsgKindNeighborSetC it handles (see
+	// its doc comment), so each of B's/C's abc-drag counts IS its neighborSetC receipt
+	// count — a genuine production outcome, not an intercepted in-flight message. The old
+	// cascade kinds ("equalize"/"trigger"/"gatePlace"/"requantize") don't exist anywhere
+	// in moveMsgKind's vocabulary any more (grep node_move.go's moveMsgKind* constants:
+	// only anchor/center/centers/drag/neighborSetC/dragStart remain) — a message of those
+	// kinds is unrepresentable by construction, so there is nothing left to tap for. The
+	// sleep widens the window for any further (unwanted) breadcrumb to land before the
+	// count check below.
 	time.Sleep(cascadeSettle)
-	mu.Lock()
-	trace := append([]tappedMsg(nil), recorded...)
-	mu.Unlock()
-	forbidden := map[string]bool{"equalize": true, "trigger": true, "gatePlace": true, "requantize": true}
-	for _, m := range trace {
-		if (m.destID == "B" || m.destID == "C") && forbidden[m.kind] {
-			t.Fatalf("no cascade message should reach %s; got %+v in trace %+v", m.destID, m, trace)
+	for _, id := range []string{"B", "C"} {
+		if n := len(abcDragDeltasFor(t, &dbg, id)); n != 1 {
+			t.Fatalf("expected exactly one abc-drag (== one moveMsgKindNeighborSetC) delivered to %s; got %d", id, n)
 		}
 	}
 
