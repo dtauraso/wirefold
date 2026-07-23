@@ -243,6 +243,12 @@ func (md *MoveDispatch) neighborSetCRequantize(selfID, fromID string, selfCenter
 		// received.
 		md.tr.AbcDrag(selfID, deltaA, deltaB, deltaC)
 	}
+	// MoveDispatch's OWN published recipient state (ui_publish.go): this runs on selfID's
+	// OWN nodeMover goroutine (neighborSetC dispatch, node_mover.go), concurrently with
+	// every other recipient's own call — recordAbcDrag synchronizes via uiMu. Unlike
+	// md.tr.AbcDrag above (EVENT LOG only now), this is what nodeMover.uiStateFor
+	// (wired to md.NodeUIStateFor) actually reads for its own dedicated stream frame.
+	md.recordAbcDrag(selfID, deltaA, deltaB, deltaC)
 
 	if md.persist.quantOffset != nil {
 		if root := md.persist.quantOffset.root; root != "" {

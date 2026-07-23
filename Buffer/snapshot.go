@@ -110,6 +110,17 @@ type SnapshotState struct {
 	overlay OverlayRow
 	scene   sceneSnapState
 
+	// abcDragCountFor, when non-nil, is the AbcDragCount SOURCE the VIEW frame writer
+	// (writeOverlayBlock) reads instead of s.overlay.AbcDragCount — injected via
+	// SetAbcDragCountSource (main.go wires it to MoveDispatch.AbcDragCount). The
+	// gesture/quantized-move goroutine that RECORDS an abc-drag now owns this counter
+	// directly (nodes/Wiring/ui_publish.go's recordAbcDrag), instead of the count
+	// reaching the buffer only via a round trip through Trace → this accumulator's
+	// KindAbcDrag handler. Nil (the default — no MoveDispatch, e.g. bare Buffer-package
+	// tests) is the REQUIRED fallback: s.overlay.AbcDragCount (still incremented by
+	// KindAbcDrag below) keeps serving the VIEW frame exactly as before this migration.
+	abcDragCountFor func() uint32
+
 	// tick is the monotonic snapshot sequence counter.
 	tick uint32
 
@@ -233,6 +244,14 @@ type SnapshotState struct {
 // SnapshotState exist); leave unset (nil) to keep tests' original per-event emit semantics.
 func (s *SnapshotState) SetTickSource(f func() int64) {
 	s.tickSource = f
+}
+
+// SetAbcDragCountSource installs the AbcDragCount source the VIEW frame writer reads
+// (see abcDragCountFor's doc comment). Call once at startup (main.go wires
+// MoveDispatch.AbcDragCount). Leave uncalled (nil) to keep the fallback: s.overlay.
+// AbcDragCount, incremented by this SnapshotState's own KindAbcDrag handler.
+func (s *SnapshotState) SetAbcDragCountSource(f func() uint32) {
+	s.abcDragCountFor = f
 }
 
 // SetViewOut installs the VIEW stream's dedicated fd (see viewOut's doc comment and

@@ -278,8 +278,13 @@ func (md *MoveDispatch) gestPointerMove(ev rawInputMsg, tr *T.Trace) {
 			// AbcDrag marks (which land asynchronously on each recipient's own goroutine)
 			// and drops recipients whose mark lands after the next move's reset.
 			if tr != nil {
-				tr.AbcDragReset()
+				tr.AbcDragReset() // .probe EVENT LOG only — see AbcDragReset event kind
 			}
+			// Re-scope MoveDispatch's OWN published recipient set the same way (count is
+			// a cumulative total-events affirmation and is intentionally left alone — only
+			// the NAME SET is drag-scoped, mirroring Buffer.SnapshotState's KindAbcDragReset
+			// handling of the fd-3 fallback's abcDragged/gotDragMsg).
+			md.resetAbcDrag()
 			// Arm the dragged node's OWN drag-anchor snapshot (moveMsgKindDragStart, see
 			// its doc comment in node_move.go) at this same slop-crossing edge — the ONE
 			// place a drag begins — so the in-editor delta log reads the drag's running
@@ -485,7 +490,12 @@ func (md *MoveDispatch) setHover(node, port string, isInput bool, tr *T.Trace) {
 	if node == md.sel.hoverNode && port == md.sel.hoverPort && isInput == md.sel.hoverInput {
 		return // no change → no re-emit (dedupe)
 	}
-	md.sel.hoverNode, md.sel.hoverPort, md.sel.hoverInput = node, port, isInput
+	// setHoverUI (ui_publish.go) is the AUTHORITATIVE write: it sets md.sel's hover fields
+	// under uiMu and republishes MoveDispatch's own published UI state, which nodeMover/
+	// edgeMover now read directly (NodeUIStateFor/PortHoveredFor). tr.Hover below is the
+	// .probe EVENT LOG only, and also feeds Buffer.SnapshotState's OWN copy of this state
+	// (KindHover → setHovered), which serves the fd-3 fallback packer.
+	md.setHoverUI(node, port, isInput)
 	if tr != nil {
 		tr.Hover(node, port, isInput)
 	}
@@ -497,16 +507,19 @@ func (md *MoveDispatch) setHover(node, port string, isInput bool, tr *T.Trace) {
 // empty-space hit CLEARS the transient highlight (md.sel.selected / md.sel.selectedEdge) — this is
 // the original click-empty-clears behavior.
 func (md *MoveDispatch) applySelect(ev rawInputMsg, tr *T.Trace) {
+	// setSelectionUI (ui_publish.go) is the AUTHORITATIVE write, same reasoning as
+	// setHoverUI above: it sets md.sel's selection fields (+ latchedNode) under uiMu and
+	// republishes MoveDispatch's own published UI state. tr.Select/tr.SelectEdge below are
+	// the .probe EVENT LOG only, and also feed Buffer.SnapshotState's OWN copy (KindSelect
+	// → setSelected/setSelectedEdge), which serves the fd-3 fallback packer.
 	if ev.Hit.Kind == "empty" {
-		md.sel.selected = ""
-		md.sel.selectedEdge = ""
+		md.setSelectionUI("", "")
 		tr.Select("")
 		return
 	}
 	if ev.Hit.Kind == "edge" {
 		if label, ok := md.edgeFromHit(ev.Hit); ok {
-			md.sel.selectedEdge = label
-			md.sel.selected = ""
+			md.setSelectionUI("", label)
 			tr.SelectEdge(label)
 			return
 		}
@@ -524,8 +537,7 @@ func (md *MoveDispatch) applySelect(ev rawInputMsg, tr *T.Trace) {
 			node = n
 		}
 	}
-	md.sel.selected = node
-	md.sel.selectedEdge = ""
+	md.setSelectionUI(node, "")
 	tr.Select(node)
 }
 

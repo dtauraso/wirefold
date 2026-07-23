@@ -270,6 +270,52 @@ type MoveDispatch struct {
 	portRowTable []moveDispatchPortRow
 	// edgeEndpointRowTable: each edge row's (srcNode, dstNode) ids, same order as edgeRowTable.
 	edgeEndpointRowTable []moveDispatchEdgeEndpoint
+
+	// --- selection/hover/abc-drag published UI state (ui_publish.go) ---
+	//
+	// This state used to live entirely on Buffer.SnapshotState (setSelected/setHovered/
+	// KindAbcDrag), written by the Trace-drain goroutine on the OTHER end of a round trip
+	// from the goroutine that actually sets the intent. It now lives here too, owned and
+	// mutated directly by the SAME single gesture/MoveDispatch goroutine that sets it
+	// (gesture.go's applySelect/setHover, quantized_move.go's neighborSetCRequantize AbcDrag
+	// path — all serialized by the single-goroutine stdin reader, so no lock is needed on
+	// the plain fields below). republishUIState (ui_publish.go) rebuilds+atomically
+	// publishes uiPub's maps from these after every mutation, for nodeMover/edgeMover to
+	// read lock-free via NodeUIStateFor/PortHoveredFor/IsEdgeSelected. tr.Select/tr.Hover/
+	// tr.AbcDrag/tr.AbcDragReset still fire alongside this, but now ONLY for the .probe
+	// EVENT LOG — Buffer.SnapshotState's OWN copy of this state (setSelected etc.) is kept,
+	// unchanged, purely to feed the fd-3 FALLBACK packer (buildSnapshot), used only when no
+	// dedicated node/edge stream fd is active (headless tests, non-extension launches).
+	//
+	// uiMu guards md.sel's selection/hover fields, latchedNode, abcRecipients, and
+	// abcDeltas. Selection/hover are otherwise mutated ONLY by the single gesture/
+	// MoveDispatch stdin-reader goroutine (no lock would be needed for THAT alone — see
+	// selection_state.go), but abcRecipients/abcDeltas are mutated from EVERY recipient
+	// node's OWN nodeMover goroutine (neighborSetCRequantize runs there, not on the stdin
+	// goroutine — node_mover.go's moveMsgKindNeighborSetC dispatch), and republishUIState
+	// reads all of the above together to build one consistent snapshot. This lock is what
+	// makes that cross-goroutine read/write safe.
+	uiMu sync.Mutex
+	// latchedNode is the node id whose LatchedSel bit stays set across a deselect (mirrors
+	// Buffer.SnapshotState.setSelected's latchedSel: moves to the newly-selected node, and
+	// is left untouched — NOT cleared — on a deselect). Guarded by uiMu.
+	latchedNode string
+	// abcRecipients is the CURRENT-DRAG-SCOPED set of node ids that have received at least
+	// one time.abc-drag message during the drag in progress (mirrors
+	// Buffer.SnapshotState.abcDragged). Cleared on AbcDragReset. Guarded by uiMu (written
+	// from every recipient node's own nodeMover goroutine, see uiMu's doc comment).
+	abcRecipients map[string]bool
+	// abcDeltas holds the last (deltaA, deltaB, deltaC) each recipient in abcRecipients
+	// received this drag (mirrors nodeSnapState.dragDeltaA/B/C). Cleared alongside
+	// abcRecipients on AbcDragReset. Guarded by uiMu.
+	abcDeltas map[string][3]int32
+	// kindIDByNode is each node's static numeric kind (see SetNodeStreams' kindIDFor
+	// param) — read-only after SetNodeStreams populates it, so no lock needed.
+	kindIDByNode map[string]uint8
+	// uiPub holds the atomically-published node-UI-state/port-hover/selected-edges maps +
+	// abc-drag count that NodeUIStateFor/PortHoveredFor/IsEdgeSelected/AbcDragCount read,
+	// republished by republishUIState after every mutation above.
+	uiPub uiPublishState
 }
 
 // moveDispatchPortRow is one row of MoveDispatch's port-row table — the (node, port)
@@ -446,10 +492,20 @@ func (md *MoveDispatch) SetNodeStreams(
 	edgeRowForPair func(a, b string) (int32, bool),
 	buildFrame func(tick uint32, nodeRow int32, cx, cy, cz, radius, sphereR float32, vrx, vry, vrz, frx, fry, frz float32, selected, kindID, hovered, latchedSel, gotDragMsg uint8, dragDeltaA, dragDeltaB, dragDeltaC int32, label string, portNames []string, portDX, portDY, portDZ, portPX, portPY, portPZ []float32, portIsInput, portHovered []uint8, dstNodeRows, edgeRows []int32) []byte,
 	buildInteriorFrame func(tick uint32, present []uint8, value []int32, ox, oy, oz []float32) []byte,
+	kindIDFor func(kind string) uint8,
 ) {
 	md.interiorOuts = map[string]io.Writer{}
 	md.buildInteriorFrame = buildInteriorFrame
+	// md.kindIDByNode is this MoveDispatch's own copy of each node's static numeric kind
+	// (resolved via the injected kindIDFor, so this package stays Buffer-independent) —
+	// used by republishUIState (ui_publish.go) to fill nodeUIStatePub.kindID without a
+	// round trip through Buffer.SnapshotState. A node's kind never changes after load, so
+	// this is built once here, not re-resolved per publish.
+	md.kindIDByNode = make(map[string]uint8, len(md.nodeSeeds))
 	for row, seed := range md.nodeSeeds {
+		if kindIDFor != nil {
+			md.kindIDByNode[seed.ID] = kindIDFor(seed.Kind)
+		}
 		nm, ok := md.nodeMovers[seed.ID]
 		if !ok {
 			continue
@@ -466,6 +522,10 @@ func (md *MoveDispatch) SetNodeStreams(
 		iFd := interiorBase + row
 		md.interiorOuts[seed.ID] = os.NewFile(uintptr(iFd), fmt.Sprintf("interior-fd%d", iFd))
 	}
+	// Publish an initial (empty) UI state now, so NodeUIStateFor resolves every node
+	// (ok=true, all-zero) from the first frame rather than nil-map until the first
+	// selection/hover/abc-drag event.
+	md.republishUIState()
 }
 
 // NodeGeomSeed is one node's load-time seed geometry, exported in spec order and consumed

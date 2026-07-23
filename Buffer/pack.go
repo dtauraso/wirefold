@@ -361,9 +361,16 @@ func (s *SnapshotState) writeCameraBlock(buf []byte, off int) int {
 
 // writeOverlayBlock writes the Overlay block (always 1 row). s.overlay IS the
 // OverlayRow value SetOverlayRow writes — no per-field positional arg list at this
-// call site, so there is nothing here to transpose.
+// call site, so there is nothing here to transpose, EXCEPT AbcDragCount: when
+// s.abcDragCountFor is set (see its doc comment), it overrides s.overlay.AbcDragCount
+// with the MoveDispatch-owned count for this one write, leaving s.overlay itself
+// untouched (so the fd-3 fallback, when active, still uses its own copy).
 func (s *SnapshotState) writeOverlayBlock(buf []byte, off int) int {
-	SetOverlayRow(buf[off:], s.overlay)
+	row := s.overlay
+	if s.abcDragCountFor != nil {
+		row.AbcDragCount = s.abcDragCountFor()
+	}
+	SetOverlayRow(buf[off:], row)
 	return off + BufOverlayStride
 }
 
