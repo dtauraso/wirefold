@@ -6,8 +6,8 @@
 import { useRef, useContext } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
-import { getLatestSnapshot } from "../snapshot-buffer";
-import { decodeSnapshot } from "./buffer-decode";
+import { getNodeFrameOrFallback } from "./node-stream-blocks";
+import { getViewBlocks } from "./view-blocks";
 import { EnvTexContext } from "./scene-env";
 import {
   SHADING_PARAM_NODE_TRANSMISSION,
@@ -47,11 +47,11 @@ export function NodeInstances({ capacity }: { capacity: number }) {
     const ringPick = ringPickRef.current;
     if (!body || !ring || !ringPick) return;
 
-    const snap = getLatestSnapshot();
-    if (!snap) { body.count = 0; ring.count = 0; ringPick.count = 0; return; }
-    const decoded = decodeSnapshot(snap);
-    if (!decoded) { body.count = 0; ring.count = 0; ringPick.count = 0; return; }
-    const { nodeCount, nodeView, overlayView } = decoded;
+    const blocks = getViewBlocks();
+    const decodedNode = getNodeFrameOrFallback();
+    if (!decodedNode || !blocks) { body.count = 0; ring.count = 0; ringPick.count = 0; return; }
+    const { overlayView } = blocks;
+    const { nodeCount, nodeView } = decodedNode;
     // The invisible ring pick-proxy (RING_PICK_TUBE_RATIO) is a pick target ONLY while the
     // selSpherePoles ("select") overlay is on — that's the one mode where a torus click
     // authors a `port ∈ torus` equation. When the overlay is off, count=0 removes it from

@@ -57,7 +57,7 @@ import {
   readEdgeEdgeLabelOff,
   readEdgeEdgeLabelLen,
 } from "../../schema/buffer-layout";
-import { BUF_BEAD_HEADER_SIZE, BUF_NODE_FRAME_HEADER_SIZE, BUF_EDGE_FRAME_HEADER_SIZE, BUF_VIEW_FRAME_HEADER_SIZE, BUF_EDGE_STREAM_FRAME_HEADER_SIZE } from "../../schema/frame-tags";
+import { BUF_BEAD_HEADER_SIZE, BUF_NODE_FRAME_HEADER_SIZE, BUF_EDGE_FRAME_HEADER_SIZE, BUF_VIEW_FRAME_HEADER_SIZE, BUF_EDGE_STREAM_FRAME_HEADER_SIZE, BUF_NODE_STREAM_FRAME_HEADER_SIZE, BUF_INTERIOR_STREAM_FRAME_HEADER_SIZE } from "../../schema/frame-tags";
 // Generated (part of BUF_LAYOUT_FINGERPRINT) — re-exported here so existing consumers
 // (buffer-scene.tsx, InteriorBeadInstances.tsx, buffer-log.ts) keep importing it from the
 // decode module rather than reaching into schema/buffer-layout directly.
@@ -506,4 +506,105 @@ export function edgeLabel(decoded: DecodedEdgeFrame, row: number): string {
   if (len === 0) return "";
   if (off < 0 || len < 0 || off + len > decoded.edgeLabelBytes.byteLength) return "";
   return STR_DECODER.decode(decoded.edgeLabelBytes.subarray(off, off + len));
+}
+
+/** Decoded view over ONE node's dedicated per-fd NODE-stream frame (BUF_BLOCK_TAG_NODE_STREAM
+ *  — see frame-tags.ts's BUF_NODE_STREAM_FRAME_HEADER_SIZE doc comment for the byte layout):
+ *  [tick:u32][portCount:u32][labelLen:u32][portNameBytesCount:u32] + this node's own single
+ *  NODE_STRIDE row (index 0) + its own inline label bytes + its own Port rows (each row's
+ *  NodeRow column already the global node row) + its own inline port-name bytes. */
+export interface DecodedNodeStreamFrame {
+  tick: number;
+  /** DataView over this node's single Node row; byteLength = NODE_STRIDE. */
+  nodeView: DataView;
+  /** This node's own label, decoded straight from its inline bytes (LabelOff is always 0
+   *  into THIS frame's own bytes — unlike the fd-3 Node block's shared label section). */
+  label: string;
+  portCount: number;
+  /** DataView over this node's own port rows; byteLength = portCount × PORT_STRIDE. */
+  portView: DataView;
+  /** Uint8 view over this node's own port-name bytes (flattened port-row order). */
+  portNameBytes: Uint8Array;
+}
+
+// Per-node-row memo (keyed by row), mirroring decodeEdgeStreamFrame's per-row memo.
+const lastNodeStreamBufByRow = new Map<number, ArrayBuffer>();
+const lastDecodedNodeStreamByRow = new Map<number, DecodedNodeStreamFrame | null>();
+
+/**
+ * Decode ONE node row's BUF_BLOCK_TAG_NODE_STREAM frame ArrayBuffer into a typed view.
+ * Returns null if the buffer is too small to be a valid frame. Pure — no side effects
+ * beyond this function's own per-row memo. Views alias the original buffer (zero-copy).
+ */
+export function decodeNodeStreamFrame(row: number, buf: ArrayBuffer): DecodedNodeStreamFrame | null {
+  if (lastNodeStreamBufByRow.get(row) === buf) {
+    return lastDecodedNodeStreamByRow.get(row) ?? null;
+  }
+  const decoded = decodeNodeStreamFrameUncached(buf);
+  lastNodeStreamBufByRow.set(row, buf);
+  lastDecodedNodeStreamByRow.set(row, decoded);
+  return decoded;
+}
+
+function decodeNodeStreamFrameUncached(buf: ArrayBuffer): DecodedNodeStreamFrame | null {
+  if (buf.byteLength < BUF_NODE_STREAM_FRAME_HEADER_SIZE) return null;
+  const hdr = new DataView(buf, 0, BUF_NODE_STREAM_FRAME_HEADER_SIZE);
+  const tick               = hdr.getUint32(0,  true);
+  const portCount          = hdr.getUint32(4,  true);
+  const labelLen           = hdr.getUint32(8,  true);
+  const portNameBytesCount = hdr.getUint32(12, true);
+
+  const portBytes = portCount * PORT_STRIDE;
+  const expectedLen = BUF_NODE_STREAM_FRAME_HEADER_SIZE + NODE_STRIDE + labelLen + portBytes + portNameBytesCount;
+  if (buf.byteLength < expectedLen) return null;
+
+  let off = BUF_NODE_STREAM_FRAME_HEADER_SIZE;
+  const nodeView = new DataView(buf, off, NODE_STRIDE);
+  off += NODE_STRIDE;
+
+  const labelBytes = new Uint8Array(buf, off, labelLen);
+  const label = STR_DECODER.decode(labelBytes);
+  off += labelLen;
+
+  const portView = new DataView(buf, off, portBytes);
+  off += portBytes;
+
+  const portNameBytes = new Uint8Array(buf, off, portNameBytesCount);
+
+  return { tick, nodeView, label, portCount, portView, portNameBytes };
+}
+
+/** Decoded view over ONE node's dedicated per-fd INTERIOR-stream frame
+ *  (BUF_BLOCK_TAG_INTERIOR_STREAM): [tick:u32] followed by a FIXED
+ *  INTERIOR_SLOTS_PER_NODE × INTERIOR_STRIDE bytes (that node's own interior-bead grid). */
+export interface DecodedInteriorStreamFrame {
+  tick: number;
+  /** DataView over this node's own INTERIOR_SLOTS_PER_NODE interior rows. */
+  interiorView: DataView;
+}
+
+const lastInteriorStreamBufByRow = new Map<number, ArrayBuffer>();
+const lastDecodedInteriorStreamByRow = new Map<number, DecodedInteriorStreamFrame | null>();
+
+/**
+ * Decode ONE node row's BUF_BLOCK_TAG_INTERIOR_STREAM frame ArrayBuffer into a typed view.
+ * Returns null if the buffer is too small to be a valid frame. Pure, per-row memoized.
+ */
+export function decodeInteriorStreamFrame(row: number, buf: ArrayBuffer): DecodedInteriorStreamFrame | null {
+  if (lastInteriorStreamBufByRow.get(row) === buf) {
+    return lastDecodedInteriorStreamByRow.get(row) ?? null;
+  }
+  const decoded = decodeInteriorStreamFrameUncached(buf);
+  lastInteriorStreamBufByRow.set(row, buf);
+  lastDecodedInteriorStreamByRow.set(row, decoded);
+  return decoded;
+}
+
+function decodeInteriorStreamFrameUncached(buf: ArrayBuffer): DecodedInteriorStreamFrame | null {
+  const interiorBytes = INTERIOR_SLOTS_PER_NODE * INTERIOR_STRIDE;
+  const expectedLen = BUF_INTERIOR_STREAM_FRAME_HEADER_SIZE + interiorBytes;
+  if (buf.byteLength < expectedLen) return null;
+  const tick = new DataView(buf, 0, BUF_INTERIOR_STREAM_FRAME_HEADER_SIZE).getUint32(0, true);
+  const interiorView = new DataView(buf, BUF_INTERIOR_STREAM_FRAME_HEADER_SIZE, interiorBytes);
+  return { tick, interiorView };
 }

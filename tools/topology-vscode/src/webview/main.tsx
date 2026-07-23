@@ -12,8 +12,8 @@ import { AbcDragLabel } from "./three/AbcDragLabel";
 import { parseHostToWebview } from "../messages";
 import { ErrorBoundary } from "./log/ErrorBoundary";
 import { CrashListeners } from "./log/CrashListeners";
-import { setLatestSnapshot, setLatestBeadFrame, setLatestNodeFrame, setLatestEdgeFrame, setLatestViewFrame, setLatestEdgeStreamFrame } from "./snapshot-buffer";
-import { BUF_BLOCK_TAG_SCENE, BUF_BLOCK_TAG_BEAD, BUF_BLOCK_TAG_NODE, BUF_BLOCK_TAG_EDGE, BUF_BLOCK_TAG_VIEW, BUF_BLOCK_TAG_EDGE_STREAM } from "../schema/frame-tags";
+import { setLatestSnapshot, setLatestBeadFrame, setLatestNodeFrame, setLatestEdgeFrame, setLatestViewFrame, setLatestEdgeStreamFrame, setLatestNodeStreamFrame, setLatestInteriorStreamFrame } from "./snapshot-buffer";
+import { BUF_BLOCK_TAG_SCENE, BUF_BLOCK_TAG_BEAD, BUF_BLOCK_TAG_NODE, BUF_BLOCK_TAG_EDGE, BUF_BLOCK_TAG_VIEW, BUF_BLOCK_TAG_EDGE_STREAM, BUF_BLOCK_TAG_NODE_STREAM, BUF_BLOCK_TAG_INTERIOR_STREAM } from "../schema/frame-tags";
 
 function Root() {
   return (
@@ -77,6 +77,17 @@ window.addEventListener("message", (e) => {
       // missing — a malformed relay, never emitted by a correct ext host.
       if (typeof msg.row === "number") {
         setLatestEdgeStreamFrame(msg.row, msg.buffer);
+      }
+    } else if (msg.tag === BUF_BLOCK_TAG_NODE_STREAM) {
+      // One of the per-node dedicated NODE streams (geometry+ports+label) — row names
+      // WHICH node (see snapshot-buffer.ts's nodeStreamFrames map).
+      if (typeof msg.row === "number") {
+        setLatestNodeStreamFrame(msg.row, msg.buffer);
+      }
+    } else if (msg.tag === BUF_BLOCK_TAG_INTERIOR_STREAM) {
+      // One of the per-node dedicated INTERIOR streams (that node's own interior beads).
+      if (typeof msg.row === "number") {
+        setLatestInteriorStreamFrame(msg.row, msg.buffer);
       }
     } else if (msg.tag === BUF_BLOCK_TAG_SCENE) {
       setLatestSnapshot(msg.buffer);

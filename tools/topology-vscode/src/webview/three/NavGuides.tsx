@@ -6,9 +6,9 @@
 import React, { useMemo, useState, useEffect, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
-import { getLatestSnapshot } from "../snapshot-buffer";
 import { useOverlayFlags } from "./overlay-flags";
-import { decodeSnapshot } from "./buffer-decode";
+import { getNodeFrameOrFallback } from "./node-stream-blocks";
+import { getViewBlocks } from "./view-blocks";
 import {
   type NavNode, decodeNavNodes, sceneSphereFromSnapshot,
 } from "./buffer-nav";
@@ -316,12 +316,11 @@ export function NavGuides() {
     // navSignature all allocate per node, per frame). Mirrors the exact flag set the JSX
     // below gates on, read early instead of only at render time.
     if (!showTori && !showScenePoles && !showNodePoles && !showSelPoles && !showHandholds) return;
-    const snap = getLatestSnapshot();
-    if (!snap) return;
-    const decoded = decodeSnapshot(snap);
-    if (!decoded) return;
-    bufNavRef.current = decodeNavNodes(decoded);
-    sceneSphereRef.current = sceneSphereFromSnapshot(decoded);
+    const blocks = getViewBlocks();
+    const decodedNode = getNodeFrameOrFallback();
+    if (!decodedNode || !blocks) return;
+    bufNavRef.current = decodeNavNodes(decodedNode);
+    sceneSphereRef.current = sceneSphereFromSnapshot(blocks);
     const sig = navSignature(bufNavRef.current);
     if (sig !== bufSigRef.current) {
       bufSigRef.current = sig;

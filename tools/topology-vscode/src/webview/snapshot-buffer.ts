@@ -175,3 +175,75 @@ export function subscribeEdgeStreamFrame(fn: SnapshotListener): () => void {
     edgeStreamListeners.delete(fn);
   };
 }
+
+// --- per-node dedicated streams (memory/feedback_no_single_writer_bridge.md) ---
+//
+// TWO keyed maps, mirroring edgeStreamFrames' role but split by stream KIND: one node's
+// own nodeMover (geometry+ports+label) and its OWN Update goroutine (interior beads) write
+// to two DIFFERENT fds (see Buffer/stream_fds.go's StreamKindNode/StreamKindInterior), so
+// they get two separate cells here, both keyed by node row. version counters let
+// node-stream-blocks.ts's aggregator memoize its (necessarily-copying) rebuild instead of
+// re-concatenating every consumer's per-frame read.
+const nodeStreamFrames: Map<number, ArrayBuffer> = new Map();
+const interiorStreamFrames: Map<number, ArrayBuffer> = new Map();
+const nodeStreamListeners = new Set<SnapshotListener>();
+const interiorStreamListeners = new Set<SnapshotListener>();
+let nodeStreamVersion = 0;
+let interiorStreamVersion = 0;
+
+/** Called by main.tsx whenever a new per-node dedicated NODE-stream frame arrives (tag
+ *  BUF_BLOCK_TAG_NODE_STREAM, carrying `row`). */
+export function setLatestNodeStreamFrame(row: number, buf: ArrayBuffer): void {
+  nodeStreamFrames.set(row, buf);
+  nodeStreamVersion++;
+  for (const fn of nodeStreamListeners) fn();
+}
+
+/** Called by node-stream-blocks.ts (and tests) to read every node row's most-recent
+ *  dedicated NODE-stream frame. Empty when the dedicated node-fd path is not active
+ *  (fallback launches never populate this map). */
+export function getLatestNodeStreamFrames(): ReadonlyMap<number, ArrayBuffer> {
+  return nodeStreamFrames;
+}
+
+/** Monotonic counter bumped on every setLatestNodeStreamFrame call — a cheap memo key for
+ *  the aggregator (rebuilding the aggregate DecodedNodeFrame is a full copy; this avoids
+ *  redoing it when nothing changed since the last read). */
+export function getNodeStreamVersion(): number {
+  return nodeStreamVersion;
+}
+
+/** Subscribe to per-node NODE-stream arrivals (any row); returns an unsubscribe fn. */
+export function subscribeNodeStreamFrame(fn: SnapshotListener): () => void {
+  nodeStreamListeners.add(fn);
+  return () => {
+    nodeStreamListeners.delete(fn);
+  };
+}
+
+/** Called by main.tsx whenever a new per-node dedicated INTERIOR-stream frame arrives (tag
+ *  BUF_BLOCK_TAG_INTERIOR_STREAM, carrying `row`). */
+export function setLatestInteriorStreamFrame(row: number, buf: ArrayBuffer): void {
+  interiorStreamFrames.set(row, buf);
+  interiorStreamVersion++;
+  for (const fn of interiorStreamListeners) fn();
+}
+
+/** Called by node-stream-blocks.ts (and tests) to read every node row's most-recent
+ *  dedicated INTERIOR-stream frame. */
+export function getLatestInteriorStreamFrames(): ReadonlyMap<number, ArrayBuffer> {
+  return interiorStreamFrames;
+}
+
+/** Monotonic counter mirroring getNodeStreamVersion for the interior stream. */
+export function getInteriorStreamVersion(): number {
+  return interiorStreamVersion;
+}
+
+/** Subscribe to per-node INTERIOR-stream arrivals (any row); returns an unsubscribe fn. */
+export function subscribeInteriorStreamFrame(fn: SnapshotListener): () => void {
+  interiorStreamListeners.add(fn);
+  return () => {
+    interiorStreamListeners.delete(fn);
+  };
+}

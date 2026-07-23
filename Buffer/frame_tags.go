@@ -146,3 +146,18 @@ const BufViewFrameHeaderSize = 4
 // POSITION already identifies which edge — see stream_fds.go). Mirrored by hand in
 // frame-tags.ts's BUF_BLOCK_TAG_EDGE_STREAM.
 const BufBlockTagEdgeStream byte = 5
+
+// BufBlockTagNodeStream is the SYNTHETIC ext-host-side tag for a decoded per-node stream
+// frame (see Buffer/stream_fds.go's StreamKindNode / Buffer/node_stream_frame.go's
+// BuildNodeStreamFrame), relayed under the same "buffer-snapshot" shape as
+// BufBlockTagEdgeStream, plus a `row` field (the node's stable row). NEVER a wire tag byte:
+// the dedicated per-node fd's frames carry no tag byte at all (the fd POSITION already
+// identifies which node). Mirrored by hand in frame-tags.ts's BUF_BLOCK_TAG_NODE_STREAM.
+const BufBlockTagNodeStream byte = 6
+
+// BufBlockTagInteriorStream is the SYNTHETIC ext-host-side tag for a decoded per-node
+// INTERIOR stream frame (see Buffer/stream_fds.go's StreamKindInterior /
+// Buffer/node_stream_frame.go's BuildInteriorStreamFrame), relayed under the same shape as
+// BufBlockTagNodeStream, plus a `row` field (same node-row numbering). NEVER a wire tag
+// byte. Mirrored by hand in frame-tags.ts's BUF_BLOCK_TAG_INTERIOR_STREAM.
+const BufBlockTagInteriorStream byte = 7

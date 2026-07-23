@@ -5,8 +5,7 @@
 import { useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
-import { getLatestSnapshot } from "../snapshot-buffer";
-import { decodeSnapshot } from "./buffer-decode";
+import { getNodeFrameOrFallback } from "./node-stream-blocks";
 import {
   readNodeCX, readNodeCY, readNodeCZ, readNodeRadius, readNodeSelected, readNodeHovered,
 } from "../../schema/buffer-layout";
@@ -33,8 +32,7 @@ export function SelectionHighlight() {
     const g = groupRef.current;
     if (!g) return;
 
-    const snap = getLatestSnapshot();
-    const decoded = snap ? decodeSnapshot(snap) : null;
+    const decoded = getNodeFrameOrFallback();
     let show = false;
     if (decoded) {
       const { nodeCount, nodeView } = decoded;
@@ -99,8 +97,7 @@ export function HoverHighlight() {
     const ring = ringRef.current;
     if (!ring) return;
 
-    const snap = getLatestSnapshot();
-    const decoded = snap ? decodeSnapshot(snap) : null;
+    const decoded = getNodeFrameOrFallback();
     let show = false;
     if (decoded) {
       const { nodeCount, nodeView } = decoded;

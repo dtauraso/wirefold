@@ -18,8 +18,9 @@
 import { useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import type * as THREE from "three";
-import { getLatestSnapshot } from "../snapshot-buffer";
-import { decodeSnapshot } from "./buffer-decode";
+import { getLatestSnapshot, getLatestBeadFrame, getLatestEdgeFrame } from "../snapshot-buffer";
+import { decodeSnapshot, decodeBeadFrame, decodeEdgeFrame } from "./buffer-decode";
+import { getNodeFrameOrFallback } from "./node-stream-blocks";
 import { INTERIOR_SLOTS_PER_NODE } from "./buffer-decode";
 import { BeadInstances } from "./BeadInstances";
 import { NodeInstances } from "./NodeInstances";
@@ -67,18 +68,43 @@ export function BufferScene({ cameraRef }: {
   // way, borrowing edgeCap). Listing them in ONE table (not scattered ifs) makes a new
   // block's capacity a single obvious edit and its omission a visible gap in this list.
   useFrame(() => {
-    const snap = getLatestSnapshot();
-    if (!snap) return;
-    const decoded = decodeSnapshot(snap);
-    if (!decoded) return;
+    const grow: { count: number; cap: number; set: (n: number) => void }[] = [];
 
-    const grow: { count: number; cap: number; set: (n: number) => void }[] = [
-      { count: decoded.beadCount,       cap: beadCap,       set: setBeadCap },
-      { count: decoded.nodeCount,       cap: nodeCap,       set: setNodeCap },
-      { count: decoded.edgeCount,       cap: edgeCap,       set: setEdgeCap },
-      { count: decoded.portCount,       cap: portCap,       set: setPortCap },
-      { count: decoded.layoutLinkCount, cap: layoutLinkCap, set: setLayoutLinkCap },
-    ];
+    const snap = getLatestSnapshot();
+    const decoded = snap ? decodeSnapshot(snap) : null;
+    if (decoded) {
+      grow.push(
+        { count: decoded.layoutLinkCount, cap: layoutLinkCap, set: setLayoutLinkCap },
+      );
+    }
+
+    // The Edge block + EdgeLabel bytes are their own tagged frame now (BUF_BLOCK_TAG_EDGE) —
+    // grow edgeCap off that frame's count, independent of the scene frame's arrival.
+    const edgeFrame = getLatestEdgeFrame();
+    const decodedEdge = edgeFrame ? decodeEdgeFrame(edgeFrame) : null;
+    if (decodedEdge) {
+      grow.push({ count: decodedEdge.edgeCount, cap: edgeCap, set: setEdgeCap });
+    }
+
+    // Beads are their own tagged frame now (BUF_BLOCK_TAG_BEAD) — grow beadCap off that
+    // frame's count, independent of the scene frame's arrival.
+    const beadFrame = getLatestBeadFrame();
+    const decodedBead = beadFrame ? decodeBeadFrame(beadFrame) : null;
+    if (decodedBead) {
+      grow.push({ count: decodedBead.beadCount, cap: beadCap, set: setBeadCap });
+    }
+
+    // Node/Interior/Port + Label/PortName bytes are their own tagged frame now
+    // (BUF_BLOCK_TAG_NODE) — grow nodeCap/portCap off that frame's counts, independent of
+    // the scene frame's arrival.
+    const decodedNode = getNodeFrameOrFallback();
+    if (decodedNode) {
+      grow.push(
+        { count: decodedNode.nodeCount, cap: nodeCap, set: setNodeCap },
+        { count: decodedNode.portCount, cap: portCap, set: setPortCap },
+      );
+    }
+
     for (const g of grow) {
       if (g.count > g.cap) g.set(Math.ceil(g.count * 1.5));
     }

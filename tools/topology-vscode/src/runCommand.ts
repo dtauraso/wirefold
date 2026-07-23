@@ -7,7 +7,7 @@ import { buildBinary, maxGoMtime, killOrphanedSims } from "./goBuild";
 import { frameRecord } from "./schema/input-layout";
 import { PROBE_DIR, PROBE_FILES } from "./probe-files";
 import { decodeBufferLog } from "./buffer-log";
-import { BUF_BLOCK_TAG_SCENE, BUF_BLOCK_TAG_BEAD, BUF_BLOCK_TAG_NODE, BUF_BLOCK_TAG_EDGE, BUF_BLOCK_TAG_VIEW, BUF_BLOCK_TAG_EDGE_STREAM } from "./schema/frame-tags";
+import { BUF_BLOCK_TAG_SCENE, BUF_BLOCK_TAG_BEAD, BUF_BLOCK_TAG_NODE, BUF_BLOCK_TAG_EDGE, BUF_BLOCK_TAG_VIEW, BUF_BLOCK_TAG_EDGE_STREAM, BUF_BLOCK_TAG_NODE_STREAM, BUF_BLOCK_TAG_INTERIOR_STREAM } from "./schema/frame-tags";
 
 // The fd-ALLOCATION contract (mirrors Buffer/stream_fds.go's doc comment): the ext host
 // knows the topology from the spec it holds, computes a base fd PER STREAM KIND, and
@@ -32,6 +32,44 @@ const EDGE_BASE_FD = 5;
 // more edges than this falls back entirely to the shared fd-3 Edge/Bead path (edgeCount is
 // clamped, WIREFOLD_STREAM_FDS omits "edge", Go never calls SetEdgeStreamActive).
 const MAX_EDGE_STREAMS = 256;
+
+// NODE_BASE_FD / INTERIOR_BASE_FD: the base fds for the "node" and "interior" stream
+// kinds — one dedicated fd PER NODE ROW each, fd = base + nodeRow (nodeRow = that node's
+// stable seed-order row, matching Buffer's Node block row order — see nodes/Wiring's
+// MoveDispatch.SetNodeStreams / SetInteriorStreams and main.go). Sit right after the edge
+// range, computed PER-SPAWN (not module-level constants) since they depend on edgeCount:
+// nodeBase = EDGE_BASE_FD + edgeCount, interiorBase = nodeBase + nodeCount. Go's
+// stream_fds.go requires BOTH "node" and "interior" WIREFOLD_STREAM_FDS entries present
+// together (main.go only wires either when both resolve) — see run() below.
+
+// MAX_NODE_STREAMS bounds the per-node fd range (mirrors MAX_EDGE_STREAMS) — one
+// dedicated pipe PER NODE for EACH of node/interior. A topology with more nodes than this
+// falls back entirely to the shared fd-3 Node/Interior/Port path.
+const MAX_NODE_STREAMS = 256;
+
+// countNodes reads the topology spec's node count WITHOUT the full Go-side validate/build
+// pipeline — just enough structure to size the pre-spawn stdio pipe array (mirrors
+// countEdges' doc comment and reasoning exactly, substituting the "nodes" directory /
+// spec array). Returns 0 (⇒ no dedicated node/interior fds; the fd-3 fallback stays
+// active) on any read/parse failure.
+export function countNodes(topologyPath: string): number {
+  try {
+    const st = fs.statSync(topologyPath);
+    if (st.isDirectory()) {
+      const nodesDir = path.join(topologyPath, "nodes");
+      if (!fs.existsSync(nodesDir)) return 0;
+      return fs.readdirSync(nodesDir).filter((f) => f.endsWith(".json")).length;
+    }
+    const raw = fs.readFileSync(topologyPath, "utf8");
+    const spec: unknown = JSON.parse(raw);
+    if (spec && typeof spec === "object" && Array.isArray((spec as { nodes?: unknown }).nodes)) {
+      return (spec as { nodes: unknown[] }).nodes.length;
+    }
+    return 0;
+  } catch {
+    return 0;
+  }
+}
 
 // countEdges reads the topology spec's edge count WITHOUT the full Go-side validate/build
 // pipeline — just enough structure to size the pre-spawn stdio pipe array (the ext host
@@ -230,6 +268,10 @@ interface StreamParseState {
   // Partial-frame carry-over PER EDGE fd (index = edge row), same role as viewBuf but one
   // per dedicated edge pipe — each is its OWN pipe with its own chunk boundaries.
   edgeBufs: Buffer[];
+  // Partial-frame carry-over PER NODE fd / PER INTERIOR fd (index = node row), same role
+  // as edgeBufs — one per dedicated node/interior pipe.
+  nodeBufs: Buffer[];
+  interiorBufs: Buffer[];
 }
 
 // freshStreamState mints empty parse state for a newly spawned process. run() calls it
@@ -237,14 +279,17 @@ interface StreamParseState {
 // the next process — concatenating them would make splitFrames read a frame length from
 // inside stale bytes and freeze (or silently starve) the scene. Binding the reset to the
 // spawn, not to each exit handler, makes "start a process with leftover bytes" impossible
-// to express rather than a rule every exit path must remember. edgeCount sizes edgeBufs to
-// this spawn's edge-fd range (0 when the dedicated edge path is off).
-function freshStreamState(edgeCount: number): StreamParseState {
+// to express rather than a rule every exit path must remember. edgeCount/nodeCount size
+// edgeBufs/nodeBufs+interiorBufs to this spawn's fd ranges (0 when that dedicated path is
+// off).
+function freshStreamState(edgeCount: number, nodeCount: number): StreamParseState {
   return {
     stdoutBuf: "",
     fd3Buf: Buffer.alloc(0),
     viewBuf: Buffer.alloc(0),
     edgeBufs: Array.from({ length: edgeCount }, () => Buffer.alloc(0)),
+    nodeBufs: Array.from({ length: nodeCount }, () => Buffer.alloc(0)),
+    interiorBufs: Array.from({ length: nodeCount }, () => Buffer.alloc(0)),
   };
 }
 
@@ -262,7 +307,7 @@ export class BuildAndRunRunner {
   // Per-process partial-frame parse state (stdout line + fd3 binary frame). Rebuilt at
   // every spawn by run() (freshStreamState), so its lifetime tracks the Go process, not
   // this long-lived runner — see freshStreamState for why that reset is at the spawn.
-  private stream: StreamParseState = freshStreamState(0);
+  private stream: StreamParseState = freshStreamState(0, 0);
   private probeFile: string | undefined;
   private goErrorsFile: string | undefined;
   private goDebugFile: string | undefined;
@@ -288,6 +333,17 @@ export class BuildAndRunRunner {
   // Current spawn's edge-fd count (0 = dedicated edge path off, the fallback). Recomputed
   // at every run() call from the topology spec.
   private edgeCount = 0;
+
+  // Last frame PER NODE ROW from the dedicated per-node NODE streams, and separately from
+  // the dedicated per-node INTERIOR streams — the per-node analogues of lastEdgeFrames, one
+  // map per stream kind since a node's geometry/ports/label and its interior beads are
+  // written by two DIFFERENT goroutines (memory/feedback_no_single_writer_bridge.md) onto
+  // two different fds. Same COPY-before-cache reasoning as lastFrames. Cleared on every spawn.
+  private lastNodeFrames: Map<number, ArrayBuffer> = new Map();
+  private lastInteriorFrames: Map<number, ArrayBuffer> = new Map();
+  // Current spawn's node-fd count (0 = dedicated node/interior path off, the fallback).
+  // Recomputed at every run() call from the topology spec.
+  private nodeCount = 0;
 
   private topologyPath: string | undefined;
 
@@ -361,10 +417,18 @@ export class BuildAndRunRunner {
     // entirely to the shared fd-3 Edge/Bead path — see MAX_EDGE_STREAMS's doc comment.
     const edgeCountRaw = countEdges(this.topologyPath ?? path.join(repoRoot, "topology"));
     this.edgeCount = edgeCountRaw > MAX_EDGE_STREAMS ? 0 : edgeCountRaw;
+    // Size the dedicated per-node NODE + INTERIOR fd ranges the same way, right after the
+    // edge range (nodeBase = EDGE_BASE_FD + edgeCount, interiorBase = nodeBase + nodeCount —
+    // see NODE_BASE_FD's doc comment). Clamped to MAX_NODE_STREAMS; 0 falls back entirely to
+    // the shared fd-3 Node/Interior/Port path.
+    const nodeCountRaw = countNodes(this.topologyPath ?? path.join(repoRoot, "topology"));
+    this.nodeCount = nodeCountRaw > MAX_NODE_STREAMS ? 0 : nodeCountRaw;
+    const nodeBaseFd = EDGE_BASE_FD + this.edgeCount;
+    const interiorBaseFd = nodeBaseFd + this.nodeCount;
     // Fresh parse state for this spawn: a prior process's leftover partial frame must
     // never prefix this one's stream (see freshStreamState). This is the single reset
     // point every restart path funnels through, including the looping respawn.
-    this.stream = freshStreamState(this.edgeCount);
+    this.stream = freshStreamState(this.edgeCount, this.nodeCount);
     // Also drop the cached keyframes: they belong to the PRIOR process. Without this,
     // a webview remounting in the window between "ready" and the new process's first
     // fd3 frame would be replayed the previous process's frames via getLastFrames().
@@ -372,6 +436,8 @@ export class BuildAndRunRunner {
     // is preserved by that emit — not by re-serving one process's bytes as another's.
     this.lastFrames.clear();
     this.lastEdgeFrames.clear();
+    this.lastNodeFrames.clear();
+    this.lastInteriorFrames.clear();
     // detached: true makes the child the leader of a new process group; the
     // prebuilt binary is the sole group member, so kill(-pid) reaches it
     // directly. Without this, SIGTERM could leave it orphaned on macOS.
@@ -380,14 +446,26 @@ export class BuildAndRunRunner {
     // dedicated VIEW-stream pipe (WIREFOLD_STREAM_FDS="view:<VIEW_FD>") — the first
     // stream migrated off fd 3 onto its own inherited pipe (see the VIEW_FD doc comment
     // above / Buffer/stream_fds.go). stdio indices EDGE_BASE_FD..EDGE_BASE_FD+edgeCount-1
-    // are one dedicated pipe PER EDGE (see EDGE_BASE_FD's doc comment) — omitted (and
-    // "edge" left out of WIREFOLD_STREAM_FDS) when edgeCount is 0, which is the required
-    // fallback: Go then keeps the Edge/Bead blocks on fd 3. "pipe" opens a readable pipe
+    // are one dedicated pipe PER EDGE (see EDGE_BASE_FD's doc comment); the next
+    // nodeCount indices are one dedicated pipe PER NODE (the "node" stream — geometry +
+    // ports + label); the FOLLOWING nodeCount indices are one dedicated pipe PER NODE again
+    // (the "interior" stream — that node's own interior beads, a SEPARATE goroutine's
+    // fd — see NODE_BASE_FD's doc comment). Any of these ranges is omitted (and its kind
+    // left out of WIREFOLD_STREAM_FDS) when its count is 0, which is the required
+    // fallback: Go then keeps the corresponding blocks on fd 3. "pipe" opens a readable pipe
     // at each index; the existing stdin(0)/stdout(1)/stderr(2) are unchanged.
     const stdio: Array<"pipe"> = ["pipe", "pipe", "pipe", "pipe", "pipe"];
     for (let i = 0; i < this.edgeCount; i++) stdio.push("pipe");
-    const streamFDsEnv =
-      this.edgeCount > 0 ? `view:${VIEW_FD},edge:${EDGE_BASE_FD}` : `view:${VIEW_FD}`;
+    for (let i = 0; i < this.nodeCount; i++) stdio.push("pipe");
+    for (let i = 0; i < this.nodeCount; i++) stdio.push("pipe");
+    const streamFDsEnvParts = [`view:${VIEW_FD}`];
+    if (this.edgeCount > 0) streamFDsEnvParts.push(`edge:${EDGE_BASE_FD}`);
+    // Go's stream_fds.go / main.go only wires the per-node node+interior streams when
+    // BOTH "node" and "interior" env entries resolve — always emit them together.
+    if (this.nodeCount > 0) {
+      streamFDsEnvParts.push(`node:${nodeBaseFd}`, `interior:${interiorBaseFd}`);
+    }
+    const streamFDsEnv = streamFDsEnvParts.join(",");
     this.proc = cp.spawn(binPath, [...topArgs], {
       cwd: repoRoot,
       detached: true,
@@ -422,6 +500,21 @@ export class BuildAndRunRunner {
       const edgeFd = (this.proc.stdio as (NodeJS.ReadableStream | null)[])[fdIdx];
       if (edgeFd) {
         edgeFd.on("data", (d: Buffer) => this.handleEdgeFd(row, d));
+      }
+    }
+    // Per-node dedicated pipes: nodeBaseFd..nodeBaseFd+nodeCount-1 (NODE stream, geometry+
+    // ports+label) and interiorBaseFd..interiorBaseFd+nodeCount-1 (INTERIOR stream, that
+    // node's own interior beads — a separate goroutine's fd, see NODE_BASE_FD's doc comment).
+    for (let row = 0; row < this.nodeCount; row++) {
+      const nodeFdIdx = nodeBaseFd + row;
+      const nodeFd = (this.proc.stdio as (NodeJS.ReadableStream | null)[])[nodeFdIdx];
+      if (nodeFd) {
+        nodeFd.on("data", (d: Buffer) => this.handleNodeFd(row, d));
+      }
+      const interiorFdIdx = interiorBaseFd + row;
+      const interiorFd = (this.proc.stdio as (NodeJS.ReadableStream | null)[])[interiorFdIdx];
+      if (interiorFd) {
+        interiorFd.on("data", (d: Buffer) => this.handleInteriorFd(row, d));
       }
     }
     this.proc.stderr?.on("data", (d: Buffer) => {
@@ -577,6 +670,41 @@ export class BuildAndRunRunner {
     }
   }
 
+  // handleNodeFd parses ONE dedicated per-node NODE stream pipe (fd = nodeBaseFd + row):
+  // frames are [len:u32][payload] with NO tag byte (the fd position already identifies
+  // WHICH node — see Buffer/stream_fds.go / Buffer/node_stream_frame.go). splitFrames is
+  // reused as-is, same as handleEdgeFd. Each decoded frame is relayed to the webview under
+  // the SAME "buffer-snapshot" shape, tagged BUF_BLOCK_TAG_NODE_STREAM (synthetic, never a
+  // wire byte) PLUS `row` so the webview routes it to the right per-node cell.
+  private handleNodeFd(row: number, chunk: Buffer) {
+    const carry = this.stream.nodeBufs[row] ?? Buffer.alloc(0);
+    const { frames, rest } = splitFrames(carry, chunk);
+    this.stream.nodeBufs[row] = rest;
+    for (const ab of frames) {
+      // Cache under this node row (same copy-before-hand-off reasoning as lastFrames).
+      this.lastNodeFrames.set(row, ab.slice(0));
+      if (this.onSnapshot) {
+        this.onSnapshot({ type: "buffer-snapshot", buffer: ab, tag: BUF_BLOCK_TAG_NODE_STREAM, row });
+      }
+    }
+  }
+
+  // handleInteriorFd parses ONE dedicated per-node INTERIOR stream pipe (fd =
+  // interiorBaseFd + row) — that node's OWN Update goroutine (a SEPARATE goroutine from
+  // its nodeMover), same framing/relay shape as handleNodeFd, tagged
+  // BUF_BLOCK_TAG_INTERIOR_STREAM.
+  private handleInteriorFd(row: number, chunk: Buffer) {
+    const carry = this.stream.interiorBufs[row] ?? Buffer.alloc(0);
+    const { frames, rest } = splitFrames(carry, chunk);
+    this.stream.interiorBufs[row] = rest;
+    for (const ab of frames) {
+      this.lastInteriorFrames.set(row, ab.slice(0));
+      if (this.onSnapshot) {
+        this.onSnapshot({ type: "buffer-snapshot", buffer: ab, tag: BUF_BLOCK_TAG_INTERIOR_STREAM, row });
+      }
+    }
+  }
+
   cancel() {
     // Drop any stdin lines buffered while proc was null — they belong to the
     // stopped session and must NOT replay onto the next spawned Go process (which
@@ -619,6 +747,17 @@ export class BuildAndRunRunner {
    *  analogue of getLastFrames(). Same fresh-copy-per-remount reasoning. */
   getLastEdgeFrames(): Array<{ row: number; buffer: ArrayBuffer }> {
     return Array.from(this.lastEdgeFrames, ([row, buffer]) => ({ row, buffer: buffer.slice(0) }));
+  }
+
+  /** The most recent frame for EVERY cached node row from the dedicated NODE stream, the
+   *  per-node analogue of getLastEdgeFrames. */
+  getLastNodeFrames(): Array<{ row: number; buffer: ArrayBuffer }> {
+    return Array.from(this.lastNodeFrames, ([row, buffer]) => ({ row, buffer: buffer.slice(0) }));
+  }
+
+  /** The most recent frame for EVERY cached node row from the dedicated INTERIOR stream. */
+  getLastInteriorFrames(): Array<{ row: number; buffer: ArrayBuffer }> {
+    return Array.from(this.lastInteriorFrames, ([row, buffer]) => ({ row, buffer: buffer.slice(0) }));
   }
 
   /** Framed binary records written before Go's stdin exists, flushed on spawn (see writeStdin/run). */

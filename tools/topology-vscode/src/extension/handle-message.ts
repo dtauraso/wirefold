@@ -14,7 +14,7 @@ import {
 } from "../messages";
 import { appendWebviewLog } from "./webview-log";
 import { PROBE_DIR, PROBE_FILES } from "../probe-files";
-import { BUF_BLOCK_TAG_EDGE_STREAM } from "../schema/frame-tags";
+import { BUF_BLOCK_TAG_EDGE_STREAM, BUF_BLOCK_TAG_NODE_STREAM, BUF_BLOCK_TAG_INTERIOR_STREAM } from "../schema/frame-tags";
 
 export type MessageCtx = {
   logUri: vscode.Uri | undefined;
@@ -93,6 +93,16 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
         // per-edge analogue of the loop above — one cached frame per edge row.
         for (const { row, buffer } of runner.getLastEdgeFrames()) {
           ctx.post({ type: "buffer-snapshot", buffer, tag: BUF_BLOCK_TAG_EDGE_STREAM, row });
+        }
+        // Per-node dedicated streams (see BuildAndRunRunner.getLastNodeFrames /
+        // getLastInteriorFrames): the per-node analogue of the edge loop above — one
+        // cached frame per node row, for EACH of the two per-node stream kinds (they are
+        // written by two different goroutines onto two different fds).
+        for (const { row, buffer } of runner.getLastNodeFrames()) {
+          ctx.post({ type: "buffer-snapshot", buffer, tag: BUF_BLOCK_TAG_NODE_STREAM, row });
+        }
+        for (const { row, buffer } of runner.getLastInteriorFrames()) {
+          ctx.post({ type: "buffer-snapshot", buffer, tag: BUF_BLOCK_TAG_INTERIOR_STREAM, row });
         }
       }
       return;

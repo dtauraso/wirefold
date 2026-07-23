@@ -10,8 +10,8 @@
 
 import { useSyncExternalStore } from "react";
 import type { OverlayFlag } from "../../messages";
-import { getLatestSnapshot, subscribeSnapshot } from "../snapshot-buffer";
-import { decodeSnapshot } from "./buffer-decode";
+import { getNodeFrameOrFallback, subscribeNodeStreamBlocks } from "./node-stream-blocks";
+import { getViewBlocks, subscribeViewBlocks } from "./view-blocks";
 import {
   readOverlaySceneTori,
   readOverlayScenePoles,
@@ -47,11 +47,9 @@ let cachedVals: OverlayFlagVals | null = null;
 /** Decode the latest snapshot's Overlay row into store-polarity booleans, or null if no
  *  snapshot / decode failure. Stable identity while unchanged. */
 export function readOverlayFlags(): OverlayFlagVals | null {
-  const snap = getLatestSnapshot();
-  if (!snap) return cachedVals;
-  const decoded = decodeSnapshot(snap);
-  if (!decoded) return cachedVals;
-  const v = decoded.overlayView;
+  const blocks = getViewBlocks();
+  if (!blocks) return cachedVals;
+  const v = blocks.overlayView;
   const bits =
     (readOverlaySceneTori(v) ? 1 << 0 : 0) |
     (readOverlayScenePoles(v) ? 1 << 1 : 0) |
@@ -80,24 +78,22 @@ export function readOverlayFlags(): OverlayFlagVals | null {
 /** React hook: re-renders the caller when any overlay flag flips (Go-owned). Returns
  *  null until the first snapshot lands. */
 export function useOverlayFlags(): OverlayFlagVals | null {
-  return useSyncExternalStore(subscribeSnapshot, readOverlayFlags, readOverlayFlags);
+  return useSyncExternalStore(subscribeViewBlocks, readOverlayFlags, readOverlayFlags);
 }
 
 /** Decode the latest snapshot's running time-node abc-drag event count (Overlay block
  *  AbcDragCount column). Read-only affirmation counter — never authored by TS, only
  *  reflects the buffer. Returns 0 if no snapshot / decode failure yet. */
 export function readAbcDragCount(): number {
-  const snap = getLatestSnapshot();
-  if (!snap) return 0;
-  const decoded = decodeSnapshot(snap);
-  if (!decoded) return 0;
-  return readOverlayAbcDragCount(decoded.overlayView);
+  const blocks = getViewBlocks();
+  if (!blocks) return 0;
+  return readOverlayAbcDragCount(blocks.overlayView);
 }
 
 /** React hook: re-renders the caller as time.abc-drag events accumulate (Go-owned
  *  counter; affirms the drag-log is happening live). */
 export function useAbcDragCount(): number {
-  return useSyncExternalStore(subscribeSnapshot, readAbcDragCount, readAbcDragCount);
+  return useSyncExternalStore(subscribeViewBlocks, readAbcDragCount, readAbcDragCount);
 }
 
 /** One current-drag recipient: its display name plus the DRAGGED node's own
@@ -120,9 +116,7 @@ let cachedRows: AbcDragRow[] = [];
  *  including a (0,0,0) delta row, which is real information ("got the message, didn't
  *  move"), not absence. */
 export function readAbcDragRows(): AbcDragRow[] {
-  const snap = getLatestSnapshot();
-  if (!snap) return cachedRows;
-  const decoded = decodeSnapshot(snap);
+  const decoded = getNodeFrameOrFallback();
   if (!decoded) return cachedRows;
   const rows: AbcDragRow[] = [];
   for (let row = 0; row < decoded.nodeCount; row++) {
@@ -142,8 +136,10 @@ export function readAbcDragRows(): AbcDragRow[] {
 }
 
 /** React hook: re-renders the caller when the current drag's recipient rows change —
- *  INCLUDING when cleared to empty at drag start. */
+ *  INCLUDING when cleared to empty at drag start. The GotDragMsg/DragDeltaA-C columns
+ *  live in the Node block (node-owner-group frame), so this subscribes to node-frame
+ *  arrivals, not scene-frame arrivals. */
 export function useAbcDragRows(): AbcDragRow[] {
-  return useSyncExternalStore(subscribeSnapshot, readAbcDragRows, readAbcDragRows);
+  return useSyncExternalStore(subscribeNodeStreamBlocks, readAbcDragRows, readAbcDragRows);
 }
 

@@ -7,10 +7,11 @@
 import React, { useRef, useState, useMemo, useEffect } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
-import { getLatestSnapshot, getLatestNodeFrame, getLatestEdgeFrame } from "../snapshot-buffer";
-import { decodeSnapshot, decodeNodeFrame, decodeEdgeFrame } from "./buffer-decode";
+import { getLatestSnapshot, getLatestEdgeFrame } from "../snapshot-buffer";
+import { decodeSnapshot, decodeEdgeFrame } from "./buffer-decode";
 import { getViewBlocks } from "./view-blocks";
 import { getEdgeStreamAccessor } from "./edge-stream-blocks";
+import { getNodeFrameOrFallback } from "./node-stream-blocks";
 import {
   SHADING_PARAM_TUBE_COLOR,
   SHADING_PARAM_TUBE_EMISSIVE,
@@ -235,12 +236,11 @@ export function EdgeTubes({ capacity, layoutLinkCapacity }: { capacity: number; 
 
   useFrame(() => {
     const snap = getLatestSnapshot();
-    const nodeFrame = getLatestNodeFrame();
     const blocks = getViewBlocks();
-    if (!snap || !nodeFrame || !blocks) return;
+    const decodedNode = getNodeFrameOrFallback();
+    if (!snap || !decodedNode || !blocks) return;
     const decoded = decodeSnapshot(snap);
-    const decodedNode = decodeNodeFrame(nodeFrame);
-    if (!decoded || !decodedNode) return;
+    if (!decoded) return;
     // Either/or (memory/feedback_no_single_writer_bridge.md): the dedicated per-edge
     // streams, when active, are this edge data's ONLY source — the fd-3 Edge frame is
     // never double-read alongside it. Falls back to the fd-3 Edge frame when no dedicated

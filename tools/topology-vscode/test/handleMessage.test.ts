@@ -14,7 +14,7 @@ import { handleMessage, type MessageCtx } from "../src/extension/handle-message"
 
 type Call = { method: string; args: unknown[] };
 
-function fakeRunner(running: boolean, lastSnapshot?: ArrayBuffer) {
+function fakeRunner(running: boolean, lastFrames: Array<{ tag: number; buffer: ArrayBuffer }> = []) {
   const calls: Call[] = [];
   const rec =
     (method: string) =>
@@ -25,9 +25,25 @@ function fakeRunner(running: boolean, lastSnapshot?: ArrayBuffer) {
     calls,
     isRunning: () => running,
     run: rec("run"),
-    getLastSnapshot: () => {
-      calls.push({ method: "getLastSnapshot", args: [] });
-      return lastSnapshot;
+    getLastFrames: () => {
+      calls.push({ method: "getLastFrames", args: [] });
+      return lastFrames;
+    },
+    // Per-edge/per-node/per-interior dedicated-stream replay caches (see
+    // BuildAndRunRunner.getLastEdgeFrames/getLastNodeFrames/getLastInteriorFrames) — empty
+    // in every test here (no dedicated-stream fixture data needed for these dispatch
+    // assertions), but must exist or the "ready" handler's replay loop throws.
+    getLastEdgeFrames: () => {
+      calls.push({ method: "getLastEdgeFrames", args: [] });
+      return [];
+    },
+    getLastNodeFrames: () => {
+      calls.push({ method: "getLastNodeFrames", args: [] });
+      return [];
+    },
+    getLastInteriorFrames: () => {
+      calls.push({ method: "getLastInteriorFrames", args: [] });
+      return [];
     },
     writeStdin: rec("writeStdin"),
   };
@@ -42,27 +58,34 @@ function ctxFor(runner: ReturnType<typeof fakeRunner>, post: MessageCtx["post"] 
 const names = (r: ReturnType<typeof fakeRunner>) => r.calls.map((c) => c.method);
 
 describe("handleMessage dispatch — ready / auto-launch", () => {
-  it("ready spawns; posts the cached last snapshot only when Go was ALREADY running", async () => {
-    const cached = new Uint8Array([1, 2, 3]).buffer;
+  it("ready spawns; posts EVERY cached last frame (per tag) only when Go was ALREADY running", async () => {
+    const cachedScene = new Uint8Array([1, 2, 3]).buffer;
+    const cachedBead = new Uint8Array([9, 9]).buffer;
     const posted: unknown[] = [];
-    const wasRunning = fakeRunner(true, cached);
+    const wasRunning = fakeRunner(true, [
+      { tag: 0, buffer: cachedScene },
+      { tag: 1, buffer: cachedBead },
+    ]);
     await handleMessage({ type: "ready" }, ctxFor(wasRunning, (m) => posted.push(m)));
-    expect(names(wasRunning)).toEqual(["run", "getLastSnapshot"]);
-    expect(posted).toEqual([{ type: "buffer-snapshot", buffer: cached }]);
+    expect(names(wasRunning)).toEqual(["run", "getLastFrames", "getLastEdgeFrames", "getLastNodeFrames", "getLastInteriorFrames"]);
+    expect(posted).toEqual([
+      { type: "buffer-snapshot", buffer: cachedScene, tag: 0 },
+      { type: "buffer-snapshot", buffer: cachedBead, tag: 1 },
+    ]);
 
     // A just-spawned Go needs no cached frame — it emits its own startup geometry.
-    const fresh = fakeRunner(false, cached);
+    const fresh = fakeRunner(false, [{ tag: 0, buffer: cachedScene }]);
     const freshPosted: unknown[] = [];
     await handleMessage({ type: "ready" }, ctxFor(fresh, (m) => freshPosted.push(m)));
     expect(names(fresh)).toEqual(["run"]);
     expect(freshPosted).toEqual([]);
   });
 
-  it("ready + wasRunning but no cached snapshot yet → no post", async () => {
-    const wasRunning = fakeRunner(true, undefined);
+  it("ready + wasRunning but no cached frames yet → no post", async () => {
+    const wasRunning = fakeRunner(true, []);
     const posted: unknown[] = [];
     await handleMessage({ type: "ready" }, ctxFor(wasRunning, (m) => posted.push(m)));
-    expect(names(wasRunning)).toEqual(["run", "getLastSnapshot"]);
+    expect(names(wasRunning)).toEqual(["run", "getLastFrames", "getLastEdgeFrames", "getLastNodeFrames", "getLastInteriorFrames"]);
     expect(posted).toEqual([]);
   });
 });

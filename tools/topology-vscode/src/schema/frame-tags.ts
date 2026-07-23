@@ -125,3 +125,33 @@ export const BUF_BLOCK_TAG_EDGE_STREAM = 5;
  * + that edge's own label bytes (labelLen, from the row) + [beadCount:u32] + beadCount ×
  * BEAD_STRIDE bead rows. Header before the Edge row is just the tick. */
 export const BUF_EDGE_STREAM_FRAME_HEADER_SIZE = 4;
+
+/** SYNTHETIC ext-host-side tag for a decoded per-node dedicated-stream frame (one
+ * nodeMover writes ITS OWN node geometry + ports + label to its own fd — see
+ * runCommand.ts's node-fd range and Buffer/stream_fds.go's StreamKindNode). NEVER a wire
+ * tag byte on the dedicated per-node fd itself (the fd POSITION already identifies which
+ * node). Relayed to the webview under the same "buffer-snapshot" shape as
+ * BUF_BLOCK_TAG_EDGE_STREAM, plus a `row` field (one per node row). Mirrors
+ * Buffer/frame_tags.go's BufBlockTagNodeStream (ext-host-only; not carried on any Go wire
+ * byte — this numbering only needs to stay distinct from the other synthetic tags here). */
+export const BUF_BLOCK_TAG_NODE_STREAM = 6;
+
+/** SYNTHETIC ext-host-side tag for a decoded per-node dedicated INTERIOR-stream frame (that
+ * node's OWN Update goroutine writes its interior beads to its own fd — see
+ * runCommand.ts's interior-fd range and Buffer/stream_fds.go's StreamKindInterior). NEVER a
+ * wire tag byte on the dedicated fd itself. Relayed under the same "buffer-snapshot" shape,
+ * plus a `row` field (one per node row, same numbering as BUF_BLOCK_TAG_NODE_STREAM). */
+export const BUF_BLOCK_TAG_INTERIOR_STREAM = 7;
+
+/** Byte layout of one node's combined per-fd frame (Buffer.BuildNodeStreamFrame), no outer
+ * tag: [tick:u32][portCount:u32][labelLen:u32][portNameBytesCount:u32] + one NODE_STRIDE row
+ * (LabelOff=0 into this frame's own label bytes) + labelLen label bytes + portCount ×
+ * PORT_STRIDE port rows (each row's NodeRow column already the global node row) +
+ * portNameBytesCount port-name bytes. */
+export const BUF_NODE_STREAM_FRAME_HEADER_SIZE = 16;
+
+/** Byte layout of one node's INTERIOR per-fd frame (Buffer.BuildInteriorStreamFrame), no
+ * outer tag: [tick:u32] followed by a FIXED INTERIOR_SLOTS_PER_NODE × INTERIOR_STRIDE bytes
+ * (no count — the decoder derives the length from the fixed per-node slot count, same as
+ * the shared fd-3 Interior block). */
+export const BUF_INTERIOR_STREAM_FRAME_HEADER_SIZE = 4;

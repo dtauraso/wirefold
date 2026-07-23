@@ -9,8 +9,8 @@
 import { useRef } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
-import { getLatestSnapshot } from "../snapshot-buffer";
-import { decodeSnapshot, nodeLabel } from "./buffer-decode";
+import { nodeLabel } from "./buffer-decode";
+import { getNodeFrameOrFallback } from "./node-stream-blocks";
 import { ndcToPixel } from "./geometry-helpers";
 import { readNodeCX, readNodeCY, readNodeCZ, readNodeRadius } from "../../schema/buffer-layout";
 import type { BufferLabelPos } from "./buffer-scene-shared";
@@ -27,9 +27,7 @@ export function BufferLabelProjector({ onPositions }: {
   useFrame(() => {
     frameCountRef.current++;
     if (frameCountRef.current % 2 !== 0) return; // ~30fps, matches LabelProjector
-    const snap = getLatestSnapshot();
-    if (!snap) return;
-    const decoded = decodeSnapshot(snap);
+    const decoded = getNodeFrameOrFallback();
     if (!decoded) return;
     const { nodeCount, nodeView } = decoded;
     const positions: BufferLabelPos[] = [];
