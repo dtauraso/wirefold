@@ -237,12 +237,20 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 	// fully valid, not degenerate, the instant this loop returns. The node's real startup
 	// emit then just re-writes its own pre-assigned row with the identical values
 	// (onNodeGeometry's exists-check), which is a no-op in practice.
+	// SeedNodeGeometry/SeedGeometry (not NodeGeometry/Geometry): these two kinds are now
+	// fully decentralized (Buffer/pack.go's decentralizedEventKinds) — each node's/edge's
+	// own mover goroutine ALSO emits the identical one-time geometry once at its own
+	// startup (node_mover.go's nodeMover.run/edgeMover.run). Tracing this seed loop's
+	// emission under the plain (non-seed) call would double it in the -trace reference
+	// and every .probe log total, since both are the SAME logical one-time occurrence —
+	// this loop's job is ONLY to prefill the row tables before any mover goroutine
+	// exists, not to be an independent causal event. See Trace.Event's Seed field.
 	for _, sd := range md.NodeSeeds() {
-		tr.NodeGeometry(sd.ID, sd.Label, sd.Kind, sd.CX, sd.CY, sd.CZ, sd.Radius, sd.SphereR, sd.Ports,
+		tr.SeedNodeGeometry(sd.ID, sd.Label, sd.Kind, sd.CX, sd.CY, sd.CZ, sd.Radius, sd.SphereR, sd.Ports,
 			sd.VRX, sd.VRY, sd.VRZ, sd.FRX, sd.FRY, sd.FRZ)
 	}
 	for _, sd := range md.EdgeSeeds() {
-		tr.Geometry(sd.Label, sd.SrcNode, sd.DstNode, sd.SrcPort, sd.DstPort, sd.SX, sd.SY, sd.SZ, sd.EX, sd.EY, sd.EZ)
+		tr.SeedGeometry(sd.Label, sd.SrcNode, sd.DstNode, sd.SrcPort, sd.DstPort, sd.SX, sd.SY, sd.SZ, sd.EX, sd.EY, sd.EZ)
 	}
 	// Sparse, one-time startup sanity check (CLAUDE.md DEBUG BREADCRUMB channel): every
 	// node LoadTopology returned should have gotten a row-seed entry above. A mismatch

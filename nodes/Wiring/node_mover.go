@@ -414,12 +414,17 @@ func (m *nodeMover) emitGeometry() {
 	// Label/PortName frame — see streamOut's doc comment): write this node's own
 	// combined frame immediately on a geometry change, in addition to the tick-driven
 	// write in run()'s loop (mirrors edgeMover.recomputeGeometry's writeStreamFrame call).
-	// NodeGeometry itself is NOT decentralized to this frame's EVENTS section (see
-	// Buffer/pack.go's decentralizedEventKinds doc comment for why — the dominant
-	// real occurrence is the ONE-TIME load-time emission, which has no safe per-owner
-	// flush point); the tr.NodeGeometry call above still feeds the central VIEW-bucket
-	// pipeline exactly as before.
-	m.writeStreamFrame(nil)
+	// NodeGeometry now rides THIS frame's own EVENTS section (Buffer/pack.go's
+	// decentralizedEventKinds excludes it from the central VIEW-bucket) — this
+	// nodeMover is the sole owner of its node's geometry, so it resolves its own
+	// NodeRow at the call site (owner_events.go) rather than routing through a
+	// shared accumulator. The tr.NodeGeometry call above still feeds the -trace
+	// JSONL sink (Trace.WriteJSONL) unchanged; it just no longer also lands in the
+	// VIEW frame's EVENTS bytes.
+	m.writeStreamFrame([]RowEvent{{
+		Kind: T.KindNodeGeometry, NodeRow: m.nodeRow,
+		PortRow: -1, TargetRow: -1, TargetPortRow: -1, EdgeRow: -1,
+	}})
 }
 
 // writeStreamFrame packs and writes this node's combined per-fd frame (center/radius/
@@ -563,6 +568,15 @@ func (m *nodeMover) run(ctx context.Context) {
 	if m.clockSrc != nil {
 		m.clk = m.clockSrc.Copy()
 	}
+	// ONE-TIME startup geometry emit, on THIS node's own mover goroutine — this is now
+	// the sole per-owner source of a node's initial node-geometry event (replacing the
+	// old node-Update-loop startup emit builders.go's EmitGeometry closure used to make;
+	// that closure no longer calls tr.NodeGeometry — see its doc comment). m.tr is
+	// non-nil in production (newNodeMover always receives one); bare test construction
+	// with a nil tr just skips this, matching emitGeometry's own nil-guard elsewhere.
+	if m.tr != nil {
+		m.emitGeometry()
+	}
 	for {
 		ApplySpeedNonBlocking(m.clk, m.speedCh)
 		// Drain every dedicated inbound channel non-blockingly, repeating until a
@@ -663,6 +677,11 @@ type edgeMover struct {
 	// goroutine (run/recomputeGeometry) — no lock, mirroring every other single-
 	// writer-per-goroutine field in this struct.
 	streamOut io.Writer
+	// edgeRow is this edge's stable buffer EDGE-ROW index (the seed order — see
+	// MoveDispatch.SetEdgeStreams), carried on every Geometry event this edge's own
+	// stream frame records (memory/feedback_no_single_writer_bridge.md). -1 until
+	// SetEdgeStreams runs (bare test construction never sets it).
+	edgeRow int32
 	// portRowFor resolves (node, port, isInput) to its buffer PORT-ROW index — the
 	// SAME resolution buildEdgeFrame's portRowLookup performs, injected here (rather
 	// than importing Buffer) via MoveDispatch.SetEdgeStreams so this package stays
@@ -706,6 +725,7 @@ func newEdgeMover(ep EdgeEndpoints, edgeID string, srcGeom, dstGeom nodeGeom, tr
 		tr:       tr,
 		clockSrc: clockSrc,
 		clk:      NewRealClock(),
+		edgeRow:  -1,
 	}
 }
 
@@ -805,11 +825,11 @@ func (m *edgeMover) recomputeGeometry() {
 		m.dest.ReviseInFlightGeometry(m.clk.Tick(), arc, seg)
 	}
 	// Emit this edge's own segment so the renderer redraws the wire from Go's endpoints.
-	// Geometry itself is NOT decentralized to this frame's EVENTS section (see Buffer/
-	// pack.go's decentralizedEventKinds doc comment for why — the dominant real
-	// occurrence is the ONE-TIME load-time emission, which has no safe per-owner flush
-	// point); the tr.Geometry call still feeds the central VIEW-bucket pipeline exactly
-	// as before.
+	// The tr.Geometry call still feeds the -trace JSONL sink (Trace.WriteJSONL)
+	// unchanged; it no longer also lands in the central VIEW frame's EVENTS bytes —
+	// Geometry now rides THIS edgeMover's own dedicated stream (Buffer/pack.go's
+	// decentralizedEventKinds excludes it from the VIEW bucket), since this goroutine
+	// is the sole owner of this edge's geometry.
 	if m.tr != nil {
 		m.tr.Geometry(m.edgeID, m.srcID, m.dstID, m.srcH, m.dstH,
 			seg.Start.X, seg.Start.Y, seg.Start.Z,
@@ -817,8 +837,12 @@ func (m *edgeMover) recomputeGeometry() {
 	}
 	// Dedicated per-edge stream (either/or with the shared fd-3 Edge/Bead blocks — see
 	// streamOut's doc comment): write this edge's own combined frame immediately on a
-	// geometry change, in addition to the tick-driven write in run()'s loop.
-	m.writeStreamFrame(m.clk.Tick(), nil)
+	// geometry change, in addition to the tick-driven write in run()'s loop. Carries
+	// this edgeMover's own row-resolved Geometry event (owner_events.go).
+	m.writeStreamFrame(m.clk.Tick(), []RowEvent{{
+		Kind: T.KindGeometry, EdgeRow: m.edgeRow,
+		NodeRow: -1, PortRow: -1, TargetRow: -1, TargetPortRow: -1,
+	}})
 }
 
 // writeStreamFrame packs and writes this edge's combined per-fd frame (edge fields +
@@ -900,6 +924,15 @@ func (m *edgeMover) run(ctx context.Context) {
 	// seeded m.clk with.
 	if m.clockSrc != nil {
 		m.clk = m.clockSrc.Copy()
+	}
+	// ONE-TIME startup geometry emit, on THIS edge's own mover goroutine — this is now
+	// the sole per-owner source of an edge's initial geometry event (replacing the old
+	// source-node-Update-loop startup emit builders.go's EmitGeometry closure used to
+	// make for each of its outgoing edges; that closure no longer calls tr.Geometry —
+	// see its doc comment). m.tr is non-nil in production; bare test construction with
+	// a nil tr just skips this, matching recomputeGeometry's own nil-guard elsewhere.
+	if m.tr != nil {
+		m.recomputeGeometry()
 	}
 	for {
 		// Drain extIn/srcIn/dstIn/speedCh without blocking, so a cycle always reaches

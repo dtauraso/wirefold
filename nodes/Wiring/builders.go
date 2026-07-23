@@ -4,7 +4,7 @@
 // determine the port manifest automatically:
 //   - *Wiring.In       → PortIn
 //   - *Wiring.Out      → PortOut
-//   - Wiring.Broadcast  → PortBroadcast
+//   - Wiring.OutMulti  → PortOutMulti
 //   - all other field types are ignored
 //
 // Non-channel fields can be populated from data.* JSON values via struct tags:
@@ -31,9 +31,9 @@ import (
 type PortDir int
 
 const (
-	PortIn        PortDir = iota
-	PortOut               // single output
-	PortBroadcast         // slice output ([]chan<- int)
+	PortIn       PortDir = iota
+	PortOut              // single output
+	PortOutMulti         // slice output ([]chan<- int)
 )
 
 // PortSpec describes one port on a node kind.
@@ -43,16 +43,16 @@ type PortSpec struct {
 }
 
 // PortBindings holds resolved PacedWires keyed by port name.
-// For PortBroadcast ports, use AppendBroadcastWithHandle.
+// For PortOutMulti ports, use AppendMultiPacedWithHandle.
 // A port name with no paced binding resolves to a dead-end chan wrapper
 // (deadEndIn/deadEndOut/deadEndOutSlice) that neither sends nor receives.
 type PortBindings struct {
 	// singlePaced holds the resolved paced binding for each single In/Out port.
-	// broadcastPaced holds the per-element bindings for each Broadcast port.
+	// multiPaced holds the per-element bindings for each OutMulti fan-out port.
 	// Consolidating the formerly-parallel per-edge maps into one struct keeps
 	// every field of a binding together and impossible to index-mismatch.
-	singlePaced    map[string]singleBinding
-	broadcastPaced map[string][]broadcastBinding
+	singlePaced map[string]singleBinding
+	multiPaced  map[string][]multiBinding
 	// outSink, when non-nil, collects every paced *Out built for this node keyed
 	// by "node.handle" so the loader can index Outs by edge for node-move
 	// travel-time updates. Render/run paths leave it nil.
@@ -98,10 +98,10 @@ type singleBinding struct {
 	label   string
 }
 
-// broadcastBinding is one broadcast element of a Broadcast port: its own dest wire,
+// multiBinding is one fan-out element of an OutMulti port: its shared dest wire,
 // the concrete source handle (e.g. "ToNext0"), per-edge send rule, and that
 // edge's own travel-time / segment / TS label.
-type broadcastBinding struct {
+type multiBinding struct {
 	pw      *PacedWire
 	handle  string
 	rule    SendRule
@@ -113,8 +113,8 @@ type broadcastBinding struct {
 
 func newPortBindings() PortBindings {
 	return PortBindings{
-		singlePaced:    map[string]singleBinding{},
-		broadcastPaced: map[string][]broadcastBinding{},
+		singlePaced: map[string]singleBinding{},
+		multiPaced:  map[string][]multiBinding{},
 	}
 }
 
@@ -130,12 +130,12 @@ func (pb *PortBindings) SetSinglePacedRule(name string, pw *PacedWire, rule Send
 	pb.singlePaced[name] = singleBinding{pw: pw, rule: rule, arc: arcLength, latency: simLatencyMs, seg: seg, label: label}
 }
 
-// AppendBroadcastWithHandle is like AppendBroadcast but records the exact
+// AppendMultiPacedWithHandle is like AppendMultiPaced but records the exact
 // source handle (e.g. "ToNext0"), the per-edge send rule, that edge's own
 // travel-time (arc length / sim latency), its straight-segment endpoints, and
 // the TS edge id (label) so the node's EmitGeometry closure can stream the segment.
-func (pb *PortBindings) AppendBroadcastWithHandle(name, handle string, pw *PacedWire, rule SendRule, arcLength, simLatencyMs float64, seg wireSegment, label string) {
-	pb.broadcastPaced[name] = append(pb.broadcastPaced[name], broadcastBinding{
+func (pb *PortBindings) AppendMultiPacedWithHandle(name, handle string, pw *PacedWire, rule SendRule, arcLength, simLatencyMs float64, seg wireSegment, label string) {
+	pb.multiPaced[name] = append(pb.multiPaced[name], multiBinding{
 		pw: pw, handle: handle, rule: rule, arc: arcLength, latency: simLatencyMs, seg: seg, label: label,
 	})
 }
@@ -152,8 +152,8 @@ func (pb *PortBindings) deadEndOut(name string) chan<- int {
 	return make(chan int, 1) // chan-name-ok: dead-end placeholder; wire identity is the port `name` (map key)
 }
 
-// deadEndOutSlice is deadEndOut's counterpart for an unwired Broadcast field:
-// there is no broadcast recorded for this port name, so it resolves to an empty
+// deadEndOutSlice is deadEndOut's counterpart for an unwired OutMulti field:
+// there is no fan-out recorded for this port name, so it resolves to an empty
 // slice of dead-end sends.
 func (pb *PortBindings) deadEndOutSlice(name string) []chan<- int {
 	return nil
@@ -162,7 +162,7 @@ func (pb *PortBindings) deadEndOutSlice(name string) []chan<- int {
 var (
 	tInPtr              = reflect.TypeFor[*In]()
 	tOutPtr             = reflect.TypeFor[*Out]()
-	tBroadcast          = reflect.TypeFor[Broadcast]()
+	tOutMulti           = reflect.TypeFor[OutMulti]()
 	tFireFunc           = reflect.TypeFor[func()]()
 	tEmitBeadsFunc      = reflect.TypeFor[func(working, backup []int)]()
 	tEmitHeldFunc       = reflect.TypeFor[func(held int)]()
@@ -200,8 +200,8 @@ func collectPorts(t reflect.Type) []PortSpec {
 			ports = append(ports, PortSpec{Name: f.Name, Dir: PortIn})
 		case tOutPtr:
 			ports = append(ports, PortSpec{Name: f.Name, Dir: PortOut})
-		case tBroadcast:
-			ports = append(ports, PortSpec{Name: f.Name, Dir: PortBroadcast})
+		case tOutMulti:
+			ports = append(ports, PortSpec{Name: f.Name, Dir: PortOutMulti})
 		}
 	}
 	return ports
@@ -229,7 +229,7 @@ func injectFunc(v reflect.Value, name string, want reflect.Type, fn any) bool {
 // order the original monolithic function performed them (behavior unchanged):
 //   - injectClosures: Fire/EmitGeometry/EmitNodeBeads/EmitHeldBead/EmitInputBeads/
 //     EmitRefillSlide/Tick closure injection.
-//   - wirePorts: tag-driven (struct-shape-driven) port wiring — In/Out/Broadcast
+//   - wirePorts: tag-driven (struct-shape-driven) port wiring — In/Out/OutMulti
 //     fields set from pb's resolved bindings.
 //   - populateData: wire:"data.<key>" / wire:"data.state" tag-driven data
 //     population.
@@ -254,10 +254,10 @@ func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindi
 // clock is present — EmitRefillSlide/Tick). Each injection is a no-op
 // when the struct lacks the matching field (injectFunc's contract). Returns the
 // sourceOuts slice that EmitGeometry's closure reads for per-edge segments;
-// wirePorts appends to it as it resolves each Out/Broadcast binding, and the
+// wirePorts appends to it as it resolves each Out/OutMulti binding, and the
 // closure (which fires later, at node startup) sees the completed slice.
 // sourceOuts is owned by the caller (reflectBuild) and shared with wirePorts,
-// which appends to it as it resolves each Out/Broadcast binding; the EmitGeometry
+// which appends to it as it resolves each Out/OutMulti binding; the EmitGeometry
 // closure reads through the same pointer so it sees the completed slice.
 func injectClosures(ctx context.Context, v reflect.Value, name string, pb PortBindings, tr *T.Trace, geom nodeGeom, sourceOuts *[]*Out, partnerCenter partnerCenterFn) {
 	// Inject Fire closure if the struct has a `Fire func()` field. The closure
@@ -265,30 +265,19 @@ func injectClosures(ctx context.Context, v reflect.Value, name string, pb PortBi
 	// cannot mis-name itself in the trace.
 	injectFunc(v, "Fire", tFireFunc, func() { tr.Fire(name) })
 
-	// Inject EmitGeometry closure if the struct has an `EmitGeometry func()` field.
-	// The closure emits the node's authoritative center + per-port world
-	// positions/dirs as a node-geometry event (port_geometry.go helpers, no
-	// duplicated math), then each outgoing edge's segment. Each node's goroutine
-	// calls it once on startup, so the node owns its geometry emission. sourceOuts
-	// is populated during port wiring by wirePorts; the closure fires later (at node
-	// startup), so it sees the completed slice.
-	injectFunc(v, "EmitGeometry", tFireFunc, func() {
-		emitNodeGeometryLocked(tr, name, geom, partnerCenter)
-		for _, o := range *sourceOuts {
-			if o != nil && o.EdgeLabel != "" {
-				g := o.echoGeom()
-				dst := ""
-				dstPort := ""
-				if o.pw != nil {
-					dst = o.pw.Target
-					dstPort = o.pw.TargetHandle
-				}
-				tr.Geometry(o.EdgeLabel, name, dst, o.port, dstPort,
-					g.Start.X, g.Start.Y, g.Start.Z,
-					g.End.X, g.End.Y, g.End.Z)
-			}
-		}
-	})
+	// EmitGeometry is deliberately left UNINJECTED (the `EmitGeometry func()` field on
+	// node structs stays nil, and Wiring.TryEmit(n.EmitGeometry) no-ops at node startup —
+	// see node.go's TryEmit). It used to be the node's own Update-loop startup emit of
+	// its node-geometry event AND each outgoing edge's segment (tr.NodeGeometry/
+	// tr.Geometry), duplicating the identical values nodeMover/edgeMover's own
+	// goroutine-start emit now produces (node_mover.go: nodeMover.run/edgeMover.run each
+	// call their own emitGeometry/recomputeGeometry once before their loop). This node
+	// struct field and sourceOuts (still populated by wirePorts, now otherwise unread by
+	// this function) are kept only because deleting the struct fields themselves would
+	// be a wider, unrelated churn across every node kind package; the field being
+	// present-but-nil is equivalent to it not existing for every live code path
+	// (geom/partnerCenter/sourceOuts are otherwise still referenced below/by callers,
+	// so their params stay; nothing left in THIS function reads them for geometry).
 
 	// interiorStr bundles this node's OWN dedicated interior fd (looked up by name from
 	// pb.md.interiorOuts, populated by SetNodeStreams — see interiorOuts' doc comment)
@@ -417,7 +406,7 @@ func injectSpeedChans(v reflect.Value, pb PortBindings) {
 	}
 }
 
-// wirePorts wires every port field (In/Out/Broadcast) discovered by reflectPorts
+// wirePorts wires every port field (In/Out/OutMulti) discovered by reflectPorts
 // with traced wrappers, resolving each from pb's paced bindings when present and
 // falling back to a dead-end chan/slice otherwise. sourceOuts accumulates every
 // paced Out built (for EmitGeometry's closure, injected by injectClosures) and
@@ -434,8 +423,8 @@ func wirePorts(ctx context.Context, v reflect.Value, nodePtr any, name string, p
 			wireInPort(f, port.Name, ctx, name, pb, tr)
 		case PortOut:
 			wireOutPort(f, port.Name, ctx, name, pb, tr, sourceOuts)
-		case PortBroadcast:
-			wireBroadcastPort(f, port.Name, ctx, name, pb, tr, sourceOuts)
+		case PortOutMulti:
+			wireOutMultiPort(f, port.Name, ctx, name, pb, tr, sourceOuts)
 		}
 	}
 }
@@ -476,14 +465,14 @@ func wireOutPort(f reflect.Value, portName string, ctx context.Context, name str
 	}
 }
 
-// wireBroadcastPort resolves a PortBroadcast field: one paced Out per broadcast
-// element recorded in pb.broadcastPaced (each with its own handle/rule/arc/
+// wireOutMultiPort resolves a PortOutMulti field: one paced Out per fan-out
+// element recorded in pb.multiPaced (each with its own handle/rule/arc/
 // latency/segment/label) when present, otherwise a dead-end chan slice. Each
 // resolved paced Out is appended to sourceOuts and (when pb.outSink is
 // non-nil) recorded under "node.handle".
-func wireBroadcastPort(f reflect.Value, portName string, ctx context.Context, name string, pb PortBindings, tr *T.Trace, sourceOuts *[]*Out) {
-	if bs := pb.broadcastPaced[portName]; len(bs) > 0 {
-		outs := make(Broadcast, len(bs))
+func wireOutMultiPort(f reflect.Value, portName string, ctx context.Context, name string, pb PortBindings, tr *T.Trace, sourceOuts *[]*Out) {
+	if bs := pb.multiPaced[portName]; len(bs) > 0 {
+		outs := make(OutMulti, len(bs))
 		for i, b := range bs {
 			outs[i] = NewOutPaced(b.pw, ctx, name, b.handle, tr, b.rule, b.arc, b.latency, b.seg, b.label)
 			*sourceOuts = append(*sourceOuts, outs[i])
@@ -494,7 +483,7 @@ func wireBroadcastPort(f reflect.Value, portName string, ctx context.Context, na
 		f.Set(reflect.ValueOf(outs))
 	} else {
 		chs := pb.deadEndOutSlice(portName)
-		outs := make(Broadcast, len(chs))
+		outs := make(OutMulti, len(chs))
 		for i, c := range chs {
 			outs[i] = &Out{ch: c, node: name, port: portName, trace: tr}
 		}

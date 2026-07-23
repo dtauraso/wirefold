@@ -87,18 +87,27 @@ func (t *Trace) drain() {
 		// the SOLE writer of events/sink (Breadcrumb routes through writeBreadcrumb on
 		// this same goroutine now too — see dispatch below — so there is no second
 		// writer that could fuse two JSON objects onto one line).
-		ev.Step = len(t.events)
-		t.events = append(t.events, ev)
-		if t.sink != nil {
-			if v, err := eventValue(ev); err == nil {
-				encBuf.Reset()
-				if enc.Encode(v) == nil {
-					_, _ = t.sink.Write(encBuf.Bytes())
+		//
+		// ev.Seed (Event.Seed's doc comment) skips the t.events append + sink write: a Seed
+		// event's ONLY job is to prefill SnapshotState's row tables via onEvent below, before
+		// any node/edge goroutine exists to emit the SAME geometry itself — recording it here
+		// too would double-count a one-time occurrence the owning goroutine already accounts
+		// for at its own startup (node_mover.go's nodeMover.run/edgeMover.run).
+		if !ev.Seed {
+			ev.Step = len(t.events)
+			t.events = append(t.events, ev)
+			if t.sink != nil {
+				if v, err := eventValue(ev); err == nil {
+					encBuf.Reset()
+					if enc.Encode(v) == nil {
+						_, _ = t.sink.Write(encBuf.Bytes())
+					}
 				}
 			}
 		}
 		// Binary snapshot hook: the drain goroutine is the sole caller, so it never
-		// races with itself or with the sink write above.
+		// races with itself or with the sink write above. Runs for Seed events too —
+		// the row-table prefill is the whole point of a Seed event.
 		if t.onEvent != nil {
 			t.onEvent(ev)
 		}

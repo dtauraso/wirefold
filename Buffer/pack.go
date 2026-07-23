@@ -554,25 +554,25 @@ func (s *SnapshotState) buildViewFrame() []byte {
 }
 
 // decentralizedEventKinds are the trace kinds that now ride their OWN emitting
-// goroutine's per-owner frame (edgeMover/interiorStream — see owner_events.go,
+// goroutine's per-owner frame (nodeMover/edgeMover/interiorStream — see owner_events.go,
 // stream_events.go) instead of this pipeline. viewEventsSection excludes them so an
 // event never appears twice in the .probe logs (once via its own owner fd, once here).
 //
-// NodeGeometry/Geometry are deliberately NOT decentralized here even though nodeMover/
-// edgeMover DO record a RowEvent for their own LIVE re-emit (a node move/port-anchor
-// change): the DOMINANT real occurrence of both kinds is the ONE-TIME load-time emission
-// from each node's own Update-loop goroutine (builders.go's injected EmitGeometry
-// closure), which has no safe way to flush a per-owner frame here without either
-// corrupting that node's live interior-bead render state (interiorStream.write always
-// replaces the full 4-slot array) or reaching across goroutines into nodeMover's own fd.
-// So both kinds stay on the pre-existing central Trace-drain → SnapshotState.pendingEvents
-// pipeline (same single-writer pipeline that already produces this VIEW frame's Camera/
-// Overlay/Scene block values) — real per-goroutine decentralization for these two kinds
-// is future work, not attempted this commit.
+// NodeGeometry/Geometry are now fully decentralized: nodeMover.run/edgeMover.run each
+// emit their own geometry ONCE at their own goroutine's start (before entering their
+// loop), in addition to their existing per-move re-emit (nodeMover.emitGeometry/
+// edgeMover.recomputeGeometry) — so the ONE-TIME load-time occurrence and every LIVE
+// occurrence both resolve on the correct owner goroutine, with no central
+// accumulator involved. The old node-Update-loop startup path (builders.go's injected
+// EmitGeometry closure) that used to ALSO emit both kinds once per node/edge is now
+// left uninjected (see injectClosures' doc comment) — it would have double-counted
+// against this per-owner emit for the identical, redundant values.
 var decentralizedEventKinds = map[string]bool{
-	T.KindPosition: true,
-	T.KindArrive:   true,
-	T.KindNodeBead: true,
+	T.KindPosition:     true,
+	T.KindArrive:       true,
+	T.KindNodeBead:     true,
+	T.KindNodeGeometry: true,
+	T.KindGeometry:     true,
 }
 
 // viewEventsSection packs the VIEW frame's trailing EVENTS section: every buffered event

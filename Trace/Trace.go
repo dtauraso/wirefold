@@ -299,6 +299,17 @@ type Event struct {
 	// TraceEventKinds vocabulary and never appended to t.events.
 	BreadcrumbLabel string
 	BreadcrumbValue string
+	// Seed marks a NodeGeometry/Geometry event emitted ONLY to prefill
+	// Buffer.SnapshotState's row tables before any node/edge goroutine has started
+	// (main.go's pre-launch md.NodeSeeds()/EdgeSeeds() loop — see SeedNodeGeometry/
+	// SeedGeometry below). The drain goroutine still runs onEvent (the state-mutating
+	// hook) for a Seed event, but does NOT append it to t.events — so it never shows
+	// up in a -trace WriteJSONL dump. This matters because the OWNING goroutine
+	// (nodeMover.run/edgeMover.run) ALSO emits the identical one-time geometry once at
+	// its own startup (see node_mover.go): tracing BOTH would double-count what is, in
+	// truth, one logical occurrence recorded twice for a load-order reason that has
+	// nothing to do with the model. Never set outside main.go's seed loop.
+	Seed bool
 }
 
 // Trace is the shared recorder. Construct with New; injected into
@@ -469,6 +480,27 @@ func (t *Trace) Geometry(edge, src, dst, srcPort, dstPort string, sx, sy, sz, ex
 func (t *Trace) NodeGeometry(nodeID, label, nodeKind string, cx, cy, cz, radius, sphereR float64, ports []PortGeom, vrx, vry, vrz, frx, fry, frz float64) {
 	t.emit(Event{Kind: KindNodeGeometry, Node: nodeID, Label: label, NodeKind: nodeKind, NX: cx, NY: cy, NZ: cz, Radius: radius, SphereR: sphereR, Ports: ports,
 		VRX: vrx, VRY: vry, VRZ: vrz, FRX: frx, FRY: fry, FRZ: frz})
+}
+
+// SeedNodeGeometry is identical to NodeGeometry but marks the event Seed-only (see
+// Event.Seed's doc comment): it still prefills SnapshotState's row tables via the
+// onEvent hook, but is never appended to t.events and so never appears in a -trace
+// dump or the .probe logs. Used ONLY by main.go's pre-launch row-seed loop.
+func (t *Trace) SeedNodeGeometry(nodeID, label, nodeKind string, cx, cy, cz, radius, sphereR float64, ports []PortGeom, vrx, vry, vrz, frx, fry, frz float64) {
+	t.emit(Event{Kind: KindNodeGeometry, Node: nodeID, Label: label, NodeKind: nodeKind, NX: cx, NY: cy, NZ: cz, Radius: radius, SphereR: sphereR, Ports: ports,
+		VRX: vrx, VRY: vry, VRZ: vrz, FRX: frx, FRY: fry, FRZ: frz, Seed: true})
+}
+
+// SeedGeometry is identical to Geometry but marks the event Seed-only (see
+// Event.Seed's doc comment). Used ONLY by main.go's pre-launch row-seed loop.
+func (t *Trace) SeedGeometry(edge, src, dst, srcPort, dstPort string, sx, sy, sz, ex, ey, ez float64) {
+	t.emit(Event{
+		Kind: KindGeometry, Edge: edge, Node: src, Target: dst,
+		SrcPort: srcPort, DstPort: dstPort,
+		SX: sx, SY: sy, SZ: sz,
+		EX: ex, EY: ey, EZ: ez,
+		Seed: true,
+	})
 }
 
 // Arrive marks a bead completing its traversal — delivered into the destination

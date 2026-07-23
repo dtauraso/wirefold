@@ -461,6 +461,7 @@ func (md *MoveDispatch) SetEdgeStreams(
 		}
 		fd := baseFd + row
 		em.streamOut = os.NewFile(uintptr(fd), fmt.Sprintf("edge-fd%d", fd))
+		em.edgeRow = int32(row)
 		em.portRowFor = portRowFor
 		em.nodeRowFor = nodeRowFor
 		em.buildFrame = buildFrame
