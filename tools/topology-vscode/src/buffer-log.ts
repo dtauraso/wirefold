@@ -14,19 +14,22 @@
 import { TRACE_EVENT_KINDS } from "./schema/trace-kinds";
 import { NODE_KIND_NAMES } from "./schema/node-defs";
 import {
-  decodeSnapshot,
+  decodeNodeFrame,
+  decodeEdgeFrame,
+  decodeViewFrame,
   nodeLabel,
   portName,
   edgeLabel,
   INTERIOR_SLOTS_PER_NODE,
-  type DecodedSnapshot,
+  type DecodedNodeFrame,
+  type DecodedEdgeFrame,
 } from "./webview/three/buffer-decode";
 import {
   readNodeCX, readNodeCY, readNodeCZ, readNodeRadius, readNodeSphereR,
   readNodeVRX, readNodeVRY, readNodeVRZ, readNodeFRX, readNodeFRY, readNodeFRZ,
   readNodeKindId,
   readInteriorPresent, readInteriorValue, readInteriorOX, readInteriorOY, readInteriorOZ,
-  readEdgeSX, readEdgeSY, readEdgeSZ, readEdgeEX, readEdgeEY, readEdgeEZ,
+  readEdgeSrcPortRow, readEdgeDstPortRow,
   readPortNodeRow, readPortDX, readPortDY, readPortDZ, readPortIsInput,
   readCameraPX, readCameraPY, readCameraPZ, readCameraR,
   readCameraPosTheta, readCameraPosPhi, readCameraUpTheta, readCameraUpPhi,
@@ -81,21 +84,73 @@ export type DecodedEventLine =
  * Returns "" when the frame is undecodable or carries no events. Each line uses the shared
  * envelope { ts_ms, src:"go", ...fields } — the same envelope the ext host's stdout relay used
  * (minus the `step` ordinal, which the buffer path does not carry).
+ *
+ * `nodeFrameBuf` is the most-recently cached BUF_BLOCK_TAG_NODE frame and `edgeFrameBuf`
+ * the most-recently cached BUF_BLOCK_TAG_EDGE frame (see runCommand.ts handleFd3): the
+ * EVENT block's node/port row references (node-geometry, node-bead, recv/send/etc.'s
+ * node+port labels) resolve against the Node/Port blocks + Label/PortName bytes, and its
+ * edge row references (geometry, select) resolve against the Edge block + EdgeLabel
+ * bytes — both now live in their own separate frames rather than riding the scene
+ * snapshot `ab`. Passing undefined (no frame cached yet) degrades that identity to ""
+ * rather than throwing — the same graceful-empty convention nodeLabel/portName already
+ * use for an out-of-range row.
  */
-export function decodeBufferLog(ab: ArrayBuffer): string {
-  const d = decodeSnapshot(ab);
-  if (!d || d.eventCount === 0) return "";
+/** camera/overlay/scene views resolved from EITHER source — the SCENE frame's embedded
+ *  blocks (fallback, no dedicated view fd) OR the dedicated VIEW frame (see
+ *  webview/three/view-blocks.ts's ext-host-side mirror). Null fields mean neither
+ *  source has landed for that block yet. */
+interface ViewBlocksOrNull {
+  cameraView: DataView | null;
+  overlayView: DataView | null;
+  sceneView: DataView | null;
+}
+
+// decodeBufferLog decodes the VIEW frame's own trailing EVENTS section — the fallback
+// bucket of trace kinds not yet decentralized to their own owner fd (Fire/Recv/Send/
+// Select/Hover/AbcDrag*/Camera/SceneSphere/overlay toggles/LayoutLink — see Buffer/
+// pack.go's viewEventsSection). The fd-3 SCENE frame no longer carries an EVENT block at
+// all (memory/feedback_no_single_writer_bridge.md); genuinely decentralized kinds
+// (NodeGeometry/Geometry/Position/Arrive/NodeBead) arrive on their OWN owner fd instead —
+// see decodeStreamFrameEvents below, called once per node/edge/interior stream frame.
+export function decodeBufferLog(viewFrameBuf: ArrayBuffer, nodeFrameBuf?: ArrayBuffer, edgeFrameBuf?: ArrayBuffer): string {
+  const dv = decodeViewFrame(viewFrameBuf);
+  if (!dv || dv.eventCount === 0) return "";
+  const dn = nodeFrameBuf ? decodeNodeFrame(nodeFrameBuf) : null;
+  const de = edgeFrameBuf ? decodeEdgeFrame(edgeFrameBuf) : null;
+  const vb: ViewBlocksOrNull = { cameraView: dv.cameraView, overlayView: dv.overlayView, sceneView: dv.sceneView };
+  return decodeEventsFromView(dv.eventCount, dv.eventView, dn, de, vb);
+}
+
+function decodeEventsFromView(eventCount: number, eventView: DataView, dn: DecodedNodeFrame | null, de: DecodedEdgeFrame | null, vb: ViewBlocksOrNull): string {
   const now = Date.now();
   let out = "";
-  for (let i = 0; i < d.eventCount; i++) {
-    const line = decodeEventLine(d, i);
+  for (let i = 0; i < eventCount; i++) {
+    const line = decodeEventLine(eventView, dn, de, vb, i);
     if (line) out += JSON.stringify({ ts_ms: now, src: "go", ...line }) + "\n";
   }
   return out;
 }
 
-function overlayFlag(d: DecodedSnapshot, kind: string): number {
-  const v = d.overlayView;
+// decodeStreamFrameEvents decodes ONE per-owner stream frame's (node/edge/interior) OWN
+// trailing EVENTS section — the genuinely decentralized kinds (memory/
+// feedback_no_single_writer_bridge.md: each emitting goroutine resolved its OWN rows at
+// record time, on its OWN goroutine — see nodes/Wiring/owner_events.go). No cross-frame
+// row resolution is attempted here (that owner goroutine already resolved what it could);
+// node/port/edge identity strings are best-effort (dn/de optional) — the numeric rows the
+// event already carries are always present regardless.
+export function decodeStreamFrameEvents(eventCount: number, eventView: DataView, dn?: DecodedNodeFrame | null, de?: DecodedEdgeFrame | null): string {
+  const now = Date.now();
+  let out = "";
+  for (let i = 0; i < eventCount; i++) {
+    const line = decodeEventLine(eventView, dn ?? null, de ?? null, { cameraView: null, overlayView: null, sceneView: null }, i);
+    if (line) out += JSON.stringify({ ts_ms: now, src: "go", ...line }) + "\n";
+  }
+  return out;
+}
+
+function overlayFlag(vb: ViewBlocksOrNull, kind: string): number {
+  const v = vb.overlayView;
+  if (!v) return 0;
   switch (kind) {
     case "scene-tori": return readOverlaySceneTori(v);
     case "scene-poles": return readOverlayScenePoles(v);
@@ -114,8 +169,7 @@ const OVERLAY_KINDS = new Set([
   "handholds", "labels-global", "overlays-vis", "double-links",
 ]);
 
-function decodeEventLine(d: DecodedSnapshot, i: number): Line | null {
-  const ev = d.eventView;
+function decodeEventLine(ev: DataView, dn: DecodedNodeFrame | null, de: DecodedEdgeFrame | null, vb: ViewBlocksOrNull, i: number): Line | null {
   const kindId = readEventKind(ev, i);
   const kind = TRACE_EVENT_KINDS[kindId];
   if (kind === undefined) return null;
@@ -126,8 +180,8 @@ function decodeEventLine(d: DecodedSnapshot, i: number): Line | null {
   const edgeRow = readEventEdgeRow(ev, i);
   const value = readEventValue(ev, i);
   const bead = readEventBead(ev, i);
-  const node = nodeRow >= 0 ? nodeLabel(d, nodeRow) : "";
-  const port = portName(d, portRow);
+  const node = dn && nodeRow >= 0 ? nodeLabel(dn, nodeRow) : "";
+  const port = dn ? portName(dn, portRow) : "";
 
   switch (kind) {
     case "recv":
@@ -139,9 +193,9 @@ function decodeEventLine(d: DecodedSnapshot, i: number): Line | null {
       const lat = readEventSimLatencyMs(ev, i);
       if (arc !== 0 || lat !== 0) {
         const l: Line = { kind, node, port, value, arcLength: arc, simLatencyMs: lat };
-        const t = targetRow >= 0 ? nodeLabel(d, targetRow) : "";
+        const t = dn && targetRow >= 0 ? nodeLabel(dn, targetRow) : "";
         if (t) l.target = t;
-        const th = portName(d, targetPortRow);
+        const th = dn ? portName(dn, targetPortRow) : "";
         if (th) l.targetHandle = th;
         return l;
       }
@@ -158,27 +212,35 @@ function decodeEventLine(d: DecodedSnapshot, i: number): Line | null {
       return l;
     }
     case "geometry": {
-      const edge = edgeLabel(d, edgeRow);
-      return {
-        kind, edge,
-        sx: readEdgeSX(d.edgeView, edgeRow), sy: readEdgeSY(d.edgeView, edgeRow), sz: readEdgeSZ(d.edgeView, edgeRow),
-        ex: readEdgeEX(d.edgeView, edgeRow), ey: readEdgeEY(d.edgeView, edgeRow), ez: readEdgeEZ(d.edgeView, edgeRow),
-      };
+      const edge = de ? edgeLabel(de, edgeRow) : "";
+      // The Edge block carries NO endpoint coordinates — SrcPortRow/DstPortRow reference the
+      // NODE frame's Port block, the ONLY place the endpoint's world position lives (see
+      // bufLayoutEdge's doc comment, Buffer/layout.go).
+      let sx = 0, sy = 0, sz = 0, ex = 0, ey = 0, ez = 0;
+      if (de && dn && edgeRow >= 0 && edgeRow < de.edgeCount) {
+        const srcRow = readEdgeSrcPortRow(de.edgeView, edgeRow);
+        const dstRow = readEdgeDstPortRow(de.edgeView, edgeRow);
+        if (srcRow >= 0) { sx = readPortPX(dn.portView, srcRow); sy = readPortPY(dn.portView, srcRow); sz = readPortPZ(dn.portView, srcRow); }
+        if (dstRow >= 0) { ex = readPortPX(dn.portView, dstRow); ey = readPortPY(dn.portView, dstRow); ez = readPortPZ(dn.portView, dstRow); }
+      }
+      return { kind, edge, sx, sy, sz, ex, ey, ez };
     }
     case "node-geometry":
-      return nodeGeometryLine(d, nodeRow, node);
+      return dn ? nodeGeometryLine(dn, nodeRow, node) : { kind, node };
     case "node-bead": {
+      if (!dn) return { kind, node };
       const slot = readEventSlot(ev, i);
       const irow = nodeRow * INTERIOR_SLOTS_PER_NODE + slot;
       return {
         kind, node, row: Math.floor(slot / 2), col: slot % 2,
-        present: readInteriorPresent(d.interiorView, irow) === 1,
-        value: readInteriorValue(d.interiorView, irow),
-        x: readInteriorOX(d.interiorView, irow), y: readInteriorOY(d.interiorView, irow), z: readInteriorOZ(d.interiorView, irow),
+        present: readInteriorPresent(dn.interiorView, irow) === 1,
+        value: readInteriorValue(dn.interiorView, irow),
+        x: readInteriorOX(dn.interiorView, irow), y: readInteriorOY(dn.interiorView, irow), z: readInteriorOZ(dn.interiorView, irow),
       };
     }
     case "camera": {
-      const c = d.cameraView;
+      const c = vb.cameraView;
+      if (!c) return { kind };
       return {
         kind,
         px: readCameraPX(c), py: readCameraPY(c), pz: readCameraPZ(c), r: readCameraR(c),
@@ -187,11 +249,12 @@ function decodeEventLine(d: DecodedSnapshot, i: number): Line | null {
       };
     }
     case "scene-sphere": {
-      const sc = d.sceneView;
+      const sc = vb.sceneView;
+      if (!sc) return { kind };
       return { kind, cx: readSceneCX(sc), cy: readSceneCY(sc), cz: readSceneCZ(sc), radius: readSceneRadius(sc) };
     }
     case "layout-link": {
-      const target = targetRow >= 0 ? nodeLabel(d, targetRow) : "";
+      const target = dn && targetRow >= 0 ? nodeLabel(dn, targetRow) : "";
       return { kind, node, target };
     }
     case "select":
@@ -200,25 +263,25 @@ function decodeEventLine(d: DecodedSnapshot, i: number): Line | null {
     case "hover":
       return { kind, node, port, value };
     default:
-      if (OVERLAY_KINDS.has(kind)) return { kind, visible: overlayFlag(d, kind) === 1 };
+      if (OVERLAY_KINDS.has(kind)) return { kind, visible: overlayFlag(vb, kind) === 1 };
       return { kind, node, port, value };
   }
 }
 
-function nodeGeometryLine(d: DecodedSnapshot, nodeRow: number, node: string): Line {
-  const n = d.nodeView;
+function nodeGeometryLine(dn: DecodedNodeFrame, nodeRow: number, node: string): Line {
+  const n = dn.nodeView;
   const cx = readNodeCX(n, nodeRow), cy = readNodeCY(n, nodeRow), cz = readNodeCZ(n, nodeRow);
   const radius = readNodeRadius(n, nodeRow);
   const sphereR = readNodeSphereR(n, nodeRow);
   const kindId = readNodeKindId(n, nodeRow);
   const ports: Line[] = [];
-  for (let pr = 0; pr < d.portCount; pr++) {
-    if (readPortNodeRow(d.portView, pr) !== nodeRow) continue;
-    const dx = readPortDX(d.portView, pr), dy = readPortDY(d.portView, pr), dz = readPortDZ(d.portView, pr);
+  for (let pr = 0; pr < dn.portCount; pr++) {
+    if (readPortNodeRow(dn.portView, pr) !== nodeRow) continue;
+    const dx = readPortDX(dn.portView, pr), dy = readPortDY(dn.portView, pr), dz = readPortDZ(dn.portView, pr);
     ports.push({
-      name: portName(d, pr),
-      isInput: readPortIsInput(d.portView, pr) === 1,
-      px: readPortPX(d.portView, pr), py: readPortPY(d.portView, pr), pz: readPortPZ(d.portView, pr),
+      name: portName(dn, pr),
+      isInput: readPortIsInput(dn.portView, pr) === 1,
+      px: readPortPX(dn.portView, pr), py: readPortPY(dn.portView, pr), pz: readPortPZ(dn.portView, pr),
       dx, dy, dz,
     });
   }

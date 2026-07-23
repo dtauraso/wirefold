@@ -29,7 +29,7 @@ import "encoding/binary"
 // (same length, same order) describing this edge's wire's current live in-flight beads —
 // supplied by the caller (edgeMover, via PacedWire.LiveBeadRows) so this package needs no
 // dependency on nodes/Wiring's bead type.
-func BuildEdgeStreamFrame(tick uint32, srcPortRow, dstPortRow int32, selected uint8, label string, beadVal []int32, beadX, beadY, beadZ []float32) []byte {
+func BuildEdgeStreamFrame(tick uint32, srcPortRow, dstPortRow int32, selected uint8, label string, beadVal []int32, beadX, beadY, beadZ []float32, events []StreamEvent) []byte {
 	labelBytes := []byte(label)
 	beadCount := len(beadVal)
 	size := 4 + BufEdgeStride + len(labelBytes) + 4 + beadCount*BufBeadStride
@@ -49,5 +49,5 @@ func BuildEdgeStreamFrame(tick uint32, srcPortRow, dstPortRow int32, selected ui
 	for i := 0; i < beadCount; i++ {
 		SetBeadRow(beadBuf, i, beadX[i], beadY[i], beadZ[i], beadVal[i], 1)
 	}
-	return buf
+	return append(buf, BuildEventsSection(events)...)
 }

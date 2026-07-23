@@ -1,13 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Merge and sort .probe/ JSONL files by ts_ms for AI-readable diagnostics.
+# Merge and sort .probe/ JSONL files by ts_ms for AI-readable diagnostics. THIS TOOL is
+# where merging happens (a read-time view) — the writers never merge on write: each
+# per-owner stream (view/node/edge/interior) writes its own file (memory/
+# feedback_no_single_writer_bridge.md — N owners, N logs).
 #
 # Usage:
-#   probe-merge.sh              — all four files sorted by .ts_ms
+#   probe-merge.sh              — all files sorted by .ts_ms
 #   probe-merge.sh --errors     — go-errors.jsonl + ts-errors.jsonl sorted
-#   probe-merge.sh --step N     — lines with .step==N across all four sorted
-#   probe-merge.sh --go         — go.jsonl + go-errors.jsonl + go-debug.jsonl sorted
+#   probe-merge.sh --step N     — lines with .step==N across all files sorted
+#   probe-merge.sh --go         — go.jsonl (VIEW-bucket) + go-node/go-edge/go-interior.jsonl
+#                                 (per-owner decentralized events) + go-errors.jsonl +
+#                                 go-debug.jsonl, sorted
 #   probe-merge.sh --debug      — go-debug.jsonl (DEBUG BREADCRUMB channel) only
 #   probe-merge.sh --ts         — ts.jsonl + ts-errors.jsonl sorted
 #
@@ -21,8 +26,13 @@ PROBE_DIR="$REPO_ROOT/.probe"
 # tools/topology-vscode/src/probe-files.ts (PROBE_FILES); shell can't import it, so they
 # are duplicated here — keep both in sync on any rename. go-debug.jsonl is the Go DEBUG
 # BREADCRUMB channel (Trace.Breadcrumb → stdout → ext host), distinct from trace events
-# (go.jsonl) and errors (go-errors.jsonl).
+# and errors (go-errors.jsonl). go.jsonl is the VIEW-bucket (kinds not yet decentralized
+# to their own owner fd); go-node/go-edge/go-interior.jsonl are the genuinely
+# decentralized per-owner-KIND logs — each written independently, never merged on write.
 GO_FILE="$PROBE_DIR/go.jsonl"
+GO_NODE_FILE="$PROBE_DIR/go-node.jsonl"
+GO_EDGE_FILE="$PROBE_DIR/go-edge.jsonl"
+GO_INTERIOR_FILE="$PROBE_DIR/go-interior.jsonl"
 GO_ERR_FILE="$PROBE_DIR/go-errors.jsonl"
 GO_DEBUG_FILE="$PROBE_DIR/go-debug.jsonl"
 TS_FILE="$PROBE_DIR/ts.jsonl"
@@ -56,6 +66,9 @@ case "$MODE" in
     STEP="${2:?Usage: probe-merge.sh --step N}"
     {
       read_file "$GO_FILE"
+      read_file "$GO_NODE_FILE"
+      read_file "$GO_EDGE_FILE"
+      read_file "$GO_INTERIOR_FILE"
       read_file "$GO_ERR_FILE"
       read_file "$GO_DEBUG_FILE"
       read_file "$TS_FILE"
@@ -63,7 +76,7 @@ case "$MODE" in
     } | jq -s --argjson step "$STEP" '[.[] | select(.step == $step)] | sort_by(.ts_ms) | .[]' -c
     ;;
   --go)
-    merge_and_sort "$GO_FILE" "$GO_ERR_FILE" "$GO_DEBUG_FILE"
+    merge_and_sort "$GO_FILE" "$GO_NODE_FILE" "$GO_EDGE_FILE" "$GO_INTERIOR_FILE" "$GO_ERR_FILE" "$GO_DEBUG_FILE"
     ;;
   --debug)
     merge_and_sort "$GO_DEBUG_FILE"
@@ -72,7 +85,7 @@ case "$MODE" in
     merge_and_sort "$TS_FILE" "$TS_ERR_FILE"
     ;;
   "")
-    merge_and_sort "$GO_FILE" "$GO_ERR_FILE" "$GO_DEBUG_FILE" "$TS_FILE" "$TS_ERR_FILE"
+    merge_and_sort "$GO_FILE" "$GO_NODE_FILE" "$GO_EDGE_FILE" "$GO_INTERIOR_FILE" "$GO_ERR_FILE" "$GO_DEBUG_FILE" "$TS_FILE" "$TS_ERR_FILE"
     ;;
   *)
     echo "Unknown option: $MODE" >&2

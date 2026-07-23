@@ -35,6 +35,11 @@ func readI32(buf []byte, off int) int32 {
 	return int32(binary.LittleEndian.Uint32(buf[off:]))
 }
 
+// TestEventBlockPopulate asserts the SEND event (a kind not yet decentralized to its own
+// owner fd — see decentralizedEventKinds) rides the VIEW frame's trailing EVENTS section,
+// NOT the fd-3 scene frame (the EVENT block was retired from the scene frame; memory/
+// feedback_no_single_writer_bridge.md). NodeGeometry events are decentralized (their own
+// owner fd), so they must NOT appear here.
 func TestEventBlockPopulate(t *testing.T) {
 	s := NewSnapshotState(nil)
 	s.Update(T.Event{Kind: T.KindNodeGeometry, Node: "A", Radius: 1,
@@ -44,25 +49,21 @@ func TestEventBlockPopulate(t *testing.T) {
 	s.Update(T.Event{Kind: T.KindSend, Node: "A", Port: "out", Value: 7,
 		ArcLength: 12.5, SimLatencyMs: 33.0, Target: "B", TargetHandle: "in"})
 
+	// The fd-3 scene frame no longer carries an EVENT block at all.
 	snap := s.BuildSnapshot()
-	beadCount := int(readU32(snap, 4))
-	nodeCount := int(readU32(snap, 8))
-	edgeCount := int(readU32(snap, 12))
-	portCount := int(readU32(snap, 16))
-	labelBytesCount := int(readU32(snap, 20))
-	eventCount := int(readU32(snap, 24))
-	// The two node-geometry events each emitted (and flushed) their own snapshot; only the
-	// send (which does not emit) is still pending, so this snapshot's EVENT block holds 1 row.
-	if eventCount != 1 {
-		t.Fatalf("eventCount: got %d, want 1 (send; node-geometry flushed on its own emits)", eventCount)
+	if len(snap) != BufHeaderSize+BufCameraStride+BufOverlayStride+BufSceneStride {
+		t.Fatalf("scene frame length: got %d, want a frame with no EVENT block", len(snap))
 	}
-	eventOff := BufHeaderSize +
-		beadCount*BufBeadStride +
-		nodeCount*BufNodeStride +
-		nodeCount*BufInteriorSlotsPerNode*BufInteriorStride +
-		edgeCount*BufEdgeStride +
-		portCount*BufPortStride +
-		BufCameraStride + BufOverlayStride + BufSceneStride + labelBytesCount
+
+	view := s.buildViewFrame()
+	eventsOff := BufViewFrameHeaderSize + BufCameraStride + BufOverlayStride + BufSceneStride
+	eventCount := int(readU32(view, eventsOff))
+	// The two node-geometry events are decentralized (their own owner fd) and are never
+	// recorded into this fallback bucket; only the send (not yet decentralized) lands here.
+	if eventCount != 1 {
+		t.Fatalf("eventCount: got %d, want 1 (send only; node-geometry is decentralized)", eventCount)
+	}
+	eventOff := eventsOff + 4
 
 	// Find the send row (kind == index of "send" in TraceEventKinds).
 	sendKind := -1
@@ -74,30 +75,30 @@ func TestEventBlockPopulate(t *testing.T) {
 	found := false
 	for r := 0; r < eventCount; r++ {
 		base := eventOff + r*BufEventStride
-		if int(snap[base+BufEventColKind]) != sendKind {
+		if int(view[base+BufEventColKind]) != sendKind {
 			continue
 		}
 		found = true
 		// A=row0, out=port row0; B=row1, in=port row1.
-		if got := readI32(snap, base+BufEventColNodeRow); got != 0 {
+		if got := readI32(view, base+BufEventColNodeRow); got != 0 {
 			t.Errorf("send NodeRow: got %d, want 0 (A)", got)
 		}
-		if got := readI32(snap, base+BufEventColPortRow); got != 0 {
+		if got := readI32(view, base+BufEventColPortRow); got != 0 {
 			t.Errorf("send PortRow: got %d, want 0 (A/out)", got)
 		}
-		if got := readI32(snap, base+BufEventColTargetRow); got != 1 {
+		if got := readI32(view, base+BufEventColTargetRow); got != 1 {
 			t.Errorf("send TargetRow: got %d, want 1 (B)", got)
 		}
-		if got := readI32(snap, base+BufEventColTargetPortRow); got != 1 {
+		if got := readI32(view, base+BufEventColTargetPortRow); got != 1 {
 			t.Errorf("send TargetPortRow: got %d, want 1 (B/in)", got)
 		}
-		if got := readI32(snap, base+BufEventColValue); got != 7 {
+		if got := readI32(view, base+BufEventColValue); got != 7 {
 			t.Errorf("send Value: got %d, want 7", got)
 		}
-		if got := readF32(snap, base+BufEventColArcLength); got != 12.5 {
+		if got := readF32(view, base+BufEventColArcLength); got != 12.5 {
 			t.Errorf("send ArcLength: got %v, want 12.5", got)
 		}
-		if got := readF32(snap, base+BufEventColSimLatencyMs); got != 33.0 {
+		if got := readF32(view, base+BufEventColSimLatencyMs); got != 33.0 {
 			t.Errorf("send SimLatencyMs: got %v, want 33", got)
 		}
 	}
@@ -112,26 +113,32 @@ func TestEventBlockPopulate(t *testing.T) {
 func TestSnapshotRoundTrip(t *testing.T) {
 	s := NewSnapshotState(nil) // no output; just test the builder
 
-	// Register two nodes via KindNodeGeometry events.
+	// Register two nodes via KindNodeGeometry events. Each carries the one port the edge
+	// below connects, so SrcPortRow/DstPortRow resolve to real rows (0 and 1 — the flattened
+	// port-row order is node-A's ports then node-B's ports).
 	s.Update(T.Event{
 		Kind: T.KindNodeGeometry, Node: "node-A",
 		NX: 1.0, NY: 2.0, NZ: 3.0,
 		Radius: 0.5, SphereR: 0.25,
 		VRX: 0.0, VRY: 0.0, VRZ: 1.0,
 		FRX: 1.0, FRY: 0.0, FRZ: 0.0,
+		Ports: []T.PortGeom{{Name: "out", IsInput: false, DX: 1}},
 	})
 	s.Update(T.Event{
 		Kind: T.KindNodeGeometry, Node: "node-B",
 		NX: 4.0, NY: 5.0, NZ: 6.0,
 		Radius: 0.75, SphereR: 0.375,
+		Ports: []T.PortGeom{{Name: "in", IsInput: true, DX: -1}},
 	})
 
 	// Register one edge via KindGeometry. Node (source) and Target (dest) carry the
-	// edge's endpoint node ids; the builder resolves them to node-row indices
-	// (node-A=row 0, node-B=row 1).
+	// edge's endpoint node ids; SrcPort/DstPort carry the endpoint port names — the
+	// builder resolves both to buffer rows (node-A=row 0, node-B=row 1; port-A/out=row 0,
+	// port-B/in=row 1).
 	s.Update(T.Event{
 		Kind: T.KindGeometry, Edge: "edge-1",
 		Node: "node-A", Target: "node-B",
+		SrcPort: "out", DstPort: "in",
 		SX: 1.1, SY: 2.2, SZ: 3.3,
 		EX: 4.4, EY: 5.5, EZ: 6.6,
 	})
@@ -166,19 +173,27 @@ func TestSnapshotRoundTrip(t *testing.T) {
 
 	// Build snapshot WITHOUT triggering emit (BuildSnapshot is exported for tests).
 	snap := s.BuildSnapshot()
+	// The Node/Interior/Port blocks + Label/PortName bytes now live in their own tagged
+	// frame (BuildNodeFrame — see BufBlockTagNode); build it alongside the scene frame.
+	nodeFrame := s.BuildNodeFrame()
+	// The Edge block + edge-label bytes now live in their own tagged frame (BuildEdgeFrame —
+	// see BufBlockTagEdge); build it alongside the scene frame too.
+	edgeFrame := s.BuildEdgeFrame()
 
 	// ── Header ───────────────────────────────────────────────────────────────
 	if len(snap) < BufHeaderSize {
 		t.Fatalf("snapshot too short: got %d bytes, want >= %d", len(snap), BufHeaderSize)
 	}
-
-	beadCount := readU32(snap, 4)
-	nodeCount := readU32(snap, 8)
-	edgeCount := readU32(snap, 12)
-
-	if beadCount != 1 {
-		t.Errorf("beadCount: got %d, want 1", beadCount)
+	if len(nodeFrame) < BufNodeFrameHeaderSize {
+		t.Fatalf("node frame too short: got %d bytes, want >= %d", len(nodeFrame), BufNodeFrameHeaderSize)
 	}
+	if len(edgeFrame) < BufEdgeFrameHeaderSize {
+		t.Fatalf("edge frame too short: got %d bytes, want >= %d", len(edgeFrame), BufEdgeFrameHeaderSize)
+	}
+
+	nodeCount := readU32(nodeFrame, 4)
+	edgeCount := readU32(edgeFrame, 4)
+
 	if nodeCount != 2 {
 		t.Errorf("nodeCount: got %d, want 2", nodeCount)
 	}
@@ -186,42 +201,65 @@ func TestSnapshotRoundTrip(t *testing.T) {
 		t.Errorf("edgeCount: got %d, want 1", edgeCount)
 	}
 
-	// ── Size check ───────────────────────────────────────────────────────────
-	// Trailing self-sizing sections (header counts at offsets 24/28/32): the EVENT block,
-	// port-name bytes, edge-label bytes. The fixture feeds events but no ports and no edge
-	// label, so only eventCount is non-zero here — read all three counts from the header
-	// rather than hard-coding, since a zero count still needs to size correctly.
-	eventCount := readU32(snap, 24)
-	portNameBytesCount := readU32(snap, 28)
-	edgeLabelBytesCount := readU32(snap, 32)
+	// ── Scene size check ─────────────────────────────────────────────────────
+	// The EVENT block was retired from this frame (memory/feedback_no_single_writer_bridge.md):
+	// the SCENE frame's header now carries only [tick][layoutLinkCount].
+	layoutLinkCount := readU32(snap, 4)
 	wantSize := BufHeaderSize +
-		int(beadCount)*BufBeadStride +
-		int(nodeCount)*BufNodeStride +
-		int(nodeCount)*BufInteriorSlotsPerNode*BufInteriorStride +
-		int(edgeCount)*BufEdgeStride +
+		int(layoutLinkCount)*BufLayoutLinkStride +
 		BufCameraStride +
 		BufOverlayStride +
-		BufSceneStride +
-		int(eventCount)*BufEventStride +
-		int(portNameBytesCount) +
-		int(edgeLabelBytesCount)
-	// No ports and no labels were injected in this fixture, so the Port and Label sections
-	// are zero-length; the header labelBytesCount reflects that.
-	if got := readU32(snap, 20); got != 0 {
-		t.Errorf("labelBytesCount: got %d, want 0 (no labels in fixture)", got)
-	}
+		BufSceneStride
 	if len(snap) != wantSize {
 		t.Errorf("snapshot size: got %d, want %d", len(snap), wantSize)
 	}
 
-	// ── Bead block ───────────────────────────────────────────────────────────
-	beadOff := BufHeaderSize
+	// ── Edge frame size check ────────────────────────────────────────────────
+	edgeLabelBytesCount := readU32(edgeFrame, 8)
+	wantEdgeFrameSize := BufEdgeFrameHeaderSize +
+		int(edgeCount)*BufEdgeStride +
+		int(edgeLabelBytesCount)
+	if len(edgeFrame) != wantEdgeFrameSize {
+		t.Errorf("edge frame size: got %d, want %d", len(edgeFrame), wantEdgeFrameSize)
+	}
+
+	// ── Node frame size check ────────────────────────────────────────────────
+	// One port on each node (the edge's endpoints) and no labels were injected, so the
+	// Label section is zero-length while the Port section carries 2 rows.
+	portCount := readU32(nodeFrame, 8)
+	labelBytesCount := readU32(nodeFrame, 12)
+	portNameBytesCount := readU32(nodeFrame, 16)
+	if portCount != 2 {
+		t.Errorf("portCount: got %d, want 2 (one port per node)", portCount)
+	}
+	if labelBytesCount != 0 {
+		t.Errorf("labelBytesCount: got %d, want 0 (no labels in fixture)", labelBytesCount)
+	}
+	wantNodeFrameSize := BufNodeFrameHeaderSize +
+		int(nodeCount)*BufNodeStride +
+		int(nodeCount)*BufInteriorSlotsPerNode*BufInteriorStride +
+		int(portCount)*BufPortStride +
+		int(labelBytesCount) +
+		int(portNameBytesCount)
+	if len(nodeFrame) != wantNodeFrameSize {
+		t.Errorf("node frame size: got %d, want %d", len(nodeFrame), wantNodeFrameSize)
+	}
+
+	// ── Bead frame ───────────────────────────────────────────────────────────
+	// Beads no longer ride the scene frame (see BufBlockTagBead); check the dedicated
+	// bead frame built by buildBeadFrame instead.
+	beadFrame := s.BuildBeadFrame()
+	beadCount := readU32(beadFrame, 4)
+	if beadCount != 1 {
+		t.Errorf("bead frame beadCount: got %d, want 1", beadCount)
+	}
+	beadOff := BufBeadHeaderSize
 	// One bead was injected (Bead=1, node-A/out).
-	gotX := readF32(snap, beadOff+BufBeadColX)
-	gotY := readF32(snap, beadOff+BufBeadColY)
-	gotZ := readF32(snap, beadOff+BufBeadColZ)
-	gotVal := readI32(snap, beadOff+BufBeadColValue)
-	gotLive := snap[beadOff+BufBeadColLive]
+	gotX := readF32(beadFrame, beadOff+BufBeadColX)
+	gotY := readF32(beadFrame, beadOff+BufBeadColY)
+	gotZ := readF32(beadFrame, beadOff+BufBeadColZ)
+	gotVal := readI32(beadFrame, beadOff+BufBeadColValue)
+	gotLive := beadFrame[beadOff+BufBeadColLive]
 
 	if gotX != 2.5 {
 		t.Errorf("bead.X: got %v, want 2.5", gotX)
@@ -240,44 +278,47 @@ func TestSnapshotRoundTrip(t *testing.T) {
 	}
 
 	// ── Node block ───────────────────────────────────────────────────────────
-	nodeOff := BufHeaderSize + int(beadCount)*BufBeadStride
+	nodeOff := BufNodeFrameHeaderSize
 
 	// node-A (row 0): geometry only (recv/arrive events live in the EVENT block, not
 	// per-node columns).
 	nA := nodeOff
-	if readF32(snap, nA+BufNodeColCX) != 1.0 {
-		t.Errorf("nodeA.CX: got %v, want 1.0", readF32(snap, nA+BufNodeColCX))
+	if readF32(nodeFrame, nA+BufNodeColCX) != 1.0 {
+		t.Errorf("nodeA.CX: got %v, want 1.0", readF32(nodeFrame, nA+BufNodeColCX))
 	}
-	if readF32(snap, nA+BufNodeColRadius) != 0.5 {
-		t.Errorf("nodeA.Radius: got %v, want 0.5", readF32(snap, nA+BufNodeColRadius))
+	if readF32(nodeFrame, nA+BufNodeColRadius) != 0.5 {
+		t.Errorf("nodeA.Radius: got %v, want 0.5", readF32(nodeFrame, nA+BufNodeColRadius))
 	}
 	// Ring-plane normals (vr vertical, fr flat) reach the node columns for SphereRing.
-	if readF32(snap, nA+BufNodeColVRZ) != 1.0 {
-		t.Errorf("nodeA.VRZ: got %v, want 1.0", readF32(snap, nA+BufNodeColVRZ))
+	if readF32(nodeFrame, nA+BufNodeColVRZ) != 1.0 {
+		t.Errorf("nodeA.VRZ: got %v, want 1.0", readF32(nodeFrame, nA+BufNodeColVRZ))
 	}
-	if readF32(snap, nA+BufNodeColFRX) != 1.0 {
-		t.Errorf("nodeA.FRX: got %v, want 1.0", readF32(snap, nA+BufNodeColFRX))
+	if readF32(nodeFrame, nA+BufNodeColFRX) != 1.0 {
+		t.Errorf("nodeA.FRX: got %v, want 1.0", readF32(nodeFrame, nA+BufNodeColFRX))
 	}
 
 	// node-B (row 1): geometry only.
 	nB := nodeOff + BufNodeStride
-	if readF32(snap, nB+BufNodeColCX) != 4.0 {
-		t.Errorf("nodeB.CX: got %v, want 4.0", readF32(snap, nB+BufNodeColCX))
+	if readF32(nodeFrame, nB+BufNodeColCX) != 4.0 {
+		t.Errorf("nodeB.CX: got %v, want 4.0", readF32(nodeFrame, nB+BufNodeColCX))
 	}
 
 	// ── Edge block ───────────────────────────────────────────────────────────
-	// The Interior block (nodeCount×BufInteriorSlotsPerNode rows) sits between the
-	// node and edge blocks, so the edge offset must skip it.
-	edgeOff := nodeOff + int(nodeCount)*BufNodeStride +
-		int(nodeCount)*BufInteriorSlotsPerNode*BufInteriorStride
-	if readF32(snap, edgeOff+BufEdgeColSX) != float32(1.1) {
-		t.Errorf("edge.SX: got %v, want ~1.1", readF32(snap, edgeOff+BufEdgeColSX))
+	// SrcPortRow/DstPortRow reference the Port block rows the Port frame owns: node-A/out
+	// is port row 0, node-B/in is port row 1 (flattened node-row order — node-A's ports
+	// then node-B's ports).
+	edgeOff := BufEdgeFrameHeaderSize
+	if got := readI32(edgeFrame, edgeOff+BufEdgeColSrcPortRow); got != 0 {
+		t.Errorf("edge.SrcPortRow: got %d, want 0 (node-A/out)", got)
 	}
-	if readF32(snap, edgeOff+BufEdgeColEZ) != float32(6.6) {
-		t.Errorf("edge.EZ: got %v, want ~6.6", readF32(snap, edgeOff+BufEdgeColEZ))
+	if got := readI32(edgeFrame, edgeOff+BufEdgeColDstPortRow); got != 1 {
+		t.Errorf("edge.DstPortRow: got %d, want 1 (node-B/in)", got)
 	}
 	// ── Camera block ─────────────────────────────────────────────────────────
-	camOff := edgeOff + int(edgeCount)*BufEdgeStride
+	// LayoutLink block (layoutLinkCount rows) sits between the header and camera block in
+	// the SCENE frame, so the camera offset must skip it — none injected in this fixture
+	// (layoutLinkCount 0).
+	camOff := BufHeaderSize + int(layoutLinkCount)*BufLayoutLinkStride
 	if readF32(snap, camOff+BufCameraColPX) != 10.0 {
 		t.Errorf("camera.PX: got %v, want 10.0", readF32(snap, camOff+BufCameraColPX))
 	}
@@ -323,45 +364,42 @@ func TestSnapshotPorts(t *testing.T) {
 		t.Fatalf("PortCount: got %d, want 3", got)
 	}
 
-	snap := s.BuildSnapshot()
-	beadCount := readU32(snap, 4)
-	nodeCount := readU32(snap, 8)
-	edgeCount := readU32(snap, 12)
-	portCount := readU32(snap, 16)
+	// The Port block now lives in the node-owner-group frame (see BufBlockTagNode).
+	nodeFrame := s.BuildNodeFrame()
+	nodeCount := readU32(nodeFrame, 4)
+	portCount := readU32(nodeFrame, 8)
 	if portCount != 3 {
 		t.Fatalf("header portCount: got %d, want 3", portCount)
 	}
 
-	portOff := BufHeaderSize +
-		int(beadCount)*BufBeadStride +
+	portOff := BufNodeFrameHeaderSize +
 		int(nodeCount)*BufNodeStride +
-		int(nodeCount)*BufInteriorSlotsPerNode*BufInteriorStride +
-		int(edgeCount)*BufEdgeStride
+		int(nodeCount)*BufInteriorSlotsPerNode*BufInteriorStride
 
 	row := func(i int) int { return portOff + i*BufPortStride }
 
 	// Row 0: n0/in (NodeRow 0, dir -1,0,0, input).
-	if got := readI32(snap, row(0)+BufPortColNodeRow); got != 0 {
+	if got := readI32(nodeFrame, row(0)+BufPortColNodeRow); got != 0 {
 		t.Errorf("port0.NodeRow: got %d, want 0", got)
 	}
-	if got := readF32(snap, row(0)+BufPortColDX); got != -1 {
+	if got := readF32(nodeFrame, row(0)+BufPortColDX); got != -1 {
 		t.Errorf("port0.DX: got %v, want -1", got)
 	}
-	if snap[row(0)+BufPortColIsInput] != 1 {
-		t.Errorf("port0.IsInput: got %d, want 1", snap[row(0)+BufPortColIsInput])
+	if nodeFrame[row(0)+BufPortColIsInput] != 1 {
+		t.Errorf("port0.IsInput: got %d, want 1", nodeFrame[row(0)+BufPortColIsInput])
 	}
 	// Row 1: n0/out (NodeRow 0, dir 1,0,0, output).
-	if got := readI32(snap, row(1)+BufPortColNodeRow); got != 0 {
+	if got := readI32(nodeFrame, row(1)+BufPortColNodeRow); got != 0 {
 		t.Errorf("port1.NodeRow: got %d, want 0", got)
 	}
-	if snap[row(1)+BufPortColIsInput] != 0 {
-		t.Errorf("port1.IsInput: got %d, want 0", snap[row(1)+BufPortColIsInput])
+	if nodeFrame[row(1)+BufPortColIsInput] != 0 {
+		t.Errorf("port1.IsInput: got %d, want 0", nodeFrame[row(1)+BufPortColIsInput])
 	}
 	// Row 2: n1/out (NodeRow 1, dir 0,1,0, output).
-	if got := readI32(snap, row(2)+BufPortColNodeRow); got != 1 {
+	if got := readI32(nodeFrame, row(2)+BufPortColNodeRow); got != 1 {
 		t.Errorf("port2.NodeRow: got %d, want 1", got)
 	}
-	if got := readF32(snap, row(2)+BufPortColDY); got != 1 {
+	if got := readF32(nodeFrame, row(2)+BufPortColDY); got != 1 {
 		t.Errorf("port2.DY: got %v, want 1", got)
 	}
 
@@ -376,8 +414,8 @@ func TestSnapshotPorts(t *testing.T) {
 	if got := s.PortCount(); got != 3 {
 		t.Fatalf("PortCount after re-emit: got %d, want 3", got)
 	}
-	snap = s.BuildSnapshot()
-	if got := readF32(snap, row(0)+BufPortColDY); got != -1 {
+	nodeFrame = s.BuildNodeFrame()
+	if got := readF32(nodeFrame, row(0)+BufPortColDY); got != -1 {
 		t.Errorf("port0.DY after re-emit: got %v, want -1", got)
 	}
 }
@@ -428,46 +466,149 @@ func TestSnapshotFraming(t *testing.T) {
 	})
 
 	frames := parseFrameStream(t, buf.Bytes())
-	if len(frames) != 3 {
-		t.Fatalf("expected 3 frames (node-geometry + edge-geometry + position), got %d", len(frames))
+	// Each trigger now emits FOUR frames (bead, then node, then edge, then scene — see
+	// emitSnapshot's comment) — see BufBlockTagBead/BufBlockTagNode/BufBlockTagEdge/
+	// BufBlockTagScene in frame_tags.go — so 3 triggers produce 12 frames.
+	if len(frames) != 12 {
+		t.Fatalf("expected 12 frames (3 triggers × [bead, node, edge, scene]), got %d", len(frames))
 	}
 
-	// The last frame (position trigger) must carry 1 bead, 1 node, 1 edge.
-	// Each frame is now [blockTag:u8][snapshot bytes]; strip the tag before reading
-	// snapshot header fields.
-	tagged := frames[len(frames)-1]
-	if len(tagged) < 1 {
-		t.Fatalf("last frame too short to carry a block tag")
+	// Every frame carries a leading block tag; split by tag and take the LAST of each kind.
+	var lastScene, lastBead, lastNode, lastEdge []byte
+	for _, f := range frames {
+		if len(f) < 1 {
+			t.Fatalf("frame too short to carry a block tag")
+		}
+		switch f[0] {
+		case BufBlockTagScene:
+			lastScene = f[1:]
+		case BufBlockTagBead:
+			lastBead = f[1:]
+		case BufBlockTagNode:
+			lastNode = f[1:]
+		case BufBlockTagEdge:
+			lastEdge = f[1:]
+		default:
+			t.Fatalf("unexpected block tag: %d", f[0])
+		}
 	}
-	if tagged[0] != BufBlockTagScene {
-		t.Fatalf("last frame block tag: got %d, want BufBlockTagScene", tagged[0])
+	if lastScene == nil || lastBead == nil || lastNode == nil || lastEdge == nil {
+		t.Fatalf("expected at least one scene, bead, node, and edge frame")
 	}
-	payload := tagged[1:]
-	beadCount := readU32(payload, 4)
-	nodeCount := readU32(payload, 8)
-	edgeCount := readU32(payload, 12)
 
+	// The last bead frame (position trigger) must carry 1 bead.
+	beadCount := readU32(lastBead, 4)
 	if beadCount != 1 {
-		t.Errorf("last frame beadCount: got %d, want 1", beadCount)
+		t.Errorf("last bead frame beadCount: got %d, want 1", beadCount)
 	}
-	if nodeCount != 1 {
-		t.Errorf("last frame nodeCount: got %d, want 1", nodeCount)
-	}
-	if edgeCount != 1 {
-		t.Errorf("last frame edgeCount: got %d, want 1", edgeCount)
+	wantBeadSize := BufBeadHeaderSize + int(beadCount)*BufBeadStride
+	if len(lastBead) != wantBeadSize {
+		t.Errorf("last bead frame size: got %d, want %d", len(lastBead), wantBeadSize)
 	}
 
-	wantSize := BufHeaderSize +
-		int(beadCount)*BufBeadStride +
+	// The last node frame (position trigger) must carry 1 node.
+	nodeCount := readU32(lastNode, 4)
+	if nodeCount != 1 {
+		t.Errorf("last node frame nodeCount: got %d, want 1", nodeCount)
+	}
+	nodePortCount := readU32(lastNode, 8)
+	nodeLabelBytesCount := readU32(lastNode, 12)
+	nodePortNameBytesCount := readU32(lastNode, 16)
+	wantNodeSize := BufNodeFrameHeaderSize +
 		int(nodeCount)*BufNodeStride +
 		int(nodeCount)*BufInteriorSlotsPerNode*BufInteriorStride +
+		int(nodePortCount)*BufPortStride +
+		int(nodeLabelBytesCount) +
+		int(nodePortNameBytesCount)
+	if len(lastNode) != wantNodeSize {
+		t.Errorf("last node frame size: got %d, want %d", len(lastNode), wantNodeSize)
+	}
+
+	// The last edge frame (position trigger) must carry 1 edge.
+	edgeCount := readU32(lastEdge, 4)
+	if edgeCount != 1 {
+		t.Errorf("last edge frame edgeCount: got %d, want 1", edgeCount)
+	}
+	edgeLabelBytesCount := readU32(lastEdge, 8)
+	wantEdgeSize := BufEdgeFrameHeaderSize +
 		int(edgeCount)*BufEdgeStride +
-		BufCameraStride + BufOverlayStride + BufSceneStride +
-		int(readU32(payload, 24))*BufEventStride + // event block
-		int(readU32(payload, 28)) + // port-name bytes
-		int(readU32(payload, 32)) // edge-label bytes
+		int(edgeLabelBytesCount)
+	if len(lastEdge) != wantEdgeSize {
+		t.Errorf("last edge frame size: got %d, want %d", len(lastEdge), wantEdgeSize)
+	}
+
+	// The last scene frame (position trigger). No EVENT block anymore (memory/
+	// feedback_no_single_writer_bridge.md): header is [tick][layoutLinkCount] only.
+	payload := lastScene
+	layoutLinkCount := readU32(payload, 4)
+	wantSize := BufHeaderSize +
+		int(layoutLinkCount)*BufLayoutLinkStride +
+		BufCameraStride + BufOverlayStride + BufSceneStride
 	if len(payload) != wantSize {
 		t.Errorf("last frame size: got %d, want %d", len(payload), wantSize)
+	}
+}
+
+// TestEdgePortRowResolvesToPortPosition is the endpoint-tear fix's core equality proof
+// (per-owner-buffer-rows.md, option (a)): the edge stores NO endpoint coordinate of its
+// own — it references its two port rows (SrcPortRow/DstPortRow), and those rows are the
+// ONLY place the endpoint's world position lives (the Port block, node-owned). This test
+// feeds a distinctive PX/PY/PZ on each of two nodes' single ports, connects them with a
+// KindGeometry event carrying SrcPort/DstPort, and asserts the edge's resolved port rows'
+// PX/PY/PZ are EXACT (same float32 bits) matches of what was fed in — not "close enough",
+// exact, because there is exactly one copy of this value in the whole buffer. This is
+// zero skew BY CONSTRUCTION: there is no second copy anywhere that could ever go stale
+// under a fast drag (the tear the old SX..EZ duplication produced).
+func TestEdgePortRowResolvesToPortPosition(t *testing.T) {
+	s := NewSnapshotState(nil)
+
+	s.Update(T.Event{
+		Kind: T.KindNodeGeometry, Node: "src",
+		Ports: []T.PortGeom{{Name: "out", IsInput: false, PX: 11.5, PY: -22.25, PZ: 3.75}},
+	})
+	s.Update(T.Event{
+		Kind: T.KindNodeGeometry, Node: "dst",
+		Ports: []T.PortGeom{{Name: "in", IsInput: true, PX: 100.5, PY: 200.25, PZ: -300.125}},
+	})
+	s.Update(T.Event{
+		Kind: T.KindGeometry, Edge: "e0",
+		Node: "src", Target: "dst", SrcPort: "out", DstPort: "in",
+	})
+
+	edgeFrame := s.BuildEdgeFrame()
+	nodeFrame := s.BuildNodeFrame()
+
+	edgeOff := BufEdgeFrameHeaderSize
+	srcRow := readI32(edgeFrame, edgeOff+BufEdgeColSrcPortRow)
+	dstRow := readI32(edgeFrame, edgeOff+BufEdgeColDstPortRow)
+	if srcRow < 0 || dstRow < 0 {
+		t.Fatalf("edge port rows unresolved: SrcPortRow=%d DstPortRow=%d", srcRow, dstRow)
+	}
+
+	nodeCount := int(readU32(nodeFrame, 4))
+	portOff := BufNodeFrameHeaderSize + nodeCount*BufNodeStride + nodeCount*BufInteriorSlotsPerNode*BufInteriorStride
+
+	srcBase := portOff + int(srcRow)*BufPortStride
+	dstBase := portOff + int(dstRow)*BufPortStride
+
+	wantSrc := [3]float32{11.5, -22.25, 3.75}
+	gotSrc := [3]float32{
+		readF32(nodeFrame, srcBase+BufPortColPX),
+		readF32(nodeFrame, srcBase+BufPortColPY),
+		readF32(nodeFrame, srcBase+BufPortColPZ),
+	}
+	if gotSrc != wantSrc {
+		t.Errorf("src port position via SrcPortRow: got %v, want %v (exact float32 match required — zero skew by construction)", gotSrc, wantSrc)
+	}
+
+	wantDst := [3]float32{100.5, 200.25, -300.125}
+	gotDst := [3]float32{
+		readF32(nodeFrame, dstBase+BufPortColPX),
+		readF32(nodeFrame, dstBase+BufPortColPY),
+		readF32(nodeFrame, dstBase+BufPortColPZ),
+	}
+	if gotDst != wantDst {
+		t.Errorf("dst port position via DstPortRow: got %v, want %v (exact float32 match required — zero skew by construction)", gotDst, wantDst)
 	}
 }
 
@@ -486,45 +627,37 @@ func TestSnapshotNodeLabels(t *testing.T) {
 	s.Update(nodeGeom("n1", "β-node")) // β is 2 UTF-8 bytes
 	s.Update(nodeGeom("n2", ""))       // empty label → len 0
 
-	snap := s.BuildSnapshot()
+	// The Node block + Label bytes now live in the node-owner-group frame (see
+	// BufBlockTagNode).
+	nodeFrame := s.BuildNodeFrame()
 
-	nodeCount := int(readU32(snap, 8))
+	nodeCount := int(readU32(nodeFrame, 4))
 	if nodeCount != 3 {
 		t.Fatalf("nodeCount: got %d, want 3", nodeCount)
 	}
-	labelBytesCount := int(readU32(snap, 20))
+	portCount := int(readU32(nodeFrame, 8))
+	labelBytesCount := int(readU32(nodeFrame, 12))
+	portNameBytesCount := int(readU32(nodeFrame, 16))
 
-	// Label section sits after every other block. Recompute its start the same way the
-	// decoder does: header + bead + node + interior + edge + port + camera + overlay.
-	beadCount := int(readU32(snap, 4))
-	edgeCount := int(readU32(snap, 12))
-	portCount := int(readU32(snap, 16))
-	labelSecOff := BufHeaderSize +
-		beadCount*BufBeadStride +
+	// Label section sits after the node/interior/port blocks. Recompute its start the same
+	// way the decoder does: header + node + interior + port.
+	labelSecOff := BufNodeFrameHeaderSize +
 		nodeCount*BufNodeStride +
 		nodeCount*BufInteriorSlotsPerNode*BufInteriorStride +
-		edgeCount*BufEdgeStride +
-		portCount*BufPortStride +
-		BufCameraStride +
-		BufOverlayStride +
-		BufSceneStride
-	// The label section is followed by the EVENT block + port-name + edge-label sections, so
-	// its end is the start of the event block, not the snapshot end. Verify the full length.
-	eventCount := int(readU32(snap, 24))
-	portNameBytesCount := int(readU32(snap, 28))
-	edgeLabelBytesCount := int(readU32(snap, 32))
-	fullLen := labelSecOff + labelBytesCount +
-		eventCount*BufEventStride + portNameBytesCount + edgeLabelBytesCount
-	if fullLen != len(snap) {
-		t.Fatalf("computed full length %d != snapshot len %d", fullLen, len(snap))
+		portCount*BufPortStride
+	// The label section is followed by the port-name-bytes section, so its end is the
+	// start of that section, not the frame end. Verify the full length.
+	fullLen := labelSecOff + labelBytesCount + portNameBytesCount
+	if fullLen != len(nodeFrame) {
+		t.Fatalf("computed full length %d != node frame len %d", fullLen, len(nodeFrame))
 	}
 
-	nodeOff := BufHeaderSize + beadCount*BufBeadStride
+	nodeOff := BufNodeFrameHeaderSize
 	want := []string{"alpha", "β-node", ""}
 	for i := 0; i < nodeCount; i++ {
-		off := int(readU32(snap, nodeOff+i*BufNodeStride+BufNodeColLabelOff))
-		ln := int(readU32(snap, nodeOff+i*BufNodeStride+BufNodeColLabelLen))
-		got := string(snap[labelSecOff+off : labelSecOff+off+ln])
+		off := int(readU32(nodeFrame, nodeOff+i*BufNodeStride+BufNodeColLabelOff))
+		ln := int(readU32(nodeFrame, nodeOff+i*BufNodeStride+BufNodeColLabelLen))
+		got := string(nodeFrame[labelSecOff+off : labelSecOff+off+ln])
 		if got != want[i] {
 			t.Errorf("node %d label: got %q, want %q", i, got, want[i])
 		}

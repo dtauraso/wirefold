@@ -1,8 +1,11 @@
 // countNodes.test.ts — mirrors the (untested) countEdges shape: sizes the per-node
 // dedicated node/interior fd range from a topology spec BEFORE Go is spawned (see
 // runCommand.ts's NODE_BASE_FD/INTERIOR_BASE_FD doc comment). Both the directory-tree
-// form (`<root>/nodes/<label>.json`) and the monolithic `{"nodes":[...]}` form are
-// exercised, plus the required fallback (0) on any read/parse failure.
+// form (`<root>/nodes/<id>/` — one SUBDIRECTORY per node id, e.g. data.json/meta.json/
+// inputs/outputs/, NOT flat `<id>.json` files — see nodes/Wiring/loader.go's parseSpec
+// dispatch and headless_node_row_order_test.go's wantNodeRowOrder, the Go-side
+// counterpart this mirrors) and the monolithic `{"nodes":[...]}` form are exercised,
+// plus the required fallback (0) on any read/parse failure.
 
 import { describe, it, expect } from "vitest";
 import * as fs from "fs";
@@ -15,13 +18,16 @@ function mkTmpDir(): string {
 }
 
 describe("countNodes", () => {
-  it("counts .json files under <root>/nodes for the directory-tree spec form", () => {
+  it("counts SUBDIRECTORIES under <root>/nodes for the directory-tree spec form", () => {
     const root = mkTmpDir();
     const nodesDir = path.join(root, "nodes");
     fs.mkdirSync(nodesDir);
-    fs.writeFileSync(path.join(nodesDir, "a.json"), "{}");
-    fs.writeFileSync(path.join(nodesDir, "b.json"), "{}");
-    fs.writeFileSync(path.join(nodesDir, "not-json.txt"), "x");
+    fs.mkdirSync(path.join(nodesDir, "a"));
+    fs.writeFileSync(path.join(nodesDir, "a", "data.json"), "{}");
+    fs.mkdirSync(path.join(nodesDir, "b"));
+    fs.writeFileSync(path.join(nodesDir, "b", "data.json"), "{}");
+    // A stray flat file (never a real node shape) must not be counted as a node.
+    fs.writeFileSync(path.join(nodesDir, "not-a-node.json"), "{}");
     expect(countNodes(root)).toBe(2);
   });
 

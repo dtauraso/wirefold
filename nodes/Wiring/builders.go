@@ -307,7 +307,11 @@ func injectClosures(ctx context.Context, v reflect.Value, name string, pb PortBi
 		if !ok || out == nil || pb.md.buildInteriorFrame == nil {
 			return nil
 		}
-		return &interiorStream{out: out, buildFrame: pb.md.buildInteriorFrame}
+		nodeRow := int32(-1)
+		if r, ok := pb.md.NodeRowFor(name); ok {
+			nodeRow = r
+		}
+		return &interiorStream{out: out, buildFrame: pb.md.buildInteriorFrame, nodeRow: nodeRow}
 	}
 
 	// Inject EmitNodeBeads closure if the struct has an `EmitNodeBeads

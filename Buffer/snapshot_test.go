@@ -76,7 +76,7 @@ func TestLayoutLinkUnresolvableEndpointFiltered(t *testing.T) {
 
 	snap := s.BuildSnapshot()
 
-	layoutLinkCount := int(readU32(snap, 8))
+	layoutLinkCount := int(readU32(snap, 4))
 
 	if layoutLinkCount != 1 {
 		t.Fatalf("layoutLinkCount: got %d, want 1 (unresolvable pair must be dropped)", layoutLinkCount)
@@ -96,7 +96,8 @@ func TestLayoutLinkUnresolvableEndpointFiltered(t *testing.T) {
 
 // TestTransientFlagsCleared verifies that the per-tick causal events accumulated
 // in pendingEvents are reset after each snapshot emit (they must not bleed into
-// subsequent ticks' EVENT block).
+// subsequent ticks' VIEW frame EVENTS section — the fd-3 scene frame no longer carries
+// an EVENT block at all; memory/feedback_no_single_writer_bridge.md).
 func TestTransientFlagsCleared(t *testing.T) {
 	s := NewSnapshotState(nil)
 
@@ -113,11 +114,13 @@ func TestTransientFlagsCleared(t *testing.T) {
 	})
 
 	// After the position-triggered snapshot, transients should be cleared.
-	// Build a second snapshot immediately (without producing any new events).
-	snap := s.BuildSnapshot()
-	eventCount := readU32(snap, 4)
-	if eventCount != 0 {
-		t.Errorf("eventCount not cleared after snapshot: got %d, want 0", eventCount)
+	if len(s.pendingEvents) != 0 {
+		t.Errorf("pendingEvents not cleared after snapshot: got %d, want 0", len(s.pendingEvents))
+	}
+	view := s.buildViewFrame()
+	eventsOff := BufViewFrameHeaderSize + BufCameraStride + BufOverlayStride + BufSceneStride
+	if eventCount := readU32(view, eventsOff); eventCount != 0 {
+		t.Errorf("view frame eventCount not cleared: got %d, want 0", eventCount)
 	}
 }
 

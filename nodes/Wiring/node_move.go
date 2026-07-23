@@ -231,7 +231,7 @@ type MoveDispatch struct {
 	// (Buffer.BuildInteriorStreamFrame), injected here (rather than importing Buffer) so
 	// this package stays Buffer-independent, matching portRowFor/buildFrame's existing
 	// interface-injection pattern on edgeMover.
-	buildInteriorFrame func(tick uint32, present []uint8, value []int32, ox, oy, oz []float32) []byte
+	buildInteriorFrame func(tick uint32, present []uint8, value []int32, ox, oy, oz []float32, events []RowEvent) []byte
 	// sel groups the CURRENTLY-SELECTED (click-select) and CURRENTLY-HOVERED (pointer hover)
 	// UI-only state (selection_state.go) — pure routing-directory-parked UI state, owned by
 	// Go but not part of the dispatch/persist/camera concerns. Grouped the same way
@@ -451,7 +451,8 @@ func (md *MoveDispatch) SetMsgTap(tap func(destID string, msg moveMsg)) {
 func (md *MoveDispatch) SetEdgeStreams(
 	baseFd int,
 	portRowFor func(node, port string, isInput bool) (int32, bool),
-	buildFrame func(tick uint32, srcPortRow, dstPortRow int32, selected uint8, label string, beadVal []int32, beadX, beadY, beadZ []float32) []byte,
+	nodeRowFor func(id string) (int32, bool),
+	buildFrame func(tick uint32, srcPortRow, dstPortRow int32, selected uint8, label string, beadVal []int32, beadX, beadY, beadZ []float32, events []RowEvent) []byte,
 ) {
 	for row, seed := range md.edgeSeeds {
 		em, ok := md.edgeMovers[seed.Label]
@@ -461,6 +462,7 @@ func (md *MoveDispatch) SetEdgeStreams(
 		fd := baseFd + row
 		em.streamOut = os.NewFile(uintptr(fd), fmt.Sprintf("edge-fd%d", fd))
 		em.portRowFor = portRowFor
+		em.nodeRowFor = nodeRowFor
 		em.buildFrame = buildFrame
 	}
 }
@@ -484,8 +486,8 @@ func (md *MoveDispatch) SetNodeStreams(
 	nodeBase, interiorBase int,
 	nodeRowFor func(id string) (int32, bool),
 	edgeRowForPair func(a, b string) (int32, bool),
-	buildFrame func(tick uint32, nodeRow int32, cx, cy, cz, radius, sphereR float32, vrx, vry, vrz, frx, fry, frz float32, selected, kindID, hovered, latchedSel, gotDragMsg uint8, dragDeltaA, dragDeltaB, dragDeltaC int32, label string, portNames []string, portDX, portDY, portDZ, portPX, portPY, portPZ []float32, portIsInput, portHovered []uint8, dstNodeRows, edgeRows []int32) []byte,
-	buildInteriorFrame func(tick uint32, present []uint8, value []int32, ox, oy, oz []float32) []byte,
+	buildFrame func(tick uint32, nodeRow int32, cx, cy, cz, radius, sphereR float32, vrx, vry, vrz, frx, fry, frz float32, selected, kindID, hovered, latchedSel, gotDragMsg uint8, dragDeltaA, dragDeltaB, dragDeltaC int32, label string, portNames []string, portDX, portDY, portDZ, portPX, portPY, portPZ []float32, portIsInput, portHovered []uint8, dstNodeRows, edgeRows []int32, events []RowEvent) []byte,
+	buildInteriorFrame func(tick uint32, present []uint8, value []int32, ox, oy, oz []float32, events []RowEvent) []byte,
 	kindIDFor func(kind string) uint8,
 ) {
 	md.interiorOuts = map[string]io.Writer{}

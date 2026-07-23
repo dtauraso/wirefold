@@ -6,7 +6,8 @@ import type { HostToWebviewMsg } from "./messages";
 import { buildBinary, maxGoMtime, killOrphanedSims } from "./goBuild";
 import { frameRecord } from "./schema/input-layout";
 import { PROBE_DIR, PROBE_FILES } from "./probe-files";
-import { decodeBufferLog } from "./buffer-log";
+import { decodeBufferLog, decodeStreamFrameEvents } from "./buffer-log";
+import { decodeNodeStreamFrame, decodeEdgeStreamFrame, decodeInteriorStreamFrame } from "./webview/three/buffer-decode";
 import { BUF_BLOCK_TAG_SCENE, BUF_BLOCK_TAG_BEAD, BUF_BLOCK_TAG_NODE, BUF_BLOCK_TAG_EDGE, BUF_BLOCK_TAG_VIEW, BUF_BLOCK_TAG_EDGE_STREAM, BUF_BLOCK_TAG_NODE_STREAM, BUF_BLOCK_TAG_INTERIOR_STREAM } from "./schema/frame-tags";
 
 // The fd-ALLOCATION contract (mirrors Buffer/stream_fds.go's doc comment): the ext host
@@ -50,15 +51,19 @@ const MAX_NODE_STREAMS = 256;
 // countNodes reads the topology spec's node count WITHOUT the full Go-side validate/build
 // pipeline — just enough structure to size the pre-spawn stdio pipe array (mirrors
 // countEdges' doc comment and reasoning exactly, substituting the "nodes" directory /
-// spec array). Returns 0 (⇒ no dedicated node/interior fds; the fd-3 fallback stays
-// active) on any read/parse failure.
+// spec array). Unlike edges/*.json (one flat file per edge), a directory-tree topology's
+// nodes/ holds one SUBDIRECTORY per node id (nodes/<id>/{data,meta}.json, inputs/, outputs/
+// — see nodes/Wiring/loader.go's parseSpec dispatch and headless_node_row_order_test.go's
+// wantNodeRowOrder, the Go-side counterpart this mirrors), so this counts subdirectories,
+// not `.json`-suffixed entries. Returns 0 (⇒ no dedicated node/interior fds; the fd-3
+// fallback stays active) on any read/parse failure.
 export function countNodes(topologyPath: string): number {
   try {
     const st = fs.statSync(topologyPath);
     if (st.isDirectory()) {
       const nodesDir = path.join(topologyPath, "nodes");
       if (!fs.existsSync(nodesDir)) return 0;
-      return fs.readdirSync(nodesDir).filter((f) => f.endsWith(".json")).length;
+      return fs.readdirSync(nodesDir, { withFileTypes: true }).filter((e) => e.isDirectory()).length;
     }
     const raw = fs.readFileSync(topologyPath, "utf8");
     const spec: unknown = JSON.parse(raw);
@@ -116,6 +121,9 @@ function appendGoError(goErrorsFile: string | undefined, message: string): void 
  *  probePathsFor. */
 interface ProbePaths {
   probeFile: string;
+  probeNodeFile: string;
+  probeEdgeFile: string;
+  probeInteriorFile: string;
   goErrorsFile: string;
   goDebugFile: string;
   tsFile: string;
@@ -131,6 +139,9 @@ function probePathsFor(folder: vscode.WorkspaceFolder): ProbePaths {
   fs.mkdirSync(probeDir, { recursive: true });
   return {
     probeFile: path.join(probeDir, PROBE_FILES.go),
+    probeNodeFile: path.join(probeDir, PROBE_FILES.goNode),
+    probeEdgeFile: path.join(probeDir, PROBE_FILES.goEdge),
+    probeInteriorFile: path.join(probeDir, PROBE_FILES.goInterior),
     goErrorsFile: path.join(probeDir, PROBE_FILES.goErrors),
     goDebugFile: path.join(probeDir, PROBE_FILES.goDebug),
     tsFile: path.join(probeDir, PROBE_FILES.ts),
@@ -309,6 +320,9 @@ export class BuildAndRunRunner {
   // this long-lived runner — see freshStreamState for why that reset is at the spawn.
   private stream: StreamParseState = freshStreamState(0, 0);
   private probeFile: string | undefined;
+  private probeNodeFile: string | undefined;
+  private probeEdgeFile: string | undefined;
+  private probeInteriorFile: string | undefined;
   private goErrorsFile: string | undefined;
   private goDebugFile: string | undefined;
   private tsFile: string | undefined;
@@ -401,6 +415,9 @@ export class BuildAndRunRunner {
     // inserted above this point can ever leave probeFile/.../stream/lastSnapshot half-set —
     // see the ProbePaths doc comment for why probePaths was computed as locals above.
     this.probeFile = probePaths.probeFile;
+    this.probeNodeFile = probePaths.probeNodeFile;
+    this.probeEdgeFile = probePaths.probeEdgeFile;
+    this.probeInteriorFile = probePaths.probeInteriorFile;
     this.goErrorsFile = probePaths.goErrorsFile;
     this.goDebugFile = probePaths.goDebugFile;
     this.tsFile = probePaths.tsFile;
@@ -594,29 +611,13 @@ export class BuildAndRunRunner {
         // Drop it rather than misinterpreting the bytes.
         continue;
       }
-      // Decode the snapshot's EVENT block into full trace-event .probe lines (the buffer-
-      // decoded log — the DECODE of the same binary that replaces Go's JSON-on-stdout
-      // path). The bead/node/edge frames carry no EVENT block — decode the scene frame
-      // only, resolving node/port rows against the most-recently cached NODE frame and
-      // edge rows against the most-recently cached EDGE frame. Go writes bead, then node,
-      // then edge, then scene LAST each tick (see emitSnapshot's comment) so
-      // this.lastFrames already holds THIS tick's node and edge frames by the time the
-      // scene frame for the same tick is decoded here.
-      if (tag === BUF_BLOCK_TAG_SCENE && this.probeFile) {
-        const nodeFrame = this.lastFrames.get(BUF_BLOCK_TAG_NODE);
-        const edgeFrame = this.lastFrames.get(BUF_BLOCK_TAG_EDGE);
-        // When the dedicated view fd is active, camera/overlay/scene are no longer
-        // embedded in the scene frame (see Buffer/pack.go's either/or) — the
-        // most-recently cached VIEW frame (handleViewFd, its own pipe) carries them
-        // instead. decodeBufferLog resolves either source (see its ViewBlocksOrNull).
-        const viewFrame = this.lastFrames.get(BUF_BLOCK_TAG_VIEW);
-        const lines = decodeBufferLog(ab, nodeFrame, edgeFrame, viewFrame);
-        if (lines.length > 0) {
-          try {
-            fs.appendFileSync(this.probeFile, lines, "utf8");
-          } catch { /* swallow */ }
-        }
-      }
+      // The fd-3 SCENE frame no longer carries an EVENT block at all (memory/
+      // feedback_no_single_writer_bridge.md): each emitting goroutine now packs its OWN
+      // events into its OWN frame's trailing EVENTS section instead, written to its OWN
+      // .probe log file (N separate logs, never merged on write) — see handleViewFd (the
+      // fallback bucket of not-yet-decentralized kinds → go.jsonl) and handleNodeFd/
+      // handleEdgeFd/handleInteriorFd (the genuinely decentralized kinds → go-node.jsonl/
+      // go-edge.jsonl/go-interior.jsonl) below.
       // Cache a COPY under this tag before handing `ab` off — see the lastFrames field
       // comment for why the reference itself cannot be cached (postMessage may
       // transfer/detach it).
@@ -641,6 +642,20 @@ export class BuildAndRunRunner {
     const { frames, rest } = splitFrames(this.stream.viewBuf, chunk);
     this.stream.viewBuf = rest;
     for (const ab of frames) {
+      // Decode this frame's OWN trailing EVENTS section — the fallback bucket of trace
+      // kinds not yet decentralized to their own owner fd (memory/
+      // feedback_no_single_writer_bridge.md, Buffer/pack.go's viewEventsSection). Written
+      // to its OWN .probe file (go.jsonl) — N separate logs, never merged on write.
+      if (this.probeFile) {
+        const nodeFrame = this.lastFrames.get(BUF_BLOCK_TAG_NODE);
+        const edgeFrame = this.lastFrames.get(BUF_BLOCK_TAG_EDGE);
+        const lines = decodeBufferLog(ab, nodeFrame, edgeFrame);
+        if (lines.length > 0) {
+          try {
+            fs.appendFileSync(this.probeFile, lines, "utf8");
+          } catch { /* swallow */ }
+        }
+      }
       // Cache under the synthetic VIEW tag (same lastFrames map, same copy-before-hand-
       // off reasoning as handleFd3 — see the lastFrames field comment).
       this.lastFrames.set(BUF_BLOCK_TAG_VIEW, ab.slice(0));
@@ -662,6 +677,20 @@ export class BuildAndRunRunner {
     const { frames, rest } = splitFrames(carry, chunk);
     this.stream.edgeBufs[row] = rest;
     for (const ab of frames) {
+      // Decode this edge's OWN trailing EVENTS section (Geometry/Position/Arrive — this
+      // goroutine's own row-resolved events; memory/feedback_no_single_writer_bridge.md).
+      // Written to its OWN .probe file (go-edge.jsonl) — N separate logs, never merged.
+      if (this.probeEdgeFile) {
+        const decoded = decodeEdgeStreamFrame(row, ab);
+        if (decoded && decoded.eventCount > 0) {
+          const lines = decodeStreamFrameEvents(decoded.eventCount, decoded.eventView);
+          if (lines.length > 0) {
+            try {
+              fs.appendFileSync(this.probeEdgeFile, lines, "utf8");
+            } catch { /* swallow */ }
+          }
+        }
+      }
       // Cache under this edge row (same copy-before-hand-off reasoning as lastFrames).
       this.lastEdgeFrames.set(row, ab.slice(0));
       if (this.onSnapshot) {
@@ -681,6 +710,20 @@ export class BuildAndRunRunner {
     const { frames, rest } = splitFrames(carry, chunk);
     this.stream.nodeBufs[row] = rest;
     for (const ab of frames) {
+      // Decode this node's OWN trailing EVENTS section (NodeGeometry — this nodeMover
+      // goroutine's own row-resolved event; memory/feedback_no_single_writer_bridge.md).
+      // Written to its OWN .probe file (go-node.jsonl) — N separate logs, never merged.
+      if (this.probeNodeFile) {
+        const decoded = decodeNodeStreamFrame(row, ab);
+        if (decoded && decoded.eventCount > 0) {
+          const lines = decodeStreamFrameEvents(decoded.eventCount, decoded.eventView);
+          if (lines.length > 0) {
+            try {
+              fs.appendFileSync(this.probeNodeFile, lines, "utf8");
+            } catch { /* swallow */ }
+          }
+        }
+      }
       // Cache under this node row (same copy-before-hand-off reasoning as lastFrames).
       this.lastNodeFrames.set(row, ab.slice(0));
       if (this.onSnapshot) {
@@ -698,6 +741,20 @@ export class BuildAndRunRunner {
     const { frames, rest } = splitFrames(carry, chunk);
     this.stream.interiorBufs[row] = rest;
     for (const ab of frames) {
+      // Decode this node's OWN trailing EVENTS section (NodeBead — this node's own
+      // Update-loop goroutine's row-resolved events; memory/feedback_no_single_writer_bridge.md).
+      // Written to its OWN .probe file (go-interior.jsonl) — N separate logs, never merged.
+      if (this.probeInteriorFile) {
+        const decoded = decodeInteriorStreamFrame(row, ab);
+        if (decoded && decoded.eventCount > 0) {
+          const lines = decodeStreamFrameEvents(decoded.eventCount, decoded.eventView);
+          if (lines.length > 0) {
+            try {
+              fs.appendFileSync(this.probeInteriorFile, lines, "utf8");
+            } catch { /* swallow */ }
+          }
+        }
+      }
       this.lastInteriorFrames.set(row, ab.slice(0));
       if (this.onSnapshot) {
         this.onSnapshot({ type: "buffer-snapshot", buffer: ab, tag: BUF_BLOCK_TAG_INTERIOR_STREAM, row });

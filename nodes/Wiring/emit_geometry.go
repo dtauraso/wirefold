@@ -19,19 +19,25 @@ import (
 // nil-safe (a zero-value *interiorStream is fine — write is a no-op when out is nil).
 type interiorStream struct {
 	out        io.Writer
-	buildFrame func(tick uint32, present []uint8, value []int32, ox, oy, oz []float32) []byte
+	buildFrame func(tick uint32, present []uint8, value []int32, ox, oy, oz []float32, events []RowEvent) []byte
 	tick       uint32
+	// nodeRow is this node's stable buffer NODE-ROW index, resolved once at
+	// construction (buildInteriorStream) — carried on every NodeBead event this stream
+	// records (memory/feedback_no_single_writer_bridge.md).
+	nodeRow int32
 }
 
 // write packs and writes this node's current interior-slot arrays via
 // writeInteriorStreamFrame, advancing its own local tick counter. No-op (including on a
-// nil receiver) when out/buildFrame aren't wired — the fallback path.
-func (s *interiorStream) write(present []uint8, value []int32, ox, oy, oz []float32) {
+// nil receiver) when out/buildFrame aren't wired — the fallback path. events carries
+// this call's own row-resolved NodeBead events, recorded by the caller in the SAME
+// function invocation (emitNodeBeads/emitHeldBead/emitInputBeads) that built them.
+func (s *interiorStream) write(present []uint8, value []int32, ox, oy, oz []float32, events []RowEvent) {
 	if s == nil {
 		return
 	}
 	s.tick++
-	writeInteriorStreamFrame(s.out, s.buildFrame, s.tick, present, value, ox, oy, oz)
+	writeInteriorStreamFrame(s.out, s.buildFrame, s.tick, present, value, ox, oy, oz, events)
 }
 
 // boolU8 converts a bool to the buffer's canonical 0/1 byte encoding — a local copy of
@@ -53,11 +59,11 @@ func boolU8(b bool) uint8 {
 // buildFrame is nil (no WIREFOLD_STREAM_FDS "interior" entry). tick is a local
 // monotonically-increasing counter (informational only — freshness, not correctness; the
 // Interior columns themselves carry the authoritative state).
-func writeInteriorStreamFrame(out io.Writer, buildFrame func(tick uint32, present []uint8, value []int32, ox, oy, oz []float32) []byte, tick uint32, present []uint8, value []int32, ox, oy, oz []float32) {
+func writeInteriorStreamFrame(out io.Writer, buildFrame func(tick uint32, present []uint8, value []int32, ox, oy, oz []float32, events []RowEvent) []byte, tick uint32, present []uint8, value []int32, ox, oy, oz []float32, events []RowEvent) {
 	if out == nil || buildFrame == nil {
 		return
 	}
-	frame := buildFrame(tick, present, value, ox, oy, oz)
+	frame := buildFrame(tick, present, value, ox, oy, oz, events)
 	var hdr [4]byte
 	binary.LittleEndian.PutUint32(hdr[:], uint32(len(frame)))
 	// Fire-and-forget, same reasoning as SnapshotState.writeFrame: no delivery
@@ -200,6 +206,11 @@ func emitNodeBeads(tr *T.Trace, nodeName string, working, backup []int, stream *
 	present := make([]uint8, 0, 4)
 	value := make([]int32, 0, 4)
 	ox, oy, oz := make([]float32, 0, 4), make([]float32, 0, 4), make([]float32, 0, 4)
+	nodeRow := int32(-1)
+	if stream != nil {
+		nodeRow = stream.nodeRow
+	}
+	var events []RowEvent
 	emitRow := func(row int, slice []int) {
 		for col := 0; col < cols; col++ {
 			p := interiorSlotOffset(row, col)
@@ -209,6 +220,11 @@ func emitNodeBeads(tr *T.Trace, nodeName string, working, backup []int, stream *
 				v = slice[col]
 			}
 			tr.NodeBead(nodeName, row, col, has, v, p.X, p.Y, p.Z)
+			events = append(events, RowEvent{
+				Kind: T.KindNodeBead, NodeRow: nodeRow, Slot: int32(row*2 + col), Value: int32(v),
+				PortRow: -1, TargetRow: -1, TargetPortRow: -1, EdgeRow: -1,
+				X: p.X, Y: p.Y, Z: p.Z,
+			})
 			present = append(present, boolU8(has))
 			value = append(value, int32(v))
 			ox, oy, oz = append(ox, float32(p.X)), append(oy, float32(p.Y)), append(oz, float32(p.Z))
@@ -216,7 +232,7 @@ func emitNodeBeads(tr *T.Trace, nodeName string, working, backup []int, stream *
 	}
 	emitRow(0, backup)  // top row = backup
 	emitRow(1, working) // bottom row = working
-	stream.write(present, value, ox, oy, oz)
+	stream.write(present, value, ox, oy, oz, events)
 }
 
 // emitHeldBead streams the HoldNewSendOld node's interior as a SINGLE centered
@@ -243,10 +259,19 @@ func emitHeldBead(tr *T.Trace, nodeName string, held int, stream *interiorStream
 	if has {
 		v = held
 	}
+	nodeRow := int32(-1)
+	if stream != nil {
+		nodeRow = stream.nodeRow
+	}
+	events := []RowEvent{{
+		Kind: T.KindNodeBead, NodeRow: nodeRow, Slot: 0, Value: int32(v),
+		PortRow: -1, TargetRow: -1, TargetPortRow: -1, EdgeRow: -1,
+	}}
 	stream.write(
 		[]uint8{boolU8(has), 0, 0, 0},
 		[]int32{int32(v), 0, 0, 0},
 		[]float32{0, 0, 0, 0}, []float32{0, 0, 0, 0}, []float32{0, 0, 0, 0},
+		events,
 	)
 }
 
@@ -267,10 +292,19 @@ func emitInputBeads(tr *T.Trace, nodeName string, left, right int, stream *inter
 	if hasR {
 		vR = right
 	}
+	nodeRow := int32(-1)
+	if stream != nil {
+		nodeRow = stream.nodeRow
+	}
+	events := []RowEvent{
+		{Kind: T.KindNodeBead, NodeRow: nodeRow, Slot: 0, Value: int32(vL), PortRow: -1, TargetRow: -1, TargetPortRow: -1, EdgeRow: -1, X: -s},
+		{Kind: T.KindNodeBead, NodeRow: nodeRow, Slot: 1, Value: int32(vR), PortRow: -1, TargetRow: -1, TargetPortRow: -1, EdgeRow: -1, X: s},
+	}
 	stream.write(
 		[]uint8{boolU8(hasL), boolU8(hasR), 0, 0},
 		[]int32{int32(vL), int32(vR), 0, 0},
 		[]float32{float32(-s), float32(s), 0, 0}, []float32{0, 0, 0, 0}, []float32{0, 0, 0, 0},
+		events,
 	)
 }
 

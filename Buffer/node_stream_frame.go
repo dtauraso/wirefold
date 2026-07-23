@@ -55,6 +55,7 @@ func BuildNodeStreamFrame(
 	portDX, portDY, portDZ, portPX, portPY, portPZ []float32,
 	portIsInput, portHovered []uint8,
 	dstNodeRows, edgeRows []int32,
+	events []StreamEvent,
 ) []byte {
 	labelBytes := []byte(label)
 	portCount := len(portNames)
@@ -108,7 +109,7 @@ func BuildNodeStreamFrame(
 		binary.LittleEndian.PutUint32(buf[rowOff+4:], uint32(edgeRows[i]))
 	}
 
-	return buf
+	return append(buf, BuildEventsSection(events)...)
 }
 
 // BuildInteriorStreamFrame packs one node's fixed-slot interior-bead frame payload (no
@@ -116,7 +117,7 @@ func BuildNodeStreamFrame(
 // column writer buildNodeFrame uses) — no count, the decoder derives the length from the
 // fixed per-node slot count (BufInteriorSlotsPerNode), same as the shared fd-3 Interior
 // block. present/value/ox/oy/oz are parallel slices, same length, same slot order.
-func BuildInteriorStreamFrame(tick uint32, present []uint8, value []int32, ox, oy, oz []float32) []byte {
+func BuildInteriorStreamFrame(tick uint32, present []uint8, value []int32, ox, oy, oz []float32, events []StreamEvent) []byte {
 	n := len(present)
 	buf := make([]byte, 4+n*BufInteriorStride)
 	binary.LittleEndian.PutUint32(buf[0:], tick)
@@ -124,5 +125,5 @@ func BuildInteriorStreamFrame(tick uint32, present []uint8, value []int32, ox, o
 	for i := 0; i < n; i++ {
 		SetInteriorRow(interiorBuf, i, present[i], value[i], ox[i], oy[i], oz[i])
 	}
-	return buf
+	return append(buf, BuildEventsSection(events)...)
 }

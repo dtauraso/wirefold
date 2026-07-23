@@ -247,7 +247,7 @@ type nodeMover struct {
 	// buildFrame packs this node's combined per-fd frame (node fields + ports + label)
 	// using Buffer's own row-writer columns (Buffer.BuildNodeStreamFrame), injected so
 	// this package needs no Buffer import.
-	buildFrame func(tick uint32, nodeRow int32, cx, cy, cz, radius, sphereR float32, vrx, vry, vrz, frx, fry, frz float32, selected, kindID, hovered, latchedSel, gotDragMsg uint8, dragDeltaA, dragDeltaB, dragDeltaC int32, label string, portNames []string, portDX, portDY, portDZ, portPX, portPY, portPZ []float32, portIsInput, portHovered []uint8, dstNodeRows, edgeRows []int32) []byte
+	buildFrame func(tick uint32, nodeRow int32, cx, cy, cz, radius, sphereR float32, vrx, vry, vrz, frx, fry, frz float32, selected, kindID, hovered, latchedSel, gotDragMsg uint8, dragDeltaA, dragDeltaB, dragDeltaC int32, label string, portNames []string, portDX, portDY, portDZ, portPX, portPY, portPZ []float32, portIsInput, portHovered []uint8, dstNodeRows, edgeRows []int32, events []RowEvent) []byte
 }
 
 func newNodeMover(id string, geom nodeGeom, tr *T.Trace, clockSrc Clock) *nodeMover {
@@ -414,7 +414,12 @@ func (m *nodeMover) emitGeometry() {
 	// Label/PortName frame — see streamOut's doc comment): write this node's own
 	// combined frame immediately on a geometry change, in addition to the tick-driven
 	// write in run()'s loop (mirrors edgeMover.recomputeGeometry's writeStreamFrame call).
-	m.writeStreamFrame()
+	// NodeGeometry itself is NOT decentralized to this frame's EVENTS section (see
+	// Buffer/pack.go's decentralizedEventKinds doc comment for why — the dominant
+	// real occurrence is the ONE-TIME load-time emission, which has no safe per-owner
+	// flush point); the tr.NodeGeometry call above still feeds the central VIEW-bucket
+	// pipeline exactly as before.
+	m.writeStreamFrame(nil)
 }
 
 // writeStreamFrame packs and writes this node's combined per-fd frame (center/radius/
@@ -422,8 +427,9 @@ func (m *nodeMover) emitGeometry() {
 // (streamOut). No-op when streamOut is nil (the fallback — see its doc comment) or
 // buildFrame was never injected (bare test construction). Called only by this nodeMover's
 // own goroutine (emitGeometry and run's per-cycle loop), so no lock is needed reading
-// m.geom.
-func (m *nodeMover) writeStreamFrame() {
+// m.geom. events carries whatever this call's caller wants riding this frame's trailing
+// EVENTS section (nil from run()'s plain tick-driven write).
+func (m *nodeMover) writeStreamFrame(events []RowEvent) {
 	if m.streamOut == nil || m.buildFrame == nil {
 		return
 	}
@@ -489,7 +495,7 @@ func (m *nodeMover) writeStreamFrame() {
 		flatRingNormalX, flatRingNormalY, flatRingNormalZ,
 		selected, kindID, hovered, latchedSel, gotDragMsg, dA, dB, dC,
 		label, portNames, portDX, portDY, portDZ, portPX, portPY, portPZ, portIsInput, portHovered,
-		dstNodeRows, edgeRows)
+		dstNodeRows, edgeRows, events)
 	var hdr [4]byte
 	binary.LittleEndian.PutUint32(hdr[:], uint32(len(frame)))
 	// Fire-and-forget, same reasoning as SnapshotState.writeFrame: no delivery
@@ -598,7 +604,7 @@ func (m *nodeMover) run(ctx context.Context) {
 		// — see uiStateFor's doc comment) — write this node's dedicated stream frame
 		// every cycle (no-op when streamOut is nil, the fallback path), mirroring
 		// edgeMover.run's same every-cycle writeStreamFrame call.
-		m.writeStreamFrame()
+		m.writeStreamFrame(nil)
 		if err := m.clk.SleepCycle(ctx); err != nil {
 			return
 		}
@@ -663,14 +669,20 @@ type edgeMover struct {
 	// Buffer-independent, matching PortRowResolver/EdgeRowResolver's existing
 	// interface-injection pattern.
 	portRowFor func(node, port string, isInput bool) (int32, bool)
+	// nodeRowFor resolves a node id to its buffer NODE-ROW index (Buffer.SnapshotState.
+	// NodeRowFor), injected the same way as portRowFor. Used to resolve the SOURCE
+	// node's row for this edge's own Geometry/Position/Arrive events.
+	nodeRowFor func(id string) (int32, bool)
 	// selected is this edge's OWN CURRENT click-selected bit — set only by this
 	// edgeMover's own goroutine (handle's moveMsgKindSelect case, from a
 	// MoveDispatch.sendEdgeSelect message), no shared map.
 	selected uint8
 	// buildFrame packs this edge's combined per-fd frame (edge fields + this wire's
 	// live beads) using Buffer's own row-writer columns (Buffer.BuildEdgeStreamFrame),
-	// injected so this package needs no Buffer import.
-	buildFrame func(tick uint32, srcPortRow, dstPortRow int32, selected uint8, label string, beadVal []int32, beadX, beadY, beadZ []float32) []byte
+	// injected so this package needs no Buffer import. events carries this goroutine's
+	// OWN row-resolved events recorded since the last flush (memory/
+	// feedback_no_single_writer_bridge.md).
+	buildFrame func(tick uint32, srcPortRow, dstPortRow int32, selected uint8, label string, beadVal []int32, beadX, beadY, beadZ []float32, events []RowEvent) []byte
 }
 
 func newEdgeMover(ep EdgeEndpoints, edgeID string, srcGeom, dstGeom nodeGeom, tr *T.Trace, clockSrc Clock) *edgeMover {
@@ -793,6 +805,11 @@ func (m *edgeMover) recomputeGeometry() {
 		m.dest.ReviseInFlightGeometry(m.clk.Tick(), arc, seg)
 	}
 	// Emit this edge's own segment so the renderer redraws the wire from Go's endpoints.
+	// Geometry itself is NOT decentralized to this frame's EVENTS section (see Buffer/
+	// pack.go's decentralizedEventKinds doc comment for why — the dominant real
+	// occurrence is the ONE-TIME load-time emission, which has no safe per-owner flush
+	// point); the tr.Geometry call still feeds the central VIEW-bucket pipeline exactly
+	// as before.
 	if m.tr != nil {
 		m.tr.Geometry(m.edgeID, m.srcID, m.dstID, m.srcH, m.dstH,
 			seg.Start.X, seg.Start.Y, seg.Start.Z,
@@ -801,7 +818,7 @@ func (m *edgeMover) recomputeGeometry() {
 	// Dedicated per-edge stream (either/or with the shared fd-3 Edge/Bead blocks — see
 	// streamOut's doc comment): write this edge's own combined frame immediately on a
 	// geometry change, in addition to the tick-driven write in run()'s loop.
-	m.writeStreamFrame(m.clk.Tick())
+	m.writeStreamFrame(m.clk.Tick(), nil)
 }
 
 // writeStreamFrame packs and writes this edge's combined per-fd frame (edge fields +
@@ -811,7 +828,7 @@ func (m *edgeMover) recomputeGeometry() {
 // (recomputeGeometry and run's per-cycle loop), so no lock is needed reading m.dest's
 // live bead state via LiveBeadRows (same single-goroutine-ownership contract PacedWire's
 // other methods rely on).
-func (m *edgeMover) writeStreamFrame(tick int64) {
+func (m *edgeMover) writeStreamFrame(tick int64, events []RowEvent) {
 	if m.streamOut == nil || m.buildFrame == nil {
 		return
 	}
@@ -839,8 +856,26 @@ func (m *edgeMover) writeStreamFrame(tick int64) {
 			beadY[i] = float32(r.Y)
 			beadZ[i] = float32(r.Z)
 		}
+		// Drain this wire's own OWN-goroutine-recorded Position/Arrive events, resolved
+		// to rows here (srcRow/nodeRowFor — the SAME resolvers this frame's own edge
+		// columns above just used), and fold them in alongside any caller-supplied
+		// events (e.g. a Geometry event from recomputeGeometry).
+		nodeRow := int32(-1)
+		if m.nodeRowFor != nil {
+			if r, ok := m.nodeRowFor(m.srcID); ok {
+				nodeRow = r
+			}
+		}
+		for _, pe := range m.dest.drainPendingEvents() {
+			events = append(events, RowEvent{
+				Kind: pe.kind, NodeRow: nodeRow, PortRow: srcRow,
+				TargetRow: -1, TargetPortRow: -1, EdgeRow: -1, Slot: -1,
+				Value: int32(pe.value), Bead: pe.gen,
+				X: pe.x, Y: pe.y, Z: pe.z, F: pe.t,
+			})
+		}
 	}
-	frame := m.buildFrame(uint32(tick), srcRow, dstRow, selected, m.edgeID, beadVal, beadX, beadY, beadZ)
+	frame := m.buildFrame(uint32(tick), srcRow, dstRow, selected, m.edgeID, beadVal, beadX, beadY, beadZ, events)
 	var hdr [4]byte
 	binary.LittleEndian.PutUint32(hdr[:], uint32(len(frame)))
 	// Fire-and-forget, same reasoning as SnapshotState.writeFrame: no delivery
@@ -906,7 +941,7 @@ func (m *edgeMover) run(ctx context.Context) {
 			// Beads on this wire may have moved even with no geometry change this
 			// cycle — write this edge's dedicated stream frame every cycle (no-op
 			// when streamOut is nil, the fallback path).
-			m.writeStreamFrame(m.clk.Tick())
+			m.writeStreamFrame(m.clk.Tick(), nil)
 		}
 		if err := m.clk.SleepCycle(ctx); err != nil {
 			return

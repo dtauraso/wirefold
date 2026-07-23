@@ -13,21 +13,49 @@ package Buffer
 import (
 	"encoding/binary"
 	"fmt"
+
+	T "github.com/dtauraso/wirefold/Trace"
 )
 
 // snapshotBuild holds all the per-build derived data (counts, string sections,
 // total size) that buildSnapshot's block-writer helpers read from. Computed once per build by
-// newSnapshotBuild; the block writers never recompute it.
+// newSnapshotBuild; the block writers never recompute it. The SCENE frame no longer carries
+// the node-owner-group blocks (Node/Interior/Port + Label/PortName bytes — see nodeFrameBuild
+// for those) or the Edge block + edge-label bytes (see edgeFrameBuild for those).
 type snapshotBuild struct {
-	beadCount, nodeCount, edgeCount uint32
-	layoutLinkCount                 uint32
+	layoutLinkCount uint32
 	// renderableLayoutLinks is the layout-link pairs whose BOTH endpoints resolve to a live
 	// node row this build (resolvableLayoutLinks). layoutLinkCount == len(this), and
 	// writeLayoutLinkBlock iterates THIS — never s.layoutLinks — so an unresolvable endpoint
 	// is filtered before emit and a -1 SrcNodeRow/DstNodeRow can never reach the buffer.
-	renderableLayoutLinks    []layoutLinkSnapState
+	renderableLayoutLinks []layoutLinkSnapState
+
+	size int
+}
+
+// edgeFrameBuild holds the per-build derived data (counts, string sections, total post-header
+// frame size) that buildEdgeFrame's block-writer helpers read from. Computed once per build by
+// newEdgeFrameBuild; mirrors nodeFrameBuild's role but for the Edge block + edge-label bytes,
+// which travel in their own tagged frame (BufBlockTagEdge).
+type edgeFrameBuild struct {
+	edgeCount uint32
+
+	edgeLabelBytes      []byte
+	edgeLabelOffs       []uint32
+	edgeLabelLens       []uint32
+	edgeLabelBytesCount int
+
+	size int
+}
+
+// nodeFrameBuild holds the per-build derived data (counts, string sections, total size) that
+// buildNodeFrame's block-writer helpers read from. Computed once per build by
+// newNodeFrameBuild; mirrors snapshotBuild's role but for the Node/Interior/Port blocks +
+// Label/PortName bytes, which travel in their own tagged frame (BufBlockTagNode) — these
+// three blocks share one owner group (the node movers).
+type nodeFrameBuild struct {
+	nodeCount                uint32
 	interiorCount, portCount int
-	eventCount               int
 
 	labelBytes      []byte
 	labelOffs       []uint32
@@ -38,11 +66,6 @@ type snapshotBuild struct {
 	portNameOffs       []uint32
 	portNameLens       []uint32
 	portNameBytesCount int
-
-	edgeLabelBytes      []byte
-	edgeLabelOffs       []uint32
-	edgeLabelLens       []uint32
-	edgeLabelBytesCount int
 
 	size int
 }
@@ -113,11 +136,45 @@ func (s *SnapshotState) newSnapshotBuild() *snapshotBuild {
 		renderableLayoutLinks = s.resolvableLayoutLinks()
 	}
 	b := &snapshotBuild{
-		beadCount:             uint32(len(s.beads)),
-		nodeCount:             uint32(len(s.nodes)),
-		edgeCount:             uint32(len(s.edges)),
 		layoutLinkCount:       uint32(len(renderableLayoutLinks)),
 		renderableLayoutLinks: renderableLayoutLinks,
+	}
+
+	b.size = BufHeaderSize +
+		int(b.layoutLinkCount)*BufLayoutLinkStride
+	// Either/or (see buildSnapshot's doc comment): camera/overlay/scene are embedded in
+	// the scene frame ONLY as the fallback, when the dedicated view fd is not active.
+	if s.viewOut == nil {
+		b.size += BufCameraStride + BufOverlayStride + BufSceneStride
+	}
+
+	return b
+}
+
+// newEdgeFrameBuild computes all counts and the trailing edge-label string section once per
+// buildEdgeFrame call, plus the total (post-header) frame payload size. The Edge block-writer
+// helper reads from the returned struct only — it never recomputes this data. Mirrors
+// newSnapshotBuild's role, split for the Edge frame.
+func (s *SnapshotState) newEdgeFrameBuild() *edgeFrameBuild {
+	b := &edgeFrameBuild{
+		edgeCount: uint32(len(s.edges)),
+	}
+
+	b.edgeLabelBytes, b.edgeLabelOffs, b.edgeLabelLens = s.buildEdgeLabelSection()
+	b.edgeLabelBytesCount = len(b.edgeLabelBytes)
+
+	b.size = int(b.edgeCount)*BufEdgeStride + b.edgeLabelBytesCount
+
+	return b
+}
+
+// newNodeFrameBuild computes all counts and the trailing string sections once per
+// buildNodeFrame call, plus the total (post-header) frame payload size. The Node/Interior/
+// Port block-writer helpers read from the returned struct only — none of them recompute
+// this data. Mirrors newSnapshotBuild's role, split for the node-owner-group frame.
+func (s *SnapshotState) newNodeFrameBuild() *nodeFrameBuild {
+	b := &nodeFrameBuild{
+		nodeCount: uint32(len(s.nodes)),
 	}
 	b.interiorCount = int(b.nodeCount) * BufInteriorSlotsPerNode
 
@@ -132,51 +189,28 @@ func (s *SnapshotState) newSnapshotBuild() *snapshotBuild {
 	b.portNameBytes, b.portNameOffs, b.portNameLens = s.buildPortNameSection(b.portCount)
 	b.portNameBytesCount = len(b.portNameBytes)
 
-	b.edgeLabelBytes, b.edgeLabelOffs, b.edgeLabelLens = s.buildEdgeLabelSection()
-	b.edgeLabelBytesCount = len(b.edgeLabelBytes)
-
-	b.eventCount = len(s.pendingEvents)
-
-	b.size = BufHeaderSize +
-		int(b.beadCount)*BufBeadStride +
-		int(b.nodeCount)*BufNodeStride +
+	b.size = int(b.nodeCount)*BufNodeStride +
 		b.interiorCount*BufInteriorStride +
-		int(b.edgeCount)*BufEdgeStride +
-		int(b.layoutLinkCount)*BufLayoutLinkStride +
 		b.portCount*BufPortStride +
-		BufCameraStride +
-		BufOverlayStride +
-		BufSceneStride +
 		b.labelBytesCount +
-		b.eventCount*BufEventStride +
-		b.portNameBytesCount +
-		b.edgeLabelBytesCount
+		b.portNameBytesCount
 
 	return b
 }
 
-// writeHeader writes the fixed 36-byte header and increments s.tick. Returns the offset after
-// the header.
+// writeHeader writes the fixed BufHeaderSize-byte SCENE header (no beadCount, no
+// nodeCount/portCount/labelBytesCount/portNameBytesCount, no edgeCount/
+// edgeLabelBytesCount — beads, the node-owner-group blocks, and the Edge block are their
+// own tagged frames, see buildBeadFrame/buildNodeFrame/buildEdgeFrame) and increments
+// s.tick. Returns the offset after the header.
 func (s *SnapshotState) writeHeader(buf []byte, b *snapshotBuild) int {
-	// Header: [tick][beadCount][nodeCount][edgeCount][portCount][labelBytesCount][eventCount][portNameBytesCount][edgeLabelBytesCount][layoutLinkCount]
+	// Header: [tick][layoutLinkCount]. No eventCount: the EVENT block was RETIRED from
+	// this frame (memory/feedback_no_single_writer_bridge.md — each emitting goroutine
+	// now packs its OWN events into its OWN frame's trailing EVENTS section; see
+	// stream_events.go / buildViewFrame's filtered fallback bucket for the kinds not yet
+	// decentralized to a per-goroutine owner).
 	off := 0
 	binary.LittleEndian.PutUint32(buf[off:], s.tick)
-	off += 4
-	binary.LittleEndian.PutUint32(buf[off:], b.beadCount)
-	off += 4
-	binary.LittleEndian.PutUint32(buf[off:], b.nodeCount)
-	off += 4
-	binary.LittleEndian.PutUint32(buf[off:], b.edgeCount)
-	off += 4
-	binary.LittleEndian.PutUint32(buf[off:], uint32(b.portCount))
-	off += 4
-	binary.LittleEndian.PutUint32(buf[off:], uint32(b.labelBytesCount))
-	off += 4
-	binary.LittleEndian.PutUint32(buf[off:], uint32(b.eventCount))
-	off += 4
-	binary.LittleEndian.PutUint32(buf[off:], uint32(b.portNameBytesCount))
-	off += 4
-	binary.LittleEndian.PutUint32(buf[off:], uint32(b.edgeLabelBytesCount))
 	off += 4
 	binary.LittleEndian.PutUint32(buf[off:], b.layoutLinkCount)
 	off += 4
@@ -184,11 +218,83 @@ func (s *SnapshotState) writeHeader(buf []byte, b *snapshotBuild) int {
 	return off
 }
 
-// writeBeadBlock writes one row per live bead (map iteration; row order is not stable across
-// snapshots, but the renderer reads beads by row position each frame with no cross-frame
-// identity needed).
-func (s *SnapshotState) writeBeadBlock(buf []byte, off int, b *snapshotBuild) int {
-	beadBuf := buf[off : off+int(b.beadCount)*BufBeadStride]
+// buildEdgeFrame packs the Edge block + edge-label bytes into their own self-contained
+// frame payload: BufEdgeFrameHeaderSize bytes
+// ([tick:u32][edgeCount:u32][edgeLabelBytesCount:u32]) followed by the Edge block and the
+// Edge-label bytes section — same row layout/order the writer helpers used to write
+// inline into the scene frame (see frame_tags.go's BufBlockTagEdge comment for the full
+// byte-layout doc). Does not touch s.tick: the scene frame's writeHeader is the sole tick
+// incrementer (see buildBeadFrame's comment for why using the pre-increment value here is
+// fine).
+func (s *SnapshotState) buildEdgeFrame() []byte {
+	b := s.newEdgeFrameBuild()
+	buf := make([]byte, BufEdgeFrameHeaderSize+b.size)
+
+	off := 0
+	binary.LittleEndian.PutUint32(buf[off:], s.tick)
+	off += 4
+	binary.LittleEndian.PutUint32(buf[off:], b.edgeCount)
+	off += 4
+	binary.LittleEndian.PutUint32(buf[off:], uint32(b.edgeLabelBytesCount))
+	off += 4
+
+	off = s.writeEdgeBlock(buf, off, b)
+	s.writeEdgeLabelBytesSection(buf, off, b)
+
+	return buf
+}
+
+// buildNodeFrame packs the Node/Interior/Port blocks + Label/PortName bytes into their own
+// self-contained frame payload: BufNodeFrameHeaderSize bytes
+// ([tick:u32][nodeCount:u32][portCount:u32][labelBytesCount:u32][portNameBytesCount:u32])
+// followed by the Node block, the Interior block (fixed BufInteriorSlotsPerNode rows per
+// node — no separate count, derived from nodeCount), the Port block, the Label bytes
+// section, and the Port-name bytes section — same row layout/order the writer helpers used
+// to write inline into the scene frame (see frame_tags.go's BufBlockTagNode comment for the
+// full byte-layout doc). These three blocks share one owner group (the node movers), so
+// they travel together. Does not touch s.tick: the scene frame's writeHeader is the sole
+// tick incrementer (see buildBeadFrame's comment for why using the pre-increment value here
+// is fine).
+func (s *SnapshotState) buildNodeFrame() []byte {
+	b := s.newNodeFrameBuild()
+	buf := make([]byte, BufNodeFrameHeaderSize+b.size)
+
+	off := 0
+	binary.LittleEndian.PutUint32(buf[off:], s.tick)
+	off += 4
+	binary.LittleEndian.PutUint32(buf[off:], b.nodeCount)
+	off += 4
+	binary.LittleEndian.PutUint32(buf[off:], uint32(b.portCount))
+	off += 4
+	binary.LittleEndian.PutUint32(buf[off:], uint32(b.labelBytesCount))
+	off += 4
+	binary.LittleEndian.PutUint32(buf[off:], uint32(b.portNameBytesCount))
+	off += 4
+
+	off = s.writeNodeBlock(buf, off, b)
+	off = s.writeInteriorBlock(buf, off, b)
+	off = s.writePortBlock(buf, off, b)
+	off = s.writeLabelBytesSection(buf, off, b)
+	s.writePortNameBytesSection(buf, off, b)
+
+	return buf
+}
+
+// buildBeadFrame packs the current live-bead state into its own self-contained frame
+// payload: [tick:u32][beadCount:u32] (BufBeadHeaderSize bytes) followed by beadCount ×
+// BufBeadStride bead rows (same row layout writeBeadBlock used to write inline into the
+// scene frame — see frame_tags.go for the full byte-layout doc). Does not touch s.tick:
+// the scene frame's writeHeader is the sole tick incrementer; this uses whatever tick
+// value is current at call time, giving both frames emitted by one emitSnapshot call
+// the same tick number when called in sequence before the increment, or ticks that
+// stay in lockstep with the scene stream either way (a monotonic counter, not a strict
+// pairing key).
+func (s *SnapshotState) buildBeadFrame() []byte {
+	beadCount := len(s.beads)
+	buf := make([]byte, BufBeadHeaderSize+beadCount*BufBeadStride)
+	binary.LittleEndian.PutUint32(buf[0:], s.tick)
+	binary.LittleEndian.PutUint32(buf[4:], uint32(beadCount))
+	beadBuf := buf[BufBeadHeaderSize:]
 	row := 0
 	for _, bead := range s.beads {
 		SetBeadRow(beadBuf, row,
@@ -196,11 +302,11 @@ func (s *SnapshotState) writeBeadBlock(buf []byte, off int, b *snapshotBuild) in
 			int32(bead.value), 1)
 		row++
 	}
-	return off + int(b.beadCount)*BufBeadStride
+	return buf
 }
 
 // writeNodeBlock writes the Node block: stable row order (insertion order of node IDs).
-func (s *SnapshotState) writeNodeBlock(buf []byte, off int, b *snapshotBuild) int {
+func (s *SnapshotState) writeNodeBlock(buf []byte, off int, b *nodeFrameBuild) int {
 	nodeBuf := buf[off : off+int(b.nodeCount)*BufNodeStride]
 	for i, n := range s.nodes {
 		SetNodeRow(nodeBuf, i,
@@ -218,7 +324,7 @@ func (s *SnapshotState) writeNodeBlock(buf []byte, off int, b *snapshotBuild) in
 // writeInteriorBlock writes FIXED BufInteriorSlotsPerNode rows per node, stable node order
 // (row = nodeRow*slotsPerNode + slot). No header count — the decoder derives the length from
 // nodeCount. Empty slots are written with present=0 so a popped bead clears on the render side.
-func (s *SnapshotState) writeInteriorBlock(buf []byte, off int, b *snapshotBuild) int {
+func (s *SnapshotState) writeInteriorBlock(buf []byte, off int, b *nodeFrameBuild) int {
 	interiorBuf := buf[off : off+b.interiorCount*BufInteriorStride]
 	for i, n := range s.nodes {
 		for slot := 0; slot < BufInteriorSlotsPerNode; slot++ {
@@ -232,29 +338,26 @@ func (s *SnapshotState) writeInteriorBlock(buf []byte, off int, b *snapshotBuild
 }
 
 // writeEdgeBlock writes the Edge block: stable row order (insertion order of edge labels).
-// The endpoint coordinates are DERIVED from the same per-node Port block data
-// (SnapshotState.portWorldPos), not read from e.sx..ez directly: the node's port
-// geometry and the edge's own last emitted segment can straddle different buildSnapshot
-// frames during a continuous drag (different goroutines), which perpetually lags the
-// rendered edge endpoint one drag-step behind the port sphere it should be pinned to.
-// Deriving from the Port block instead makes a node-geometry update move the port AND
-// the edge endpoint in the SAME frame, unconditionally. e.sx..ez remain the FALLBACK for
-// an edge whose endpoint port hasn't resolved yet (edges can register before their
-// endpoint nodes do, see onEdgeGeometry).
-func (s *SnapshotState) writeEdgeBlock(buf []byte, off int, b *snapshotBuild) int {
+// SrcPortRow/DstPortRow reference the Port block rows (NODE frame) that OWN the source
+// (output) and dest (input) port world position — resolved here via portRowLookup (the
+// same (node,port,isInput) -> row map the EVENT block uses) rather than storing a copy of
+// the endpoint coordinate, so there is nothing on this row that can go stale under a drag
+// (see bufLayoutEdge's doc comment in layout.go). -1 when a port isn't (yet) resolvable
+// (e.g. a startup ordering gap) — the renderer treats this like any other unresolved row.
+func (s *SnapshotState) writeEdgeBlock(buf []byte, off int, b *edgeFrameBuild) int {
 	edgeBuf := buf[off : off+int(b.edgeCount)*BufEdgeStride]
+	portRows := s.portRowLookup()
 	for i, e := range s.edges {
-		sx, sy, sz := e.sx, e.sy, e.sz
-		if px, py, pz, ok := s.portWorldPos(e.srcNode, e.srcPort, false); ok {
-			sx, sy, sz = px, py, pz
+		srcPortRow := int32(-1)
+		if pr, ok := portRows[portLookupKey{e.srcNode, e.srcPort, false}]; ok {
+			srcPortRow = int32(pr)
 		}
-		ex, ey, ez := e.ex, e.ey, e.ez
-		if px, py, pz, ok := s.portWorldPos(e.dstNode, e.dstPort, true); ok {
-			ex, ey, ez = px, py, pz
+		dstPortRow := int32(-1)
+		if pr, ok := portRows[portLookupKey{e.dstNode, e.dstPort, true}]; ok {
+			dstPortRow = int32(pr)
 		}
 		SetEdgeRow(edgeBuf, i,
-			float32(sx), float32(sy), float32(sz),
-			float32(ex), float32(ey), float32(ez), e.selected,
+			srcPortRow, dstPortRow, e.selected,
 			b.edgeLabelOffs[i], b.edgeLabelLens[i])
 	}
 	return off + int(b.edgeCount)*BufEdgeStride
@@ -263,9 +366,9 @@ func (s *SnapshotState) writeEdgeBlock(buf []byte, off int, b *snapshotBuild) in
 // edgeRowForPair returns the buffer edge-row index of the bead edge connecting node ids a/b
 // (in either direction), or -1 when no such edge exists. Recomputed fresh every buildSnapshot
 // call (not cached at load) so a layout link's overlay segment stays resolved to whichever
-// edge row currently connects that pair — the Edge block's SX..EZ are themselves re-emitted
-// on every node/port move, so riding along on the row index (rather than duplicating
-// endpoints here) is what keeps the overlay attached under a drag.
+// edge row currently connects that pair — the Edge block's SrcPortRow/DstPortRow are
+// themselves re-resolved every build, so riding along on the row index (rather than
+// duplicating endpoints here) is what keeps the overlay attached under a drag.
 func (s *SnapshotState) edgeRowForPair(a, b string) int32 {
 	for i, e := range s.edges {
 		if (e.srcNode == a && e.dstNode == b) || (e.srcNode == b && e.dstNode == a) {
@@ -333,7 +436,7 @@ func (s *SnapshotState) SetBreadcrumbSink(f func(label, node, port, value string
 // is the owning node's row index; DX/DY/DZ is the port surface direction; IsInput marks input
 // ports. The Go-side port-row table (LookupPortRow) is built in this identical flattened
 // order, so port row i ↔ (node, port) i for hit resolution.
-func (s *SnapshotState) writePortBlock(buf []byte, off int, b *snapshotBuild) int {
+func (s *SnapshotState) writePortBlock(buf []byte, off int, b *nodeFrameBuild) int {
 	portBuf := buf[off : off+b.portCount*BufPortStride]
 	prow := 0
 	for i := range s.nodes {
@@ -386,24 +489,15 @@ func (s *SnapshotState) writeSceneBlock(buf []byte, off int) int {
 // labelBytesCount): every node's label UTF-8 bytes concatenated in node-row order. Each
 // node's LabelOff/LabelLen columns slice into this section; the numeric node row carries its
 // human label with no sidecar.
-func (s *SnapshotState) writeLabelBytesSection(buf []byte, off int, b *snapshotBuild) int {
+func (s *SnapshotState) writeLabelBytesSection(buf []byte, off int, b *nodeFrameBuild) int {
 	copy(buf[off:off+b.labelBytesCount], b.labelBytes)
 	return off + b.labelBytesCount
-}
-
-// writeEventBlockSection writes the EVENT block (self-sizing via header eventCount): the
-// per-tick causal trace events (numeric rows + string-section refs). Consumed only by the
-// ext-host .probe logger.
-func (s *SnapshotState) writeEventBlockSection(buf []byte, off int, b *snapshotBuild) int {
-	eventBuf := buf[off : off+b.eventCount*BufEventStride]
-	s.writeEventBlock(eventBuf, s.portRowLookup())
-	return off + b.eventCount*BufEventStride
 }
 
 // writePortNameBytesSection writes the Port-name bytes section (self-sizing via header
 // portNameBytesCount): every port's name UTF-8 bytes in flattened port-row order;
 // PortNameOff/PortNameLen slice into it.
-func (s *SnapshotState) writePortNameBytesSection(buf []byte, off int, b *snapshotBuild) int {
+func (s *SnapshotState) writePortNameBytesSection(buf []byte, off int, b *nodeFrameBuild) int {
 	copy(buf[off:off+b.portNameBytesCount], b.portNameBytes)
 	return off + b.portNameBytesCount
 }
@@ -411,7 +505,7 @@ func (s *SnapshotState) writePortNameBytesSection(buf []byte, off int, b *snapsh
 // writeEdgeLabelBytesSection writes the Edge-label bytes section (self-sizing via header
 // edgeLabelBytesCount): every edge's label UTF-8 bytes in edge-row order;
 // EdgeLabelOff/EdgeLabelLen slice into it.
-func (s *SnapshotState) writeEdgeLabelBytesSection(buf []byte, off int, b *snapshotBuild) int {
+func (s *SnapshotState) writeEdgeLabelBytesSection(buf []byte, off int, b *edgeFrameBuild) int {
 	copy(buf[off:off+b.edgeLabelBytesCount], b.edgeLabelBytes)
 	return off + b.edgeLabelBytesCount
 }
@@ -419,24 +513,116 @@ func (s *SnapshotState) writeEdgeLabelBytesSection(buf []byte, off int, b *snaps
 // buildSnapshot packs all current state into one snapshot []byte. It is a short orchestrator:
 // newSnapshotBuild computes all counts/string-sections once, then each block is written
 // in the exact byte-layout order the header/format comment at the top of this file documents.
+//
+// Either/or with buildViewFrame (dual path, see snapshot.go's viewOut doc comment and
+// Buffer/stream_fds.go): when s.viewOut is nil (no dedicated view fd — the fallback),
+// camera/overlay/scene are embedded here, exactly as before this migration. When
+// s.viewOut is non-nil (the dedicated fd is active), they are EXCLUDED here — they are
+// written instead as their own frame on their own fd (buildViewFrame, called from
+// emitSnapshot) — never double-sourced from both places at once.
 func (s *SnapshotState) buildSnapshot() []byte {
 	b := s.newSnapshotBuild()
 	buf := make([]byte, b.size)
 
 	off := s.writeHeader(buf, b)
-	off = s.writeBeadBlock(buf, off, b)
-	off = s.writeNodeBlock(buf, off, b)
-	off = s.writeInteriorBlock(buf, off, b)
-	off = s.writeEdgeBlock(buf, off, b)
 	off = s.writeLayoutLinkBlock(buf, off, b)
-	off = s.writePortBlock(buf, off, b)
-	off = s.writeCameraBlock(buf, off)
-	off = s.writeOverlayBlock(buf, off)
-	off = s.writeSceneBlock(buf, off)
-	off = s.writeLabelBytesSection(buf, off, b)
-	off = s.writeEventBlockSection(buf, off, b)
-	off = s.writePortNameBytesSection(buf, off, b)
-	s.writeEdgeLabelBytesSection(buf, off, b)
+	if s.viewOut == nil {
+		off = s.writeCameraBlock(buf, off)
+		off = s.writeOverlayBlock(buf, off)
+		s.writeSceneBlock(buf, off)
+	}
 
 	return buf
+}
+
+// buildViewFrame packs the VIEW stream's own frame payload: BufViewFrameHeaderSize (4)
+// bytes ([tick:u32]) followed by the Camera, Overlay, and Scene blocks — the SAME
+// block-writer helpers buildSnapshot uses in its fallback branch, so there is exactly
+// one place each block's bytes are produced regardless of which path is active. Called
+// only when s.viewOut != nil (see buildSnapshot's either/or doc comment). Does not touch
+// s.tick: buildSnapshot's writeHeader (called earlier in the same emitSnapshot) is the
+// sole tick incrementer, mirroring buildBeadFrame/buildNodeFrame/buildEdgeFrame's
+// existing "read the pre-increment tick" convention.
+func (s *SnapshotState) buildViewFrame() []byte {
+	buf := make([]byte, BufViewFrameHeaderSize+BufCameraStride+BufOverlayStride+BufSceneStride)
+	binary.LittleEndian.PutUint32(buf[0:], s.tick)
+	off := BufViewFrameHeaderSize
+	off = s.writeCameraBlock(buf, off)
+	off = s.writeOverlayBlock(buf, off)
+	s.writeSceneBlock(buf, off)
+	return append(buf, s.viewEventsSection()...)
+}
+
+// decentralizedEventKinds are the trace kinds that now ride their OWN emitting
+// goroutine's per-owner frame (edgeMover/interiorStream — see owner_events.go,
+// stream_events.go) instead of this pipeline. viewEventsSection excludes them so an
+// event never appears twice in the .probe logs (once via its own owner fd, once here).
+//
+// NodeGeometry/Geometry are deliberately NOT decentralized here even though nodeMover/
+// edgeMover DO record a RowEvent for their own LIVE re-emit (a node move/port-anchor
+// change): the DOMINANT real occurrence of both kinds is the ONE-TIME load-time emission
+// from each node's own Update-loop goroutine (builders.go's injected EmitGeometry
+// closure), which has no safe way to flush a per-owner frame here without either
+// corrupting that node's live interior-bead render state (interiorStream.write always
+// replaces the full 4-slot array) or reaching across goroutines into nodeMover's own fd.
+// So both kinds stay on the pre-existing central Trace-drain → SnapshotState.pendingEvents
+// pipeline (same single-writer pipeline that already produces this VIEW frame's Camera/
+// Overlay/Scene block values) — real per-goroutine decentralization for these two kinds
+// is future work, not attempted this commit.
+var decentralizedEventKinds = map[string]bool{
+	T.KindPosition: true,
+	T.KindArrive:   true,
+	T.KindNodeBead: true,
+}
+
+// viewEventsSection packs the VIEW frame's trailing EVENTS section: every buffered event
+// whose kind is NOT already decentralized to its own owner fd (decentralizedEventKinds).
+// This is the FALLBACK bucket for kinds not yet migrated to a per-goroutine owner
+// (Fire/Recv/Send/Select/Hover/AbcDrag*/Camera/SceneSphere/overlay toggles/LayoutLink) —
+// they still flow through the existing Trace-drain → SnapshotState.pendingEvents pipeline,
+// which is also what already produces this exact VIEW frame's Camera/Overlay/Scene block
+// values, so packing them here reuses an existing single-writer pipeline rather than
+// introducing a new one. Real per-goroutine decentralization for THESE kinds is future work.
+func (s *SnapshotState) viewEventsSection() []byte {
+	if len(s.pendingEvents) == 0 {
+		return BuildEventsSection(nil)
+	}
+	portRows := s.portRowLookup()
+	kept := make([]StreamEvent, 0, len(s.pendingEvents))
+	for _, e := range s.pendingEvents {
+		if decentralizedEventKinds[e.kind] {
+			continue
+		}
+		nodeRow := int32(s.nodeRowIndex(e.node))
+		portRow := int32(-1)
+		if e.port != "" {
+			if pr, ok := portRows[portLookupKey{e.node, e.port, e.portIsInput}]; ok {
+				portRow = int32(pr)
+			}
+		}
+		targetRow := int32(-1)
+		if e.target != "" {
+			targetRow = int32(s.nodeRowIndex(e.target))
+		}
+		targetPortRow := int32(-1)
+		if e.targetHandle != "" {
+			if pr, ok := portRows[portLookupKey{e.target, e.targetHandle, true}]; ok {
+				targetPortRow = int32(pr)
+			}
+		}
+		edgeRow := int32(-1)
+		if e.edge != "" {
+			if idx, ok := s.edgeIndex[e.edge]; ok {
+				edgeRow = int32(idx)
+			}
+		}
+		kept = append(kept, StreamEvent{
+			Kind: s.kindID[e.kind], NodeRow: nodeRow, PortRow: portRow,
+			TargetRow: targetRow, TargetPortRow: targetPortRow, EdgeRow: edgeRow,
+			Slot: int32(e.slot), Value: int32(e.value), Bead: uint32(e.bead),
+			ArcLength: float32(e.arc), SimLatencyMs: float32(e.lat),
+			X: float32(e.x), Y: float32(e.y), Z: float32(e.z), F: float32(e.f),
+		})
+	}
+	return BuildEventsSection(kept)
 }

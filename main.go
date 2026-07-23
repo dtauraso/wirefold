@@ -18,6 +18,38 @@ import (
 	W "github.com/dtauraso/wirefold/nodes/Wiring"
 )
 
+// toStreamEvents converts a nodeMover/edgeMover/interiorStream goroutine's own
+// row-resolved events (Wiring.RowEvent, string kind — kept Buffer-independent there) into
+// Buffer.StreamEvent (numeric kind, via Buffer.KindID) for packing into that SAME
+// goroutine's own frame's trailing EVENTS section (memory/feedback_no_single_writer_bridge.md).
+// Pure value conversion — no shared state, safe to call from any owner goroutine.
+func toStreamEvents(events []W.RowEvent) []B.StreamEvent {
+	if len(events) == 0 {
+		return nil
+	}
+	out := make([]B.StreamEvent, len(events))
+	for i, e := range events {
+		out[i] = B.StreamEvent{
+			Kind:          B.KindID(e.Kind),
+			NodeRow:       e.NodeRow,
+			PortRow:       e.PortRow,
+			TargetRow:     e.TargetRow,
+			TargetPortRow: e.TargetPortRow,
+			EdgeRow:       e.EdgeRow,
+			Slot:          e.Slot,
+			Value:         e.Value,
+			Bead:          uint32(e.Bead),
+			ArcLength:     float32(e.ArcLength),
+			SimLatencyMs:  float32(e.SimLatencyMs),
+			X:             float32(e.X),
+			Y:             float32(e.Y),
+			Z:             float32(e.Z),
+			F:             float32(e.F),
+		}
+	}
+	return out
+}
+
 // runTopology loads and runs the topology under ctx, blocking until ctx is
 // cancelled or all nodes exit. Shared by Run and RunTest.
 //
@@ -135,7 +167,10 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 		// selected bit, set via a moveMsgKindSelect message the gesture goroutine sends
 		// on select/deselect (MoveDispatch.sendEdgeSelect). snapState.IsEdgeSelected
 		// keeps serving the fd-3 fallback only.
-		md.SetEdgeStreams(edgeBase, md.PortRowFor, B.BuildEdgeStreamFrame)
+		md.SetEdgeStreams(edgeBase, md.PortRowFor, md.NodeRowFor,
+			func(tick uint32, srcPortRow, dstPortRow int32, selected uint8, label string, beadVal []int32, beadX, beadY, beadZ []float32, events []W.RowEvent) []byte {
+				return B.BuildEdgeStreamFrame(tick, srcPortRow, dstPortRow, selected, label, beadVal, beadX, beadY, beadZ, toStreamEvents(events))
+			})
 		snapState.SetEdgeStreamActive(true)
 	}
 	// The two per-node dedicated streams (memory/feedback_no_single_writer_bridge.md):
@@ -158,7 +193,16 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 			// Buffer-independent.
 			md.SetNodeStreams(nodeBase, interiorBase,
 				md.NodeRowFor, md.EdgeRowForPair,
-				B.BuildNodeStreamFrame, B.BuildInteriorStreamFrame, B.NodeKindID)
+				func(tick uint32, nodeRow int32, cx, cy, cz, radius, sphereR float32, vrx, vry, vrz, frx, fry, frz float32, selected, kindID, hovered, latchedSel, gotDragMsg uint8, dragDeltaA, dragDeltaB, dragDeltaC int32, label string, portNames []string, portDX, portDY, portDZ, portPX, portPY, portPZ []float32, portIsInput, portHovered []uint8, dstNodeRows, edgeRows []int32, events []W.RowEvent) []byte {
+					return B.BuildNodeStreamFrame(tick, nodeRow, cx, cy, cz, radius, sphereR, vrx, vry, vrz, frx, fry, frz,
+						selected, kindID, hovered, latchedSel, gotDragMsg, dragDeltaA, dragDeltaB, dragDeltaC,
+						label, portNames, portDX, portDY, portDZ, portPX, portPY, portPZ, portIsInput, portHovered,
+						dstNodeRows, edgeRows, toStreamEvents(events))
+				},
+				func(tick uint32, present []uint8, value []int32, ox, oy, oz []float32, events []W.RowEvent) []byte {
+					return B.BuildInteriorStreamFrame(tick, present, value, ox, oy, oz, toStreamEvents(events))
+				},
+				B.NodeKindID)
 			snapState.SetNodeStreamActive(true)
 		}
 	}

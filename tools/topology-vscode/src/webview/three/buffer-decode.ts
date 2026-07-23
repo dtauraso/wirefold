@@ -85,10 +85,20 @@ export interface DecodedSnapshot {
    *  at load and never moved — see readSceneCX/readSceneRadius, KindSceneSphere), or null —
    *  see cameraView's doc comment. */
   sceneView: DataView | null;
-  /** Number of per-tick causal events in this snapshot's EVENT block (.probe log only). */
-  eventCount: number;
-  /** DataView over the EVENT block; byteLength = eventCount × EVENT_STRIDE. */
-  eventView: DataView;
+}
+
+/** Decodes a trailing EVENTS section ([count:u32] + count × EVENT_STRIDE rows) appended
+ *  after `offset` bytes of already-known content in ANY per-owner frame (NODE/EDGE/
+ *  INTERIOR/VIEW — memory/feedback_no_single_writer_bridge.md). The fd-3 SCENE frame no
+ *  longer carries an EVENT block at all — each per-owner stream carries its own instead.
+ *  Returns {count:0, view: empty} when the buffer is too short to hold even the count
+ *  (never null — callers can always safely iterate 0 times). */
+export function decodeTrailingEvents(buf: ArrayBuffer, offset: number): { count: number; view: DataView } {
+  if (buf.byteLength < offset + 4) return { count: 0, view: new DataView(buf, buf.byteLength, 0) };
+  const count = new DataView(buf, offset, 4).getUint32(0, true);
+  const bytes = count * EVENT_STRIDE;
+  if (buf.byteLength < offset + 4 + bytes) return { count: 0, view: new DataView(buf, buf.byteLength, 0) };
+  return { count, view: new DataView(buf, offset + 4, bytes) };
 }
 
 // Single-entry memo keyed on the ArrayBuffer's OBJECT IDENTITY (not its contents — the
@@ -125,17 +135,16 @@ function decodeSnapshotUncached(buf: ArrayBuffer): DecodedSnapshot | null {
 
   const hdr = new DataView(buf, 0, BUF_HEADER_SIZE);
   const tick            = hdr.getUint32(0, true);
-  const eventCount      = hdr.getUint32(4, true);
-  const layoutLinkCount = hdr.getUint32(8, true);
+  const layoutLinkCount = hdr.getUint32(4, true);
 
   const layoutLinkBytes = layoutLinkCount * LAYOUT_LINK_STRIDE;
-  const eventBytes      = eventCount * EVENT_STRIDE;
   // Either/or (Go's buildSnapshot, Buffer/pack.go): camera/overlay/scene are embedded
   // here ONLY in the fallback (no dedicated view fd). Distinguish the two shapes by
-  // exact byte length — layoutLinkCount/eventCount are already known from the header,
-  // so there is no ambiguity between "no view blocks" and "view blocks present".
+  // exact byte length — layoutLinkCount is already known from the header, so there is
+  // no ambiguity between "no view blocks" and "view blocks present". The EVENT block was
+  // retired from this frame entirely (memory/feedback_no_single_writer_bridge.md).
   const viewBlockBytes = CAMERA_STRIDE + OVERLAY_STRIDE + SCENE_STRIDE;
-  const withoutViewLen = BUF_HEADER_SIZE + layoutLinkBytes + eventBytes;
+  const withoutViewLen = BUF_HEADER_SIZE + layoutLinkBytes;
   const withViewLen    = withoutViewLen + viewBlockBytes;
 
   if (buf.byteLength !== withoutViewLen && buf.byteLength !== withViewLen) return null;
@@ -154,14 +163,11 @@ function decodeSnapshotUncached(buf: ArrayBuffer): DecodedSnapshot | null {
     overlayView = new DataView(buf, off, OVERLAY_STRIDE);
     off += OVERLAY_STRIDE;
     sceneView = new DataView(buf, off, SCENE_STRIDE);
-    off += SCENE_STRIDE;
   }
-
-  const eventView = new DataView(buf, off, eventBytes);
 
   return {
     tick, layoutLinkCount, layoutLinkView, cameraView, overlayView,
-    sceneView, eventCount, eventView,
+    sceneView,
   };
 }
 
@@ -397,6 +403,9 @@ export interface DecodedEdgeStreamFrame {
   beadCount: number;
   /** DataView over this edge's own bead rows; byteLength = beadCount × BEAD_STRIDE. */
   beadView: DataView;
+  /** This edge's own trailing EVENTS section (.probe log only; see decodeTrailingEvents). */
+  eventCount: number;
+  eventView: DataView;
 }
 
 // Per-edge-row memo (keyed by row, not a single lastBuf — many edge streams arrive
@@ -444,8 +453,11 @@ function decodeEdgeStreamFrameUncached(buf: ArrayBuffer): DecodedEdgeStreamFrame
   const beadBytes = beadCount * BEAD_STRIDE;
   if (buf.byteLength < off + beadBytes) return null;
   const beadView = new DataView(buf, off, beadBytes);
+  off += beadBytes;
 
-  return { tick, edgeView, label, beadCount, beadView };
+  const { count: eventCount, view: eventView } = decodeTrailingEvents(buf, off);
+
+  return { tick, edgeView, label, beadCount, beadView, eventCount, eventView };
 }
 
 /** Decoded view over a BUF_BLOCK_TAG_VIEW frame (see frame-tags.ts for its byte layout):
@@ -455,6 +467,11 @@ export interface DecodedViewFrame {
   cameraView: DataView;
   overlayView: DataView;
   sceneView: DataView;
+  /** The fallback bucket of events not yet decentralized to their own owner fd
+   *  (Fire/Recv/Send/Select/Hover/AbcDrag(Reset)/Camera/SceneSphere/overlay toggles/
+   *  LayoutLink — see Buffer/pack.go's viewEventsSection). */
+  eventCount: number;
+  eventView: DataView;
 }
 
 // Single-entry memo, mirroring decodeSnapshot's — the view frame arrives on its own
@@ -490,8 +507,11 @@ function decodeViewFrameUncached(buf: ArrayBuffer): DecodedViewFrame | null {
   off += OVERLAY_STRIDE;
 
   const sceneView = new DataView(buf, off, SCENE_STRIDE);
+  off += SCENE_STRIDE;
 
-  return { tick, cameraView, overlayView, sceneView };
+  const { count: eventCount, view: eventView } = decodeTrailingEvents(buf, off);
+
+  return { tick, cameraView, overlayView, sceneView, eventCount, eventView };
 }
 
 /**
@@ -533,6 +553,9 @@ export interface DecodedNodeStreamFrame {
    *  × NODE_STREAM_LAYOUT_LINK_STRIDE. Read with readNodeStreamLayoutLinkDstNodeRow /
    *  readNodeStreamLayoutLinkEdgeRow below — this node's own row is the SrcNodeRow. */
   layoutLinkView: DataView;
+  /** This node's own trailing EVENTS section (.probe log only; see decodeTrailingEvents). */
+  eventCount: number;
+  eventView: DataView;
 }
 
 /** Reads DstNodeRow (i32) from row `row` of a node stream frame's LayoutLink section. */
@@ -593,8 +616,11 @@ function decodeNodeStreamFrameUncached(buf: ArrayBuffer): DecodedNodeStreamFrame
   off += portNameBytesCount;
 
   const layoutLinkView = new DataView(buf, off, layoutLinkBytes);
+  off += layoutLinkBytes;
 
-  return { tick, nodeView, label, portCount, portView, portNameBytes, layoutLinkCount, layoutLinkView };
+  const { count: eventCount, view: eventView } = decodeTrailingEvents(buf, off);
+
+  return { tick, nodeView, label, portCount, portView, portNameBytes, layoutLinkCount, layoutLinkView, eventCount, eventView };
 }
 
 /** Decoded view over ONE node's dedicated per-fd INTERIOR-stream frame
@@ -604,6 +630,9 @@ export interface DecodedInteriorStreamFrame {
   tick: number;
   /** DataView over this node's own INTERIOR_SLOTS_PER_NODE interior rows. */
   interiorView: DataView;
+  /** This goroutine's own trailing EVENTS section (.probe log only; see decodeTrailingEvents). */
+  eventCount: number;
+  eventView: DataView;
 }
 
 const lastInteriorStreamBufByRow = new Map<number, ArrayBuffer>();
@@ -629,5 +658,6 @@ function decodeInteriorStreamFrameUncached(buf: ArrayBuffer): DecodedInteriorStr
   if (buf.byteLength < expectedLen) return null;
   const tick = new DataView(buf, 0, BUF_INTERIOR_STREAM_FRAME_HEADER_SIZE).getUint32(0, true);
   const interiorView = new DataView(buf, BUF_INTERIOR_STREAM_FRAME_HEADER_SIZE, interiorBytes);
-  return { tick, interiorView };
+  const { count: eventCount, view: eventView } = decodeTrailingEvents(buf, expectedLen);
+  return { tick, interiorView, eventCount, eventView };
 }

@@ -34,10 +34,10 @@ import {
   INTERIOR_STRIDE,
   readInteriorPresent, readInteriorValue, readInteriorOX, readInteriorOY, readInteriorOZ,
   // Edge
-  EDGE_COL_SX, EDGE_COL_SY, EDGE_COL_SZ, EDGE_COL_EX, EDGE_COL_EY, EDGE_COL_EZ,
+  EDGE_COL_SRC_PORT_ROW, EDGE_COL_DST_PORT_ROW,
   EDGE_COL_SELECTED,
   EDGE_STRIDE,
-  readEdgeSX, readEdgeSY, readEdgeSZ, readEdgeEX, readEdgeEY, readEdgeEZ,
+  readEdgeSrcPortRow, readEdgeDstPortRow,
   readEdgeSelected,
   // Camera
   CAMERA_COL_PX, CAMERA_COL_PY, CAMERA_COL_PZ, CAMERA_COL_R,
@@ -224,28 +224,22 @@ describe("buffer-layout — Interior block", () => {
 
 describe("buffer-layout — Edge block", () => {
   it("stride equals packed field sizes", () => {
-    // 6×f32 + 1×u8 (selected) + 2×u32 (edge-label off/len) = 33
-    expect(EDGE_STRIDE).toBe(33);
+    // 2×i32 (SrcPortRow/DstPortRow) + 1×u8 (selected) + 2×u32 (edge-label off/len) = 17.
+    // No endpoint coordinates — the edge references its two port rows instead of storing
+    // a copy (see bufLayoutEdge's doc comment, Buffer/layout.go — the endpoint-tear fix).
+    expect(EDGE_STRIDE).toBe(17);
   });
 
   it("read helpers decode known bytes correctly", () => {
     const buf = new ArrayBuffer(EDGE_STRIDE);
     const dv = new DataView(buf);
 
-    dv.setFloat32(EDGE_COL_SX, 1.0, true);
-    dv.setFloat32(EDGE_COL_SY, 2.0, true);
-    dv.setFloat32(EDGE_COL_SZ, 3.0, true);
-    dv.setFloat32(EDGE_COL_EX, 4.0, true);
-    dv.setFloat32(EDGE_COL_EY, 5.0, true);
-    dv.setFloat32(EDGE_COL_EZ, 6.0, true);
+    dv.setInt32(EDGE_COL_SRC_PORT_ROW, 3, true);
+    dv.setInt32(EDGE_COL_DST_PORT_ROW, 7, true);
     dv.setUint8(EDGE_COL_SELECTED, 1);
 
-    expectF32(readEdgeSX(dv, 0), 1.0);
-    expectF32(readEdgeSY(dv, 0), 2.0);
-    expectF32(readEdgeSZ(dv, 0), 3.0);
-    expectF32(readEdgeEX(dv, 0), 4.0);
-    expectF32(readEdgeEY(dv, 0), 5.0);
-    expectF32(readEdgeEZ(dv, 0), 6.0);
+    expect(readEdgeSrcPortRow(dv, 0)).toBe(3);
+    expect(readEdgeDstPortRow(dv, 0)).toBe(7);
     expect(readEdgeSelected(dv, 0)).toBe(1);
   });
 });
@@ -325,11 +319,11 @@ describe("buffer-layout — Overlay block", () => {
 // ─ Meta ───────────────────────────────────────────────────────────────────────
 
 describe("buffer-layout — meta", () => {
-  it("schema version is 32", () => {
-    expect(BUF_LAYOUT_VERSION).toBe(32);
+  it("schema version is 33", () => {
+    expect(BUF_LAYOUT_VERSION).toBe(33);
   });
 
-  it("header size is 40 bytes (10×u32)", () => {
-    expect(BUF_HEADER_SIZE).toBe(40);
+  it("header size is 8 bytes (2×u32: tick + layoutLinkCount; no beadCount/nodeCount/portCount/labelBytesCount/portNameBytesCount/edgeCount/edgeLabelBytesCount/eventCount — beads, the node-owner-group blocks, the Edge block, and events are their own tagged/per-owner frames)", () => {
+    expect(BUF_HEADER_SIZE).toBe(8);
   });
 });

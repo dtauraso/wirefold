@@ -77,41 +77,6 @@ type portLookupKey struct {
 	isInput bool
 }
 
-// writeEventBlock resolves every buffered event to numeric rows and packs the EVENT block
-// into buf (eventCount rows). portRows is the (node,port,isInput)→row map. Returns nothing;
-// pendingEvents is cleared by clearTransients after the emit.
-func (s *SnapshotState) writeEventBlock(buf []byte, portRows map[portLookupKey]int) {
-	for row, e := range s.pendingEvents {
-		nodeRow := int32(s.nodeRowIndex(e.node))
-		portRow := int32(-1)
-		if e.port != "" {
-			if pr, ok := portRows[portLookupKey{e.node, e.port, e.portIsInput}]; ok {
-				portRow = int32(pr)
-			}
-		}
-		targetRow := int32(-1)
-		if e.target != "" {
-			targetRow = int32(s.nodeRowIndex(e.target))
-		}
-		targetPortRow := int32(-1)
-		if e.targetHandle != "" {
-			if pr, ok := portRows[portLookupKey{e.target, e.targetHandle, true}]; ok {
-				targetPortRow = int32(pr)
-			}
-		}
-		edgeRow := int32(-1)
-		if e.edge != "" {
-			if idx, ok := s.edgeIndex[e.edge]; ok {
-				edgeRow = int32(idx)
-			}
-		}
-		SetEventRow(buf, row,
-			s.kindID[e.kind], nodeRow, portRow, targetRow, targetPortRow, edgeRow,
-			int32(e.slot), int32(e.value), uint32(e.bead),
-			float32(e.arc), float32(e.lat), float32(e.x), float32(e.y), float32(e.z), float32(e.f))
-	}
-}
-
 // FinalFlush emits one last snapshot if events accumulated since the last emit (e.g. trailing
 // recv/fire/arrive that were not followed by a position emit), OR if a KindPosition update
 // was coalesced away (tickSource set, still on the same tick as the last emit) and so never

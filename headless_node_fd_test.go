@@ -139,12 +139,11 @@ func runHeadlessNodeFdCase(t *testing.T, dedicated bool) (sawNodeTag bool, nodeF
 		switch buf[0] {
 		case B.BufBlockTagScene:
 			sawScene = true
-			// Scene block payload (buf[1:]) header: [tick:u32][eventCount:u32]
-			// [layoutLinkCount:u32] (Buffer/pack.go's writeHeader) — capture the LAST
-			// one seen so the caller can assert the required either/or with the
-			// per-node streams.
-			if len(buf) >= 1+12 {
-				lastSceneLayoutLinks = readU32(buf[1:], 8)
+			// Scene block payload (buf[1:]) header: [tick:u32][layoutLinkCount:u32]
+			// (Buffer/pack.go's writeHeader) — capture the LAST one seen so the caller
+			// can assert the required either/or with the per-node streams.
+			if len(buf) >= 1+8 {
+				lastSceneLayoutLinks = readU32(buf[1:], 4)
 			}
 		case B.BufBlockTagNode:
 			sawNodeTag = true
@@ -249,7 +248,12 @@ func TestHeadlessNodeFdDedicatedStream(t *testing.T) {
 		portsOff := labelOff + int(labelLen)
 		portNamesOff := portsOff + int(portCount)*B.BufPortStride
 		layoutLinksOff := portNamesOff + int(portNameBytesCount)
-		wantLen := layoutLinksOff + int(layoutLinkCount)*B.BufNodeStreamLayoutLinkStride
+		eventsOff := layoutLinksOff + int(layoutLinkCount)*B.BufNodeStreamLayoutLinkStride
+		if eventsOff+4 > len(frame) {
+			t.Fatalf("node row %d: frame too short (%d bytes) to hold the trailing EVENTS section count", row, len(frame))
+		}
+		eventCount := readU32(frame, eventsOff)
+		wantLen := eventsOff + 4 + int(eventCount)*B.BufEventStride
 		if wantLen != len(frame) {
 			t.Fatalf("node row %d: frame length %d does not match computed layout end %d",
 				row, len(frame), wantLen)
@@ -295,10 +299,16 @@ func TestHeadlessNodeFdDedicatedStream(t *testing.T) {
 	}
 
 	for row, frame := range interiorFrames {
-		// Fixed-slot frame (Buffer.BuildInteriorStreamFrame): [tick:u32] + 4 Interior rows.
-		want := 4 + 4*B.BufInteriorStride
+		// Fixed-slot frame (Buffer.BuildInteriorStreamFrame): [tick:u32] + 4 Interior rows +
+		// a trailing EVENTS section ([count:u32] + count NodeBead rows).
+		fixedLen := 4 + 4*B.BufInteriorStride
+		if len(frame) < fixedLen+4 {
+			t.Fatalf("interior row %d: frame length %d, want >= %d (fixed 4-slot layout + EVENTS count)", row, len(frame), fixedLen+4)
+		}
+		eventCount := readU32(frame, fixedLen)
+		want := fixedLen + 4 + int(eventCount)*B.BufEventStride
 		if len(frame) != want {
-			t.Fatalf("interior row %d: frame length %d, want %d (fixed 4-slot layout)", row, len(frame), want)
+			t.Fatalf("interior row %d: frame length %d, want %d (fixed 4-slot layout + %d events)", row, len(frame), want, eventCount)
 		}
 	}
 }
