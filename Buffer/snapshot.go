@@ -9,29 +9,43 @@
 // already removed end-to-end (see main.go, Trace/Trace.go); there is no
 // separate JSON stream and no pending migration.
 //
-// Frame format: [len:u32-LE][blockTag:u8][snapshot bytes]  (len counts the tag byte
-// PLUS the snapshot bytes). blockTag is the discriminator defined in frame_tags.go —
-// today there is exactly one value, BufBlockTagScene, carrying the WHOLE combined
-// snapshot below unchanged; it is the protocol foundation for eventually splitting
-// this single buffer into N per-block buffers, each tagged with its own owner.
+// Frame format: [len:u32-LE][blockTag:u8][block bytes]  (len counts the tag byte PLUS
+// the block bytes). blockTag is the discriminator defined in frame_tags.go. Four tags
+// are emitted, every emitSnapshot call, as four SEPARATE frames:
 //
-// Snapshot layout (little-endian, packed):
+//   - BufBlockTagScene: the combined snapshot below (layout-link/camera/overlay/scene/
+//     event blocks — everything except beads, the node-owner-group blocks, and the
+//     Edge block).
+//   - BufBlockTagBead: the Bead block alone, in its own self-contained frame (built by
+//     buildBeadFrame, Buffer/pack.go) — beads churn every tick independent of the rest
+//     of scene state, so they no longer ride the scene frame. See frame_tags.go for its
+//     byte layout.
+//   - BufBlockTagNode: the Node/Interior/Port blocks + Label/PortName bytes, in their
+//     own self-contained frame (built by buildNodeFrame, Buffer/pack.go) — these three
+//     blocks share one owner group (the node movers), so they travel together, split
+//     out of the scene frame the same way the Bead block was. See frame_tags.go for its
+//     byte layout.
+//   - BufBlockTagEdge: the Edge block + edge-label bytes, in its own self-contained
+//     frame (built by buildEdgeFrame, Buffer/pack.go). The Edge block carries NO
+//     endpoint coordinates — it references its two port rows (SrcPortRow/DstPortRow),
+//     which resolve against the NODE frame's Port block — see bufLayoutEdge's doc
+//     comment in layout.go for why (the endpoint-tear fix). See frame_tags.go for its
+//     byte layout.
 //
-//	Header   40 bytes: [tick][beadCount][nodeCount][edgeCount][portCount][labelBytesCount][eventCount][portNameBytesCount][edgeLabelBytesCount][layoutLinkCount] (u32 each)
-//	Bead     beadCount × BufBeadStride bytes
-//	Node     nodeCount × BufNodeStride bytes   (persistent geom + transient event flags + label off/len)
-//	Interior nodeCount × BufInteriorSlotsPerNode × BufInteriorStride bytes
-//	Edge     edgeCount × BufEdgeStride bytes   (+ edge-label off/len)
+// This split is a step of eventually breaking the rest of this single buffer
+// into N per-block buffers, each tagged with its own owner.
+//
+// Scene snapshot layout (little-endian, packed):
+//
+//	Header   12 bytes: [tick][eventCount][layoutLinkCount] (u32 each)
 //	LayoutLink layoutLinkCount × BufLayoutLinkStride bytes (the LAYOUT double-link overlay pairs,
-//	           from LocalPolars — NOT the Edge block; see bufLayoutLayoutLink in layout.go)
-//	Port     portCount × BufPortStride bytes   (flattened over nodes in node-row order; + port-name off/len)
+//	           from LocalPolars — NOT the Edge block; see bufLayoutLayoutLink in layout.go —
+//	           SrcNodeRow/DstNodeRow resolve against the NODE frame's Node block, see
+//	           frame_tags.go's BufBlockTagNode comment)
 //	Camera   BufCameraStride bytes             (always 1 row)
 //	Overlay  BufOverlayStride bytes            (always 1 row)
 //	Scene    BufSceneStride bytes              (always 1 row; persisted scene-sphere center+radius)
-//	Label    labelBytesCount bytes             (node labels' UTF-8 bytes, node-row order)
 //	Event    eventCount × BufEventStride bytes (per-tick causal trace events; .probe log only)
-//	PortName portNameBytesCount bytes          (port names' UTF-8 bytes, flattened port-row order)
-//	EdgeLabel edgeLabelBytesCount bytes        (edge labels' UTF-8 bytes, edge-row order)
 //
 // This buffer is the sole framed channel Go emits (no pending rollout flip):
 // the JSON trace was already removed, not deferred to a later phase.
@@ -50,15 +64,22 @@ package Buffer
 import (
 	"encoding/binary"
 	"io"
+	"sync/atomic"
 
 	T "github.com/dtauraso/wirefold/Trace"
 )
 
-// PortRowEntry is Trace.PortRow (its Trace-package type has the full ownership-handoff
-// comment). This alias keeps the Buffer-package name every existing caller in this file
-// already used; T.PortRow lives in Trace, not Buffer, precisely so this table's element
-// type can be shared with nodes/Wiring without either package importing the other.
-type PortRowEntry = T.PortRow
+// PortRowEntry is one row of the port-row resolution table: the (node, port) identity
+// that a numeric buffer PORT-ROW index resolves to. Go writes the buffer Port block in a
+// fixed flattened order (node-row order × each node's Ports order); this table is built in
+// that SAME order, so port row i ↔ table entry i. It is the authoritative row→(node,port)
+// map the gesture FSM uses to turn a raw port-row hit back into a topology edit — the
+// numeric buffer carries no port-name strings (no sidecar).
+type PortRowEntry struct {
+	Node    string
+	Port    string
+	IsInput bool
+}
 
 // SnapshotState accumulates full-world render state from trace events.
 type SnapshotState struct {
@@ -107,28 +128,63 @@ type SnapshotState struct {
 	// out receives framed binary snapshots. Nil = silent discard.
 	out io.Writer
 
-	// portTableC hands the current flattened port-row table (same order as the Port block)
-	// from this drain goroutine to the stdin/gesture goroutine over a depth-1,
-	// replace-latest channel — ownership handoff, not shared state (CLAUDE.md model: the
-	// drain goroutine owns SnapshotState, the stdin/gesture goroutine is a separate owner).
-	// Rebuilt on node-geometry changes (the only place ports change) and sent non-blocking
-	// drop-old via sendLatestTableNonBlocking; nil until SetPortTableChan wires it (tests /
-	// unwired builds), in which case rebuildPortTable's send is a harmless no-op. The
-	// receiving side (nodes/Wiring's MoveDispatch.portTbl, drained once per stdin dispatch
-	// iteration) is the sole reader.
-	portTableC chan []T.PortRow
+	// viewOut, when non-nil, is the VIEW stream's OWN dedicated fd (see
+	// Buffer/stream_fds.go / main.go's SetViewOut call) — camera+overlay+scene are
+	// written there as their own frame (buildViewFrame) instead of embedded in the
+	// fd-3 scene frame. Nil (the default — no WIREFOLD_STREAM_FDS entry for "view",
+	// e.g. headless tests) is the REQUIRED fallback: camera/overlay/scene stay embedded
+	// in buildSnapshot's scene frame exactly as before this migration. Exactly one
+	// goroutine (the Trace-drain goroutine, same as `out`) ever writes to this — no lock
+	// needed, mirroring `out`'s own single-writer contract.
+	viewOut io.Writer
 
-	// edgeTableC is the edge-row analogue of portTableC: the edge labels in the SAME stable
-	// row order as the Edge block, handed to the stdin/gesture goroutine over a depth-1,
-	// replace-latest channel whenever a new edge registers (onEdgeGeometry). nil until
-	// SetEdgeTableChan wires it.
-	edgeTableC chan []string
+	// edgeStreamActive is true once the dedicated per-edge stream is active (see
+	// SetEdgeStreamActive's doc comment) — the required either/or with fd 3's
+	// Bead/Edge blocks, mirroring viewOut's role for the VIEW stream. False (the
+	// default) is the REQUIRED fallback: fd 3 keeps emitting the Bead and Edge
+	// blocks exactly as before this migration (headless tests, non-extension
+	// launches). Ingestion (Update/onEdgeGeometry/the beads map) is UNCHANGED
+	// either way — edgeTable/portTable/selection/hit-testing still depend on it;
+	// only the fd-3 WRITE of the Bead/Edge frames is gated by this flag.
+	//
+	// ATOMIC (unlike viewOut, a plain field): SetViewOut is called BEFORE the Trace
+	// drain goroutine exists (main.go constructs SnapshotState and calls SetViewOut
+	// ahead of T.NewWithSinkHook's `go t.drain()`), so there is no concurrent reader
+	// yet. SetEdgeStreamActive is called AFTER the drain goroutine has already
+	// started (it needs md, which needs tr, which starts the drain goroutine at
+	// construction) — a plain bool here would be a genuine data race between this
+	// goroutine's write and emitSnapshot's read on the drain goroutine.
+	edgeStreamActive atomic.Bool
 
-	// nodeTableC is the node-row analogue of portTableC/edgeTableC: the node ids in the
-	// SAME stable row order as the Node block, handed to the stdin/gesture goroutine over a
-	// depth-1, replace-latest channel whenever a new node registers (onNodeGeometry). nil
-	// until SetNodeTableChan wires it.
-	nodeTableC chan []string
+	// selectedEdges publishes the CURRENT edge-selection state (label -> selected) as an
+	// immutable map, atomically, so a dedicated edgeMover goroutine (a stream-owning
+	// goroutine other than the Trace-drain goroutine) can read the current selection via
+	// IsEdgeSelected with no lock — same lock-free cross-goroutine read shape as
+	// portTable/edgeTable/nodeTable above. Republished on every selection-state change
+	// (setSelectedEdge/setSelected's clearSelectedEdges).
+	selectedEdges atomic.Pointer[map[string]bool]
+
+	// portTable publishes the current flattened port-row table (same order as the Port
+	// block) as an immutable slice. Rebuilt on node-geometry changes (the only place ports
+	// change) on the Trace-drain goroutine and read via LookupPortRow from the stdin/gesture
+	// goroutine — the atomic pointer hands off an immutable snapshot with no lock.
+	portTable atomic.Pointer[[]PortRowEntry]
+
+	// edgeTable publishes the current edge-row table (the edge labels in the SAME stable
+	// row order as the Edge block) as an immutable slice. Rebuilt whenever a new edge is
+	// registered (onEdgeGeometry) on the Trace-drain goroutine and read via LookupEdgeRow
+	// from the gesture goroutine — the atomic pointer hands off an immutable snapshot with
+	// no lock. This is the edge analogue of portTable: a numeric edge-row hit resolves to
+	// its edge label so the gesture FSM can mark the Go-owned edge selection.
+	edgeTable atomic.Pointer[[]string]
+
+	// nodeTable publishes the current node-row table (the node ids in the SAME stable row
+	// order as the Node block) as an immutable slice. Rebuilt whenever a new node registers
+	// (onNodeGeometry) on the Trace-drain goroutine and read via LookupNodeRow from the
+	// gesture goroutine — the atomic pointer hands off an immutable snapshot with no lock.
+	// This is the node analogue of portTable/edgeTable: a numeric node-row hit resolves to
+	// its node id so the gesture FSM can drag/select the Go-owned node.
+	nodeTable atomic.Pointer[[]string]
 
 	// pendingEvents accumulates the per-tick causal trace events since the last snapshot
 	// emit (the same accumulate-then-flush lifecycle as the transient node event flags).
@@ -184,6 +240,69 @@ type SnapshotState struct {
 // SnapshotState exist); leave unset (nil) to keep tests' original per-event emit semantics.
 func (s *SnapshotState) SetTickSource(f func() int64) {
 	s.tickSource = f
+}
+
+// SetViewOut installs the VIEW stream's dedicated fd (see viewOut's doc comment and
+// Buffer/stream_fds.go). Call once at startup, after both this SnapshotState and the
+// fd exist (main.go). Leave uncalled (viewOut stays nil) to keep the fallback: camera/
+// overlay/scene embedded in the fd-3 scene frame, exactly as before this migration —
+// this is what every existing test and headless launch already gets, unchanged.
+func (s *SnapshotState) SetViewOut(w io.Writer) {
+	s.viewOut = w
+}
+
+// SetEdgeStreamActive installs the either/or for the fd-3 Bead/Edge blocks (see
+// edgeStreamActive's doc comment): pass true once every edgeMover has been wired to its
+// own dedicated fd (nodes/Wiring's MoveDispatch.SetEdgeStreams, called from main.go when
+// WIREFOLD_STREAM_FDS carries an "edge" entry). Leave uncalled (edgeStreamActive stays
+// false) to keep the fallback: fd 3 keeps emitting the Bead and Edge blocks exactly as
+// before this migration — required for headless tests and non-extension launches.
+func (s *SnapshotState) SetEdgeStreamActive(active bool) {
+	s.edgeStreamActive.Store(active)
+}
+
+// PortRowFor resolves (node, port, isInput) to its buffer PORT-ROW index via the
+// published port-row table — the REVERSE of LookupPortRow. Used by a dedicated
+// edgeMover goroutine (a goroutine other than the Trace drain) to resolve its own
+// SrcPortRow/DstPortRow for its per-edge stream frame; safe to call cross-goroutine for
+// the same reason LookupPortRow is (reads an immutable atomically-published slice).
+// ok=false when no port matches (unresolved — the same -1 sentinel writeEdgeBlock uses).
+func (s *SnapshotState) PortRowFor(node, port string, isInput bool) (int32, bool) {
+	tbl := s.portTable.Load()
+	if tbl == nil {
+		return -1, false
+	}
+	for i, e := range *tbl {
+		if e.Node == node && e.Port == port && e.IsInput == isInput {
+			return int32(i), true
+		}
+	}
+	return -1, false
+}
+
+// IsEdgeSelected reports whether label is the CURRENT click-selected edge, via the
+// published selectedEdges map. Safe to call from a goroutine other than the Trace drain
+// (reads an immutable atomically-published map, same shape as portTable/edgeTable/
+// nodeTable). false when never registered or not currently selected.
+func (s *SnapshotState) IsEdgeSelected(label string) bool {
+	m := s.selectedEdges.Load()
+	if m == nil {
+		return false
+	}
+	return (*m)[label]
+}
+
+// rebuildSelectedEdges republishes the selectedEdges map from the current s.edges/
+// s.edgeLabels state. Called from the Trace-drain goroutine whenever edge selection
+// changes (setSelectedEdge, clearSelectedEdges).
+func (s *SnapshotState) rebuildSelectedEdges() {
+	m := make(map[string]bool, len(s.edges))
+	for i, e := range s.edges {
+		if e.selected == 1 {
+			m[s.edgeLabels[i]] = true
+		}
+	}
+	s.selectedEdges.Store(&m)
 }
 
 // eventRec is one buffered causal event, holding string identities that buildSnapshot
@@ -281,24 +400,16 @@ type interiorSlotState struct {
 	ox, oy, oz float64
 }
 
-// edgeSnapState holds persistent segment endpoints for one edge, plus the edge's
-// source and destination node ids (edge-graph topology used by the on-surface
-// selection highlight). srcNode/dstNode are resolved to node-row indices at
-// buildSnapshot time (a node may register after its edges do).
+// edgeSnapState holds one edge's source/dest NODE ids (edge-graph topology used by the
+// on-surface selection highlight) and PORT NAMES (used to resolve SrcPortRow/DstPortRow
+// at buildEdgeFrame time via portRowLookup). srcNode/dstNode are resolved to node-row
+// indices at buildSnapshot time (a node may register after its edges do). NO endpoint
+// coordinates are stored here — see bufLayoutEdge's doc comment in layout.go for why
+// (the endpoint-tear fix): the endpoint lives on the node-owned Port block, and this
+// struct carries only the reference (node id + port name), never a copy of the value.
 type edgeSnapState struct {
-	sx, sy, sz float64
-	ex, ey, ez float64
-	srcNode    string
-	dstNode    string
-	// srcPort/dstPort are this edge's endpoint PORT NAMES (source OUT-port, dest
-	// IN-port). buildSnapshot uses them, together with srcNode/dstNode, to look up
-	// the SAME per-node port world position the Port block was just written from
-	// (portWorldPos) and derive the Edge block's SX..EZ from that lookup instead of
-	// from sx..ez above — sx..ez are only ever a snapshot of what the edge's own
-	// goroutine last emitted, which can be one clock cycle stale mid-drag relative
-	// to the node's own live port geometry (see CLAUDE.md/the edge-tube drift fix).
-	// sx..ez remain the FALLBACK for an edge whose endpoint port hasn't resolved yet
-	// (edges can register before their endpoint nodes do, see below).
+	srcNode string
+	dstNode string
 	srcPort string
 	dstPort string
 	// selected is PERSISTENT (not a transient event flag): 1 marks this edge as the
@@ -531,75 +642,67 @@ func (s *SnapshotState) PortCount() int {
 // BuildSnapshot exposes the snapshot builder for tests.
 func (s *SnapshotState) BuildSnapshot() []byte { return s.buildSnapshot() }
 
-// sendLatestTableNonBlocking delivers v on ch WITHOUT ever blocking the caller (the Trace
-// drain goroutine, which must never stall waiting on the stdin/gesture goroutine). ch is a
-// depth-1 buffered channel; if it already holds a stale pending table (the stdin/gesture
-// goroutine hasn't drained it yet), that stale value is dropped and replaced — LATEST WINS
-// is correct here for the same reason it's correct for clock speed/held values
-// (nodes/Wiring/clock.go SendSpeedNonBlocking/SendLatestNonBlocking): a row table is
-// current absolute state, not an event stream a reader must see every element of. ch may be
-// nil (unwired in tests / builds that never call the Set*TableChan setters below), in which
-// case this is a no-op — a nil channel send/receive is never selected.
-func sendLatestTableNonBlocking[V any](ch chan V, v V) {
-	if ch == nil {
-		return
-	}
-	select {
-	case ch <- v:
-		return
-	default:
-	}
-	// Buffer full: drain the stale value, then place the new one. Both steps are
-	// non-blocking; if the reader raced us and drained it first between the two selects,
-	// the second send below still succeeds (buffer now empty).
-	select {
-	case <-ch:
-	default:
-	}
-	select {
-	case ch <- v:
-	default:
-	}
-}
+// BuildBeadFrame exposes the bead-frame builder for tests.
+func (s *SnapshotState) BuildBeadFrame() []byte { return s.buildBeadFrame() }
 
-// SetPortTableChan wires the depth-1, replace-latest channel this drain goroutine hands the
-// port-row table to (the stdin/gesture goroutine's MoveDispatch.portTbl is the sole
-// reader). Call once at startup after LoadTopology, before any node goroutine can emit
-// node-geometry (main.go). nil (never called) makes rebuildPortTable's send a no-op.
-func (s *SnapshotState) SetPortTableChan(ch chan []T.PortRow) { s.portTableC = ch }
+// BuildNodeFrame exposes the node-owner-group frame builder (Node/Interior/Port blocks +
+// Label/PortName bytes) for tests.
+func (s *SnapshotState) BuildNodeFrame() []byte { return s.buildNodeFrame() }
 
-// SetEdgeTableChan is the edge-row analogue of SetPortTableChan.
-func (s *SnapshotState) SetEdgeTableChan(ch chan []string) { s.edgeTableC = ch }
+// BuildEdgeFrame exposes the Edge-frame builder (Edge block + edge-label bytes) for tests.
+func (s *SnapshotState) BuildEdgeFrame() []byte { return s.buildEdgeFrame() }
 
-// SetNodeTableChan is the node-row analogue of SetPortTableChan.
-func (s *SnapshotState) SetNodeTableChan(ch chan []string) { s.nodeTableC = ch }
-
-// rebuildPortTable rebuilds the port-row table in the SAME flattened order buildSnapshot
-// writes the Port block: for each node in stable node-row order, that node's ports in
-// node-geometry Ports order. Called from the Trace-drain goroutine whenever a node-geometry
-// event changes the port set — on every node-geometry re-emit, so potentially high
-// frequency during a drag — and hands the fresh table off via a non-blocking, drop-old send
-// so this goroutine never stalls on a busy stdin/gesture reader.
+// rebuildPortTable rebuilds and atomically publishes the port-row table in the SAME
+// flattened order buildSnapshot writes the Port block: for each node in stable node-row
+// order, that node's ports in node-geometry Ports order. Called from the Trace-drain
+// goroutine whenever a node-geometry event changes the port set. The published slice is
+// immutable — LookupPortRow reads it lock-free from another goroutine.
 func (s *SnapshotState) rebuildPortTable() {
-	tbl := make([]T.PortRow, 0, s.PortCount())
+	tbl := make([]PortRowEntry, 0, s.PortCount())
 	for i := range s.nodes {
 		node := s.nodeIDs[i]
 		for _, p := range s.nodes[i].ports {
-			tbl = append(tbl, T.PortRow{Node: node, Port: p.name, IsInput: p.isInput})
+			tbl = append(tbl, PortRowEntry{Node: node, Port: p.name, IsInput: p.isInput})
 		}
 	}
-	sendLatestTableNonBlocking(s.portTableC, tbl)
+	s.portTable.Store(&tbl)
 }
 
-// rebuildNodeTable rebuilds the node-row table — the node ids in the SAME stable row order
-// buildSnapshot writes the Node block (node id insertion order). Called from the
-// Trace-drain goroutine whenever a new node registers (low frequency: once per node) and
-// hands the fresh table off via the same non-blocking, drop-old send as rebuildPortTable,
-// for uniformity.
+// LookupPortRow resolves a numeric buffer PORT-ROW index to its (node, port, isInput)
+// identity via the published port-row table. ok=false for an out-of-range row or before
+// any port has been registered. Safe to call from a goroutine other than the Trace drain
+// (reads an immutable atomically-published slice). This is the row→(node,port) resolution
+// the gesture FSM uses for wiring/handhold — the numeric buffer carries no port strings.
+func (s *SnapshotState) LookupPortRow(row int) (node, port string, isInput, ok bool) {
+	tbl := s.portTable.Load()
+	if tbl == nil || row < 0 || row >= len(*tbl) {
+		return "", "", false, false
+	}
+	e := (*tbl)[row]
+	return e.Node, e.Port, e.IsInput, true
+}
+
+// rebuildNodeTable rebuilds and atomically publishes the node-row table — the node ids in
+// the SAME stable row order buildSnapshot writes the Node block (node id insertion order).
+// Called from the Trace-drain goroutine whenever a new node registers. The published slice
+// is immutable — LookupNodeRow reads it lock-free from the gesture goroutine.
 func (s *SnapshotState) rebuildNodeTable() {
 	tbl := make([]string, len(s.nodeIDs))
 	copy(tbl, s.nodeIDs)
-	sendLatestTableNonBlocking(s.nodeTableC, tbl)
+	s.nodeTable.Store(&tbl)
+}
+
+// LookupNodeRow resolves a numeric buffer NODE-ROW index to its node id via the published
+// node-row table. ok=false for an out-of-range row or before any node registers. This is the
+// node analogue of LookupPortRow/LookupEdgeRow: a numeric node-row hit (the node
+// InstancedMesh instanceId == its buffer node row) resolves back to the node id here in Go,
+// so the numeric buffer carries no node id strings and the webview forwards only the row.
+func (s *SnapshotState) LookupNodeRow(row int) (nodeID string, ok bool) {
+	tbl := s.nodeTable.Load()
+	if tbl == nil || row < 0 || row >= len(*tbl) {
+		return "", false
+	}
+	return (*tbl)[row], true
 }
 
 // --- internal helpers --------------------------------------------------------
@@ -660,8 +763,6 @@ func (s *SnapshotState) onEdgeGeometry(ev T.Event) {
 	}
 	idx := s.edgeIndex[label]
 	e := &s.edges[idx]
-	e.sx, e.sy, e.sz = ev.SX, ev.SY, ev.SZ
-	e.ex, e.ey, e.ez = ev.EX, ev.EY, ev.EZ
 	// Node (source) and Target (dest) carry the edge's endpoint node ids for the
 	// on-surface adjacency; preserve any previously-set ids if a later emit omits them.
 	if ev.Node != "" {
@@ -670,30 +771,15 @@ func (s *SnapshotState) onEdgeGeometry(ev T.Event) {
 	if ev.Target != "" {
 		e.dstNode = ev.Target
 	}
+	// SrcPort/DstPort carry the edge's endpoint port NAMES, resolved to buffer PORT-ROW
+	// indices at buildEdgeFrame time (portRowLookup) — see edgeSnapState's doc comment
+	// for why no endpoint coordinate is stored here at all.
 	if ev.SrcPort != "" {
 		e.srcPort = ev.SrcPort
 	}
 	if ev.DstPort != "" {
 		e.dstPort = ev.DstPort
 	}
-}
-
-// portWorldPos looks up the CURRENT world position of one (node, port) pair from the
-// same per-node port data writePortBlock (pack.go) writes the Port block from. Returns
-// ok=false when the node hasn't registered yet, or has registered but doesn't (yet)
-// carry a port of that name/direction — both legitimate during load, when an edge can
-// register before its endpoint nodes do.
-func (s *SnapshotState) portWorldPos(nodeID, portName string, isInput bool) (x, y, z float64, ok bool) {
-	idx, exists := s.nodeIndex[nodeID]
-	if !exists {
-		return 0, 0, 0, false
-	}
-	for _, p := range s.nodes[idx].ports {
-		if p.name == portName && p.isInput == isInput {
-			return p.px, p.py, p.pz, true
-		}
-	}
-	return 0, 0, 0, false
 }
 
 // onLayoutLink registers one LAYOUT-link pair (Node=one endpoint, Target=the other), sourced
@@ -773,6 +859,7 @@ func (s *SnapshotState) setSelectedEdge(label string) {
 	for i := range s.nodes {
 		s.nodes[i].selected = 0
 	}
+	s.rebuildSelectedEdges()
 }
 
 // setHovered marks the hovered entity and clears hover on every other node and port. A
@@ -808,16 +895,30 @@ func (s *SnapshotState) clearSelectedEdges() {
 	for i := range s.edges {
 		s.edges[i].selected = 0
 	}
+	s.rebuildSelectedEdges()
 }
 
-// rebuildEdgeTable rebuilds the edge-row table — the edge labels in the SAME stable row
-// order buildSnapshot writes the Edge block (edge label insertion order). Called from the
-// Trace-drain goroutine whenever a new edge registers (low frequency: once per edge) and
-// hands the fresh table off via the same non-blocking, drop-old send as rebuildPortTable.
+// rebuildEdgeTable rebuilds and atomically publishes the edge-row table — the edge labels
+// in the SAME stable row order buildSnapshot writes the Edge block (edge label insertion
+// order). Called from the Trace-drain goroutine whenever a new edge registers. The
+// published slice is immutable — LookupEdgeRow reads it lock-free from another goroutine.
 func (s *SnapshotState) rebuildEdgeTable() {
 	tbl := make([]string, len(s.edgeLabels))
 	copy(tbl, s.edgeLabels)
-	sendLatestTableNonBlocking(s.edgeTableC, tbl)
+	s.edgeTable.Store(&tbl)
+}
+
+// LookupEdgeRow resolves a numeric buffer EDGE-ROW index to its edge label via the
+// published edge-row table. ok=false for an out-of-range row or before any edge registers.
+// Safe to call from a goroutine other than the Trace drain (reads an immutable atomically-
+// published slice). This is the row→edge resolution the gesture FSM uses to mark the
+// Go-owned edge selection — the numeric buffer carries no edge label strings.
+func (s *SnapshotState) LookupEdgeRow(row int) (label string, ok bool) {
+	tbl := s.edgeTable.Load()
+	if tbl == nil || row < 0 || row >= len(*tbl) {
+		return "", false
+	}
+	return (*tbl)[row], true
 }
 
 // nodeRowIndex returns the buffer node-row index for a node id, or -1 when the id is
@@ -861,17 +962,45 @@ func (s *SnapshotState) emitSnapshot() {
 	s.pendingEvents = ready
 
 	snap := s.buildSnapshot()
+	beadFrame := s.buildBeadFrame()
+	nodeFrame := s.buildNodeFrame()
+	edgeFrame := s.buildEdgeFrame()
 	if s.out != nil {
-		var hdr [4]byte
-		binary.LittleEndian.PutUint32(hdr[:], uint32(1+len(snap)))
 		// Write errors are intentionally ignored: this is the fire-and-forget Go→TS render
 		// stream (CLAUDE.md — no ack, no delivery signal), emitted every tick. Logging on
 		// failure would be a per-tick firehose (see log-flood lesson), and there is no caller
 		// that could act on the error. A dead peer (broken pipe) is a lifecycle event: the
 		// host tears the Go process down, so there is nothing to recover here.
-		_, _ = s.out.Write(hdr[:])
-		_, _ = s.out.Write([]byte{BufBlockTagScene})
-		_, _ = s.out.Write(snap)
+		//
+		// Four frames, each independently length-prefixed + tagged: bead, then node, then
+		// edge, then scene LAST. Order matters here (unlike the earlier bead-only split): the
+		// ext host's .probe buffer-decoded log resolves the SCENE frame's EVENT block
+		// node/port/edge rows against the NODE and EDGE frames — writing node and edge before
+		// scene guarantees the ext host's per-tag frame cache already holds THIS tick's node
+		// and edge frames by the time it decodes this tick's scene frame (see runCommand.ts
+		// handleFd3). Edge is written after node for the same reason the LayoutLink block's
+		// resolution needs the node frame cached first — no direct ordering requirement
+		// between node and edge themselves, but this keeps every downstream-referenced frame
+		// ahead of the frame that references it.
+		// Either/or with the dedicated per-edge streams (edgeStreamActive — see its doc
+		// comment): when active, every edgeMover writes its OWN combined edge+bead frame
+		// to its OWN fd (node_mover.go's writeStreamFrame), so the fd-3 Bead and Edge
+		// blocks are skipped here entirely — never double-sourced from both places.
+		if !s.edgeStreamActive.Load() {
+			s.writeFrame(BufBlockTagBead, beadFrame)
+			s.writeFrame(BufBlockTagEdge, edgeFrame)
+		}
+		s.writeFrame(BufBlockTagNode, nodeFrame)
+		s.writeFrame(BufBlockTagScene, snap)
+	}
+	// VIEW stream: when the dedicated fd is active (s.viewOut != nil), camera/overlay/
+	// scene were already EXCLUDED from `snap` above (buildSnapshot's either/or) — write
+	// them here instead, as their own untagged frame on their own fd (no tag byte: the
+	// fd position already identifies the stream, see stream_fds.go). When s.viewOut is
+	// nil (the fallback), buildSnapshot already embedded them in `snap` above and there
+	// is nothing further to write here.
+	if s.viewOut != nil {
+		s.writeRawFrame(s.viewOut, s.buildViewFrame())
 	}
 	s.clearTransients()
 	// Restore the deferred events (clearTransients truncated pendingEvents to empty).
@@ -879,6 +1008,28 @@ func (s *SnapshotState) emitSnapshot() {
 	// This emit just published the current bead state (buildSnapshot always packs s.beads),
 	// regardless of what triggered it — clear the coalesce-tracking flag.
 	s.positionDirty = false
+}
+
+// writeFrame writes one [len:u32-LE][tag:u8][payload] frame to s.out. len counts the tag
+// byte plus len(payload). Errors are ignored — see emitSnapshot's comment on why.
+func (s *SnapshotState) writeFrame(tag byte, payload []byte) {
+	var hdr [4]byte
+	binary.LittleEndian.PutUint32(hdr[:], uint32(1+len(payload)))
+	_, _ = s.out.Write(hdr[:])
+	_, _ = s.out.Write([]byte{tag})
+	_, _ = s.out.Write(payload)
+}
+
+// writeRawFrame writes one [len:u32-LE][payload] frame to w, WITHOUT a tag byte — used
+// for a stream on its OWN dedicated fd (today, the VIEW stream), where the fd position
+// already identifies the kind (see Buffer/stream_fds.go), so there is nothing left to
+// discriminate inside the frame. Errors are ignored, same reasoning as writeFrame/
+// emitSnapshot's comment (fire-and-forget, no delivery guarantee on this channel).
+func (s *SnapshotState) writeRawFrame(w io.Writer, payload []byte) {
+	var hdr [4]byte
+	binary.LittleEndian.PutUint32(hdr[:], uint32(len(payload)))
+	_, _ = w.Write(hdr[:])
+	_, _ = w.Write(payload)
 }
 
 // eventReady reports whether every node/edge identity an event references is registered, so

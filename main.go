@@ -98,6 +98,24 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 	// Register the snapshot tick source's own speed channel alongside every other
 	// clock-holder's, so a speed change reaches it too (see the SetTickSource comment above).
 	speedSinks = append(speedSinks, snapSpeedCh)
+	// The per-edge dedicated stream (memory/feedback_no_single_writer_bridge.md): when
+	// WIREFOLD_STREAM_FDS carries an "edge" entry, wire every edgeMover to its OWN fd
+	// (fd = baseFd + edgeRow, edgeRow = the stable seed order — see
+	// MoveDispatch.SetEdgeStreams) and tell snapState to stop emitting the fd-3 Bead/Edge
+	// blocks (the required either/or). Unset (headless tests, non-extension launches)
+	// leaves both edgeStreamActive and every edgeMover's streamOut at their zero values
+	// (false/nil) — the fallback: fd 3 keeps carrying Bead/Edge exactly as before. MUST run
+	// BEFORE the node/edge row-seed loop below (tr.NodeGeometry/tr.Geometry): those seed
+	// events queue onto Trace's channel and are processed by the ALREADY-RUNNING drain
+	// goroutine (started at T.NewWithSinkHook above), so if SetEdgeStreamActive ran after
+	// the seed loop, the drain goroutine could process one or more seed events with
+	// edgeStreamActive still false and emit a stray fd-3 Bead/Edge frame before this flips —
+	// running it first means every event the drain goroutine ever sees (seed or live) is
+	// processed with the final edgeStreamActive value already in effect.
+	if edgeBase, ok := streamFDs[B.StreamKindEdge]; ok {
+		md.SetEdgeStreams(edgeBase, snapState.PortRowFor, snapState.IsEdgeSelected, B.BuildEdgeStreamFrame)
+		snapState.SetEdgeStreamActive(true)
+	}
 	// One example startup breadcrumb — proves the debug channel end-to-end and is genuinely
 	// useful (which topology loaded, how many nodes). Sparse: once per run.
 	tr.Breadcrumb("topology-loaded", topologyPath, "", fmt.Sprintf("nodes=%d", len(nodes)))

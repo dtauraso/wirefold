@@ -74,16 +74,12 @@ type EditMsg =
 // geometry. It is NOT a camera pose sent by TS — the model keeps Go owning the camera.
 export type RawPointerKind = "pointerdown" | "pointermove" | "pointerup" | "wheel" | "home";
 
-/** The stateless raycast hit: which rendered entity is under the pointer.
+/** The stateless raycast hit: which rendered entity is under the pointer + its world point.
  *  kind classifies the rendered target (three.js hit-testing). Every entity hit carries ONLY a
  *  numeric buffer ROW — Go resolves the row back to its entity via its own row tables, so NO id
  *  string crosses the bridge. isInput is vestigial (Go derives the port side from its port-row
  *  table). nodeRow/portRow/edgeRow are the buffer NODE/PORT/EDGE row indices (the InstancedMesh
- *  instanceId == its buffer row), each -1 when the hit is not of that kind. There is no world
- *  point on this record: any ray/plane unprojection Go needs (ring-anchor drag, node-drag
- *  target) is computed Go-side from the raw pointer NDC + Go's own camera/surface state
- *  (nodes/Wiring/gesture.go pointerOnRingPlane / rayDirThroughNDC), never carried across the
- *  bridge. */
+ *  instanceId == its buffer row), each -1 when the hit is not of that kind. */
 export type RawHit = {
   kind: "port" | "handhold" | "node" | "edge" | "torus" | "empty";
   isInput: boolean;
@@ -99,6 +95,9 @@ export type RawHit = {
   /** Term-id for a handhold hit (+θ=0, +φ=1, -θ=2, -φ=3; NavGuides.tsx HANDHOLD_TERM_TAG);
    *  -1 when not a handhold hit. Go decodes comp/sign from it (nodes/Wiring/gesture.go). */
   handholdTerm: number;
+  x: number;
+  y: number;
+  z: number;
 };
 
 export type RawInputEvent = {
@@ -148,7 +147,16 @@ export type HostToWebviewMsg =
   // Go → TS is the binary content buffer ONLY (no id/label sidecar): each node's human label
   // rides the buffer node block (LabelOff/LabelLen into the trailing label section) and is
   // decoded row-keyed via buffer-decode nodeLabel.
-  | { type: "buffer-snapshot"; buffer: ArrayBuffer };
+  //
+  // tag carries the fd-3 frame's block tag (schema/frame-tags.ts BUF_BLOCK_TAG_SCENE /
+  // BUF_BLOCK_TAG_BEAD / BUF_BLOCK_TAG_NODE / BUF_BLOCK_TAG_EDGE), or a SYNTHETIC tag the
+  // ext host attaches when relaying a frame decoded off a dedicated fd (never a wire tag
+  // byte there — see frame-tags.ts): BUF_BLOCK_TAG_VIEW (the singleton view fd) or
+  // BUF_BLOCK_TAG_EDGE_STREAM (one of the per-edge fds — row names WHICH edge, since
+  // there are many, unlike view's singleton). main.tsx routes the payload to the right
+  // cell (snapshot-buffer.ts's scene/bead/node/edge/view cells, or the per-edge-row cell
+  // for BUF_BLOCK_TAG_EDGE_STREAM) without re-decoding the buffer.
+  | { type: "buffer-snapshot"; buffer: ArrayBuffer; tag: number; row?: number };
 
 export const WEBVIEW_TO_HOST_TYPES: ReadonlySet<WebviewToHostMsg["type"]> = new Set([
   "ready", "webview-log", "edit", "save", "raw-input", "go-record",
@@ -199,8 +207,11 @@ export function parseHostToWebview(raw: unknown): HostToWebviewMsg | undefined {
   }
   switch (t) {
     case "buffer-snapshot":
-      // buffer must be an ArrayBuffer (transferred zero-copy from the host).
-      return m.buffer instanceof ArrayBuffer ? (m as unknown as HostToWebviewMsg) : undefined;
+      // buffer must be an ArrayBuffer (transferred zero-copy from the host); tag must be
+      // the numeric fd-3 block tag it carries.
+      return m.buffer instanceof ArrayBuffer && typeof m.tag === "number"
+        ? (m as unknown as HostToWebviewMsg)
+        : undefined;
     default:
       return undefined;
   }

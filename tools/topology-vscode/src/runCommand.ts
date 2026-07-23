@@ -7,7 +7,57 @@ import { buildBinary, maxGoMtime, killOrphanedSims } from "./goBuild";
 import { frameRecord } from "./schema/input-layout";
 import { PROBE_DIR, PROBE_FILES } from "./probe-files";
 import { decodeBufferLog } from "./buffer-log";
-import { BUF_BLOCK_TAG_SCENE } from "./schema/frame-tags";
+import { BUF_BLOCK_TAG_SCENE, BUF_BLOCK_TAG_BEAD, BUF_BLOCK_TAG_NODE, BUF_BLOCK_TAG_EDGE, BUF_BLOCK_TAG_VIEW, BUF_BLOCK_TAG_EDGE_STREAM } from "./schema/frame-tags";
+
+// The fd-ALLOCATION contract (mirrors Buffer/stream_fds.go's doc comment): the ext host
+// knows the topology from the spec it holds, computes a base fd PER STREAM KIND, and
+// passes it to Go via WIREFOLD_STREAM_FDS = "kind:baseFd,kind:baseFd,…". VIEW_FD is the
+// base (and, since view is a singleton stream — one gesture/MoveDispatch goroutine
+// network-wide — also the ONLY) fd for the "view" kind: fd = baseFd["view"] + rowIndex,
+// rowIndex always 0 for this singleton. This is the FIRST stream migrated off fd 3 onto
+// its own dedicated inherited pipe (memory/feedback_no_single_writer_bridge.md).
+const VIEW_FD = 4;
+
+// EDGE_BASE_FD: the base fd for the "edge" stream kind — one dedicated fd PER EDGE ROW,
+// fd = EDGE_BASE_FD + edgeRow (edgeRow = that edge's stable seed-order row, matching
+// Buffer's Edge block row order — see nodes/Wiring's MoveDispatch.SetEdgeStreams). Sits
+// right after the view fd. Layout today: fd 0-2 stdin/stdout/stderr, fd 3 = fd3 (node/
+// interior/port dual-path — see the module doc), fd 4 = view (singleton), fd 5..5+E-1 =
+// one per edge (E = countEdges(topologyPath) below).
+const EDGE_BASE_FD = 5;
+
+// MAX_EDGE_STREAMS bounds the per-edge fd range: one dedicated pipe PER EDGE (see
+// EDGE_BASE_FD's doc comment) — fine for current graph sizes (this is a scaling bound the
+// no-single-writer-bridge migration accepts explicitly, not an oversight). A topology with
+// more edges than this falls back entirely to the shared fd-3 Edge/Bead path (edgeCount is
+// clamped, WIREFOLD_STREAM_FDS omits "edge", Go never calls SetEdgeStreamActive).
+const MAX_EDGE_STREAMS = 256;
+
+// countEdges reads the topology spec's edge count WITHOUT the full Go-side validate/build
+// pipeline — just enough structure to size the pre-spawn stdio pipe array (the ext host
+// must know the fd RANGE before spawning Go, so it cannot ask Go for this). Mirrors
+// nodes/Wiring/loader.go's parseSpec dispatch: a directory tree (one file per
+// `<root>/edges/<label>.json`) or a monolithic topology.json (`{"edges":[...]}`). Returns
+// 0 (⇒ no dedicated edge fds; the fd-3 fallback stays active) on any read/parse failure —
+// a missing/malformed spec is Go's error to report, not this sizing probe's.
+export function countEdges(topologyPath: string): number {
+  try {
+    const st = fs.statSync(topologyPath);
+    if (st.isDirectory()) {
+      const edgesDir = path.join(topologyPath, "edges");
+      if (!fs.existsSync(edgesDir)) return 0;
+      return fs.readdirSync(edgesDir).filter((f) => f.endsWith(".json")).length;
+    }
+    const raw = fs.readFileSync(topologyPath, "utf8");
+    const spec: unknown = JSON.parse(raw);
+    if (spec && typeof spec === "object" && Array.isArray((spec as { edges?: unknown }).edges)) {
+      return (spec as { edges: unknown[] }).edges.length;
+    }
+    return 0;
+  } catch {
+    return 0;
+  }
+}
 
 
 /** Format a Go-side error as a probe JSONL line (src="go", kind="error"). */
@@ -174,6 +224,12 @@ function ensureBinaryBuilt(
 interface StreamParseState {
   stdoutBuf: string;
   fd3Buf: Buffer;
+  // Partial-frame carry-over for the dedicated VIEW fd (VIEW_FD). Same role as fd3Buf,
+  // separate because it is a DIFFERENT pipe with its own chunk boundaries.
+  viewBuf: Buffer;
+  // Partial-frame carry-over PER EDGE fd (index = edge row), same role as viewBuf but one
+  // per dedicated edge pipe — each is its OWN pipe with its own chunk boundaries.
+  edgeBufs: Buffer[];
 }
 
 // freshStreamState mints empty parse state for a newly spawned process. run() calls it
@@ -181,9 +237,15 @@ interface StreamParseState {
 // the next process — concatenating them would make splitFrames read a frame length from
 // inside stale bytes and freeze (or silently starve) the scene. Binding the reset to the
 // spawn, not to each exit handler, makes "start a process with leftover bytes" impossible
-// to express rather than a rule every exit path must remember.
-function freshStreamState(): StreamParseState {
-  return { stdoutBuf: "", fd3Buf: Buffer.alloc(0) };
+// to express rather than a rule every exit path must remember. edgeCount sizes edgeBufs to
+// this spawn's edge-fd range (0 when the dedicated edge path is off).
+function freshStreamState(edgeCount: number): StreamParseState {
+  return {
+    stdoutBuf: "",
+    fd3Buf: Buffer.alloc(0),
+    viewBuf: Buffer.alloc(0),
+    edgeBufs: Array.from({ length: edgeCount }, () => Buffer.alloc(0)),
+  };
 }
 
 export class BuildAndRunRunner {
@@ -200,22 +262,32 @@ export class BuildAndRunRunner {
   // Per-process partial-frame parse state (stdout line + fd3 binary frame). Rebuilt at
   // every spawn by run() (freshStreamState), so its lifetime tracks the Go process, not
   // this long-lived runner — see freshStreamState for why that reset is at the spawn.
-  private stream: StreamParseState = freshStreamState();
+  private stream: StreamParseState = freshStreamState(0);
   private probeFile: string | undefined;
   private goErrorsFile: string | undefined;
   private goDebugFile: string | undefined;
   private tsFile: string | undefined;
   private tsErrorsFile: string | undefined;
-  // Last fd3 buffer-snapshot frame, kept so a REMOUNTED webview (which holds no state)
-  // can be handed a full frame instantly on "ready" without round-tripping to Go — see
-  // getLastSnapshot(). This is a keyframe cache of Go's own bytes, not authored state.
-  // MUST be a COPY, not the ArrayBuffer instance handed to onSnapshot/postMessage: VS
-  // Code's webview.postMessage TRANSFERS (does not clone) ArrayBuffers to the webview
-  // process on engines >=1.57 (see the @types/vscode postMessage doc comment — "will be
-  // more efficiently transferred to the webview"), which DETACHES the source buffer
-  // (byteLength -> 0) once posted. Caching the same reference would silently hand a
-  // later "ready" an empty buffer. See runCommand.test.ts for the byteLength assertion.
-  private lastSnapshot: ArrayBuffer | undefined;
+  // Last fd3 frame PER BLOCK TAG (scene, bead — see frame-tags.ts), kept so a REMOUNTED
+  // webview (which holds no state) can be handed a full frame instantly on "ready" without
+  // round-tripping to Go — see getLastFrames(). This is a keyframe cache of Go's own bytes,
+  // not authored state. Each cached entry MUST be a COPY, not the ArrayBuffer instance
+  // handed to onSnapshot/postMessage: VS Code's webview.postMessage TRANSFERS (does not
+  // clone) ArrayBuffers to the webview process on engines >=1.57 (see the @types/vscode
+  // postMessage doc comment — "will be more efficiently transferred to the webview"),
+  // which DETACHES the source buffer (byteLength -> 0) once posted. Caching the same
+  // reference would silently hand a later "ready" an empty buffer. See runCommand.test.ts
+  // for the byteLength assertion.
+  private lastFrames: Map<number, ArrayBuffer> = new Map();
+
+  // Last frame PER EDGE ROW from the dedicated per-edge streams (see StreamParseState.
+  // edgeBufs) — the per-edge analogue of lastFrames, keyed by edge row instead of block
+  // tag (there are many edge streams, not one). Same COPY-before-cache reasoning as
+  // lastFrames (postMessage transfers/detaches ArrayBuffers). Cleared on every spawn.
+  private lastEdgeFrames: Map<number, ArrayBuffer> = new Map();
+  // Current spawn's edge-fd count (0 = dedicated edge path off, the fallback). Recomputed
+  // at every run() call from the topology spec.
+  private edgeCount = 0;
 
   private topologyPath: string | undefined;
 
@@ -283,29 +355,47 @@ export class BuildAndRunRunner {
     this.channel.appendLine("$ " + binPath + " " + topArgs.join(" "));
     this.cancelled = false;
     this.looping = true;
+    // Size the dedicated per-edge fd range from the topology spec BEFORE spawning (the
+    // ext host must know the range up front — see countEdges' doc comment). Clamped to
+    // MAX_EDGE_STREAMS; 0 (spec unreadable, or more edges than the bound) falls back
+    // entirely to the shared fd-3 Edge/Bead path — see MAX_EDGE_STREAMS's doc comment.
+    const edgeCountRaw = countEdges(this.topologyPath ?? path.join(repoRoot, "topology"));
+    this.edgeCount = edgeCountRaw > MAX_EDGE_STREAMS ? 0 : edgeCountRaw;
     // Fresh parse state for this spawn: a prior process's leftover partial frame must
     // never prefix this one's stream (see freshStreamState). This is the single reset
     // point every restart path funnels through, including the looping respawn.
-    this.stream = freshStreamState();
-    // Also drop the cached keyframe: it belongs to the PRIOR process. Without this,
+    this.stream = freshStreamState(this.edgeCount);
+    // Also drop the cached keyframes: they belong to the PRIOR process. Without this,
     // a webview remounting in the window between "ready" and the new process's first
-    // fd3 frame would be replayed the previous process's snapshot via getLastSnapshot().
-    // The freshly spawned Go emits its full scene as its first frame, so continuity is
-    // preserved by that emit — not by re-serving one process's bytes as another's.
-    this.lastSnapshot = undefined;
+    // fd3 frame would be replayed the previous process's frames via getLastFrames().
+    // The freshly spawned Go emits its full scene (and bead) frames again, so continuity
+    // is preserved by that emit — not by re-serving one process's bytes as another's.
+    this.lastFrames.clear();
+    this.lastEdgeFrames.clear();
     // detached: true makes the child the leader of a new process group; the
     // prebuilt binary is the sole group member, so kill(-pid) reaches it
     // directly. Without this, SIGTERM could leave it orphaned on macOS.
     // stdio index 3 = fd3 binary side channel: Go writes length-prefixed binary
-    // snapshot frames here (WIREFOLD_BUF_OUT_FD=3). "pipe" opens a readable pipe
-    // at proc.stdio[3]; the existing stdin(0)/stdout(1)/stderr(2) are unchanged.
+    // snapshot frames here (WIREFOLD_BUF_OUT_FD=3). stdio index VIEW_FD (4) = the
+    // dedicated VIEW-stream pipe (WIREFOLD_STREAM_FDS="view:<VIEW_FD>") — the first
+    // stream migrated off fd 3 onto its own inherited pipe (see the VIEW_FD doc comment
+    // above / Buffer/stream_fds.go). stdio indices EDGE_BASE_FD..EDGE_BASE_FD+edgeCount-1
+    // are one dedicated pipe PER EDGE (see EDGE_BASE_FD's doc comment) — omitted (and
+    // "edge" left out of WIREFOLD_STREAM_FDS) when edgeCount is 0, which is the required
+    // fallback: Go then keeps the Edge/Bead blocks on fd 3. "pipe" opens a readable pipe
+    // at each index; the existing stdin(0)/stdout(1)/stderr(2) are unchanged.
+    const stdio: Array<"pipe"> = ["pipe", "pipe", "pipe", "pipe", "pipe"];
+    for (let i = 0; i < this.edgeCount; i++) stdio.push("pipe");
+    const streamFDsEnv =
+      this.edgeCount > 0 ? `view:${VIEW_FD},edge:${EDGE_BASE_FD}` : `view:${VIEW_FD}`;
     this.proc = cp.spawn(binPath, [...topArgs], {
       cwd: repoRoot,
       detached: true,
-      stdio: ["pipe", "pipe", "pipe", "pipe"],
+      stdio,
       env: {
         ...process.env,
         WIREFOLD_BUF_OUT_FD: "3",
+        WIREFOLD_STREAM_FDS: streamFDsEnv,
       },
     });
     // Flush any framed binary records buffered before this spawn (writeStdin queued them).
@@ -319,6 +409,20 @@ export class BuildAndRunRunner {
     const fd3 = (this.proc.stdio as (NodeJS.ReadableStream | null)[])[3];
     if (fd3) {
       fd3.on("data", (d: Buffer) => this.handleFd3(d));
+    }
+    // VIEW_FD: the dedicated view-stream pipe. Cast for the same reason as fd3 above —
+    // Node's ChildProcess types only narrow stdio[0..2].
+    const viewFd = (this.proc.stdio as (NodeJS.ReadableStream | null)[])[VIEW_FD];
+    if (viewFd) {
+      viewFd.on("data", (d: Buffer) => this.handleViewFd(d));
+    }
+    // Per-edge dedicated pipes: EDGE_BASE_FD..EDGE_BASE_FD+edgeCount-1, one per edge row.
+    for (let row = 0; row < this.edgeCount; row++) {
+      const fdIdx = EDGE_BASE_FD + row;
+      const edgeFd = (this.proc.stdio as (NodeJS.ReadableStream | null)[])[fdIdx];
+      if (edgeFd) {
+        edgeFd.on("data", (d: Buffer) => this.handleEdgeFd(row, d));
+      }
     }
     this.proc.stderr?.on("data", (d: Buffer) => {
       const msg = d.toString();
@@ -383,33 +487,92 @@ export class BuildAndRunRunner {
     const { frames, rest } = splitFrames(this.stream.fd3Buf, chunk);
     this.stream.fd3Buf = rest;
     for (const framed of frames) {
-      // Read and strip the block-tag byte (see frame-tags.ts / Buffer/frame_tags.go).
-      // Today there is exactly one tag, BUF_BLOCK_TAG_SCENE, carrying the whole combined
-      // snapshot exactly as before; every downstream consumer below gets the SAME plain
-      // snapshot bytes (tag-free) it always did.
+      // Read and strip the block-tag byte (see frame-tags.ts / Buffer/frame_tags.go). Four
+      // tags exist today: BUF_BLOCK_TAG_SCENE (the combined scene snapshot, no beads,
+      // node-owner-group blocks, or Edge block), BUF_BLOCK_TAG_BEAD (the self-contained
+      // per-tick bead frame), BUF_BLOCK_TAG_NODE (the self-contained Node/Interior/Port +
+      // Label/PortName frame), and BUF_BLOCK_TAG_EDGE (the self-contained Edge +
+      // EdgeLabel frame). All four route to the webview; only the scene tag carries an
+      // EVENT block for the .probe log.
       const tag = new DataView(framed).getUint8(0);
       const ab = framed.slice(1);
-      if (tag !== BUF_BLOCK_TAG_SCENE) {
-        // No other tag exists yet — an unrecognized tag would mean a protocol drift
-        // between Go and the ext host. Drop it rather than misinterpreting the bytes.
+      if (tag !== BUF_BLOCK_TAG_SCENE && tag !== BUF_BLOCK_TAG_BEAD && tag !== BUF_BLOCK_TAG_NODE && tag !== BUF_BLOCK_TAG_EDGE) {
+        // An unrecognized tag would mean a protocol drift between Go and the ext host.
+        // Drop it rather than misinterpreting the bytes.
         continue;
       }
       // Decode the snapshot's EVENT block into full trace-event .probe lines (the buffer-
-      // decoded log — the DECODE of the same binary that replaces Go's JSON-on-stdout path).
-      if (this.probeFile) {
-        const lines = decodeBufferLog(ab);
+      // decoded log — the DECODE of the same binary that replaces Go's JSON-on-stdout
+      // path). The bead/node/edge frames carry no EVENT block — decode the scene frame
+      // only, resolving node/port rows against the most-recently cached NODE frame and
+      // edge rows against the most-recently cached EDGE frame. Go writes bead, then node,
+      // then edge, then scene LAST each tick (see emitSnapshot's comment) so
+      // this.lastFrames already holds THIS tick's node and edge frames by the time the
+      // scene frame for the same tick is decoded here.
+      if (tag === BUF_BLOCK_TAG_SCENE && this.probeFile) {
+        const nodeFrame = this.lastFrames.get(BUF_BLOCK_TAG_NODE);
+        const edgeFrame = this.lastFrames.get(BUF_BLOCK_TAG_EDGE);
+        // When the dedicated view fd is active, camera/overlay/scene are no longer
+        // embedded in the scene frame (see Buffer/pack.go's either/or) — the
+        // most-recently cached VIEW frame (handleViewFd, its own pipe) carries them
+        // instead. decodeBufferLog resolves either source (see its ViewBlocksOrNull).
+        const viewFrame = this.lastFrames.get(BUF_BLOCK_TAG_VIEW);
+        const lines = decodeBufferLog(ab, nodeFrame, edgeFrame, viewFrame);
         if (lines.length > 0) {
           try {
             fs.appendFileSync(this.probeFile, lines, "utf8");
           } catch { /* swallow */ }
         }
       }
-      // Cache a COPY before handing `ab` off — see the lastSnapshot field comment for why
-      // the reference itself cannot be cached (postMessage may transfer/detach it).
-      this.lastSnapshot = ab.slice(0);
+      // Cache a COPY under this tag before handing `ab` off — see the lastFrames field
+      // comment for why the reference itself cannot be cached (postMessage may
+      // transfer/detach it).
+      this.lastFrames.set(tag, ab.slice(0));
       // Transfer zero-copy to the webview (if a snapshot consumer is registered).
       if (this.onSnapshot) {
-        this.onSnapshot({ type: "buffer-snapshot", buffer: ab });
+        this.onSnapshot({ type: "buffer-snapshot", buffer: ab, tag });
+      }
+    }
+  }
+
+  // handleViewFd parses the dedicated VIEW-stream pipe (VIEW_FD): frames are
+  // [len:u32][payload] with NO tag byte (the fd position already identifies the
+  // stream — see Buffer/stream_fds.go / frame-tags.ts). splitFrames is reused as-is:
+  // it only knows length-prefix framing, never the tag's meaning, so it applies
+  // identically whether or not a tag byte is present inside the payload. Each decoded
+  // frame is relayed to the webview under the SAME "buffer-snapshot" message shape as
+  // the fd-3 tags, tagged BUF_BLOCK_TAG_VIEW (a synthetic ext-host-side tag, never a
+  // wire byte) — this extends the webview's existing tag-routed-cell pattern to a
+  // fifth cell instead of adding a second message shape.
+  private handleViewFd(chunk: Buffer) {
+    const { frames, rest } = splitFrames(this.stream.viewBuf, chunk);
+    this.stream.viewBuf = rest;
+    for (const ab of frames) {
+      // Cache under the synthetic VIEW tag (same lastFrames map, same copy-before-hand-
+      // off reasoning as handleFd3 — see the lastFrames field comment).
+      this.lastFrames.set(BUF_BLOCK_TAG_VIEW, ab.slice(0));
+      if (this.onSnapshot) {
+        this.onSnapshot({ type: "buffer-snapshot", buffer: ab, tag: BUF_BLOCK_TAG_VIEW });
+      }
+    }
+  }
+
+  // handleEdgeFd parses ONE dedicated per-edge stream pipe (fd = EDGE_BASE_FD + row):
+  // frames are [len:u32][payload] with NO tag byte (the fd position already identifies
+  // WHICH edge — see Buffer/stream_fds.go / Buffer/edge_stream_frame.go). splitFrames is
+  // reused as-is, same as handleViewFd. Each decoded frame is relayed to the webview under
+  // the SAME "buffer-snapshot" shape as the other tags, tagged BUF_BLOCK_TAG_EDGE_STREAM
+  // (synthetic, never a wire byte) PLUS `row` so the webview routes it to the right
+  // per-edge cell (there are many edge streams, unlike view's singleton).
+  private handleEdgeFd(row: number, chunk: Buffer) {
+    const carry = this.stream.edgeBufs[row] ?? Buffer.alloc(0);
+    const { frames, rest } = splitFrames(carry, chunk);
+    this.stream.edgeBufs[row] = rest;
+    for (const ab of frames) {
+      // Cache under this edge row (same copy-before-hand-off reasoning as lastFrames).
+      this.lastEdgeFrames.set(row, ab.slice(0));
+      if (this.onSnapshot) {
+        this.onSnapshot({ type: "buffer-snapshot", buffer: ab, tag: BUF_BLOCK_TAG_EDGE_STREAM, row });
       }
     }
   }
@@ -436,17 +599,26 @@ export class BuildAndRunRunner {
     return this.proc !== undefined;
   }
 
-  /** The most recent fd3 buffer-snapshot frame, or undefined if none has arrived yet.
-   *  Used by the "ready" handler to hand a remounted webview a full frame instantly
-   *  (see the lastSnapshot field comment).
+  /** The most recent fd3 frame for EVERY cached block tag (scene, bead, node — see
+   *  frame-tags.ts), or an empty array if none has arrived yet. Used by the "ready"
+   *  handler to hand a remounted webview every cached frame instantly (see the
+   *  lastFrames field comment).
    *
-   *  Returns a FRESH COPY on every call, because the caller posts what it gets and
+   *  Each returned buffer is a FRESH COPY, because the caller posts what it gets and
    *  webview.postMessage TRANSFERS ArrayBuffers — handing out the cached reference
    *  would detach our own cache on the first serve. That breaks the exact case this
    *  cache exists for: while PAUSED no new frame ever arrives to repopulate it, so a
    *  second remount would be served a zero-length buffer. The copy is one per remount. */
-  getLastSnapshot(): ArrayBuffer | undefined {
-    return this.lastSnapshot?.slice(0);
+  getLastFrames(): Array<{ tag: number; buffer: ArrayBuffer }> {
+    return Array.from(this.lastFrames, ([tag, buffer]) => ({ tag, buffer: buffer.slice(0) }));
+  }
+
+  /** The most recent frame for EVERY cached edge row (see lastEdgeFrames), or an empty
+   *  array if none has arrived yet / the dedicated edge path is off. Used by the "ready"
+   *  handler to hand a remounted webview every edge's last frame instantly, the per-edge
+   *  analogue of getLastFrames(). Same fresh-copy-per-remount reasoning. */
+  getLastEdgeFrames(): Array<{ row: number; buffer: ArrayBuffer }> {
+    return Array.from(this.lastEdgeFrames, ([row, buffer]) => ({ row, buffer: buffer.slice(0) }));
   }
 
   /** Framed binary records written before Go's stdin exists, flushed on spawn (see writeStdin/run). */

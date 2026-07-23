@@ -5,10 +5,11 @@
 import { useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
-import { getLatestSnapshot } from "../snapshot-buffer";
-import { decodeSnapshot } from "./buffer-decode";
+import { getLatestBeadFrame } from "../snapshot-buffer";
+import { decodeBeadFrame } from "./buffer-decode";
 import { beadStyleForValue } from "./bead-style";
 import { readBeadX, readBeadY, readBeadZ, readBeadLive, readBeadValue } from "../../schema/buffer-layout";
+import { getEdgeStreamAccessor } from "./edge-stream-blocks";
 
 const BEAD_SPHERE_RADIUS = 4;
 // On-wire (transit) bead ring tube ratio — mirror scene-beads.tsx's PulseBead
@@ -33,27 +34,49 @@ export function BeadInstances({ capacity }: { capacity: number }) {
     const ring = ringRef.current;
     if (!body || !ring) return;
 
-    const snap = getLatestSnapshot();
-    if (!snap) { body.count = 0; ring.count = 0; return; }
-    const decoded = decodeSnapshot(snap);
-    if (!decoded) { body.count = 0; ring.count = 0; return; }
-    const { beadCount, beadView } = decoded;
-
+    // Either/or (memory/feedback_no_single_writer_bridge.md): when the dedicated per-edge
+    // streams are active, EVERY edge's own bead rows are aggregated across ALL edge cells —
+    // there is no single shared Bead frame in that mode (each edge's wire carries only its
+    // own beads). Falls back to the single fd-3 Bead frame when no dedicated edge stream
+    // has arrived yet.
+    const edgeStream = getEdgeStreamAccessor();
     let slot = 0;
-    for (let i = 0; i < beadCount && slot < capacity; i++) {
-      if (!readBeadLive(beadView, i)) continue;
-      const style = beadStyleForValue(readBeadValue(beadView, i));
-      if (!style) continue; // non-0/1 value → hide (never paint a fallback)
-      matRef.current.setPosition(
-        readBeadX(beadView, i),
-        readBeadY(beadView, i),
-        readBeadZ(beadView, i),
-      );
-      body.setMatrixAt(slot, matRef.current);
-      ring.setMatrixAt(slot, matRef.current);
-      body.setColorAt(slot, colRef.current.set(style.fill));
-      ring.setColorAt(slot, colRef.current.set(style.ring));
-      slot++;
+    if (edgeStream) {
+      for (let row = 0; row < edgeStream.edgeCount && slot < capacity; row++) {
+        for (const b of edgeStream.beads(row)) {
+          if (slot >= capacity) break;
+          const style = beadStyleForValue(b.val);
+          if (!style) continue; // non-0/1 value → hide (never paint a fallback)
+          matRef.current.setPosition(b.x, b.y, b.z);
+          body.setMatrixAt(slot, matRef.current);
+          ring.setMatrixAt(slot, matRef.current);
+          body.setColorAt(slot, colRef.current.set(style.fill));
+          ring.setColorAt(slot, colRef.current.set(style.ring));
+          slot++;
+        }
+      }
+    } else {
+      const frame = getLatestBeadFrame();
+      if (!frame) { body.count = 0; ring.count = 0; return; }
+      const decoded = decodeBeadFrame(frame);
+      if (!decoded) { body.count = 0; ring.count = 0; return; }
+      const { beadCount, beadView } = decoded;
+
+      for (let i = 0; i < beadCount && slot < capacity; i++) {
+        if (!readBeadLive(beadView, i)) continue;
+        const style = beadStyleForValue(readBeadValue(beadView, i));
+        if (!style) continue; // non-0/1 value → hide (never paint a fallback)
+        matRef.current.setPosition(
+          readBeadX(beadView, i),
+          readBeadY(beadView, i),
+          readBeadZ(beadView, i),
+        );
+        body.setMatrixAt(slot, matRef.current);
+        ring.setMatrixAt(slot, matRef.current);
+        body.setColorAt(slot, colRef.current.set(style.fill));
+        ring.setColorAt(slot, colRef.current.set(style.ring));
+        slot++;
+      }
     }
     body.count = slot;
     ring.count = slot;

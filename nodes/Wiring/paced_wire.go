@@ -480,6 +480,51 @@ func (pw *PacedWire) stepAll(tick int64) {
 	}
 }
 
+// LiveBeadRow is one in-flight bead's CURRENT world position + value + id, computed with
+// the same lerp math advanceBead uses but with NO side effects — no trace emit, no state
+// mutation. Used only by the dedicated per-edge stream (edgeMover.writeStreamFrame,
+// node_mover.go) to snapshot this wire's current beads without duplicating tr.Position's
+// separate accumulation into Buffer.SnapshotState.
+type LiveBeadRow struct {
+	Val     int
+	X, Y, Z float64
+	Gen     uint64
+}
+
+// LiveBeadRows returns every in-flight, position-streaming bead's CURRENT world position
+// at tick (this wire's own goroutine's clock reading), in FIFO order. Safe to call ONLY
+// from this wire's own goroutine (reads pw.inflight directly, no lock — same single-
+// goroutine-ownership contract stepAll/ReviseInFlightGeometry rely on). A bead with no
+// position stream (bp.streams()==false) is omitted, matching advanceBead's own emit gate.
+func (pw *PacedWire) LiveBeadRows(tick int64) []LiveBeadRow {
+	nowTick := float64(tick)
+	rows := make([]LiveBeadRow, 0, len(pw.inflight))
+	for i := range pw.inflight {
+		b := &pw.inflight[i]
+		if !b.streams {
+			continue
+		}
+		crossTicks := pw.ticksToCross(b.arc)
+		target := nowTick
+		if crossTicks > 0 && nowTick >= b.placementTick+crossTicks {
+			target = b.placementTick + crossTicks
+		}
+		t := 0.0
+		if crossTicks > 0 {
+			t = (target - b.placementTick) / crossTicks
+		}
+		if t < 0 {
+			t = 0
+		}
+		if t > 1 {
+			t = 1
+		}
+		p := lerp(b.seg.Start, b.seg.End, t)
+		rows = append(rows, LiveBeadRow{Val: b.val, X: p.X, Y: p.Y, Z: p.Z, Gen: b.gen})
+	}
+	return rows
+}
+
 // ReviseInFlightGeometry re-derives EVERY in-flight bead's remaining travel after a
 // geometry edit (node-move) changed the edge (MODEL.md "Geometry and time"). It
 // preserves each bead's FRACTIONAL progress t (its proportion along the wire), NOT

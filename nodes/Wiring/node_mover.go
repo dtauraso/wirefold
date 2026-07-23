@@ -14,7 +14,10 @@ package Wiring
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
+	"io"
+	"sync/atomic"
 
 	T "github.com/dtauraso/wirefold/Trace"
 )
@@ -82,64 +85,57 @@ type nodeMover struct {
 	// loader's build-wide speed-sink accumulator; nil in bare test construction, which
 	// is fine — ApplySpeedNonBlocking is a no-op on a nil channel.
 	speedCh chan float64
-	// There is no geomMu, and none is needed: m.geom is now touched by EXACTLY ONE
-	// goroutine — this mover's own inbox-drain goroutine (run/handle). Every writer AND
-	// every reader of it — applyCenter, setPortAnchorId (via handle), emitGeometry's
-	// full-struct copy — runs there and nowhere else. There is no cross-goroutine reader
-	// at all: the former one, MoveDispatch.NodeKind, now reads the SEPARATE immutable
-	// md.kinds table (node_move.go) built once at construction, not nm.geom — so kind
-	// resolution never reaches into a mover's live struct. geom access is safe by plain
-	// single-goroutine confinement, not by a lock and not by a type split.
-	//
-	// (m.geom still splits, in port_geometry.go, into an embedded write-once nodeIdentity
-	// and MUTABLE state; that split predates and outlives this change but is no longer
-	// what makes geom access race-free — confinement is. There is no separate per-node
-	// "Update()" writer goroutine either — that was the retired SLICE 3 architecture.)
+	// There is no geomMu. m.geom (port_geometry.go) splits into an embedded, write-once
+	// nodeIdentity (Kind/Label/R/SceneCenter — set once at construction in loader.go,
+	// grepped clean of any later write anywhere in this package) and MUTABLE state
+	// (ScenePolar/HasPos/ReachR/Inputs/Outputs-element-AnchorId) written only by
+	// applyCenter and handle's moveMsgKindAnchor case. Every writer AND every reader of
+	// the mutable part — applyCenter, setPortAnchorId (via handle), emitGeometry's
+	// full-struct copy — runs exclusively on nodeMover's OWN inbox-drain goroutine
+	// (run/handle), so there is never more than one goroutine touching that memory. The
+	// one cross-goroutine reader, MoveDispatch.NodeKind (node_move.go), called from the
+	// gesture/stdin-reader goroutine, reads ONLY nm.geom.Kind — a field on the embedded
+	// nodeIdentity, which no writer here ever touches. So the two properties that would
+	// require a lock (a mutable field read cross-goroutine, or an identity field that
+	// could gain a second writer) both provably don't hold, by construction of the type
+	// split, not by coincidence of which byte ranges happen to overlap today.
 	//
 	// CHECKED BY CODE: TestNodeKindConcurrentWithApplyCenterUnderRace
-	// (node_mover_geom_race_test.go) drives NodeKind (reading immutable md.kinds) and
-	// applyCenter (writing nm.geom) concurrently under -race, as a standing regression
-	// check that NodeKind stays lock-free and never reaches back into mutable mover state
-	// (a future change routing NodeKind through nm.geom would make it fail).
-	// neighborCenters caches THIS node's own view of every DIRECT domain neighbor's
-	// (edge-adjacent node's) last-reported world center — keyed by neighbor id. Written
-	// ONLY by this node's own goroutine (handle: moveMsgKindNeighborSetC's FromCenter,
-	// and the aimed-port pure-reemit's PartnerCenter field), read ONLY by this node's
-	// own goroutine (partnerCenter at emit time, requantizeLocalPolars, and
-	// commitNodeMoveLocal's reach computation) — no cross-goroutine access at all,
-	// unlike the atomic-snapshot pattern this replaced (each mover reading ANOTHER
-	// mover's published pointer). Seeded once at construction (newMoveDispatch) from
-	// load-time geoms for every edge-adjacent neighbor, so a lookup before the first
-	// move always has a valid (if eventually stale-until-first-report) center.
-	neighborCenters map[string]vec3
-	// reportCh is the SEND end of the movers→gesture position-report channel
-	// (MoveDispatch.posReportCh) — the external-observer pattern portTblC/edgeTblC/
-	// nodeTblC already use, generalized to node centers. applyCenter sends this node's
-	// fresh {id, center} on it non-blockingly every time it commits a new center. nil in
-	// bare test construction that skips newMoveDispatch; a nil-channel send inside a
-	// select-with-default is a no-op, never a block.
-	reportCh chan posReport
+	// (node_mover_geom_race_test.go) drives NodeKind's reader loop and applyCenter's
+	// writer loop concurrently under -race with no lock on either side, as a standing
+	// regression check that the split holds (a future change reintroducing a write to an
+	// identity field, or widening NodeKind's read to a whole-struct copy, would make it
+	// fail). There is no separate per-node "Update()" writer goroutine — that was the
+	// retired SLICE 3 architecture.
+	// snap is an atomically-published immutable snapshot of this node's current
+	// center+reachR. Written only by the mover's own goroutine after every center
+	// update; read by any goroutine (stdin reader) to observe the current position
+	// without crossing into the mover's live geom.
+	snap atomic.Pointer[centerSnap]
 	// sendMove routes a moveMsg to another id's OWN dedicated channel (resolveDest, above)
 	// — no shared inbox, no shared mutable state.
 	// Bound to md.enqueueFor(nm): it appends to nm.pending and immediately attempts a
 	// non-blocking flush (never blocks the calling handler goroutine).
 	sendMove func(id string, msg moveMsg)
 	edgeIDs  []string
-	// commitLocal is the OWNER-GOROUTINE commit path, bound at construction to a closure
-	// that calls md.commitNodeMoveLocal with THIS mover (newMoveDispatch), so the commit
-	// never has to look the mover back up by id — there is no nodeMovers directory to look
-	// it up in. It applies this node's own new center SYNCHRONOUSLY via applyCenter instead
-	// of enqueuing an async self-send, so it is safe to call from THIS node's own handle()
-	// for a moveMsgKindDrag, with no cross-goroutine self-send and no shared mutable state
-	// (each node's quantized offset lives on its own mover — see nodeMover.quantOffset). The
-	// id param is VESTIGIAL — handle passes m.id but the closure ignores it and uses its own
-	// captured mover. nil in tests that build a bare nodeMover directly.
+	// centerOf resolves another node's current world center, bound to
+	// md.centerOfNode. Unused by any live handler now that the rule/gate/anchor
+	// cascade (which used it to read rule-neighbor centers) is gone; kept wired for
+	// any future direct-neighbor lookup need.
+	centerOf func(id string) (vec3, bool)
+	// commitLocal is the OWNER-GOROUTINE commit path, bound to
+	// md.commitNodeMoveLocal (generalized to every node). It publishes this node's
+	// own snap SYNCHRONOUSLY via applyCenter instead of enqueuing an async self-send,
+	// so it is safe to call from THIS node's own handle() for a moveMsgKindDrag, with
+	// no cross-goroutine self-send and no shared mutable state (each node's quantized
+	// offset lives on its own mover — see nodeMover.quantOffset). nil in tests that
+	// build a bare nodeMover directly.
 	commitLocal func(id string, newPos vec3)
 	// partnerCenter resolves, per (port,isInput) on this node, the CURRENT world center of
 	// the single partner node connected via one edge (aimed-port model, port_geometry.go
-	// portWorldPosAimed / builders.go partnerCenterFn). Wired by newMoveDispatch to read
-	// THIS node's own neighborCenters cache (above) — no cross-goroutine access. nil
-	// only in tests that build a bare nodeMover directly.
+	// portWorldPosAimed / builders.go partnerCenterFn). Wired by newMoveDispatch from
+	// b.edgeEndpoints + the OTHER nodeMover's atomic snap — a dynamic, always-current lookup
+	// with no shared mutable state. nil only in tests that build a bare nodeMover directly.
 	partnerCenter partnerCenterFn
 	// quantOffset is THIS node's own quantized polar offset (iTheta,iPhi,iR + step
 	// constants) about the scene center — the per-node replacement for the formerly
@@ -152,12 +148,10 @@ type nodeMover struct {
 	quantOffset quantizedOffset
 	// neighborSetC runs THIS node's own plain-neighbor set-c redraw (keep stored
 	// bearing, write only the new c, reposition self) — bound to
-	// md.neighborSetCRequantize. Dispatched from moveMsgKindNeighborSetC so a domain
+	// md.neighborSetCReposition. Dispatched from moveMsgKindNeighborSetC so a domain
 	// neighbor's holder AND world position are written only by that neighbor's OWN
-	// goroutine. selfCenter is THIS node's own current center (nodeWorldPos(m.geom),
-	// read on this node's own goroutine — replaces the old md.centerOfNode(selfID)
-	// atomic read). nil in tests that build a bare nodeMover directly.
-	neighborSetC func(selfID, fromID string, selfCenter, fromCenter vec3, deltaA, deltaB, deltaC int)
+	// goroutine. nil in tests that build a bare nodeMover directly.
+	neighborSetC func(selfID, fromID string, fromCenter vec3, deltaA, deltaB, deltaC int)
 	// pending is THIS node's own outbound retry queue: sendMove appends here and attempts an immediate
 	// non-blocking send; an item that can't be delivered right now (the target's
 	// inbox is momentarily full) stays here and is retried — before any newer item to
@@ -168,22 +162,12 @@ type nodeMover struct {
 	// same retain-and-retry shape PacedWire already uses for its outCh delivery
 	// handoff (full → retry next cycle, bead stays in inflight) — reused rather than
 	// a second invented pattern.
-	//
-	// INTENTIONALLY UNBOUNDED (no cap). The model forbids dropping a cascade message
-	// (MODEL.md: "the cascade never drops a message"; an earlier lossy sender dropped ~98%
-	// of sends under load and was removed) — a size cap would reintroduce exactly that
-	// loss, so it is NOT the right hardening. Growth is only possible if a destination's
-	// channel stays full FOREVER, which requires that destination's own run loop to have
-	// stopped draining while this node keeps sending to it. That only happened via the one
-	// unguarded blocking-send path (applyRingAnchor), now ctx-guarded (sendExtCtx) so no
-	// goroutine parks holding a full extIn: every live mover drains its own channels every
-	// cycle, so pending drains and never grows without bound in practice.
 	pending []pendingSend
 	// resolveDest looks up the ONE dedicated directed channel FROM this node TO the
 	// given destination id — the destination's neighborIn[this node's id] if destID is
 	// another node, or the destination edge's srcIn/dstIn depending on which endpoint
-	// this node is (the loader-local nodeMovers map and md.edgeMovers are read-only
-	// directories after construction, safe to read from any goroutine). There is no shared inbox to look
+	// this node is (md.nodeMovers/md.edgeMovers are read-only directories after
+	// construction, safe to read from any goroutine). There is no shared inbox to look
 	// up: every (sender, destination) pair resolves to its OWN channel. nil only in
 	// tests that build a bare nodeMover directly, in which case flushPending is a no-op.
 	resolveDest func(id string) (chan moveMsg, bool)
@@ -218,11 +202,12 @@ func newNodeMover(id string, geom nodeGeom, tr *T.Trace, clockSrc Clock) *nodeMo
 		id: id, geom: geom,
 		extIn: make(chan moveMsg, 8), neighborIn: map[string]chan moveMsg{}, tr: tr,
 		clockSrc: clockSrc, clk: NewRealClock(),
-		// neighborCenters starts empty here; newMoveDispatch seeds every
-		// edge-adjacent neighbor's entry from load-time geoms once edge adjacency
-		// is known (this constructor runs before edges are wired).
-		neighborCenters: map[string]vec3{},
 	}
+	// Seed the atomic snapshot from the initial geometry (even when !HasPos, in which case
+	// nodeWorldPos falls back to the origin) so readers — including another node's aimed-port
+	// partnerCenter lookup — always have a valid center to read before the first center
+	// message arrives.
+	nm.snap.Store(&centerSnap{c: nodeWorldPos(geom), p: geom.ScenePolar, reach: geom.ReachR})
 	return nm
 }
 
@@ -255,14 +240,6 @@ func (m *nodeMover) handle(msg moveMsg) {
 			m.applyCenter(*msg.Center, msg.ReachR)
 			return
 		}
-		// Pure aimed-port re-emit: PartnerCenter (if present) is the SENDER's own
-		// just-committed fresh center — update this node's neighborCenters cache for
-		// that sender BEFORE re-emitting, so partnerCenter (read at emit time, below)
-		// picks up the fresh direction. See moveMsg.PartnerCenter's doc comment for why
-		// this must never be read into Center itself.
-		if msg.PartnerCenter != nil && msg.SenderID != "" {
-			m.neighborCenters[msg.SenderID] = *msg.PartnerCenter
-		}
 		if m.tr != nil {
 			m.emitGeometry()
 		}
@@ -271,7 +248,7 @@ func (m *nodeMover) handle(msg moveMsg) {
 	if msg.Kind == moveMsgKindDrag {
 		// Owner-goroutine drag entry (generalized to EVERY node so no node's quantized
 		// offset is ever touched by a foreign mover goroutine): commit this node's OWN
-		// new position via the local (synchronous-apply, reported over reportCh) commit path. A drag is
+		// new position via the local (synchronous-snap-publish) commit path. A drag is
 		// always a FREE move now -- there is no equal-radii solve and no self-trigger
 		// cascade to run.
 		newPos := msg.Target
@@ -292,12 +269,8 @@ func (m *nodeMover) handle(msg moveMsg) {
 		// (the dragged node) moved to msg.FromCenter; THIS node stays put and re-quantizes
 		// its OWN edge to SenderID from the live offset — theta, phi AND r all fresh —
 		// so both the angle and the distance to SenderID change (neighborSetCRequantize).
-		// Update this node's own neighborCenters cache for SenderID (this message always
-		// carries the sender's freshest committed center, regardless of aimed-port
-		// status) before dispatching.
-		m.neighborCenters[msg.SenderID] = msg.FromCenter
 		if m.neighborSetC != nil {
-			m.neighborSetC(m.id, msg.SenderID, nodeWorldPos(m.geom), msg.FromCenter, msg.DeltaA, msg.DeltaB, msg.DeltaC)
+			m.neighborSetC(m.id, msg.SenderID, msg.FromCenter, msg.DeltaA, msg.DeltaB, msg.DeltaC)
 		}
 		return
 	}
@@ -327,18 +300,13 @@ func (m *nodeMover) armDragAnchor() {
 // applyCenter is the SOLE WRITE of this node's center/reach. It is called ONLY from
 // this nodeMover's own inbox-drain goroutine (handle's moveMsgKindCenter case, driven
 // by fanCenters below), which is what makes that one goroutine the exclusive writer of
-// m.geom. It sets the held polar position, reports the fresh center to the gesture
-// goroutine over reportCh (non-blocking, movers→gesture — see posReport's doc
-// comment; the gesture goroutine's own drainPositions call is what makes this visible
-// to heldCenters/centerOfNode, replacing the old atomic-snapshot cross-goroutine read),
-// and re-emits this node's live geometry.
+// m.geom/m.snap. It sets the held polar position, publishes the atomic snapshot readers
+// observe cross-goroutine (stdin reader: centerOfNode/heldCenters/heldPolar/fanCenters'
+// partner lookup, edgeMover's partnerCenter), and re-emits this node's live geometry.
 func (m *nodeMover) applyCenter(center vec3, reach float64) {
 	setNodeWorld(&m.geom, center)
 	m.geom.ReachR = reach
-	select {
-	case m.reportCh <- posReport{ID: m.id, Center: center}:
-	default:
-	}
+	m.snap.Store(&centerSnap{c: center, p: m.geom.ScenePolar, reach: reach})
 	if m.tr != nil {
 		m.emitGeometry()
 	}
@@ -496,6 +464,30 @@ type edgeMover struct {
 	// nil in bare test construction, which is fine — a nil channel is never
 	// selected in run()'s loop below.
 	speedCh chan float64
+
+	// --- dedicated per-edge stream (memory/feedback_no_single_writer_bridge.md) ---
+	// streamOut, when non-nil, is THIS edge's OWN dedicated fd (see
+	// MoveDispatch.SetEdgeStreams / Buffer/stream_fds.go's StreamKindEdge). Nil (the
+	// default — no WIREFOLD_STREAM_FDS "edge" entry, e.g. headless tests) is the
+	// REQUIRED fallback: this edge's geometry+beads keep flowing only through
+	// tr.Geometry/tr.Position into the shared Buffer.SnapshotState (fd 3's Edge/Bead
+	// blocks), exactly as before this migration. Written ONLY by this edgeMover's own
+	// goroutine (run/recomputeGeometry) — no lock, mirroring every other single-
+	// writer-per-goroutine field in this struct.
+	streamOut io.Writer
+	// portRowFor resolves (node, port, isInput) to its buffer PORT-ROW index — the
+	// SAME resolution buildEdgeFrame's portRowLookup performs, injected here (rather
+	// than importing Buffer) via MoveDispatch.SetEdgeStreams so this package stays
+	// Buffer-independent, matching PortRowResolver/EdgeRowResolver's existing
+	// interface-injection pattern.
+	portRowFor func(node, port string, isInput bool) (int32, bool)
+	// edgeSelected reports whether this edge (by its label/edgeID) is the CURRENT
+	// click-selected edge, injected the same way as portRowFor.
+	edgeSelected func(label string) bool
+	// buildFrame packs this edge's combined per-fd frame (edge fields + this wire's
+	// live beads) using Buffer's own row-writer columns (Buffer.BuildEdgeStreamFrame),
+	// injected so this package needs no Buffer import.
+	buildFrame func(tick uint32, srcPortRow, dstPortRow int32, selected uint8, label string, beadVal []int32, beadX, beadY, beadZ []float32) []byte
 }
 
 func newEdgeMover(ep EdgeEndpoints, edgeID string, srcGeom, dstGeom nodeGeom, tr *T.Trace, clockSrc Clock) *edgeMover {
@@ -602,13 +594,12 @@ func (m *edgeMover) recomputeGeometry() {
 	if m.out != nil {
 		m.out.publishGeom(outGeom{ArcLength: arc, SimLatencyMs: lat, Start: seg.Start, End: seg.End})
 	}
-	// Re-derive this edge's in-flight beads from the new arc + segment. This edge does NOT
-	// touch pw.inflight itself: the dest wire is its own goroutine now. Post the revision
-	// over reviseCh and let the wire's goroutine apply it. Fire-and-forget, no tick threaded
-	// — the wire stamps its own clock reading (MODEL.md: each goroutine reads its own clock).
-	// One edge per wire (fan-in removed), so the revision applies to all of the wire's beads.
+	// Re-derive an in-flight bead on this edge from the new arc + segment (no-op if
+	// none in flight); this runs on the SAME goroutine that owns the dest wire's
+	// bead state (this is that wire's own goroutine — see edgeMover.run), so no
+	// lock is needed.
 	if m.dest != nil {
-		m.dest.sendRevise(reviseReq{arc: arc, seg: seg})
+		m.dest.ReviseInFlightGeometry(m.clk.Tick(), arc, seg)
 	}
 	// Emit this edge's own segment so the renderer redraws the wire from Go's endpoints.
 	if m.tr != nil {
@@ -616,18 +607,70 @@ func (m *edgeMover) recomputeGeometry() {
 			seg.Start.X, seg.Start.Y, seg.Start.Z,
 			seg.End.X, seg.End.Y, seg.End.Z)
 	}
+	// Dedicated per-edge stream (either/or with the shared fd-3 Edge/Bead blocks — see
+	// streamOut's doc comment): write this edge's own combined frame immediately on a
+	// geometry change, in addition to the tick-driven write in run()'s loop.
+	m.writeStreamFrame(m.clk.Tick())
 }
 
-// run is the edge's per-goroutine loop. Every cycle it drains any pending move/speed
-// messages without blocking, reacting to an endpoint move by recomputing its own
-// per-edge segment/arc (handle -> recomputeGeometry) and POSTING the revision to its
-// dest wire over reviseCh, then paces to the next cycle on its own clock copy.
-//
-// It does NOT drive or mutate the dest wire's bead state: the wire is its own goroutine
-// (PacedWire.run) now. That is the single-owner fix for fan-in — a destination input
-// port is one shared wire, so if each incident edge's own goroutine drove/revised it,
-// N fan-in edges would be N goroutines racing one pw.inflight. Now the wire owns
-// inflight alone and edges only hand it revisions.
+// writeStreamFrame packs and writes this edge's combined per-fd frame (edge fields +
+// this wire's currently live in-flight beads) to its OWN dedicated fd (streamOut). No-op
+// when streamOut is nil (the fallback — see its doc comment) or buildFrame was never
+// injected (bare test construction). Called only by this edgeMover's own goroutine
+// (recomputeGeometry and run's per-cycle loop), so no lock is needed reading m.dest's
+// live bead state via LiveBeadRows (same single-goroutine-ownership contract PacedWire's
+// other methods rely on).
+func (m *edgeMover) writeStreamFrame(tick int64) {
+	if m.streamOut == nil || m.buildFrame == nil {
+		return
+	}
+	var srcRow, dstRow int32 = -1, -1
+	if m.portRowFor != nil {
+		if r, ok := m.portRowFor(m.srcID, m.srcH, false); ok {
+			srcRow = r
+		}
+		if r, ok := m.portRowFor(m.dstID, m.dstH, true); ok {
+			dstRow = r
+		}
+	}
+	var selected uint8
+	if m.edgeSelected != nil && m.edgeSelected(m.edgeID) {
+		selected = 1
+	}
+	var beadVal []int32
+	var beadX, beadY, beadZ []float32
+	if m.dest != nil {
+		rows := m.dest.LiveBeadRows(tick)
+		beadVal = make([]int32, len(rows))
+		beadX = make([]float32, len(rows))
+		beadY = make([]float32, len(rows))
+		beadZ = make([]float32, len(rows))
+		for i, r := range rows {
+			beadVal[i] = int32(r.Val)
+			beadX[i] = float32(r.X)
+			beadY[i] = float32(r.Y)
+			beadZ[i] = float32(r.Z)
+		}
+	}
+	frame := m.buildFrame(uint32(tick), srcRow, dstRow, selected, m.edgeID, beadVal, beadX, beadY, beadZ)
+	var hdr [4]byte
+	binary.LittleEndian.PutUint32(hdr[:], uint32(len(frame)))
+	// Fire-and-forget, same reasoning as SnapshotState.writeFrame: no delivery
+	// guarantee on this channel, errors ignored.
+	_, _ = m.streamOut.Write(hdr[:])
+	_, _ = m.streamOut.Write(frame)
+}
+
+// run is the edge's per-goroutine loop. It IS the wire's own goroutine
+// (MODEL.md "The network" — PacedWire is an active goroutine, and it is this
+// same per-edge goroutine that already existed to revise in-flight geometry,
+// not an additional one): every cycle it drains any pending move/speed
+// messages without blocking, then drives its dest wire's ONE cycle of bead
+// ownership (DriveOneCycle — placement drain, position-step, delivery
+// handoff), then paces to the next cycle on its OWN clock copy. This is what
+// lets ReviseInFlightGeometry (called from handle, below, on this SAME
+// goroutine) touch pw.inflight with no lock: there is exactly one goroutine
+// on either side of that call.
 func (m *edgeMover) run(ctx context.Context) {
 	// Copy taken ONCE at this goroutine's start (run IS the goroutine). If no clockSrc was
 	// given (bare test construction), keep the inert placeholder newEdgeMover
@@ -670,12 +713,13 @@ func (m *edgeMover) run(ctx context.Context) {
 				break drain
 			}
 		}
-		// The edge no longer drives its dest wire — the wire has its OWN goroutine now
-		// (PacedWire.run, launched by Start), which is what makes a shared fan-in wire
-		// single-owner. This loop's remaining job is to react to endpoint-move messages
-		// (handle -> recomputeGeometry, which posts a revision to the wire over reviseCh)
-		// and stay drained; it still paces on its own clock so a cycle always comes back
-		// around to drain the inbox.
+		if m.dest != nil {
+			m.dest.DriveOneCycle(ctx, m.clk.Tick())
+			// Beads on this wire may have moved even with no geometry change this
+			// cycle — write this edge's dedicated stream frame every cycle (no-op
+			// when streamOut is nil, the fallback path).
+			m.writeStreamFrame(m.clk.Tick())
+		}
 		if err := m.clk.SleepCycle(ctx); err != nil {
 			return
 		}

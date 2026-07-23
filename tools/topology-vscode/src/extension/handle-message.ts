@@ -14,6 +14,7 @@ import {
 } from "../messages";
 import { appendWebviewLog } from "./webview-log";
 import { PROBE_DIR, PROBE_FILES } from "../probe-files";
+import { BUF_BLOCK_TAG_EDGE_STREAM } from "../schema/frame-tags";
 
 export type MessageCtx = {
   logUri: vscode.Uri | undefined;
@@ -77,16 +78,22 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
       // webview holds no state (see check-no-webview-state.sh) — it has nothing to
       // draw until the next frame Go happens to emit, which may be a long wait while
       // paused/idle. run() is idempotent (no-op if already running).
-      // If Go was ALREADY running before this run(), hand the remounted webview the
-      // ext host's cached last snapshot (see BuildAndRunRunner.lastSnapshot) so it
-      // renders instantly without round-tripping to Go. A just-spawned Go needs no
-      // cached frame — it emits its own startup geometry — so this also dodges any
-      // post-spawn stdin-readiness race.
+      // If Go was ALREADY running before this run(), hand the remounted webview EVERY
+      // cached last frame per block tag (see BuildAndRunRunner.lastFrames — scene AND
+      // bead) so it renders instantly without round-tripping to Go. A just-spawned Go
+      // needs no cached frames — it emits its own startup geometry — so this also
+      // dodges any post-spawn stdin-readiness race.
       const wasRunning = runner.isRunning();
       runner.run();
       if (wasRunning) {
-        const cached = runner.getLastSnapshot();
-        if (cached) ctx.post({ type: "buffer-snapshot", buffer: cached });
+        for (const { tag, buffer } of runner.getLastFrames()) {
+          ctx.post({ type: "buffer-snapshot", buffer, tag });
+        }
+        // Per-edge dedicated streams (see BuildAndRunRunner.getLastEdgeFrames): the
+        // per-edge analogue of the loop above — one cached frame per edge row.
+        for (const { row, buffer } of runner.getLastEdgeFrames()) {
+          ctx.post({ type: "buffer-snapshot", buffer, tag: BUF_BLOCK_TAG_EDGE_STREAM, row });
+        }
       }
       return;
     }
