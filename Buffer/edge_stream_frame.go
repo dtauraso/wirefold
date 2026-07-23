@@ -5,8 +5,8 @@
 // step) — the edge's own Edge-block row PLUS the beads currently in flight on that
 // edge's wire, with no sub-tag byte (the fd position already identifies which edge).
 //
-// Wire bytes (no outer tag, unlike fd3's [len][tag][payload] — see
-// SnapshotState.writeRawFrame's doc comment for why a dedicated fd carries no tag):
+// Wire bytes (no outer tag, unlike fd3's [len][tag][payload] — a dedicated fd's OWN
+// position already identifies the stream, so there is nothing left to discriminate):
 //
 //	[tick:u32]
 //	Edge     BufEdgeStride bytes (SrcPortRow/DstPortRow/Selected + EdgeLabelOff=0/Len,

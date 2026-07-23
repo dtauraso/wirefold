@@ -75,18 +75,25 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 		}
 	}
 	snapState := B.NewSnapshotState(snapOut)
-	// The VIEW stream (camera+overlay+scene, one singleton row owned by the gesture/
-	// MoveDispatch goroutine) is the first stream migrated OFF fd 3 onto its own
-	// dedicated inherited pipe, per the no-single-writer-bridge rule (memory/
-	// feedback_no_single_writer_bridge.md) and the fd-allocation contract documented in
-	// Buffer/stream_fds.go. WIREFOLD_STREAM_FDS unset/empty (headless tests, non-
-	// extension launches) ⇒ ParseStreamFDs returns an empty map ⇒ Open reports not-found
-	// ⇒ viewOut stays nil ⇒ SetViewOut is never called ⇒ buildSnapshot's fallback packs
-	// camera/overlay/scene into the fd-3 scene frame exactly as before. This dual path is
+	// The VIEW stream (camera+overlay+scene, one singleton row) is the first stream
+	// migrated OFF fd 3 onto its own dedicated inherited pipe, per the no-single-writer-
+	// bridge rule (memory/feedback_no_single_writer_bridge.md) and the fd-allocation
+	// contract documented in Buffer/stream_fds.go. WIREFOLD_STREAM_FDS unset/empty
+	// (headless tests, non-extension launches) ⇒ ParseStreamFDs returns an empty map ⇒
+	// Open reports not-found ⇒ viewFile stays nil ⇒ neither SetViewStreamActive nor
+	// MoveDispatch.SetViewStream below ever runs ⇒ buildSnapshot's fallback packs camera/
+	// overlay/scene into the fd-3 scene frame exactly as before. This dual path is
 	// required, not optional (headless/test launches never set this env var).
+	//
+	// Step C (per-owner-buffer-rows.md): the gesture/stdin-reader goroutine (nodes/
+	// Wiring's MoveDispatch, wired below once it exists) is now the WRITER of this
+	// stream, not Buffer.SnapshotState — SetViewStreamActive only tells SnapshotState to
+	// EXCLUDE camera/overlay/scene from its own fd-3 scene frame while the dedicated
+	// stream is active (the either/or), never to write the stream itself.
 	streamFDs := B.ParseStreamFDs(os.Getenv("WIREFOLD_STREAM_FDS"))
-	if viewOut, ok := streamFDs.Open(B.StreamKindView, 0); ok {
-		snapState.SetViewOut(viewOut)
+	viewFile, viewStreamWired := streamFDs.Open(B.StreamKindView, 0)
+	if viewStreamWired {
+		snapState.SetViewStreamActive(true)
 	}
 	// Coalesce the high-volume KindPosition stream to at most one emit per tick (clock.go: "the
 	// tick IS the animation clock", not per-bead-event).
@@ -204,6 +211,50 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 				},
 				B.NodeKindID)
 			snapState.SetNodeStreamActive(true)
+		}
+	}
+	// The VIEW stream's write side (Step C, per-owner-buffer-rows.md): wire md as the
+	// stream's owner/writer BEFORE anything that can change camera/overlay/scene-sphere/
+	// selection/hover reaches it (SeedInitialViewpoint/LoadOverlays/LoadSceneSphere below,
+	// then the launched movers/stdin reader) — mirrors SetEdgeStreams/SetNodeStreams'
+	// "wire before it can fire" ordering above. Only when the dedicated fd is actually
+	// wired (viewStreamWired) — left uncalled otherwise (the fallback), matching
+	// SetEdgeStreams/SetNodeStreams' own gating.
+	if viewStreamWired {
+		md.SetViewStream(viewFile,
+			func(tick uint32,
+				camPX, camPY, camPZ, camR, camPosTheta, camPosPhi, camUpTheta, camUpPhi float32,
+				sceneTori, scenePoles, nodePoles, selSpherePoles, handholds, labelsGlobal, overlaysVis, doubleLinks uint8,
+				abcDragCount uint32,
+				sceneCX, sceneCY, sceneCZ, sceneRadius float32,
+				events []W.RowEvent,
+			) []byte {
+				return B.BuildViewStreamFrame(tick,
+					camPX, camPY, camPZ, camR, camPosTheta, camPosPhi, camUpTheta, camUpPhi,
+					B.OverlayRow{
+						SceneTori: sceneTori, ScenePoles: scenePoles, NodePoles: nodePoles,
+						SelSpherePoles: selSpherePoles, Handholds: handholds, LabelsGlobal: labelsGlobal,
+						OverlaysVis: overlaysVis, DoubleLinks: doubleLinks, AbcDragCount: abcDragCount,
+					},
+					sceneCX, sceneCY, sceneCZ, sceneRadius,
+					toStreamEvents(events))
+			})
+		// LayoutLink is load-time-once (see decentralizedEventKinds' doc comment,
+		// Buffer/pack.go) — emit each pair once, now that the view stream is wired, so the
+		// .probe log's per-kind count still matches the -trace reference. tr.LayoutLink
+		// itself (loader.go's emitLayoutLinks, already run inside LoadTopology above) is
+		// UNCHANGED and still populates Buffer.SnapshotState's own LayoutLink BLOCK — this
+		// is purely the EVENT-block/.probe-log representation.
+		for _, pair := range md.LayoutLinkPairs() {
+			nodeRow := int32(-1)
+			if r, ok := md.NodeRowFor(pair[0]); ok {
+				nodeRow = r
+			}
+			targetRow := int32(-1)
+			if r, ok := md.NodeRowFor(pair[1]); ok {
+				targetRow = r
+			}
+			md.EmitLayoutLinkViewEvent(nodeRow, targetRow)
 		}
 	}
 	// One example startup breadcrumb — proves the debug channel end-to-end and is genuinely

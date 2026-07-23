@@ -127,15 +127,23 @@ type SnapshotState struct {
 	// out receives framed binary snapshots. Nil = silent discard.
 	out io.Writer
 
-	// viewOut, when non-nil, is the VIEW stream's OWN dedicated fd (see
-	// Buffer/stream_fds.go / main.go's SetViewOut call) — camera+overlay+scene are
-	// written there as their own frame (buildViewFrame) instead of embedded in the
-	// fd-3 scene frame. Nil (the default — no WIREFOLD_STREAM_FDS entry for "view",
-	// e.g. headless tests) is the REQUIRED fallback: camera/overlay/scene stay embedded
-	// in buildSnapshot's scene frame exactly as before this migration. Exactly one
-	// goroutine (the Trace-drain goroutine, same as `out`) ever writes to this — no lock
-	// needed, mirroring `out`'s own single-writer contract.
-	viewOut io.Writer
+	// viewStreamActive is true once the dedicated VIEW stream is active (WIREFOLD_STREAM_FDS
+	// carries a "view" entry — see Buffer/stream_fds.go / main.go's MoveDispatch.SetViewStream
+	// call) — the required either/or with the fd-3 scene frame's embedded Camera/Overlay/
+	// Scene blocks, mirroring edgeStreamActive/nodeStreamActive's role for their streams.
+	// False (the default) is the REQUIRED fallback: camera/overlay/scene stay embedded in
+	// buildSnapshot's scene frame exactly as before this migration.
+	//
+	// Step C (per-owner-buffer-rows.md) moved the VIEW frame's WRITE side off this
+	// SnapshotState entirely: the gesture/stdin-reader goroutine (nodes/Wiring's
+	// MoveDispatch) now owns and writes it directly (MoveDispatch.emitViewFrame /
+	// Buffer.BuildViewStreamFrame) — this SnapshotState no longer holds a view fd or ever
+	// writes to one. viewStreamActive survives ONLY as the either/or gate above (so the
+	// fd-3 fallback still excludes these blocks correctly while the dedicated stream is
+	// active) — it never triggers a write here. ATOMIC (unlike the old viewOut io.Writer
+	// field it replaces) for the same reason edgeStreamActive/nodeStreamActive are: set
+	// from main.go after the Trace drain goroutine already exists.
+	viewStreamActive atomic.Bool
 
 	// edgeStreamActive is true once the dedicated per-edge stream is active (see
 	// SetEdgeStreamActive's doc comment) — the required either/or with fd 3's
@@ -254,13 +262,15 @@ func (s *SnapshotState) SetAbcDragCountSource(f func() uint32) {
 	s.abcDragCountFor = f
 }
 
-// SetViewOut installs the VIEW stream's dedicated fd (see viewOut's doc comment and
-// Buffer/stream_fds.go). Call once at startup, after both this SnapshotState and the
-// fd exist (main.go). Leave uncalled (viewOut stays nil) to keep the fallback: camera/
-// overlay/scene embedded in the fd-3 scene frame, exactly as before this migration —
-// this is what every existing test and headless launch already gets, unchanged.
-func (s *SnapshotState) SetViewOut(w io.Writer) {
-	s.viewOut = w
+// SetViewStreamActive installs the either/or for the fd-3 embedded Camera/Overlay/Scene
+// blocks (see viewStreamActive's doc comment): pass true once the dedicated VIEW stream is
+// active (nodes/Wiring's MoveDispatch.SetViewStream, called from main.go when
+// WIREFOLD_STREAM_FDS carries a "view" entry). Leave uncalled (viewStreamActive stays
+// false) to keep the fallback: camera/overlay/scene embedded in the fd-3 scene frame,
+// exactly as before this migration — this is what every existing test and headless launch
+// already gets, unchanged.
+func (s *SnapshotState) SetViewStreamActive(active bool) {
+	s.viewStreamActive.Store(active)
 }
 
 // SetEdgeStreamActive installs the either/or for the fd-3 Bead/Edge blocks (see
@@ -992,15 +1002,12 @@ func (s *SnapshotState) emitSnapshot() {
 	// stream's own poll (writeStreamFrame) from ever reading state more than one
 	// snapshot cycle stale.
 	s.rebuildNodeUIStates()
-	// VIEW stream: when the dedicated fd is active (s.viewOut != nil), camera/overlay/
-	// scene were already EXCLUDED from `snap` above (buildSnapshot's either/or) — write
-	// them here instead, as their own untagged frame on their own fd (no tag byte: the
-	// fd position already identifies the stream, see stream_fds.go). When s.viewOut is
-	// nil (the fallback), buildSnapshot already embedded them in `snap` above and there
-	// is nothing further to write here.
-	if s.viewOut != nil {
-		s.writeRawFrame(s.viewOut, s.buildViewFrame())
-	}
+	// VIEW stream: Step C (per-owner-buffer-rows.md) moved this WRITE off SnapshotState —
+	// the gesture/stdin-reader goroutine now owns and writes its own VIEW frame directly
+	// (MoveDispatch.emitViewFrame). When viewStreamActive is true, camera/overlay/scene
+	// were already EXCLUDED from `snap` above (buildSnapshot's either/or) and this
+	// SnapshotState has nothing further to write for them. When false (the fallback),
+	// buildSnapshot already embedded them in `snap` above.
 	s.clearTransients()
 	// Restore the deferred events (clearTransients truncated pendingEvents to empty).
 	s.pendingEvents = append(s.pendingEvents, deferred...)
@@ -1017,18 +1024,6 @@ func (s *SnapshotState) writeFrame(tag byte, payload []byte) {
 	_, _ = s.out.Write(hdr[:])
 	_, _ = s.out.Write([]byte{tag})
 	_, _ = s.out.Write(payload)
-}
-
-// writeRawFrame writes one [len:u32-LE][payload] frame to w, WITHOUT a tag byte — used
-// for a stream on its OWN dedicated fd (today, the VIEW stream), where the fd position
-// already identifies the kind (see Buffer/stream_fds.go), so there is nothing left to
-// discriminate inside the frame. Errors are ignored, same reasoning as writeFrame/
-// emitSnapshot's comment (fire-and-forget, no delivery guarantee on this channel).
-func (s *SnapshotState) writeRawFrame(w io.Writer, payload []byte) {
-	var hdr [4]byte
-	binary.LittleEndian.PutUint32(hdr[:], uint32(len(payload)))
-	_, _ = w.Write(hdr[:])
-	_, _ = w.Write(payload)
 }
 
 // eventReady reports whether every node/edge identity an event references is registered, so

@@ -22,6 +22,10 @@
 
 package Wiring
 
+import (
+	T "github.com/dtauraso/wirefold/Trace"
+)
+
 type sceneSphereJSON struct {
 	Center *[3]float64 `json:"center"`
 	Radius *float64    `json:"radius"`
@@ -109,6 +113,12 @@ func (md *MoveDispatch) LoadSceneSphere(topologyPath string) {
 		c := md.sceneSphere.Center
 		md.tr.SceneSphere(c.X, c.Y, c.Z, md.sceneSphere.Radius)
 	}
+	// Decentralized (Step C, per-owner-buffer-rows.md): the gesture/stdin-reader goroutine
+	// (this one — LoadSceneSphere runs before any other goroutine launches) also writes its
+	// own VIEW frame directly, carrying this one-time scene-sphere event. SceneSphere
+	// decodes entirely from the VIEW frame's own Scene block (buffer-log.ts's
+	// decodeEventLine "scene-sphere" case) — no row identity to resolve.
+	md.emitViewFrame([]RowEvent{{Kind: T.KindSceneSphere, NodeRow: -1, PortRow: -1, TargetRow: -1, TargetPortRow: -1, EdgeRow: -1}})
 }
 
 // sceneSpherePersister writes the scene sphere to view/sphere.json, mirroring

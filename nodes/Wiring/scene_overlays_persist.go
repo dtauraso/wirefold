@@ -168,4 +168,20 @@ func (md *MoveDispatch) LoadOverlays(topologyPath string, tr *T.Trace) {
 	} else {
 		md.ov = ov
 	}
+	// Decentralized (Step C, per-owner-buffer-rows.md): the gesture/stdin-reader goroutine
+	// also writes its own VIEW frame directly, carrying the same 8 one-time overlay-flag
+	// events SetGuideVisibility's tr.Emit* calls above already logged on the fd-3 fallback
+	// path — one RowEvent per flag kind, matching that per-kind count. Every overlay kind
+	// decodes entirely from the VIEW frame's own Overlay block (buffer-log.ts's
+	// decodeEventLine OVERLAY_KINDS branch) — no row identity to resolve.
+	md.emitViewFrame([]RowEvent{
+		{Kind: T.KindSceneTori, NodeRow: -1, PortRow: -1, TargetRow: -1, TargetPortRow: -1, EdgeRow: -1},
+		{Kind: T.KindScenePoles, NodeRow: -1, PortRow: -1, TargetRow: -1, TargetPortRow: -1, EdgeRow: -1},
+		{Kind: T.KindNodePoles, NodeRow: -1, PortRow: -1, TargetRow: -1, TargetPortRow: -1, EdgeRow: -1},
+		{Kind: T.KindSelSpherePoles, NodeRow: -1, PortRow: -1, TargetRow: -1, TargetPortRow: -1, EdgeRow: -1},
+		{Kind: T.KindHandholds, NodeRow: -1, PortRow: -1, TargetRow: -1, TargetPortRow: -1, EdgeRow: -1},
+		{Kind: T.KindLabelsGlobal, NodeRow: -1, PortRow: -1, TargetRow: -1, TargetPortRow: -1, EdgeRow: -1},
+		{Kind: T.KindOverlaysVis, NodeRow: -1, PortRow: -1, TargetRow: -1, TargetPortRow: -1, EdgeRow: -1},
+		{Kind: T.KindDoubleLinks, NodeRow: -1, PortRow: -1, TargetRow: -1, TargetPortRow: -1, EdgeRow: -1},
+	})
 }

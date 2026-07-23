@@ -143,8 +143,8 @@ func (s *SnapshotState) newSnapshotBuild() *snapshotBuild {
 	b.size = BufHeaderSize +
 		int(b.layoutLinkCount)*BufLayoutLinkStride
 	// Either/or (see buildSnapshot's doc comment): camera/overlay/scene are embedded in
-	// the scene frame ONLY as the fallback, when the dedicated view fd is not active.
-	if s.viewOut == nil {
+	// the scene frame ONLY as the fallback, when the dedicated view stream is not active.
+	if !s.viewStreamActive.Load() {
 		b.size += BufCameraStride + BufOverlayStride + BufSceneStride
 	}
 
@@ -514,19 +514,21 @@ func (s *SnapshotState) writeEdgeLabelBytesSection(buf []byte, off int, b *edgeF
 // newSnapshotBuild computes all counts/string-sections once, then each block is written
 // in the exact byte-layout order the header/format comment at the top of this file documents.
 //
-// Either/or with buildViewFrame (dual path, see snapshot.go's viewOut doc comment and
-// Buffer/stream_fds.go): when s.viewOut is nil (no dedicated view fd — the fallback),
-// camera/overlay/scene are embedded here, exactly as before this migration. When
-// s.viewOut is non-nil (the dedicated fd is active), they are EXCLUDED here — they are
-// written instead as their own frame on their own fd (buildViewFrame, called from
-// emitSnapshot) — never double-sourced from both places at once.
+// Either/or with the dedicated VIEW stream (dual path, see snapshot.go's viewStreamActive
+// doc comment and Buffer/stream_fds.go): when viewStreamActive is false (no dedicated view
+// fd wired — the fallback), camera/overlay/scene are embedded here, exactly as before this
+// migration. When true (the dedicated fd is active), they are EXCLUDED here — the
+// gesture/stdin-reader goroutine (nodes/Wiring's MoveDispatch) writes them instead, as its
+// own VIEW-stream frame on its own fd — never double-sourced from both places at once. This
+// SnapshotState no longer WRITES that frame itself (Step C, per-owner-buffer-rows.md) —
+// viewStreamActive only gates this fd-3 exclusion, nothing else.
 func (s *SnapshotState) buildSnapshot() []byte {
 	b := s.newSnapshotBuild()
 	buf := make([]byte, b.size)
 
 	off := s.writeHeader(buf, b)
 	off = s.writeLayoutLinkBlock(buf, off, b)
-	if s.viewOut == nil {
+	if !s.viewStreamActive.Load() {
 		off = s.writeCameraBlock(buf, off)
 		off = s.writeOverlayBlock(buf, off)
 		s.writeSceneBlock(buf, off)
@@ -575,15 +577,48 @@ func (s *SnapshotState) buildViewFrame() []byte {
 // NodeRow/PortRow/TargetRow/TargetPortRow via the shared per-node interiorStream
 // (nodes/Wiring's newInteriorStreamGetter) and flushes onto that frame's own EVENTS
 // section (interiorStream.writeEvents), never through this central pipeline.
+//
+// Camera/the 8 overlay-toggle kinds/SceneSphere/Select/Hover/AbcDrag/AbcDragReset are now
+// decentralized too (Step C, per-owner-buffer-rows.md): the gesture/stdin-reader goroutine
+// (nodes/Wiring's RunStdinReader, via MoveDispatch) already owns this state (md.vp/md.ov/
+// md.sceneSphere/md.sel, mutated only by that one goroutine) — it now also WRITES the VIEW
+// stream's own frame (MoveDispatch.emitViewFrame / Buffer.BuildViewStreamFrame) instead of
+// this pipeline packing it from Buffer.SnapshotState's copy. AbcDrag is the one kind
+// recorded on a DIFFERENT goroutine (an abc-drag recipient's own nodeMover) — it reaches
+// the view-owner goroutine over a plain channel (MoveDispatch.abcDragCh), never a shared/
+// atomic counter. LayoutLink is decentralized too: it is a LOAD-TIME-ONCE topology fact
+// (loader.go's emitLayoutLinks, sourced from LocalPolars) with no live per-goroutine
+// owner to stream from — main.go emits each pair once, after the view stream is wired,
+// via MoveDispatch.LayoutLinkPairs (the same seed-once idiom Step A used for
+// NodeGeometry/Geometry's row-table prefill). tr.LayoutLink itself is UNCHANGED — it
+// still populates Buffer.SnapshotState's own s.layoutLinks (the LayoutLink BLOCK's sole
+// source, a render concern unrelated to this .probe-log-only EVENT-block kind). After
+// this migration viewEventsSection (below) packs ZERO events — every kind Update handles
+// is decentralized to its own owner's frame.
 var decentralizedEventKinds = map[string]bool{
-	T.KindPosition:     true,
-	T.KindArrive:       true,
-	T.KindNodeBead:     true,
-	T.KindNodeGeometry: true,
-	T.KindGeometry:     true,
-	T.KindFire:         true,
-	T.KindRecv:         true,
-	T.KindSend:         true,
+	T.KindPosition:       true,
+	T.KindArrive:         true,
+	T.KindNodeBead:       true,
+	T.KindNodeGeometry:   true,
+	T.KindGeometry:       true,
+	T.KindFire:           true,
+	T.KindRecv:           true,
+	T.KindSend:           true,
+	T.KindCamera:         true,
+	T.KindSceneTori:      true,
+	T.KindScenePoles:     true,
+	T.KindNodePoles:      true,
+	T.KindSelSpherePoles: true,
+	T.KindHandholds:      true,
+	T.KindLabelsGlobal:   true,
+	T.KindOverlaysVis:    true,
+	T.KindDoubleLinks:    true,
+	T.KindSceneSphere:    true,
+	T.KindSelect:         true,
+	T.KindHover:          true,
+	T.KindAbcDrag:        true,
+	T.KindAbcDragReset:   true,
+	T.KindLayoutLink:     true,
 }
 
 // viewEventsSection packs the VIEW frame's trailing EVENTS section: every buffered event

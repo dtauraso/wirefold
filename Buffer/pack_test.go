@@ -35,31 +35,34 @@ func readI32(buf []byte, off int) int32 {
 	return int32(binary.LittleEndian.Uint32(buf[off:]))
 }
 
-// TestEventBlockPopulate asserts a SELECT event (a kind not yet decentralized to its
-// own owner fd — see decentralizedEventKinds) rides the VIEW frame's trailing EVENTS
-// section, NOT the fd-3 scene frame (the EVENT block was retired from the scene frame;
-// memory/feedback_no_single_writer_bridge.md), while NodeGeometry/Send (decentralized
-// to nodeMover/edgeMover's own frame and the node's own Update goroutine's
-// interior-stream frame, respectively) never appear here even though recordEvent still
-// buffers them into s.pendingEvents (recordEvent has no decentralization filter — only
-// viewEventsSection, the PACK side, does).
-//
-// Select (unlike Recv/Fire/Send) triggers Update's own emitSnapshot arm, so it is
-// recorded directly via recordEvent (same package) rather than through Update, keeping
-// this test's own explicit buildViewFrame() call the only thing that packs it.
+// TestEventBlockPopulate asserts the VIEW frame's trailing EVENTS section is now EMPTY,
+// even when several event kinds have been recorded (recordEvent has no decentralization
+// filter — only viewEventsSection, the PACK side, does). Step C of
+// per-owner-buffer-rows.md decentralized every remaining view-owner kind (Camera, the 8
+// overlay toggles, SceneSphere, Select, Hover, AbcDrag/AbcDragReset) onto the gesture/
+// stdin-reader goroutine's own VIEW frame (nodes/Wiring's MoveDispatch.emitViewFrame) —
+// combined with Steps A/B's NodeGeometry/Geometry/Fire/Recv/Send decentralization, there
+// is nothing left for this fallback bucket to carry: decentralizedEventKinds now covers
+// every kind Update handles, so viewEventsSection packs ZERO events, always.
 func TestEventBlockPopulate(t *testing.T) {
 	s := NewSnapshotState(nil)
 	s.Update(T.Event{Kind: T.KindNodeGeometry, Node: "A", Radius: 1,
 		Ports: []T.PortGeom{{Name: "out", IsInput: false, DX: 1}}})
 	s.Update(T.Event{Kind: T.KindNodeGeometry, Node: "B", Radius: 1,
 		Ports: []T.PortGeom{{Name: "in", IsInput: true, DX: -1}}})
-	// Both these events are decentralized (see decentralizedEventKinds): recordEvent still
-	// buffers them (no filter on that side), but the pack-time filter below must exclude
-	// them from this VIEW frame's EVENTS section.
+	// Every one of these kinds is decentralized (see decentralizedEventKinds): recordEvent
+	// still buffers them (no filter on that side), but the pack-time filter below must
+	// exclude ALL of them from this VIEW frame's EVENTS section.
 	s.recordEvent(T.Event{Kind: T.KindNodeGeometry, Node: "A"})
 	s.recordEvent(T.Event{Kind: T.KindSend, Node: "A", Port: "out", Value: 7,
 		ArcLength: 12.5, SimLatencyMs: 33.0, Target: "B", TargetHandle: "in"})
 	s.recordEvent(T.Event{Kind: T.KindSelect, Node: "A"})
+	s.recordEvent(T.Event{Kind: T.KindHover, Node: "A"})
+	s.recordEvent(T.Event{Kind: T.KindCamera})
+	s.recordEvent(T.Event{Kind: T.KindSceneSphere})
+	s.recordEvent(T.Event{Kind: T.KindAbcDrag, Node: "A"})
+	s.recordEvent(T.Event{Kind: T.KindAbcDragReset})
+	s.recordEvent(T.Event{Kind: T.KindSceneTori, Visible: true})
 
 	// The fd-3 scene frame no longer carries an EVENT block at all.
 	snap := s.BuildSnapshot()
@@ -70,35 +73,8 @@ func TestEventBlockPopulate(t *testing.T) {
 	view := s.buildViewFrame()
 	eventsOff := BufViewFrameHeaderSize + BufCameraStride + BufOverlayStride + BufSceneStride
 	eventCount := int(readU32(view, eventsOff))
-	// The node-geometry and send events are decentralized (their own owner fd) and are
-	// never packed into this fallback bucket; only the select (not yet decentralized)
-	// lands here.
-	if eventCount != 1 {
-		t.Fatalf("eventCount: got %d, want 1 (select only; node-geometry/send are decentralized)", eventCount)
-	}
-	eventOff := eventsOff + 4
-
-	// Find the select row (kind == index of "select" in TraceEventKinds).
-	selectKind := -1
-	for i, k := range T.TraceEventKinds {
-		if k == T.KindSelect {
-			selectKind = i
-		}
-	}
-	found := false
-	for r := 0; r < eventCount; r++ {
-		base := eventOff + r*BufEventStride
-		if int(view[base+BufEventColKind]) != selectKind {
-			continue
-		}
-		found = true
-		// A=row0.
-		if got := readI32(view, base+BufEventColNodeRow); got != 0 {
-			t.Errorf("select NodeRow: got %d, want 0 (A)", got)
-		}
-	}
-	if !found {
-		t.Fatal("no select event row found in EVENT block")
+	if eventCount != 0 {
+		t.Fatalf("eventCount: got %d, want 0 (every kind is now decentralized to its own owner's frame)", eventCount)
 	}
 }
 

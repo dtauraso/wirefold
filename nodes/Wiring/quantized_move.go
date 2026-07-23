@@ -243,6 +243,13 @@ func (md *MoveDispatch) neighborSetCRequantize(selfID, fromID string, selfCenter
 		// received.
 		md.tr.AbcDrag(selfID, deltaA, deltaB, deltaC)
 	}
+	// Decentralized (Step C, per-owner-buffer-rows.md): signal the VIEW-stream owner
+	// goroutine (RunStdinReader) that one more abc-drag occurred, so ITS OWN abcDragCount
+	// (a plain int, never shared/atomic) and VIEW frame stay current — see
+	// view_stream.go's doc comment for why this is message-passing, not a shared counter.
+	// This runs on selfID's OWN nodeMover goroutine, a DIFFERENT goroutine than the one
+	// that owns abcDragCount, hence the channel rather than a direct write.
+	md.sendAbcDragTick()
 	// selfID's OWN recipient bit: this runs on selfID's OWN nodeMover goroutine
 	// (neighborSetC dispatch, node_mover.go's moveMsgKindNeighborSetC case), so it is
 	// safe to write nm's fields directly — no shared map, no lock. This is what

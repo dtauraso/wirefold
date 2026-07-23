@@ -232,6 +232,40 @@ type MoveDispatch struct {
 	// this package stays Buffer-independent, matching portRowFor/buildFrame's existing
 	// interface-injection pattern on edgeMover.
 	buildInteriorFrame func(tick uint32, present []uint8, value []int32, ox, oy, oz []float32, events []RowEvent) []byte
+	// --- the dedicated VIEW stream (memory/feedback_no_single_writer_bridge.md,
+	// docs/planning/visual-editor/per-owner-buffer-rows.md Step C) --- see view_stream.go.
+	//
+	// viewOut, when non-nil, is the VIEW stream's OWN dedicated fd (see SetViewStream /
+	// Buffer/stream_fds.go's StreamKindView). Nil (the default — no WIREFOLD_STREAM_FDS
+	// "view" entry, e.g. headless tests) is the REQUIRED fallback: nothing here ever
+	// writes, and Buffer.SnapshotState's own fd-3 embed keeps carrying camera/overlay/
+	// scene exactly as before this migration. Written ONLY by the gesture/stdin-reader
+	// goroutine (the sole caller of every MoveDispatch method that can change camera/
+	// overlay/scene/selection/hover) — no lock.
+	viewOut io.Writer
+	// viewBuildFrame packs this goroutine's own VIEW frame (Buffer.BuildViewStreamFrame),
+	// injected via SetViewStream so this package stays Buffer-independent, mirroring
+	// buildInteriorFrame/buildFrame's existing interface-injection pattern.
+	viewBuildFrame ViewFrameBuilder
+	// viewTick is a purely local frame-sequence counter for the VIEW stream (not shared
+	// with any other stream's tick) — written only by the gesture/stdin-reader goroutine.
+	viewTick uint32
+	// abcDragCh is the non-blocking, message-passing bridge from an abc-drag RECIPIENT's
+	// own nodeMover goroutine (quantized_move.go's neighborSetCRequantize, potentially many
+	// different goroutines) to the ONE gesture/stdin-reader goroutine that owns
+	// abcDragCount and writes the VIEW frame. Per MODEL.md/explicit no-atomic directive:
+	// message-passing, never a shared/atomic counter. A full channel just drops that one
+	// count-observability tick (no delivery guarantee, same shape as every other
+	// fire-and-forget bridge in this codebase) rather than blocking the recipient's own
+	// goroutine. nil until SetViewStream runs (no dedicated view stream ⇒ nothing to send
+	// to; nodeMover call sites nil-check before sending).
+	abcDragCh chan struct{}
+	// abcDragCount is this goroutine's OWN plain int (no atomic, no lock: only the
+	// gesture/stdin-reader goroutine ever reads or writes it, via DrainAbcDragChan) — the
+	// VIEW frame's Overlay.AbcDragCount column reads this directly. Cumulative for the
+	// run's lifetime (never reset — mirrors Buffer.SnapshotState's own
+	// s.overlay.AbcDragCount, which stays the fd-3 fallback's independent copy).
+	abcDragCount uint32
 	// sel groups the CURRENTLY-SELECTED (click-select) and CURRENTLY-HOVERED (pointer hover)
 	// UI-only state (selection_state.go) — pure routing-directory-parked UI state, owned by
 	// Go but not part of the dispatch/persist/camera concerns. Grouped the same way
@@ -384,6 +418,27 @@ func (md *MoveDispatch) LookupEdgeRow(row int) (label string, ok bool) {
 		return "", false
 	}
 	return md.edgeRowTable[row], true
+}
+
+// LayoutLinkPairs returns every LAYOUT double-link pair (id, to), one per unordered pair
+// (id is always the alphabetically-first side — mirrors loader.go's emitLayoutLinks own
+// de-dup rule), by walking each nodeMover's own layoutLinkTos (seeded once at load,
+// static since — see its doc comment in node_mover.go). This is the SAME set
+// emitLayoutLinks streams via tr.LayoutLink for Buffer.SnapshotState's LayoutLink BLOCK
+// (still the sole source of that block; unaffected by this method), reconstructed here
+// so main.go can ALSO emit each pair once as a view-owner VIEW-frame event (Step C,
+// per-owner-buffer-rows.md — LayoutLink is load-time-once, like SceneSphere, so it has no
+// live per-goroutine owner to decentralize onto; this seed-once emission is its
+// decentralized counterpart). Order is not guaranteed to match emitLayoutLinks' — the
+// .probe log is a multiset of events, per per-owner-buffer-rows.md's own doc comment.
+func (md *MoveDispatch) LayoutLinkPairs() [][2]string {
+	var out [][2]string
+	for id, nm := range md.nodeMovers {
+		for _, to := range nm.layoutLinkTos {
+			out = append(out, [2]string{id, to})
+		}
+	}
+	return out
 }
 
 // EdgeRowForPair resolves the buffer edge-row index of the bead edge connecting node ids

@@ -280,6 +280,9 @@ func (md *MoveDispatch) gestPointerMove(ev rawInputMsg, tr *T.Trace) {
 			if tr != nil {
 				tr.AbcDragReset() // .probe EVENT LOG only — see AbcDragReset event kind
 			}
+			// Decentralized (Step C, per-owner-buffer-rows.md): this same goroutine also
+			// writes its own VIEW frame directly, carrying this one-time drag-start event.
+			md.emitViewFrame([]RowEvent{{Kind: T.KindAbcDragReset, NodeRow: -1, PortRow: -1, TargetRow: -1, TargetPortRow: -1, EdgeRow: -1}})
 			// Re-scope MoveDispatch's OWN published recipient set the same way (count is
 			// a cumulative total-events affirmation and is intentionally left alone — only
 			// the NAME SET is drag-scoped, mirroring Buffer.SnapshotState's KindAbcDragReset
@@ -499,6 +502,24 @@ func (md *MoveDispatch) setHover(node, port string, isInput bool, tr *T.Trace) {
 	if tr != nil {
 		tr.Hover(node, port, isInput)
 	}
+	// Decentralized (Step C, per-owner-buffer-rows.md): this same goroutine also writes
+	// its own VIEW frame directly, carrying this one hover event resolved to buffer rows
+	// (mirrors owner_events.go's pattern for every other per-owner stream).
+	nodeRow := int32(-1)
+	if r, ok := md.NodeRowFor(node); ok {
+		nodeRow = r
+	}
+	portRow := int32(-1)
+	if port != "" {
+		if r, ok := md.PortRowFor(node, port, isInput); ok {
+			portRow = r
+		}
+	}
+	value := int32(0)
+	if isInput {
+		value = 1
+	}
+	md.emitViewFrame([]RowEvent{{Kind: T.KindHover, NodeRow: nodeRow, PortRow: portRow, TargetRow: -1, TargetPortRow: -1, EdgeRow: -1, Value: value}})
 }
 
 // applySelect sets the Go-owned selection from a click hit and emits it. Selection is
@@ -516,12 +537,17 @@ func (md *MoveDispatch) applySelect(ev rawInputMsg, tr *T.Trace) {
 	if ev.Hit.Kind == "empty" {
 		md.setSelectionUI("", "")
 		tr.Select("")
+		md.emitSelectViewFrame("")
 		return
 	}
 	if ev.Hit.Kind == "edge" {
 		if label, ok := md.edgeFromHit(ev.Hit); ok {
 			md.setSelectionUI("", label)
 			tr.SelectEdge(label)
+			// An edge selection carries no NodeRow (see decodeEventLine's "select" case,
+			// buffer-log.ts — it never reads EdgeRow for this kind), mirroring the fd-3
+			// fallback's KindSelect{Edge: label, Node: ""} shape exactly.
+			md.emitSelectViewFrame("")
 			return
 		}
 		// Unresolvable edge hit → clear selection rather than leaving stale state.
@@ -540,6 +566,20 @@ func (md *MoveDispatch) applySelect(ev rawInputMsg, tr *T.Trace) {
 	}
 	md.setSelectionUI(node, "")
 	tr.Select(node)
+	md.emitSelectViewFrame(node)
+}
+
+// emitSelectViewFrame is applySelect's decentralized-view-frame counterpart (Step C,
+// per-owner-buffer-rows.md): writes this goroutine's own VIEW frame carrying the one
+// select event just logged via tr.Select/tr.SelectEdge above.
+func (md *MoveDispatch) emitSelectViewFrame(node string) {
+	nodeRow := int32(-1)
+	if node != "" {
+		if r, ok := md.NodeRowFor(node); ok {
+			nodeRow = r
+		}
+	}
+	md.emitViewFrame([]RowEvent{{Kind: T.KindSelect, NodeRow: nodeRow, PortRow: -1, TargetRow: -1, TargetPortRow: -1, EdgeRow: -1}})
 }
 
 // nodeFromHit resolves a node hit to its node id. A node hit carries only a numeric buffer

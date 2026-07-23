@@ -228,10 +228,28 @@ func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *
 			}
 		}
 	}()
+	// abcDragCh is this goroutine's read end of the abc-drag-count bridge (view_stream.go's
+	// doc comment): every abc-drag RECIPIENT's own nodeMover goroutine sends a tick here,
+	// non-blocking; THIS single goroutine (the VIEW-stream owner) drains it and increments
+	// its own plain abcDragCount. nil (md == nil, or SetViewStream never ran) is fine — a
+	// nil channel in the select below never becomes ready, matching the "no dedicated view
+	// stream" fallback everywhere else in this file.
+	var abcDragCh chan struct{}
+	if md != nil {
+		abcDragCh = md.abcDragCh
+	}
 	for {
 		select {
 		case <-done:
 			return
+		case <-abcDragCh:
+			// One or more abc-drag ticks arrived on this same wake — drain them all in one
+			// pass (mirrors nodeMover/edgeMover's own "drain to empty" shape) and re-emit
+			// the view frame once per drained tick, so the .probe log's abc-drag COUNT
+			// still matches one event per recipient (buffer-log-equivalence.test.ts).
+			for n := md.DrainAbcDragChan(); n > 0; n-- {
+				md.emitViewFrame([]RowEvent{{Kind: T.KindAbcDrag, NodeRow: -1, PortRow: -1, TargetRow: -1, TargetPortRow: -1, EdgeRow: -1}})
+			}
 		case rec, ok := <-recCh:
 			if !ok {
 				return
@@ -299,6 +317,23 @@ func handleSaveMsg(md *MoveDispatch) {
 // overlay_gen.go from OVERLAY_FLAG_NAMES. Parity guarded by check-edit-op-parity.sh via
 // the OVERLAY_TOGGLES sentinels in overlay_gen.go.
 
+// overlayFlagTraceKind maps the wire FLAG name (same keys as overlayToggles) to its
+// Trace.Kind* string, so applyUpdate's toggle case can hand emitViewFrame the ONE event
+// that flag's toggle logged (matching the fd-3 fallback's per-toggle tr.X(bool) call).
+// Hand-authored (overlay_gen.go is GENERATED and does not carry Trace kinds) — kept in
+// sync with overlayToggles by check-edit-op-parity.sh's OVERLAY_TOGGLES sentinels, which
+// already assert this exact flag-name set.
+var overlayFlagTraceKind = map[string]string{
+	"tori":           T.KindSceneTori,
+	"scenePoles":     T.KindScenePoles,
+	"nodePoles":      T.KindNodePoles,
+	"selSpherePoles": T.KindSelSpherePoles,
+	"handholds":      T.KindHandholds,
+	"labelsGlobal":   T.KindLabelsGlobal,
+	"overlays":       T.KindOverlaysVis,
+	"doubleLinks":    T.KindDoubleLinks,
+}
+
 // applyEdit dispatches one geometry-CRUD edit by its op. The sole op is update
 // (matched by value so it stays invisible to the message-kind-parity guard, which
 // fences only top-level msg.Type kinds).
@@ -355,6 +390,13 @@ func applyUpdate(msg stdinMsg, md *MoveDispatch, tr *T.Trace, speedSinks []chan 
 			// Flip the named flag — Go owns the state; TS just signals the flip.
 			if fn, ok := overlayToggles[msg.Flag]; ok {
 				fn(md, tr)
+				// Decentralized (Step C, per-owner-buffer-rows.md): this goroutine (the sole
+				// caller of every overlay Toggle*) also writes its own VIEW frame directly,
+				// carrying the one flag that just changed — matches the ONE tr.X(bool) event
+				// the toggle already logged on the fd-3 fallback path.
+				if kind, ok := overlayFlagTraceKind[msg.Flag]; ok {
+					md.emitViewFrame([]RowEvent{{Kind: kind, NodeRow: -1, PortRow: -1, TargetRow: -1, TargetPortRow: -1, EdgeRow: -1}})
+				}
 			}
 		}
 		// Persist ON CHANGE (mirrors camera): schedule a debounced write of the new

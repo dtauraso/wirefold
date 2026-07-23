@@ -83,12 +83,30 @@ func (v *viewpointState) PanViewpoint(delta vec3, tr *T.Trace) {
 func (md *MoveDispatch) SetViewpoint(pivot vec3, r float64, pos, up dir) {
 	md.vp.SetViewpoint(pivot, r, pos, up)
 }
-func (md *MoveDispatch) EmitViewpoint(tr *T.Trace)                { md.vp.EmitViewpoint(tr) }
-func (md *MoveDispatch) OrbitViewpoint(from, to dir, tr *T.Trace) { md.vp.OrbitViewpoint(from, to, tr) }
+
+// cameraViewEvent is the single Camera event every camera-changing delegator below hands
+// to emitViewFrame. Camera decodes entirely from the VIEW frame's own Camera block (see
+// buffer-log.ts's decodeEventLine "camera" case) — no row identity to resolve.
+func cameraViewEvent() []RowEvent {
+	return []RowEvent{{Kind: T.KindCamera, NodeRow: -1, PortRow: -1, TargetRow: -1, TargetPortRow: -1, EdgeRow: -1}}
+}
+
+func (md *MoveDispatch) EmitViewpoint(tr *T.Trace) {
+	md.vp.EmitViewpoint(tr)
+	md.emitViewFrame(cameraViewEvent())
+}
+func (md *MoveDispatch) OrbitViewpoint(from, to dir, tr *T.Trace) {
+	md.vp.OrbitViewpoint(from, to, tr)
+	md.emitViewFrame(cameraViewEvent())
+}
 func (md *MoveDispatch) OrbitLockedViewpoint(from, to dir, tr *T.Trace) {
 	md.vp.OrbitLockedViewpoint(from, to, tr)
+	md.emitViewFrame(cameraViewEvent())
 }
-func (md *MoveDispatch) ZoomViewpoint(factor float64, tr *T.Trace) { md.vp.ZoomViewpoint(factor, tr) }
+func (md *MoveDispatch) ZoomViewpoint(factor float64, tr *T.Trace) {
+	md.vp.ZoomViewpoint(factor, tr)
+	md.emitViewFrame(cameraViewEvent())
+}
 func (md *MoveDispatch) PanViewpoint(delta vec3, tr *T.Trace) {
 	// A dolly is a pure CAMERA move (the eye translates toward the cursor). It must NOT move the
 	// scene sphere: coupling them left md.sceneSphere.Center diverged from the movers' held
@@ -97,4 +115,5 @@ func (md *MoveDispatch) PanViewpoint(delta vec3, tr *T.Trace) {
 	// Pan-moves-the-sphere is REJECTED doctrine, not a gap to fill; if it is ever revisited it
 	// must be its own gesture, never a side effect of a camera move.
 	md.vp.PanViewpoint(delta, tr)
+	md.emitViewFrame(cameraViewEvent())
 }
