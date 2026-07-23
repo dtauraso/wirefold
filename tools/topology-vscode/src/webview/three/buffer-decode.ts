@@ -311,6 +311,13 @@ function decodeNodeFrameUncached(buf: ArrayBuffer): DecodedNodeFrame | null {
  * replacement for the removed id/label sidecar: the label rides the binary buffer.
  */
 export function nodeLabel(decoded: DecodedNodeFrame, row: number): string {
+  // Bound the row against THIS frame's node count BEFORE indexing the node block:
+  // reading the off/len columns at row×NODE_STRIDE throws (nodeView is exactly
+  // nodeCount×NODE_STRIDE bytes) when a VIEW-bucket event carries a node row valid for
+  // the topology but beyond a STALE cached fd-3 node frame's count (a cross-generation
+  // skew inherent to per-owner streaming). Degrade to "" — the graceful-empty contract
+  // this function's callers already document (decodeBufferLog, buffer-log.ts).
+  if (row < 0 || row >= decoded.nodeCount) return "";
   const off = readNodeLabelOff(decoded.nodeView, row);
   const len = readNodeLabelLen(decoded.nodeView, row);
   if (len === 0) return "";
@@ -324,7 +331,10 @@ export function nodeLabel(decoded: DecodedNodeFrame, row: number): string {
  * render/bridge path resolves a port hit by row index, never by this string.
  */
 export function portName(decoded: DecodedNodeFrame, row: number): string {
-  if (row < 0) return "";
+  // Upper-bound the row too (not just row<0): a stale cached frame can have fewer port
+  // rows than the topology, and reading row×PORT_STRIDE past portView throws. Same
+  // graceful-empty contract as nodeLabel.
+  if (row < 0 || row >= decoded.portCount) return "";
   const off = readPortPortNameOff(decoded.portView, row);
   const len = readPortPortNameLen(decoded.portView, row);
   if (len === 0) return "";
@@ -520,7 +530,9 @@ function decodeViewFrameUncached(buf: ArrayBuffer): DecodedViewFrame | null {
  * render/bridge path resolves an edge hit by row index, never by this string.
  */
 export function edgeLabel(decoded: DecodedEdgeFrame, row: number): string {
-  if (row < 0) return "";
+  // Upper-bound the row too (see nodeLabel/portName): a stale cached edge frame can have
+  // fewer rows than the topology; reading row×EDGE_STRIDE past edgeView throws.
+  if (row < 0 || row >= decoded.edgeCount) return "";
   const off = readEdgeEdgeLabelOff(decoded.edgeView, row);
   const len = readEdgeEdgeLabelLen(decoded.edgeView, row);
   if (len === 0) return "";

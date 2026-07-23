@@ -99,10 +99,29 @@ describe("buffer-decoded .probe logs equivalence", () => {
     // resolve a node/port/edge string — the fallback tags never appear on fd 3 once the
     // dedicated streams are active (as here), so these simply stay undefined; decodeBufferLog
     // degrades gracefully (see its dn/de optional params).
+    // NOTE: this comment's "never appear" claim is not exercised by this run — see the
+    // separate pre-existing RangeError flake documented in this task's final report; it is
+    // NOT the close/end race this file's other changes fix, and is left as discovered but
+    // unaddressed (out of scope: fixing it touches production decode/schema code).
     let lastNodeFallbackFrame: ArrayBuffer | undefined;
     let lastEdgeFallbackFrame: ArrayBuffer | undefined;
     let fd3Buf: Buffer = Buffer.alloc(0);
+
+    // Every stream we attach a 'data' handler to also gets an 'end' promise below, so we
+    // can await full drain of ALL of them (not just process 'close') — 'end' fires strictly
+    // after a stream's last 'data', and fires even on a zero-byte stream, so this is a
+    // reliable per-stream EOF signal (unlike 'close' alone, which does not guarantee every
+    // extra-fd pipe's final buffered 'data' has been delivered to the Node read side).
+    const streamEndPromises: Promise<void>[] = [];
+    const trackEnd = (s: NodeJS.ReadableStream) => {
+      streamEndPromises.push(new Promise<void>((resolve) => {
+        if ((s as unknown as { readableEnded?: boolean }).readableEnded) { resolve(); return; }
+        s.on("end", () => resolve());
+      }));
+    };
+
     const fd3 = (proc.stdio as (NodeJS.ReadableStream | null)[])[3];
+    trackEnd(fd3!);
     fd3!.on("data", (d: Buffer) => {
       const { frames, rest } = splitFrames(fd3Buf, d);
       fd3Buf = rest;
@@ -117,6 +136,7 @@ describe("buffer-decoded .probe logs equivalence", () => {
     // Send/Select/Hover/AbcDrag*/Camera/SceneSphere/overlay toggles/LayoutLink).
     let viewBuf: Buffer = Buffer.alloc(0);
     const viewStream = (proc.stdio as (NodeJS.ReadableStream | null)[])[VIEW_FD];
+    trackEnd(viewStream!);
     viewStream!.on("data", (d: Buffer) => {
       const { frames, rest } = splitFrames(viewBuf, d);
       viewBuf = rest;
@@ -128,6 +148,7 @@ describe("buffer-decoded .probe logs equivalence", () => {
     const edgeBufs: Buffer[] = new Array(edgeCount).fill(Buffer.alloc(0));
     for (let row = 0; row < edgeCount; row++) {
       const s = (proc.stdio as (NodeJS.ReadableStream | null)[])[EDGE_BASE_FD + row];
+      trackEnd(s!);
       s!.on("data", (d: Buffer) => {
         const { frames, rest } = splitFrames(edgeBufs[row], d);
         edgeBufs[row] = rest;
@@ -145,6 +166,7 @@ describe("buffer-decoded .probe logs equivalence", () => {
     const interiorBufs: Buffer[] = new Array(nodeCount).fill(Buffer.alloc(0));
     for (let row = 0; row < nodeCount; row++) {
       const ns = (proc.stdio as (NodeJS.ReadableStream | null)[])[nodeBaseFd + row];
+      trackEnd(ns!);
       ns!.on("data", (d: Buffer) => {
         const { frames, rest } = splitFrames(nodeBufs[row], d);
         nodeBufs[row] = rest;
@@ -154,6 +176,7 @@ describe("buffer-decoded .probe logs equivalence", () => {
         }
       });
       const is = (proc.stdio as (NodeJS.ReadableStream | null)[])[interiorBaseFd + row];
+      trackEnd(is!);
       is!.on("data", (d: Buffer) => {
         const { frames, rest } = splitFrames(interiorBufs[row], d);
         interiorBufs[row] = rest;
@@ -169,7 +192,17 @@ describe("buffer-decoded .probe logs equivalence", () => {
     // closed — strictly after Go's deferred f.Close() on the -trace file completes, since
     // the OS only reports process exit once every write the process made has been
     // committed. No arbitrary sleep: this await is tied to real completion signals.
-    await new Promise<void>((r) => proc.on("close", () => r()));
+    //
+    // 'close' alone is NOT sufficient for the ~33-pipe fan-out this test spawns: it does not
+    // reliably guarantee every extra-fd Readable has delivered its LAST buffered 'data' to
+    // the Node read side before it fires (a read-side pipe-drain race in the test harness,
+    // not in Go — Go writes every event correctly on every run). A stream's 'end' fires
+    // strictly after its last 'data' (and fires on a zero-byte stream too), so awaiting
+    // 'end' on every stream IN ADDITION to 'close' closes that race.
+    await Promise.all([
+      new Promise<void>((r) => proc.on("close", () => r())),
+      ...streamEndPromises,
+    ]);
 
     // Reference path → per-kind counts from the -trace file (real trace kinds only).
     const traceText = fs.readFileSync(traceFile, "utf8");

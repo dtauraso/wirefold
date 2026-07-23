@@ -269,6 +269,11 @@ function decodeEventLine(ev: DataView, dn: DecodedNodeFrame | null, de: DecodedE
 }
 
 function nodeGeometryLine(dn: DecodedNodeFrame, nodeRow: number, node: string): Line {
+  // A node-geometry event riding the VIEW bucket resolves its node columns against the
+  // last cached fd-3 node frame, which can be a STALE generation with fewer rows than the
+  // topology — reading nodeRow past nodeView would throw. Degrade to the label-only line
+  // (same graceful-empty contract as nodeLabel/portName), never crash the .probe logger.
+  if (nodeRow < 0 || nodeRow >= dn.nodeCount) return { kind: "node-geometry", node };
   const n = dn.nodeView;
   const cx = readNodeCX(n, nodeRow), cy = readNodeCY(n, nodeRow), cz = readNodeCZ(n, nodeRow);
   const radius = readNodeRadius(n, nodeRow);
