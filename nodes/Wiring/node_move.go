@@ -233,7 +233,7 @@ type MoveDispatch struct {
 	// interface-injection pattern on edgeMover.
 	buildInteriorFrame func(tick uint32, present []uint8, value []int32, ox, oy, oz []float32, events []RowEvent) []byte
 	// --- the dedicated VIEW stream (memory/feedback_no_single_writer_bridge.md,
-	// docs/planning/visual-editor/per-owner-buffer-rows.md Step C) --- see view_stream.go.
+	// memory/feedback_no_single_writer_bridge.md Step C) --- see view_stream.go.
 	//
 	// viewOut, when non-nil, is the VIEW stream's OWN dedicated fd (see SetViewStream /
 	// Buffer/stream_fds.go's StreamKindView). Nil (the default — no WIREFOLD_STREAM_FDS
@@ -338,7 +338,7 @@ type MoveDispatch struct {
 	// no mutex, no atomic. tr.Select/tr.Hover/tr.AbcDrag/tr.AbcDragReset still fire
 	// alongside this, but ONLY for the -trace/.probe EVENT LOG (Buffer.SnapshotState, the
 	// central accumulator that used to also feed a fd-3 fallback packer, was deleted
-	// entirely — per-owner-buffer-rows.md's final step; WIREFOLD_STREAM_FDS is now
+	// entirely — memory/feedback_no_single_writer_bridge.md's final step; WIREFOLD_STREAM_FDS is now
 	// mandatory, there is no fallback left).
 	//
 	// latchedNode is the node id whose LatchedSel bit stays set across a deselect (mirrors
@@ -427,10 +427,10 @@ func (md *MoveDispatch) LookupEdgeRow(row int) (label string, ok bool) {
 // emitLayoutLinks streams via tr.LayoutLink for Buffer.SnapshotState's LayoutLink BLOCK
 // (still the sole source of that block; unaffected by this method), reconstructed here
 // so main.go can ALSO emit each pair once as a view-owner VIEW-frame event (Step C,
-// per-owner-buffer-rows.md — LayoutLink is load-time-once, like SceneSphere, so it has no
+// memory/feedback_no_single_writer_bridge.md — LayoutLink is load-time-once, like SceneSphere, so it has no
 // live per-goroutine owner to decentralize onto; this seed-once emission is its
 // decentralized counterpart). Order is not guaranteed to match emitLayoutLinks' — the
-// .probe log is a multiset of events, per per-owner-buffer-rows.md's own doc comment.
+// .probe log is a multiset of events, per memory/feedback_no_single_writer_bridge.md's own doc comment.
 func (md *MoveDispatch) LayoutLinkPairs() [][2]string {
 	var out [][2]string
 	for id, nm := range md.nodeMovers {

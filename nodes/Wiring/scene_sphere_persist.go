@@ -109,7 +109,7 @@ func (md *MoveDispatch) LoadSceneSphere(topologyPath string) {
 	// The scene sphere is established here and never moves again (MODEL.md), so the VIEW
 	// frame emit below is the single source-of-truth broadcast the renderer uses in place
 	// of deriving a content-sphere centroid from live node positions.
-	// Decentralized (Step C, per-owner-buffer-rows.md): the gesture/stdin-reader goroutine
+	// Decentralized (Step C, memory/feedback_no_single_writer_bridge.md): the gesture/stdin-reader goroutine
 	// (this one — LoadSceneSphere runs before any other goroutine launches) also writes its
 	// own VIEW frame directly, carrying this one-time scene-sphere event. SceneSphere
 	// decodes entirely from the VIEW frame's own Scene block (buffer-log.ts's

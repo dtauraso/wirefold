@@ -1,7 +1,7 @@
 // headless_node_fd_test.go — drives the REAL compiled binary headlessly and proves the
 // per-node dedicated-stream migration end-to-end (memory/feedback_no_single_writer_bridge.md,
 // Buffer/stream_fds.go's StreamKindNode/StreamKindInterior): with every per-owner fd wired
-// (mandatory — no fd-3 fallback left, per-owner-buffer-rows.md's final step), every node's
+// (mandatory — no fd-3 fallback left, memory/feedback_no_single_writer_bridge.md's final step), every node's
 // own combined frame (Node fields + ports + label) arrives on its OWN "node" fd, and every
 // node's own interior-bead frame arrives on its OWN "interior" fd.
 //

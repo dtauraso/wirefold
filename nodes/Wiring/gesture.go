@@ -277,7 +277,7 @@ func (md *MoveDispatch) gestPointerMove(ev rawInputMsg, tr *T.Trace) {
 			// event of the drag, so resetting there interleaves with the neighborSetC fan's
 			// AbcDrag marks (which land asynchronously on each recipient's own goroutine)
 			// and drops recipients whose mark lands after the next move's reset.
-			// Decentralized (Step C, per-owner-buffer-rows.md): this same goroutine also
+			// Decentralized (Step C, memory/feedback_no_single_writer_bridge.md): this same goroutine also
 			// writes its own VIEW frame directly, carrying this one-time drag-start event.
 			md.emitViewFrame([]RowEvent{{Kind: T.KindAbcDragReset, NodeRow: -1, PortRow: -1, TargetRow: -1, TargetPortRow: -1, EdgeRow: -1}})
 			// Re-scope MoveDispatch's OWN published recipient set the same way (count is
@@ -494,7 +494,7 @@ func (md *MoveDispatch) setHover(node, port string, isInput bool, tr *T.Trace) {
 	// fields (mutated only by this goroutine, no lock) and MESSAGES the affected
 	// node(s) to set their OWN hovered bit — no shared/republished map.
 	md.setHoverUI(node, port, isInput)
-	// Decentralized (Step C, per-owner-buffer-rows.md): this same goroutine also writes
+	// Decentralized (Step C, memory/feedback_no_single_writer_bridge.md): this same goroutine also writes
 	// its own VIEW frame directly, carrying this one hover event resolved to buffer rows
 	// (mirrors owner_events.go's pattern for every other per-owner stream).
 	nodeRow := int32(-1)
@@ -557,7 +557,7 @@ func (md *MoveDispatch) applySelect(ev rawInputMsg, tr *T.Trace) {
 }
 
 // emitSelectViewFrame is applySelect's decentralized-view-frame counterpart (Step C,
-// per-owner-buffer-rows.md): writes this goroutine's own VIEW frame carrying the one
+// memory/feedback_no_single_writer_bridge.md): writes this goroutine's own VIEW frame carrying the one
 // select event just logged via tr.Select/tr.SelectEdge above.
 func (md *MoveDispatch) emitSelectViewFrame(node string) {
 	nodeRow := int32(-1)

@@ -329,7 +329,7 @@ export function EdgeTubes({ capacity, layoutLinkCapacity }: { capacity: number; 
     // The Edge block carries NO endpoint coordinates: SrcPortRow/DstPortRow reference the
     // NODE frame's Port block, the ONLY place the endpoint's world position lives (node-
     // owned) — so a fresh Node frame and this SAME-tick Edge frame can never disagree (the
-    // endpoint-tear fix, per-owner-buffer-rows.md option (a)).
+    // endpoint-tear fix, memory/feedback_no_single_writer_bridge.md option (a)).
 
     const portEndpoint = (portRow: number): [number, number, number] => {
       if (portRow < 0) return [0, 0, 0];

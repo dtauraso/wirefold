@@ -1,7 +1,7 @@
 // Buffer/view_stream_frame.go — the VIEW stream's dedicated-frame packer (see
 // Buffer/stream_fds.go's StreamKindView doc comment and
 // memory/feedback_no_single_writer_bridge.md). Step C of retiring Buffer.SnapshotState's
-// central accumulator (docs/planning/visual-editor/per-owner-buffer-rows.md): the
+// central accumulator (memory/feedback_no_single_writer_bridge.md): the
 // gesture/stdin-reader goroutine (nodes/Wiring's MoveDispatch) already owns camera/overlay/
 // scene-sphere/selection/hover state — it now WRITES this frame itself, directly, instead
 // of routing that state through Buffer.SnapshotState's Trace-drain accumulator.

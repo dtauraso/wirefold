@@ -23,7 +23,7 @@ import {
 
 // Build a VIEW-stream frame (camera+overlay+scene) carrying only the Overlay columns of
 // interest — the live production shape (decodeViewFrame), replacing the deleted fd-3 SCENE
-// frame fixture (removed with Buffer.SnapshotState — per-owner-buffer-rows.md's final
+// frame fixture (removed with Buffer.SnapshotState — memory/feedback_no_single_writer_bridge.md's final
 // step). `set` writes an overlay column (u8) by offset.
 function makeOverlaySnapshot(cols: Partial<Record<number, number>>): ArrayBuffer {
   const total = BUF_VIEW_FRAME_HEADER_SIZE + CAMERA_STRIDE + OVERLAY_STRIDE + SCENE_STRIDE;

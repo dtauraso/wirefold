@@ -78,7 +78,7 @@ and two streams per node row (that nodeMover's own geometry+ports+label, and tha
 Update-goroutine's interior beads). `WIREFOLD_STREAM_FDS` (set by the ext host's spawn,
 `tools/topology-vscode/src/runCommand.ts`) is **mandatory** — `Buffer.SnapshotState`, the
 former central accumulator that packed one combined fd-3 frame with a fallback path, was
-deleted entirely (per-owner-buffer-rows.md). A dedicated-fd frame is
+deleted entirely (memory/feedback_no_single_writer_bridge.md). A dedicated-fd frame is
 `[len:u32-LE][payload]` with **no tag byte** — the fd POSITION identifies which
 stream/row it is; the ext host relays each to the webview under a synthetic tag
 (`BUF_BLOCK_TAG_VIEW`/`_EDGE_STREAM`/`_NODE_STREAM`/`_INTERIOR_STREAM`,

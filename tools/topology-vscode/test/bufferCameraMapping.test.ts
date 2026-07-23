@@ -33,7 +33,7 @@ function anglesToWorldOffset(r: number, theta: number, phi: number): THREE.Vecto
 
 /** Build a VIEW-stream frame (camera+overlay+scene) with a single filled camera row —
  *  the live production shape (decodeViewFrame), replacing the deleted fd-3 SCENE frame
- *  fixture (decodeSnapshot, removed with Buffer.SnapshotState — per-owner-buffer-rows.md's
+ *  fixture (decodeSnapshot, removed with Buffer.SnapshotState — memory/feedback_no_single_writer_bridge.md's
  *  final step). */
 function makeCameraSnapshot(cam: {
   px: number; py: number; pz: number; r: number;

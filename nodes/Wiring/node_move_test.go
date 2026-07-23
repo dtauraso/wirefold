@@ -72,7 +72,7 @@ func TestDecentralizedNodeMove(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadTopology: %v", err)
 	}
-	// Decentralized (Step C, per-owner-buffer-rows.md): wire src's/e0's own dedicated
+	// Decentralized (Step C, memory/feedback_no_single_writer_bridge.md): wire src's/e0's own dedicated
 	// stream frames directly (bypassing the fd/os.NewFile machinery SetNodeStreams/
 	// SetEdgeStreams use in production) so this test can observe their own row-resolved
 	// RowEvents on move, mirroring the retired central Trace event assertions below.

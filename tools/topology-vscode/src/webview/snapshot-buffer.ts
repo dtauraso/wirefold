@@ -1,7 +1,7 @@
 // snapshot-buffer.ts — module-level sinks for the latest binary frames from Go's dedicated
 // per-owner stream fds (memory/feedback_no_single_writer_bridge.md). There is no fd-3
 // SCENE/BEAD/NODE/EDGE fallback anymore — WIREFOLD_STREAM_FDS is mandatory
-// (per-owner-buffer-rows.md's final step deleted Buffer.SnapshotState, the central
+// (memory/feedback_no_single_writer_bridge.md's final step deleted Buffer.SnapshotState, the central
 // accumulator that used to write those fd-3 frames).
 //
 // Separated from main.tsx so that buffer-scene.tsx / BeadInstances.tsx can read them

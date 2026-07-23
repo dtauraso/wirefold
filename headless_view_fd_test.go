@@ -1,7 +1,7 @@
 // headless_view_fd_test.go — drives the REAL compiled binary headlessly and proves the
 // VIEW stream end-to-end (memory/feedback_no_single_writer_bridge.md, Buffer/stream_fds.go):
 // with every per-owner fd wired (WIREFOLD_STREAM_FDS mandatory — the fd-3 SnapshotState
-// accumulator + its fallback frame were deleted, per-owner-buffer-rows.md's final step),
+// accumulator + its fallback frame were deleted, memory/feedback_no_single_writer_bridge.md's final step),
 // camera/overlay/scene arrive on their OWN dedicated view frame (BuildViewStreamFrame).
 //
 // See headless_stream_helpers_test.go for the spawn/cleanup pattern this reuses; NEVER run

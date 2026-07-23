@@ -164,7 +164,7 @@ func loadSceneOverlays(overlaysPath, legacyScenePath string) (overlayState, bool
 func (md *MoveDispatch) LoadOverlays(topologyPath string, tr *T.Trace) {
 	ov, _ := loadSceneOverlays(overlaysFilePath(topologyPath), sceneCameraPath(topologyPath)) // ov = defaults with any persisted keys applied
 	md.ov.SetGuideVisibility(ov)
-	// Decentralized (Step C, per-owner-buffer-rows.md): the gesture/stdin-reader goroutine
+	// Decentralized (Step C, memory/feedback_no_single_writer_bridge.md): the gesture/stdin-reader goroutine
 	// (this one) writes its own VIEW frame directly, carrying the 8 one-time overlay-flag
 	// events this load implies — one RowEvent per flag kind. Every overlay kind decodes
 	// entirely from the VIEW frame's own Overlay block (buffer-log.ts's decodeEventLine

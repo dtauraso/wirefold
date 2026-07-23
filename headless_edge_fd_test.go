@@ -1,7 +1,7 @@
 // headless_edge_fd_test.go — drives the REAL compiled binary headlessly and proves the
 // per-edge dedicated-stream migration end-to-end (memory/feedback_no_single_writer_bridge.md,
 // Buffer/stream_fds.go's StreamKindEdge): with every per-owner fd wired (mandatory — no
-// fd-3 fallback left, per-owner-buffer-rows.md's final step), every edge's own combined
+// fd-3 fallback left, memory/feedback_no_single_writer_bridge.md's final step), every edge's own combined
 // frame (Edge fields + its wire's live beads) arrives on its OWN fd.
 //
 // See headless_stream_helpers_test.go for the spawn/cleanup pattern this reuses; NEVER run

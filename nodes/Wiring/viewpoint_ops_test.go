@@ -9,7 +9,7 @@ import (
 // viewpoint_ops_test.go — the Zoom/Pan/Orbit viewpoint ops mutate viewpointState's own
 // fields correctly; the underlying orbit/zoom/pan math is verified in spherical_test.go /
 // viewpoint tests, these assert the op wiring only. The RowEvent/VIEW-frame side of this
-// (Decentralized, Step C, per-owner-buffer-rows.md) is a MoveDispatch-level concern,
+// (Decentralized, Step C, memory/feedback_no_single_writer_bridge.md) is a MoveDispatch-level concern,
 // covered by TestMoveDispatchViewpointDelegatorsEmit below and viewpoint_bridge_test.go.
 
 // TestZoomViewpointEmitsRadius: ZoomViewpoint scales r.

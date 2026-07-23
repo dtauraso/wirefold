@@ -1,5 +1,5 @@
 // Trace is now a thin breadcrumb writer plus the closed EVENT-KIND vocabulary shared
-// with the per-owner buffer streams (per-owner-buffer-rows.md, memory/
+// with the per-owner buffer streams (memory/feedback_no_single_writer_bridge.md, memory/
 // feedback_no_single_writer_bridge.md). Every domain event (recv/fire/send/geometry/
 // camera/selection/overlay-toggle/...) is now written by its OWNING goroutine directly
 // as a RowEvent onto that goroutine's own dedicated stream frame (nodes/Wiring's

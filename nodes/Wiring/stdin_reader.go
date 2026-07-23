@@ -390,7 +390,7 @@ func applyUpdate(msg stdinMsg, md *MoveDispatch, tr *T.Trace, speedSinks []chan 
 			// Flip the named flag — Go owns the state; TS just signals the flip.
 			if fn, ok := overlayToggles[msg.Flag]; ok {
 				fn(md, tr)
-				// Decentralized (Step C, per-owner-buffer-rows.md): this goroutine (the sole
+				// Decentralized (Step C, memory/feedback_no_single_writer_bridge.md): this goroutine (the sole
 				// caller of every overlay Toggle*) also writes its own VIEW frame directly,
 				// carrying the one flag that just changed — matches the ONE tr.X(bool) event
 				// the toggle already logged on the fd-3 fallback path.

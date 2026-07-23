@@ -1,6 +1,6 @@
 // live_event_poll_test.go — shared helper for external-package tests (Wiring_test) that
 // need to poll a live MoveDispatch's per-owner RowEvents while node goroutines are still
-// running. Decentralized (Step C, per-owner-buffer-rows.md): each node/edge goroutine now
+// running. Decentralized (Step C, memory/feedback_no_single_writer_bridge.md): each node/edge goroutine now
 // writes its own dedicated stream frame directly (no central Trace event channel to hook
 // into), so a live-observing test wires md.SetNodeStreams with a capturing buildFrame/
 // buildInteriorFrame, exactly as main.go wires the real Buffer builders — just capturing

@@ -6,7 +6,7 @@ set -euo pipefail
 # The Overlay block's eight boolean flags used to be hand-listed in FIVE separate places
 # (struct, field map, a central dispatcher's switch case list, and SetOverlayRow's nine
 # same-typed positional uint8/uint32 args) inside the now-deleted Buffer.SnapshotState
-# accumulator (per-owner-buffer-rows.md's final step). Two adjacent same-typed positional
+# accumulator (memory/feedback_no_single_writer_bridge.md's final step). Two adjacent same-typed positional
 # args could be transposed there and the mistake would COMPILE, type-check, and pass tests
 # — it would surface only as the wrong overlay toggling live in the editor.
 #

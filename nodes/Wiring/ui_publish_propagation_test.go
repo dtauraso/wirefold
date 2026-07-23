@@ -121,7 +121,7 @@ func lastViewFrameAbcDragCount(raw []byte) (count uint32, ok bool) {
 // through the real gesture/quantized-move call sites and asserts (a) the AFFECTED
 // mover's OWN dedicated stream frame shows the new state via its periodic emit (no
 // shared/republished map to poll instead), and (b) the VIEW frame's AbcDragCount
-// (MoveDispatch's OWN plain counter, Step C of per-owner-buffer-rows.md) reflects the
+// (MoveDispatch's OWN plain counter, Step C of memory/feedback_no_single_writer_bridge.md) reflects the
 // abc-drag event.
 func TestGesturePathPropagatesUIStateToMoverStream(t *testing.T) {
 	root := writeXTN(t) // x --Out--> t (chain), x --Out--> n (data)

@@ -2,7 +2,7 @@
 // headless per-owner-stream test in this package uses to drive the REAL compiled binary
 // with WIREFOLD_STREAM_FDS fully wired (view + one fd per edge row + one NODE/INTERIOR fd
 // per node row) — MANDATORY now that Buffer.SnapshotState's central accumulator and its fd-3
-// fallback were deleted (per-owner-buffer-rows.md's final step): there is no fallback path
+// fallback were deleted (memory/feedback_no_single_writer_bridge.md's final step): there is no fallback path
 // left to fall back to, so every headless test that used to exercise "fd3 only" must wire
 // the real per-owner fds instead. NEVER run the sim in the foreground
 // (memory/feedback_no_foreground_sim_runs.md).

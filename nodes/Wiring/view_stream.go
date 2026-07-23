@@ -1,5 +1,5 @@
 // view_stream.go — the VIEW stream's write side (Step C, docs/planning/visual-editor/
-// per-owner-buffer-rows.md; memory/feedback_no_single_writer_bridge.md).
+// memory/feedback_no_single_writer_bridge.md; memory/feedback_no_single_writer_bridge.md).
 //
 // Camera/overlay/scene-sphere/selection/hover state already lives on MoveDispatch (md.vp/
 // md.ov/md.sceneSphere/md.sel), mutated only by the gesture/stdin-reader goroutine
@@ -81,7 +81,7 @@ func (md *MoveDispatch) DrainAbcDragChan() int {
 }
 
 // EmitLayoutLinkViewEvent writes one LayoutLink event onto this goroutine's own VIEW
-// frame (Step C, per-owner-buffer-rows.md): LayoutLink is a load-time-once topology fact
+// frame (Step C, memory/feedback_no_single_writer_bridge.md): LayoutLink is a load-time-once topology fact
 // with no live per-goroutine owner to stream it from, so it is emitted once here rather
 // than from a per-tick owner. Exported so main.go (package main, which already
 // resolves nodeRow/targetRow via md.NodeRowFor) can call it directly after wiring

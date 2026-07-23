@@ -24,7 +24,7 @@ func TestLoadOverlaysEmitsDefaultsWhenNoPersistedKeys(t *testing.T) {
 	root := writeTree(t) // no view/scene.json → loadSceneOverlays returns found=false
 	md := &MoveDispatch{ov: defaultOverlayState()}
 	var kinds []string
-	// Decentralized (Step C, per-owner-buffer-rows.md): LoadOverlays writes its own VIEW
+	// Decentralized (Step C, memory/feedback_no_single_writer_bridge.md): LoadOverlays writes its own VIEW
 	// frame directly via md.emitViewFrame; capture the RowEvent kinds it carries instead of
 	// the retired central Trace onEvent hook.
 	md.SetViewStream(io.Discard, func(tick uint32,

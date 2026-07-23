@@ -147,7 +147,7 @@ type bufLayoutInterior struct {
 // One row per edge (wire). Matched from KindGeometry trace events.
 //
 // The edge stores NO endpoint coordinates (the removed SX..EZ copy was a duplication
-// artifact — see docs/planning/visual-editor/per-owner-buffer-rows.md): it carries only
+// artifact — see memory/feedback_no_single_writer_bridge.md): it carries only
 // SrcPortRow/DstPortRow, the flattened buffer PORT-ROW indices (same resolution as
 // LookupPortRow / the Port block, Buffer/node_stream_frame.go's BuildNodeStreamFrame) of
 // the source (OUTPUT)

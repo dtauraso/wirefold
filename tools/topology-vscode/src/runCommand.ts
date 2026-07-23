@@ -271,7 +271,7 @@ function ensureBinaryBuilt(
 // ONLY within a single Go process's stream: a leftover tail is a fragment of THAT process's
 // output. Its lifetime is therefore the process's, not the runner's. fd 3 itself carries no
 // frames anymore (WIREFOLD_STREAM_FDS is mandatory — the fd-3 SnapshotState accumulator and
-// its fallback frames were deleted, per-owner-buffer-rows.md's final step); the pipe slot
+// its fallback frames were deleted, memory/feedback_no_single_writer_bridge.md's final step); the pipe slot
 // stays allocated (see run()) purely to keep the remaining fd numbering unchanged.
 interface StreamParseState {
   stdoutBuf: string;
@@ -460,7 +460,7 @@ export class BuildAndRunRunner {
     // directly. Without this, SIGTERM could leave it orphaned on macOS.
     // stdio index 3 is a RESERVED, UNUSED pipe slot: Go no longer writes anything to fd 3
     // (Buffer.SnapshotState — the central accumulator that used to write it, plus its
-    // fallback frames — was deleted entirely; per-owner-buffer-rows.md's final step). The
+    // fallback frames — was deleted entirely; memory/feedback_no_single_writer_bridge.md's final step). The
     // slot stays allocated purely so the remaining fd numbering (VIEW_FD=4, edge/node/
     // interior ranges after it) matches this file's existing constants unchanged. stdio
     // index VIEW_FD (4) = the dedicated VIEW-stream pipe (WIREFOLD_STREAM_FDS=

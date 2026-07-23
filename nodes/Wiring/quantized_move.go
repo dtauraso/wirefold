@@ -238,7 +238,7 @@ func (md *MoveDispatch) neighborSetCRequantize(selfID, fromID string, selfCenter
 			fmt.Sprintf("peer=%s peerCenter=(%.3f,%.3f,%.3f) abc=(%d,%d,%d) delta=(%d,%d,%d)",
 				fromID, fromCenter.X, fromCenter.Y, fromCenter.Z, it, ip, ir, deltaA, deltaB, deltaC))
 	}
-	// Decentralized (Step C, per-owner-buffer-rows.md): signal the VIEW-stream owner
+	// Decentralized (Step C, memory/feedback_no_single_writer_bridge.md): signal the VIEW-stream owner
 	// goroutine (RunStdinReader) that one more abc-drag occurred, so ITS OWN abcDragCount
 	// (a plain int, never shared/atomic) and VIEW frame stay current — see
 	// view_stream.go's doc comment for why this is message-passing, not a shared counter.

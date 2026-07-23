@@ -1,6 +1,6 @@
 // Buffer/node_kind_id_test.go — NodeKindID mapping test. Split off from the deleted
 // Buffer/snapshot_test.go (which exercised it through the now-deleted SnapshotState
-// accumulator/buildSnapshot path — per-owner-buffer-rows.md's final step): NodeKindID
+// accumulator/buildSnapshot path — memory/feedback_no_single_writer_bridge.md's final step): NodeKindID
 // itself is a generated, standalone lookup (node_kind_id_gen.go) with no accumulator
 // dependency, so it keeps direct coverage here.
 

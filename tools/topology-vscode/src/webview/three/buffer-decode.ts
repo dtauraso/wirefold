@@ -9,7 +9,7 @@
 // resolved against the NODE frame's Port block — see EdgeTube.tsx). decodeViewFrame takes
 // the dedicated VIEW-stream frame and returns the Camera/Overlay/Scene blocks. There is no
 // combined SCENE-frame decoder anymore: Buffer.SnapshotState (the central accumulator that
-// used to write that fd-3 fallback frame) was deleted entirely — per-owner-buffer-rows.md's
+// used to write that fd-3 fallback frame) was deleted entirely — memory/feedback_no_single_writer_bridge.md's
 // final step; WIREFOLD_STREAM_FDS is mandatory.
 //
 // Node frame layout (little-endian, packed; see frame-tags.ts BUF_BLOCK_TAG_NODE):

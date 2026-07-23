@@ -57,7 +57,7 @@ func toStreamEvents(events []W.RowEvent) []B.StreamEvent {
 // The clock is free-running (no play/pause gate).
 func runTopology(ctx context.Context, cancel context.CancelFunc, topologyPath string, clk W.Clock) {
 	// The VIEW stream (camera+overlay+scene, one singleton row) — per-owner buffer rows
-	// (per-owner-buffer-rows.md, memory/feedback_no_single_writer_bridge.md): WIREFOLD_STREAM_FDS
+	// (memory/feedback_no_single_writer_bridge.md, memory/feedback_no_single_writer_bridge.md): WIREFOLD_STREAM_FDS
 	// is now MANDATORY (the fd-3 SnapshotState accumulator + fallback packer were deleted along
 	// with this migration's final step — see Buffer/stream_fds.go). The gesture/stdin-reader
 	// goroutine (nodes/Wiring's MoveDispatch, wired below once it exists) is the sole WRITER of
@@ -65,7 +65,7 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, topologyPath st
 	streamFDs := B.ParseStreamFDs(os.Getenv("WIREFOLD_STREAM_FDS"))
 	viewFile, viewStreamWired := streamFDs.Open(B.StreamKindView, 0)
 	// Trace is now just the breadcrumb writer (the central event channel/drain and the
-	// -trace JSONL dump were deleted — per-owner-buffer-rows.md's final step: every
+	// -trace JSONL dump were deleted — memory/feedback_no_single_writer_bridge.md's final step: every
 	// emitting goroutine packs its own frame directly; see Trace/Trace.go's doc comment).
 	tr := T.New(0)
 	// DEBUG BREADCRUMB channel: production breadcrumbs ride stdout as {"kind":"breadcrumb",...}
@@ -128,7 +128,7 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, topologyPath st
 				B.NodeKindID)
 		}
 	}
-	// The VIEW stream's write side (Step C, per-owner-buffer-rows.md): wire md as the
+	// The VIEW stream's write side (Step C, memory/feedback_no_single_writer_bridge.md): wire md as the
 	// stream's owner/writer BEFORE anything that can change camera/overlay/scene-sphere/
 	// selection/hover reaches it (SeedInitialViewpoint/LoadOverlays/LoadSceneSphere below,
 	// then the launched movers/stdin reader) — mirrors SetEdgeStreams/SetNodeStreams'

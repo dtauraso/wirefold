@@ -27,7 +27,7 @@ func countCameraEvents(events []RowEvent) int {
 
 // captureViewFrameKinds wires md's VIEW stream to a builder that appends every
 // RowEvent kind it's handed to *kinds, mirroring what the real buffer builder does
-// (Decentralized, Step C, per-owner-buffer-rows.md) without needing a real fd.
+// (Decentralized, Step C, memory/feedback_no_single_writer_bridge.md) without needing a real fd.
 func captureViewFrameKinds(md *MoveDispatch, kinds *[]RowEvent) {
 	md.SetViewStream(io.Discard, func(tick uint32,
 		camPX, camPY, camPZ, camR, camPosTheta, camPosPhi, camUpTheta, camUpPhi float32,

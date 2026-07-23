@@ -18,7 +18,7 @@
 // beads drawn for that node until its own Update goroutine's first frame arrives).
 //
 // WIREFOLD_STREAM_FDS "node"+"interior" are now MANDATORY (the fd-3 fallback frame was
-// deleted, per-owner-buffer-rows.md's final step) — null means "no frame has arrived yet",
+// deleted, memory/feedback_no_single_writer_bridge.md's final step) — null means "no frame has arrived yet",
 // not "the dedicated path is off".
 
 import { getLatestNodeStreamFrames, getLatestInteriorStreamFrames, getNodeStreamVersion, getInteriorStreamVersion, subscribeNodeStreamFrame, subscribeInteriorStreamFrame } from "../snapshot-buffer";
