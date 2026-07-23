@@ -36,13 +36,9 @@ func (v *viewpointState) SetViewpoint(pivot vec3, r float64, pos, up dir) {
 	v.lockedAxis = nil
 }
 
-// EmitViewpoint emits the current camera viewpoint state as a camera trace event.
+// EmitViewpoint persists the current camera viewpoint state (the VIEW frame carrying it
+// is written by the caller, MoveDispatch.EmitViewpoint below).
 func (v *viewpointState) EmitViewpoint(tr *T.Trace) {
-	if tr != nil {
-		tr.Camera(v.pivot.X, v.pivot.Y, v.pivot.Z, v.r,
-			v.pos.Theta, v.pos.Phi,
-			v.up.Theta, v.up.Phi)
-	}
 	// Persist the just-emitted viewpoint (debounced, off the hot path) when armed —
 	// independent of the trace sink. Every gesture viewpoint change (orbit/zoom/pan/home)
 	// flows through EmitViewpoint, so this is the single chokepoint for the write side.

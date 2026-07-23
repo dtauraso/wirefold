@@ -377,7 +377,6 @@ func (pw *PacedWire) stepAll(tick int64) {
 			}
 			emit, pos, final := pw.advanceBead(b, nowTick)
 			if emit {
-				pw.Trace.Position(pos.node, pos.port, pos.val, pos.x, pos.y, pos.z, pos.t, pos.gen)
 				pw.pending = append(pw.pending, pendingWireEvent{
 					kind: T.KindPosition, value: pos.val,
 					x: pos.x, y: pos.y, z: pos.z, t: pos.t, gen: pos.gen,
@@ -516,7 +515,6 @@ type posEmitArgs struct {
 // this wire's own goroutine (stepAll) right after the outCh handoff succeeds.
 func (pw *PacedWire) emitArrive(ai arriveInfo) {
 	if ai.emit {
-		pw.Trace.Arrive(ai.node, ai.port, ai.value, ai.gen)
 		pw.pending = append(pw.pending, pendingWireEvent{kind: T.KindArrive, value: ai.value, gen: ai.gen})
 	}
 }

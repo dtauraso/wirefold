@@ -163,17 +163,13 @@ func loadSceneOverlays(overlaysPath, legacyScenePath string) (overlayState, bool
 // directory-tree and monolithic forms.
 func (md *MoveDispatch) LoadOverlays(topologyPath string, tr *T.Trace) {
 	ov, _ := loadSceneOverlays(overlaysFilePath(topologyPath), sceneCameraPath(topologyPath)) // ov = defaults with any persisted keys applied
-	if tr != nil {
-		md.ov.SetGuideVisibility(ov, tr) // ALWAYS emit so the buffer reflects the state
-	} else {
-		md.ov = ov
-	}
+	md.ov.SetGuideVisibility(ov)
 	// Decentralized (Step C, per-owner-buffer-rows.md): the gesture/stdin-reader goroutine
-	// also writes its own VIEW frame directly, carrying the same 8 one-time overlay-flag
-	// events SetGuideVisibility's tr.Emit* calls above already logged on the fd-3 fallback
-	// path — one RowEvent per flag kind, matching that per-kind count. Every overlay kind
-	// decodes entirely from the VIEW frame's own Overlay block (buffer-log.ts's
-	// decodeEventLine OVERLAY_KINDS branch) — no row identity to resolve.
+	// (this one) writes its own VIEW frame directly, carrying the 8 one-time overlay-flag
+	// events this load implies — one RowEvent per flag kind. Every overlay kind decodes
+	// entirely from the VIEW frame's own Overlay block (buffer-log.ts's decodeEventLine
+	// OVERLAY_KINDS branch) — no row identity to resolve. tr is unused now (kept in the
+	// signature to avoid rippling a call-site signature change through main.go).
 	md.emitViewFrame([]RowEvent{
 		{Kind: T.KindSceneTori, NodeRow: -1, PortRow: -1, TargetRow: -1, TargetPortRow: -1, EdgeRow: -1},
 		{Kind: T.KindScenePoles, NodeRow: -1, PortRow: -1, TargetRow: -1, TargetPortRow: -1, EdgeRow: -1},

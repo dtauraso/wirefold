@@ -44,7 +44,7 @@ func TestInputToHoldNewSendOldTraversal(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tr, live := newTraceWithLiveEvents(256)
+	tr := T.New(0)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -52,10 +52,16 @@ func TestInputToHoldNewSendOldTraversal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadTopology: %v", err)
 	}
+	live := wireLiveRowEvents(nmr)
 	nmr.Start(ctx)
 
 	for _, n := range nodes {
 		go n.Update(ctx)
+	}
+
+	dstRow, ok := nmr.NodeRowFor("dst")
+	if !ok {
+		t.Fatal("no NODE-ROW for dst")
 	}
 
 	// Wait for both bead values (1 then 0, per popEnd end-pop order) to be
@@ -71,8 +77,8 @@ func TestInputToHoldNewSendOldTraversal(t *testing.T) {
 		case <-poll.C:
 			got = got[:0]
 			for _, e := range live.snapshot() {
-				if e.Kind == T.KindRecv && e.Node == "dst" && e.Port == "FromPrevHoldNewSendOldNode" {
-					got = append(got, e.Value)
+				if e.Kind == T.KindRecv && e.NodeRow == dstRow {
+					got = append(got, int(e.Value))
 				}
 			}
 		}

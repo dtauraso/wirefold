@@ -237,11 +237,6 @@ func (md *MoveDispatch) neighborSetCRequantize(selfID, fromID string, selfCenter
 		md.tr.Breadcrumb("abc-drag", selfID, fromID,
 			fmt.Sprintf("peer=%s peerCenter=(%.3f,%.3f,%.3f) abc=(%d,%d,%d) delta=(%d,%d,%d)",
 				fromID, fromCenter.X, fromCenter.Y, fromCenter.Z, it, ip, ir, deltaA, deltaB, deltaC))
-		// Routed counterpart of the breadcrumb above: marks selfID in the buffer so the
-		// in-editor overlay log lists it (the breadcrumb alone never reaches the buffer).
-		// deltaA/deltaB/deltaC ride along so the in-editor drag-log can show what selfID
-		// received.
-		md.tr.AbcDrag(selfID, deltaA, deltaB, deltaC)
 	}
 	// Decentralized (Step C, per-owner-buffer-rows.md): signal the VIEW-stream owner
 	// goroutine (RunStdinReader) that one more abc-drag occurred, so ITS OWN abcDragCount
@@ -254,9 +249,9 @@ func (md *MoveDispatch) neighborSetCRequantize(selfID, fromID string, selfCenter
 	// (neighborSetC dispatch, node_mover.go's moveMsgKindNeighborSetC case), so it is
 	// safe to write nm's fields directly — no shared map, no lock. This is what
 	// writeStreamFrame (also this goroutine) reads for its own dedicated stream frame.
-	// md.tr.AbcDrag above (EVENT LOG only) separately still drives Buffer.SnapshotState's
-	// own s.overlay.AbcDragCount for the VIEW frame (the fd-3-fallback path's existing
-	// single-goroutine counter — no change needed here).
+	// The RunStdinReader goroutine's own abcDragCount (view_stream.go) is the sole
+	// source of the VIEW frame's AbcDragCount now — no second EVENT-LOG accumulation
+	// needed here.
 	if nm, ok := md.nodeMovers[selfID]; ok {
 		nm.gotDragMsg = 1
 		nm.dragDeltaA, nm.dragDeltaB, nm.dragDeltaC = int32(deltaA), int32(deltaB), int32(deltaC)

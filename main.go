@@ -55,7 +55,7 @@ func toStreamEvents(events []W.RowEvent) []B.StreamEvent {
 // clk is the single monotonic clock every wire reads to time its own delivery
 // (MODEL.md). Both callers (Run, RunTest) pass a real clock; it is always non-nil.
 // The clock is free-running (no play/pause gate).
-func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath string, topologyPath string, clk W.Clock) {
+func runTopology(ctx context.Context, cancel context.CancelFunc, topologyPath string, clk W.Clock) {
 	// The VIEW stream (camera+overlay+scene, one singleton row) — per-owner buffer rows
 	// (per-owner-buffer-rows.md, memory/feedback_no_single_writer_bridge.md): WIREFOLD_STREAM_FDS
 	// is now MANDATORY (the fd-3 SnapshotState accumulator + fallback packer were deleted along
@@ -64,11 +64,10 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 	// this stream.
 	streamFDs := B.ParseStreamFDs(os.Getenv("WIREFOLD_STREAM_FDS"))
 	viewFile, viewStreamWired := streamFDs.Open(B.StreamKindView, 0)
-	// sink=nil: the JSON-trace-on-stdout emitter is REMOVED. Trace still assigns Step and
-	// buffers events (WriteJSONL -trace file); it no longer drives any onEvent hook — the
-	// central Buffer.SnapshotState accumulator that hook fed is deleted (per-owner-buffer-
-	// rows.md's final step): every emitting goroutine now packs its own frame directly.
-	tr := T.NewWithSinkHook(0, nil, nil)
+	// Trace is now just the breadcrumb writer (the central event channel/drain and the
+	// -trace JSONL dump were deleted — per-owner-buffer-rows.md's final step: every
+	// emitting goroutine packs its own frame directly; see Trace/Trace.go's doc comment).
+	tr := T.New(0)
 	// DEBUG BREADCRUMB channel: production breadcrumbs ride stdout as {"kind":"breadcrumb",...}
 	// lines; the ext host routes them to .probe/go-debug.jsonl (see runCommand.ts). This is the
 	// Go analogue of the webview's postLog — a cheap, structured, one-call diagnostic that lands
@@ -273,46 +272,32 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 		close(done)
 	}()
 	<-done
-
-	tr.Close()
-	if tracePath != "" {
-		f, err := os.Create(tracePath)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "trace write: %v\n", err)
-			return
-		}
-		defer f.Close()
-		if err := tr.WriteJSONL(f); err != nil {
-			fmt.Fprintf(os.Stderr, "trace write: %v\n", err)
-		}
-	}
 }
 
 // Run wires the topology and blocks until SIGTERM/SIGINT or stdin EOF.
 // This is the live-run path used by the extension host. It uses a production
 // free-running RealClock (no play/pause gate).
-func Run(tracePath string, topologyPath string) {
+func Run(topologyPath string) {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
-	runTopology(ctx, cancel, tracePath, topologyPath, W.NewRealClock())
+	runTopology(ctx, cancel, topologyPath, W.NewRealClock())
 }
 
 // RunTest wires the topology and lets it run for dur before cancelling, using a
 // production RealClock. Used by automated tests that need a self-terminating run.
-func RunTest(dur time.Duration, tracePath string, topologyPath string) {
+func RunTest(dur time.Duration, topologyPath string) {
 	ctx, cancel := context.WithTimeout(context.Background(), dur)
 	defer cancel()
-	runTopology(ctx, cancel, tracePath, topologyPath, W.NewRealClock())
+	runTopology(ctx, cancel, topologyPath, W.NewRealClock())
 }
 
 func main() {
-	tracePath := flag.String("trace", "", "if set, write a raw JSONL trace to this path on shutdown")
 	dur := flag.Duration("duration", 0, "if non-zero, run for this duration then exit (test mode)")
 	topologyPath := flag.String("topology", "topology", "path to topology JSON spec")
 	flag.Parse()
 	if *dur > 0 {
-		RunTest(*dur, *tracePath, *topologyPath)
+		RunTest(*dur, *topologyPath)
 	} else {
-		Run(*tracePath, *topologyPath)
+		Run(*topologyPath)
 	}
 }

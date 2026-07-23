@@ -277,9 +277,6 @@ func (md *MoveDispatch) gestPointerMove(ev rawInputMsg, tr *T.Trace) {
 			// event of the drag, so resetting there interleaves with the neighborSetC fan's
 			// AbcDrag marks (which land asynchronously on each recipient's own goroutine)
 			// and drops recipients whose mark lands after the next move's reset.
-			if tr != nil {
-				tr.AbcDragReset() // .probe EVENT LOG only — see AbcDragReset event kind
-			}
 			// Decentralized (Step C, per-owner-buffer-rows.md): this same goroutine also
 			// writes its own VIEW frame directly, carrying this one-time drag-start event.
 			md.emitViewFrame([]RowEvent{{Kind: T.KindAbcDragReset, NodeRow: -1, PortRow: -1, TargetRow: -1, TargetPortRow: -1, EdgeRow: -1}})
@@ -495,13 +492,8 @@ func (md *MoveDispatch) setHover(node, port string, isInput bool, tr *T.Trace) {
 	}
 	// setHoverUI (node_move.go) is the AUTHORITATIVE write: it sets md.sel's hover
 	// fields (mutated only by this goroutine, no lock) and MESSAGES the affected
-	// node(s) to set their OWN hovered bit — no shared/republished map. tr.Hover below
-	// is the .probe EVENT LOG only, and also feeds Buffer.SnapshotState's OWN copy of
-	// this state (KindHover → setHovered), which serves the fd-3 fallback packer.
+	// node(s) to set their OWN hovered bit — no shared/republished map.
 	md.setHoverUI(node, port, isInput)
-	if tr != nil {
-		tr.Hover(node, port, isInput)
-	}
 	// Decentralized (Step C, per-owner-buffer-rows.md): this same goroutine also writes
 	// its own VIEW frame directly, carrying this one hover event resolved to buffer rows
 	// (mirrors owner_events.go's pattern for every other per-owner stream).
@@ -531,22 +523,18 @@ func (md *MoveDispatch) applySelect(ev rawInputMsg, tr *T.Trace) {
 	// setSelectionUI (node_move.go) is the AUTHORITATIVE write, same reasoning as
 	// setHoverUI above: it sets md.sel's selection fields (+ latchedNode, mutated only
 	// by this goroutine, no lock) and MESSAGES the affected node(s)/edge to set their
-	// OWN selected/latchedSel bit. tr.Select/tr.SelectEdge below are the .probe EVENT
-	// LOG only, and also feed Buffer.SnapshotState's OWN copy (KindSelect →
-	// setSelected/setSelectedEdge), which serves the fd-3 fallback packer.
+	// OWN selected/latchedSel bit.
 	if ev.Hit.Kind == "empty" {
 		md.setSelectionUI("", "")
-		tr.Select("")
 		md.emitSelectViewFrame("")
 		return
 	}
 	if ev.Hit.Kind == "edge" {
 		if label, ok := md.edgeFromHit(ev.Hit); ok {
 			md.setSelectionUI("", label)
-			tr.SelectEdge(label)
 			// An edge selection carries no NodeRow (see decodeEventLine's "select" case,
-			// buffer-log.ts — it never reads EdgeRow for this kind), mirroring the fd-3
-			// fallback's KindSelect{Edge: label, Node: ""} shape exactly.
+			// buffer-log.ts — it never reads EdgeRow for this kind), mirroring the
+			// KindSelect{Edge: label, Node: ""} shape exactly.
 			md.emitSelectViewFrame("")
 			return
 		}
@@ -565,7 +553,6 @@ func (md *MoveDispatch) applySelect(ev rawInputMsg, tr *T.Trace) {
 		}
 	}
 	md.setSelectionUI(node, "")
-	tr.Select(node)
 	md.emitSelectViewFrame(node)
 }
 

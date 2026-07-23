@@ -409,7 +409,6 @@ func (m *nodeMover) applyCenter(center vec3, reach float64) {
 // nodeMover's own inbox-drain goroutine only (see the doc comment on nodeMover.geom),
 // so a plain field read here can never race a concurrent writer.
 func (m *nodeMover) emitGeometry() {
-	emitNodeGeometryLocked(m.tr, m.id, m.geom, m.partnerCenter)
 	// Dedicated per-node stream (see streamOut's doc comment): write this node's own
 	// combined frame immediately on a geometry change, in addition to the tick-driven
 	// write in run()'s loop (mirrors edgeMover.recomputeGeometry's writeStreamFrame call).
@@ -417,9 +416,7 @@ func (m *nodeMover) emitGeometry() {
 	// never rides the VIEW stream's fallback bucket) — this
 	// nodeMover is the sole owner of its node's geometry, so it resolves its own
 	// NodeRow at the call site (owner_events.go) rather than routing through a
-	// shared accumulator. The tr.NodeGeometry call above still feeds the -trace
-	// JSONL sink (Trace.WriteJSONL) unchanged; it just no longer also lands in the
-	// VIEW frame's EVENTS bytes.
+	// shared accumulator.
 	m.writeStreamFrame([]RowEvent{{
 		Kind: T.KindNodeGeometry, NodeRow: m.nodeRow,
 		PortRow: -1, TargetRow: -1, TargetPortRow: -1, EdgeRow: -1,
@@ -824,16 +821,9 @@ func (m *edgeMover) recomputeGeometry() {
 		m.dest.ReviseInFlightGeometry(m.clk.Tick(), arc, seg)
 	}
 	// Emit this edge's own segment so the renderer redraws the wire from Go's endpoints.
-	// The tr.Geometry call still feeds the -trace JSONL sink (Trace.WriteJSONL)
-	// unchanged; it no longer also lands in the central VIEW frame's EVENTS bytes —
-	// Geometry now rides THIS edgeMover's own dedicated stream (fully decentralized —
-	// it never rides the VIEW stream's fallback bucket), since this goroutine
-	// is the sole owner of this edge's geometry.
-	if m.tr != nil {
-		m.tr.Geometry(m.edgeID, m.srcID, m.dstID, m.srcH, m.dstH,
-			seg.Start.X, seg.Start.Y, seg.Start.Z,
-			seg.End.X, seg.End.Y, seg.End.Z)
-	}
+	// Geometry rides THIS edgeMover's own dedicated stream (fully decentralized — it never
+	// rides the VIEW stream's fallback bucket), since this goroutine is the sole owner of
+	// this edge's geometry.
 	// Dedicated per-edge stream (either/or with the shared fd-3 Edge/Bead blocks — see
 	// streamOut's doc comment): write this edge's own combined frame immediately on a
 	// geometry change, in addition to the tick-driven write in run()'s loop. Carries

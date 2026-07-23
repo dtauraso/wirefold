@@ -1,164 +1,131 @@
-// Phase 7 Chunk 3 — runtime trace recorder.
+// Trace is now a thin breadcrumb writer plus the closed EVENT-KIND vocabulary shared
+// with the per-owner buffer streams (per-owner-buffer-rows.md, memory/
+// feedback_no_single_writer_bridge.md). Every domain event (recv/fire/send/geometry/
+// camera/selection/overlay-toggle/...) is now written by its OWNING goroutine directly
+// as a RowEvent onto that goroutine's own dedicated stream frame (nodes/Wiring's
+// owner_events.go and friends) — there is no more central Trace channel, no drain
+// goroutine, and no second (redundant) serialization of those events through this
+// package. Buffer.KindID resolves a RowEvent's string Kind to its numeric id via
+// TraceEventKinds below, which stays the single source of that vocabulary (also
+// generated into tools/topology-vscode/src/schema/trace-kinds.ts).
 //
-// One Trace value is shared across all nodes; each node holds it as
-// a *Trace field, injected at build time by Wiring.reflectBuild.
-// Nodes call Emit at three points: on a successful channel receive
-// (recv), before fanning out an emission (fire), and after each
-// successful send. All events serialize through a single
-// channel; a drain goroutine assigns the monotonic Step ordinal and
-// appends to the slice — the order events arrive at the channel is
-// the causal-enough story for replay (per trace-replay-plan.md).
+// The one exception is NodeBead: emitRefillSlide's per-frame interior-refill-slide
+// animation (nodes/Wiring/emit_geometry.go) calls Trace.NodeBead directly with no
+// RowEvent dual of its own — kept as an actual Trace event for that reason, delivered
+// synchronously (no channel) to an optional in-process onEvent hook (headless tests)
+// and/or sink (in-process test buffer). Neither is wired in production (main.go passes
+// none), so this is a no-op cost on the live path.
 //
-// Wire format note: this package emits `send` events keyed by
-// (Node, Port), NOT by edge ID. Edge IDs are a Wiring/spec-level
-// concept the node doesn't have. The on-disk Go trace is raw form.
+// Breadcrumb is the other survivor: a free-form diagnostic line (outside the closed
+// Kind vocabulary), written directly — one `sink.Write` call per breadcrumb, on the
+// calling goroutine, no channel and no lock. A single small write to a pipe is atomic
+// per POSIX PIPE_BUF, so concurrent breadcrumbs from many goroutines never interleave
+// into a fused line; breadcrumbs are short, sparse control-event lines (see CLAUDE.md's
+// "Debugging the Go layer" section), never a per-tick firehose, so this holds in practice.
 
 package Trace
 
-import (
-	"io"
-	"sync"
-)
+import "io"
 
-// Closed event vocabulary. Mirrors src/sim/trace.ts but keeps Port
-// for both recv (input port) and send (output port). Node is always
-// the emitting node — the one that received the value (recv) or sent
-// it (send/fire).
+// Closed event-kind vocabulary. Every per-owner stream's RowEvent.Kind (nodes/Wiring's
+// owner_events.go and friends) is one of these strings; Buffer.KindID resolves it to
+// its TraceEventKinds index for the wire encoding. Node is always the emitting node —
+// the one that received the value (recv) or sent it (send/fire) — Port distinguishes
+// input vs output where applicable.
 const (
 	KindRecv = "recv"
 	KindFire = "fire"
 	KindSend = "send"
-	// KindPosition is the per-frame bead-position event (Phase 2). The wire's
-	// delivery goroutine emits one every ~16 ms while a bead is in flight,
-	// carrying the bead's evaluated 3-D position so the renderer plots it without
-	// computing geometry itself.
+	// KindPosition is the per-frame bead-position kind. The wire's delivery goroutine
+	// resolves one every ~16 ms while a bead is in flight, carrying the bead's evaluated
+	// 3-D position so the renderer plots it without computing geometry itself.
 	KindPosition = "edge-bead"
-	// KindGeometry carries an edge's authoritative straight-segment endpoints
-	// (Phase 3). Go owns node positions + per-edge segments; it emits one geometry
-	// event per edge on load and again whenever a node-move re-derives that edge's
-	// segment, so the renderer draws the wire tube from Go's endpoints and
+	// KindGeometry carries an edge's authoritative straight-segment endpoints. The
+	// edgeMover resolves one per edge on load and again whenever a node-move re-derives
+	// that edge's segment, so the renderer draws the wire tube from Go's endpoints and
 	// computes no geometry of its own. Keyed by edge label (== the TS edge id).
 	KindGeometry = "geometry"
 	// KindNodeGeometry carries one node's authoritative center + per-port world
-	// positions/directions (item 1). Each node's goroutine emits this once on
-	// startup via its injected EmitGeometry closure — the node owns its own
-	// geometry emission (wires still own bead-position emission). Keyed by node id.
+	// positions/directions. Each nodeMover resolves this once on startup and again on
+	// every node-move — the node owns its own geometry (wires own bead-position).
+	// Keyed by node id.
 	KindNodeGeometry = "node-geometry"
-	// KindArrive marks a bead COMPLETING its traversal on a wire — the bead has
-	// reached the destination port and is delivered into the slot. The wire emits
-	// it from deliverLocked (the single delivery path), keyed by the bead's SOURCE
-	// node+port — the same routing key as send/position — so the renderer clears
-	// the transit pulse the instant the bead arrives.
+	// KindArrive marks a bead COMPLETING its traversal on a wire — the bead has reached
+	// the destination port and is delivered into the slot. The wire resolves it from
+	// deliverLocked (the single delivery path), keyed by the bead's SOURCE node+port —
+	// the same routing key as send/position — so the renderer clears the transit pulse
+	// the instant the bead arrives.
 	KindArrive = "arrive"
-	// KindNodeBead carries one INTERIOR slot's authoritative grid-slot state
-	// (node 1's depleting/refilling buffer). Node 1's Update computes the 2x2 grid
-	// slot positions coupled to the working/backup array mutation and emits a 4-slot
-	// SNAPSHOT (one node-bead event per slot) via its injected EmitNodeBeads closure
-	// on each array change. Keyed by node id + (row,col): row 0 = top/backup, row 1 =
-	// bottom/working; col is the index within that row. Payload = present (filled?) +
-	// value (0|1) + world position (x,y,z). A popped slot is emitted with present=false
-	// so TS clears it (absence can't be rendered, presence can).
-	// Discrete positions only this phase — beads snap to their slots (no slide yet).
+	// KindNodeBead carries one INTERIOR slot's authoritative grid-slot state (node 1's
+	// depleting/refilling buffer). Node 1's Update computes the 2x2 grid slot positions
+	// coupled to the working/backup array mutation and resolves a 4-slot SNAPSHOT (one
+	// node-bead kind per slot) whenever the array changes. Keyed by node id +
+	// (row,col): row 0 = top/backup, row 1 = bottom/working; col is the index within
+	// that row. Payload = present (filled?) + value (0|1) + world position (x,y,z). A
+	// popped slot carries present=false so TS clears it (absence can't be rendered,
+	// presence can).
 	KindNodeBead = "node-bead"
-	// KindCamera carries the polar camera viewpoint state on camera events. Go emits
-	// it whenever the camera is set, orbited, zoomed, or panned, so the renderer can
-	// reconstruct the camera pose without computing any geometry itself. Fields:
-	// px/py/pz = pivot world position; r = orbit radius; posTheta/posPhi = pivot→camera
-	// direction (spherical); upTheta/upPhi = up-hint direction (spherical).
+	// KindCamera carries the polar camera viewpoint state. Go resolves it whenever the
+	// camera is set, orbited, zoomed, or panned, so the renderer can reconstruct the
+	// camera pose without computing any geometry itself.
 	KindCamera = "camera"
-	// KindSceneTori carries the polar-guide tori visibility state. Go emits it when
-	// the tori visibility is toggled (op="tori-vis"), so the renderer shows or hides
-	// the two polar tori in NavGuides without computing any geometry.
+	// KindSceneTori carries the polar-guide tori visibility state.
 	KindSceneTori = "scene-tori"
-	// KindScenePoles carries the scene-center pole frame visibility state. Go emits it
-	// when the visibility is toggled (op="scene-poles"), so the renderer shows or hides
-	// the scene-center PolarFrame without computing any geometry.
+	// KindScenePoles carries the scene-center pole frame visibility state.
 	KindScenePoles = "scene-poles"
-	// KindNodePoles carries the per-node pole frame visibility state. Go emits it when
-	// the visibility is toggled (op="node-poles"), so the renderer shows or hides
-	// PolarFrames drawn at every node sphere.
+	// KindNodePoles carries the per-node pole frame visibility state.
 	KindNodePoles = "node-poles"
-	// KindSelSpherePoles carries the selection-sphere pole axis visibility state. Go emits it when
-	// the visibility is toggled (op="sel-sphere-poles"), so the renderer shows or hides the
-	// selection sphere pole markers in NavGuides.
+	// KindSelSpherePoles carries the selection-sphere pole axis visibility state.
 	KindSelSpherePoles = "sel-sphere-poles"
-	// KindHandholds carries the rotation-handhold grab-sphere visibility state. Go emits it
-	// when the visibility is toggled (op="handholds-vis"), so the renderer shows or hides
-	// the 4 grab spheres per torus in NavGuides without computing any geometry.
+	// KindHandholds carries the rotation-handhold grab-sphere visibility state.
 	KindHandholds = "handholds"
-	// KindLabelsGlobal carries the global node-label visibility state. Go emits it when
-	// the visibility is toggled (op="labels-vis"), so the renderer shows or hides
-	// all node labels in ThreeView without computing any geometry.
+	// KindLabelsGlobal carries the global node-label visibility state.
 	KindLabelsGlobal = "labels-global"
-	// KindOverlaysVis carries the master overlays visibility state. Go emits it when
-	// the master toggle is triggered (op="overlays-vis"), so the renderer shows or hides
-	// all 8 overlays at once without mutating individual overlay bools.
+	// KindOverlaysVis carries the master overlays visibility state.
 	KindOverlaysVis = "overlays-vis"
-	// KindDoubleLinks carries the double-link (layout-link) overlay visibility state. Go
-	// emits it when the toggle is triggered (op="double-links"), so the renderer draws the
-	// cyan bidirectional overlay reading the LayoutLink block and dims the edge tubes.
+	// KindDoubleLinks carries the double-link (layout-link) overlay visibility state.
 	// Default OFF (unlike the other overlay flags).
 	KindDoubleLinks = "double-links"
 	// KindLayoutLink carries one double-linked node PAIR from the LAYOUT model
-	// (nodes/Wiring/layout_holder.go LocalPolars) — NOT the bead-edge graph. Go emits one per
-	// pair once at load (nodes/Wiring/loader.go emitLayoutLinks, deduplicated so each
-	// unordered pair streams exactly once), keyed by Node (one endpoint) and Target (the
-	// other). The buffer's LayoutLink block resolves both to node rows so the renderer draws
-	// the layout-link overlay from Go-streamed data, never inferred from Edge adjacency.
+	// (nodes/Wiring/layout_holder.go LocalPolars) — NOT the bead-edge graph. Streamed
+	// once per pair at load (deduplicated so each unordered pair streams exactly once),
+	// keyed by Node (one endpoint) and Target (the other).
 	KindLayoutLink = "layout-link"
-	// KindSelect carries the CURRENTLY-SELECTED node id (click-select). Selection is
-	// Go-owned state: the gesture state machine (gesture.go) sets it on a click and emits
-	// this event so the buffer snapshot marks the node's Selected column. Node="" clears
-	// the selection (empty-space click). Keyed by node id; the renderer highlights it.
+	// KindSelect carries the CURRENTLY-SELECTED node id (click-select), or an edge label
+	// on Edge with Node empty (edge selection — selection is single + exclusive across
+	// nodes and edges). Node="" clears the selection (empty-space click).
 	KindSelect = "select"
-	// KindHover carries the CURRENTLY-HOVERED entity (pointer hover). Hover is Go-owned
-	// state: the gesture FSM (gesture.go) tracks which node or port is under the pointer from
-	// the raycast hit on each pointer-move and emits this event so the buffer snapshot marks
-	// the node's / port's Hovered column. Port!="" hovers that port (Node is its owning node,
-	// Value=1 for an input port); otherwise Node hovers that node (Node="" clears all hover).
-	// Emitted only when the hovered entity CHANGES (the FSM dedupes) so pointer-move does not
-	// flood the snapshot stream. Keyed by node id / (node,port); the renderer highlights it.
+	// KindHover carries the CURRENTLY-HOVERED entity (pointer hover). Port!="" hovers
+	// that port (Node is its owning node, Value=1 for an input port); otherwise Node
+	// hovers that node (Node="" clears all hover).
 	KindHover = "hover"
 	// KindSceneSphere carries the persisted scene sphere (center + radius) — the fixed
-	// world anchor every node's scene polar is measured about (nodes/Wiring/sphere_layout.go
-	// sceneSphere). It is established ONCE at load (LoadSceneSphere) and never moves, so Go
-	// emits this a single time at startup; the renderer reads it in place of deriving a
-	// content-sphere centroid from live node positions (which moves with the nodes and is a
-	// different, non-authoritative sphere). Reuses the PX/PY/PZ/R fields (center/radius);
-	// no new Event fields.
+	// world anchor every node's scene polar is measured about. Established ONCE at load
+	// and never moves.
 	KindSceneSphere = "scene-sphere"
-	// KindAbcDrag marks one time-node (HoldNewSendOld) abc-drag re-quantize event —
-	// the routed counterpart to the "time.abc-drag" debug breadcrumb emitted alongside
-	// it (nodes/Wiring/node_move.go neighborSetCRequantize). No payload beyond the kind
-	// itself; the buffer's Overlay block increments a running count on each occurrence
-	// so the in-editor overlay label can affirm the log is happening live.
+	// KindAbcDrag marks one time-node (HoldNewSendOld) abc-drag re-quantize event — the
+	// routed counterpart to the "time.abc-drag" debug breadcrumb emitted alongside it
+	// (nodes/Wiring/node_move.go neighborSetCRequantize).
 	KindAbcDrag = "abc-drag"
-	// KindAbcDragReset marks the START of one drag operation — emitted exactly once at
-	// the gesture FSM's pending→dragging transition (nodes/Wiring/gesture.go), BEFORE
-	// the dragged node's neighborSetC fan emits any KindAbcDrag marks for that drag. The
-	// snapshot layer clears its recipient SET (and every node's gotDragMsg bit) on this
-	// event, so the in-editor drag-log overlay lists only THIS drag's recipients — not
-	// recipients accumulated across the whole session. No payload beyond the kind itself.
+	// KindAbcDragReset marks the START of one drag operation — resolved exactly once at
+	// the gesture FSM's pending→dragging transition, BEFORE the dragged node's
+	// neighborSetC fan resolves any KindAbcDrag marks for that drag.
 	KindAbcDragReset = "abc-drag-reset"
-	// kindBreadcrumb is the internal marker for a Breadcrumb() call routed through
-	// t.ch like any other event (see Breadcrumb). Deliberately unexported and NOT
-	// added to TraceEventKinds: breadcrumbs stay outside the closed replay
-	// vocabulary — they get no Step ordinal and are never appended to t.events
-	// (drain's writeBreadcrumb intercepts kindBreadcrumb before record()).
-	kindBreadcrumb = "breadcrumb"
 )
 
-// TraceEventKinds is the single source of truth for the closed kind
-// vocabulary. gen-node-defs reads this slice to emit trace-kinds.ts, which
-// buffer-log.ts uses as a kindId → name lookup table when decoding the
-// buffer EVENT block for the .probe log. There is no tsc exhaustiveness
-// check derived from it — adding a kind here does not force a TS branch
-// anywhere; it only extends the lookup table.
+// TraceEventKinds is the single source of truth for the closed kind vocabulary.
+// gen-node-defs reads this slice to emit trace-kinds.ts (the TS decode side's kindId →
+// name lookup), and Buffer.KindID indexes it to resolve a RowEvent's string Kind to its
+// numeric id for the wire encoding. There is no tsc exhaustiveness check derived from
+// it — adding a kind here does not force a TS branch anywhere; it only extends the
+// lookup table.
 var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindPosition, KindGeometry, KindNodeGeometry, KindArrive, KindNodeBead, KindCamera, KindSceneTori, KindScenePoles, KindNodePoles, KindSelSpherePoles, KindHandholds, KindLabelsGlobal, KindOverlaysVis, KindDoubleLinks, KindLayoutLink, KindSelect, KindHover, KindSceneSphere, KindAbcDrag, KindAbcDragReset}
 
-// PortGeom is one port's authoritative world geometry on a node-geometry event:
-// its name, whether it is an input, its sphere-surface world position (PX/PY/PZ),
-// and the unit direction from node center toward the port (DX/DY/DZ).
+// PortGeom is one port's authoritative world geometry: its name, whether it is an
+// input, its sphere-surface world position (PX/PY/PZ), and the unit direction from node
+// center toward the port (DX/DY/DZ). Shared value type used by nodes/Wiring's own
+// per-node stream-frame builders (node_mover.go/node_move.go) — independent of the
+// (deleted) central NodeGeometry event this used to also ride on.
 type PortGeom struct {
 	Name       string
 	IsInput    bool
@@ -166,511 +133,125 @@ type PortGeom struct {
 	DX, DY, DZ float64
 }
 
+// Event is the payload NodeBead (the one surviving Trace event) and Breadcrumb (outside
+// the closed Kind vocabulary) carry. Trimmed to just the fields those two use — every
+// other field the pre-decentralization Event struct carried (Step, Bead, geometry,
+// camera, overlay-visibility, ...) died with the methods that populated them.
 type Event struct {
-	Step  int    `json:"step"`
-	Kind  string `json:"kind"`
-	Node  string `json:"node"`
-	Port  string `json:"port,omitempty"`  // recv: input port; send: output port
-	Value int    `json:"value,omitempty"` // recv/send only
-	// Bead is the per-wire monotonic bead id (paced_wire.go gen). Set on the three
-	// wire-bead events (send, edge-bead/position, arrive) so the renderer keys each
-	// in-flight bead independently and a wire can show N beads at once. Bead ids are
-	// 1-based (nextGen increments before it is read, so the first bead is gen 1);
-	// 0 never occurs, so omitempty safely marks "no bead" — the three wire-bead
-	// kinds always carry a real id ≥1, every other kind omits it (TS reads
-	// `bead ?? 0`).
-	Bead uint64 `json:"bead,omitempty"`
-	// Wire geometry fields — populated on send events when the outgoing port
-	// is backed by a PacedWire. Zero values are omitted from JSON output.
-	// ArriveStep is omitted: Go has no global ms-per-step cadence,
-	// so the TS layer derives arrival from emitTime + simLatencyMs instead.
-	ArcLength    float64 `json:"arcLength,omitempty"`
-	SimLatencyMs float64 `json:"simLatencyMs,omitempty"`
-	// Destination slot identity — authoritative from Go. Set on send events backed
-	// by a PacedWire so the TS layer never derives targetHandle from edge data.
-	Target       string `json:"target,omitempty"`
-	TargetHandle string `json:"targetHandle,omitempty"`
-	// X/Y/Z carry the bead's evaluated 3-D world position on position events
-	// (KindPosition). Go computes the position from the bead's curve + clock; the
-	// renderer plots these directly. hasPos distinguishes a real (possibly 0,0,0)
-	// position from an unset one so marshalEvent always emits all three.
-	X, Y, Z float64
-	hasPos  bool
-	// F carries the bead's FRACTIONAL progress t along its wire (0..1) on position
-	// events. Go owns progress (timing/clock); the editor places the bead in space
-	// at lerp(liveStart, liveEnd, F) on its LOCAL (dragged) node port positions, so
-	// the bead rides the live wire with no round-trip lag and no t-swing race.
-	F float64
-	// Edge carries the edge's id on geometry events (KindGeometry).
-	// This is the TS edge id — the renderer routes the segment to the right wire.
-	// Not set on any other event kind.
-	Edge string `json:"edge,omitempty"`
-	// SX/SY/SZ and EX/EY/EZ carry an edge's authoritative straight-segment endpoints
-	// on geometry events (KindGeometry): Start = source OUT-port world pos,
-	// End = dest IN-port world pos. Go owns these; historically the renderer drew the
-	// wire tube from them directly. The buffer no longer stores these as a duplicate
-	// copy on the Edge block (see SrcPort/DstPort below) — the renderer now resolves
-	// the endpoint from the node-owned Port block instead, so a stale copy here can
-	// never cause a render-time tear. Still carried on the event/struct for now (no
-	// production consumer left; kept only as the geometry event's historical payload).
-	SX, SY, SZ float64
-	EX, EY, EZ float64
-	// SrcPort/DstPort carry the edge's source (OUTPUT) and dest (INPUT) port NAMES on
-	// geometry events (KindGeometry) — the identity the edgeMover's own stream frame
-	// resolves to buffer PORT-ROW indices (via injected portRowFor) so the Edge block's
-	// SrcPortRow/DstPortRow reference the Port block rows that OWN the endpoint world
-	// position, instead of duplicating SX..EZ as a second, laggier copy.
-	SrcPort, DstPort string
-	// NX/NY/NZ carry the node's center world position on node-geometry events
-	// (KindNodeGeometry), and Ports carries that node's per-port world geometry.
-	// Keyed by Node (the node id). Set on node-geometry events only.
-	NX, NY, NZ float64
-	Ports      []PortGeom
-	// Label carries the node's HUMAN label on node-geometry events (KindNodeGeometry):
-	// the topology's data.label if present, else the node id. It rides the geometry
-	// stream so the new-system webview can build a row-keyed label sidecar (buffer-nav)
-	// without reading the old spec store. Set on node-geometry events only.
-	Label string `json:"label,omitempty"`
-	// NodeKind carries the node's Go KIND (PascalCase, e.g. "Hold") on node-geometry
-	// events (KindNodeGeometry). It rides the geometry stream so the new-system webview
-	// can map each node row to its NODE_DEFS fill/stroke color without reading the old
-	// spec store. Distinct from Kind (the trace-event kind string). Set on
-	// node-geometry events only.
-	NodeKind string `json:"-"`
-	// Radius carries the node body/ring sphere radius on node-geometry events
-	// (KindNodeGeometry) — Go-owned (min(w,h)/CurveParamNodeRadiusDivisor). The
-	// renderer reads it for the body/ring instead of recomputing from node dims.
-	Radius float64
-	// SphereR carries the node's sphere-chain radius on node-geometry events
-	// (KindNodeGeometry) — the radius used for bead-chain orbit and port placement
-	// (nodeR in port_geometry.go). Distinct from Radius (the node body/ring sphere).
-	SphereR float64 `json:"sphereR,omitempty"`
-	// VRX/VRY/VRZ carry the vertical great-circle ring normal on node-geometry events
-	// (KindNodeGeometry). Go owns these constants so TS never hardcodes ring orientation.
-	VRX, VRY, VRZ float64
-	// FRX/FRY/FRZ carry the flat (equatorial) great-circle ring normal on node-geometry
-	// events (KindNodeGeometry). Companion to VRX/VRY/VRZ above.
-	FRX, FRY, FRZ float64
-	// PX/PY/PZ carry the camera pivot world position on camera events (KindCamera).
-	// R is the orbit radius; PosTheta/PosPhi are the pivot→camera direction (spherical);
-	// UpTheta/UpPhi are the up-hint direction (spherical). Set on camera events only.
-	PX, PY, PZ       float64
-	R                float64
-	PosTheta, PosPhi float64
-	UpTheta, UpPhi   float64
-	// Row/Col identify an interior bead's grid slot on node-bead events
-	// (KindNodeBead): Row 0 = top/backup, Row 1 = bottom/working; Col is the
-	// position in that row's slice. Keyed by Node + (Row,Col). X/Y/Z carry the
-	// slot's world position and Value the bead value (0|1). Set on node-bead only.
-	// Present marks whether the slot is FILLED: a node-bead snapshot emits ALL 4
-	// slots on each array change — Present=true (with Value+position) for filled
-	// slots, Present=false for empty (popped) slots so TS can clear them.
+	Kind     string
+	Node     string
+	Port     string
+	Value    int
 	Row, Col int
 	Present  bool
-	// Visible carries the tori visibility state on scene-tori events (KindSceneTori).
-	// true = tori shown; false = tori hidden. Set on scene-tori events only.
-	Visible bool `json:"visible"`
-	// DeltaA/DeltaB/DeltaC carry the DRAGGED node's own quantized-triple change
-	// (newTriple - oldTriple, integer indices) on abc-drag events (KindAbcDrag): the
-	// dragged node computes this ONCE, on its own goroutine, per direct domain
-	// neighbor, and each neighbor's re-quantize message rides the SAME delta (nodes/
-	// Wiring/node_move.go requantizeLocalPolars). Zero if the dragged node had no
-	// prior stored triple to subtract from. Set on abc-drag events only.
-	DeltaA int `json:"deltaA,omitempty"`
-	DeltaB int `json:"deltaB,omitempty"`
-	DeltaC int `json:"deltaC,omitempty"`
-	// BreadcrumbLabel/BreadcrumbValue carry a Breadcrumb() call's label/value strings
-	// on the internal kindBreadcrumb event (see Breadcrumb below). Node/Port reuse the
-	// existing fields. Set on kindBreadcrumb events only; never part of the closed
-	// TraceEventKinds vocabulary and never appended to t.events.
+	X, Y, Z  float64
+	// BreadcrumbLabel/BreadcrumbValue carry a Breadcrumb() call's label/value strings.
+	// Node/Port above are reused for a breadcrumb's node/port arguments.
 	BreadcrumbLabel string
 	BreadcrumbValue string
-	// Seed marks a NodeGeometry/Geometry event emitted ONLY to prefill
-	// Buffer.SnapshotState's row tables before any node/edge goroutine has started
-	// (main.go's pre-launch md.NodeSeeds()/EdgeSeeds() loop — see SeedNodeGeometry/
-	// SeedGeometry below). The drain goroutine still runs onEvent (the state-mutating
-	// hook) for a Seed event, but does NOT append it to t.events — so it never shows
-	// up in a -trace WriteJSONL dump. This matters because the OWNING goroutine
-	// (nodeMover.run/edgeMover.run) ALSO emits the identical one-time geometry once at
-	// its own startup (see node_mover.go): tracing BOTH would double-count what is, in
-	// truth, one logical occurrence recorded twice for a load-order reason that has
-	// nothing to do with the model. Never set outside main.go's seed loop.
-	Seed bool
 }
 
-// Trace is the shared recorder. Construct with New; injected into
-// each node's Trace field by Wiring.reflectBuild. Call Close after
-// all nodes have stopped to drain
-// the channel and receive the final event slice via Events().
+// Trace holds the optional in-process test sink (headless tests only — never wired in
+// production) and the production DEBUG BREADCRUMB sink (main.go's os.Stdout). Both
+// fields are set ONCE at startup (New*/SetDebugSink), before any producer goroutine
+// exists, and never mutated again — read-only for the rest of the process, so every
+// later caller (running in a goroutine spawned after startup) sees the write via the
+// ordinary happens-before edge from goroutine creation. No lock needed: there is no
+// second writer of either field, and NodeBead/Breadcrumb only ever READ them.
 type Trace struct {
-	ch      chan Event
-	done    chan struct{}
-	stopped chan struct{} // closed by Close() to signal senders to stop; ch is NEVER closed
-	// closeOnce makes Close idempotent (replaces the old `closed bool` guarded by
-	// Trace.mu). No lock is needed: events/sink/onEvent/debugSink are all written by
-	// the single drain goroutine and nothing else — see the field comments below and
-	// the wait-for-everything-then-close change. CHECKED:
-	// TestTraceConcurrentEmitVsClose (trace_concurrency_test.go) drives many
-	// concurrent Emit callers against one Close() under `go test -race` and is RED
-	// (reproducible data-race reports) if a caller writes events/sink/debugSink
-	// directly instead of going through emit()/t.ch. The doc claim "`ch` is NEVER
-	// closed" (a send on a closed channel panics — verified by reading emit()/
-	// Close(): Close only closes `stopped`, never `ch`) is CHECKED by the same test,
-	// which recovers any goroutine panic from an Emit racing Close and fails if one
-	// occurs. Guard against reintroducing a `close(t.ch)` anywhere: that is the one
-	// change this test does NOT independently rule out.
-	closeOnce sync.Once
-	// events is drain-only: the drain goroutine (drain.go) is its sole writer, from
-	// construction (NewWithSinkHook's `go t.drain()`) until Close(). Events()/
-	// WriteJSONL() read it too — safe only once every producer goroutine has exited
-	// (main.go's complete shutdown: node Update loops + nodeMover/edgeMover
-	// goroutines + the stdin dispatch loop, all wg.Wait()'d before Close(); see
-	// close-everything.md) and the drain goroutine has itself observed t.stopped and
-	// returned. sink/onEvent/debugSink are set ONCE at startup (NewWithSinkHook /
-	// SetDebugSink), before any producer goroutine is spawned, and never mutated
-	// again — read-only for the rest of the process, by both drain and Breadcrumb's
-	// unwired-no-op check, with no synchronization needed beyond the ordinary
-	// happens-before edge from goroutine creation.
-	events    []Event
-	sink      io.Writer   // if non-nil, each event is written as JSONL in real time
-	onEvent   func(Event) // if non-nil, called from drain goroutine on every event (binary snapshot hook)
-	debugSink io.Writer   // if non-nil, Breadcrumb() lines are ALSO written here (production debug channel)
+	sink      io.Writer
+	debugSink io.Writer
+	onEvent   func(Event) // optional in-process observation hook (headless tests only)
 }
 
-// New allocates a Trace with a buffered emit channel. buf controls
-// how much burst the recorder absorbs before Emit blocks. 1024 is
-// plenty for the current topology sizes; bump if Emit is observed
-// to back-pressure node loops.
+// New allocates a Trace with no sinks wired. buf is accepted only for call-site
+// compatibility with the pre-decentralization API (there is no channel to size
+// anymore); pass any value.
 func New(buf int) *Trace {
 	return NewWithSink(buf, nil)
 }
 
-// NewWithSink is like New but writes each event as JSONL to sink in
-// real time (inside the drain goroutine) in addition to buffering.
-// Pass nil for sink to disable streaming (identical to New).
+// NewWithSink is like New but wires sink as the in-process test-observation sink (see
+// Breadcrumb/NodeBead's doc comments) — never wired in production.
 func NewWithSink(buf int, sink io.Writer) *Trace {
 	return NewWithSinkHook(buf, sink, nil)
 }
 
-// NewWithSinkHook is like NewWithSink but also installs onEvent, which is called
-// from the drain goroutine on every recorded event (after the event is appended
-// and the JSONL sink written). Use this to attach a binary snapshot state without
-// a separate goroutine or channel. Pass nil for onEvent to omit the hook.
+// NewWithSinkHook is like NewWithSink but also installs onEvent, called synchronously
+// (on the calling goroutine) by NodeBead — the one surviving Trace event. Pass nil for
+// onEvent to omit the hook (production always does).
 func NewWithSinkHook(buf int, sink io.Writer, onEvent func(Event)) *Trace {
-	if buf <= 0 {
-		buf = 1024
-	}
-	t := &Trace{
-		ch:      make(chan Event, buf),
-		done:    make(chan struct{}),
-		stopped: make(chan struct{}),
-		sink:    sink,
-		onEvent: onEvent,
-	}
-	go t.drain()
-	return t
-}
-
-// emit is the single send path. It NEVER sends on a closed channel because
-// t.ch is never closed; instead Close() closes t.stopped and a concurrent
-// sender that is mid-flight selects the stopped case and drops the event
-// silently rather than send on a torn-down trace.
-func (t *Trace) emit(e Event) {
-	if t == nil {
-		return
-	}
-	select {
-	case t.ch <- e:
-	case <-t.stopped:
-	}
-}
-
-// Emit sends one event. Called from node Update loops — always check
-// t != nil at the call site so untraced runs are zero-cost beyond a
-// nil check. Blocks if the buffer is full (per trace-replay-plan §
-// "Backpressure: buffered recorder channel; if full, log a warning
-// and block briefly rather than drop"). The 1024-deep default keeps
-// this rare in practice.
-func (t *Trace) Emit(e Event) {
-	t.emit(e)
-}
-
-// Recv emits a recv event for `(node, port, value)`. Convenience
-// wrapper so node code stays one-line.
-func (t *Trace) Recv(node, port string, value int) {
-	t.emit(Event{Kind: KindRecv, Node: node, Port: port, Value: value})
-}
-
-// Fire emits a fire event for `node`. Called once per handler
-// activation that produces ≥1 emission, before the first Send.
-func (t *Trace) Fire(node string) {
-	t.emit(Event{Kind: KindFire, Node: node})
-}
-
-// Send emits a send event for `(node, port, value)` after a
-// successful S.Send on the corresponding output channel.
-func (t *Trace) Send(node, port string, value int) {
-	t.emit(Event{Kind: KindSend, Node: node, Port: port, Value: value})
-}
-
-// SendWire emits a send event like Send, additionally carrying the wire geometry
-// fields (arcLength in world-units, simLatencyMs in milliseconds) and the
-// authoritative destination slot identity (target node id, targetHandle port name)
-// from the outgoing PacedWire. Pass zero values when the port is not backed by a PacedWire.
-func (t *Trace) SendWire(node, port string, value int, arcLength, simLatencyMs float64, target, targetHandle string) {
-	t.emit(Event{Kind: KindSend, Node: node, Port: port, Value: value, ArcLength: arcLength, SimLatencyMs: simLatencyMs, Target: target, TargetHandle: targetHandle})
-}
-
-// Position emits a per-frame bead-position event (Phase 2). node/port are the
-// SOURCE node id + output port — the same identity carried by the send event, so
-// the renderer routes the position to the right edge(s) by source+sourceHandle
-// (fan-out). value echoes the bead value; x/y/z is the bead's evaluated 3-D world
-// position on its own edge curve; f is the bead's FRACTIONAL progress t (0..1)
-// along the wire, which the editor uses to place the bead on its LOCAL (dragged)
-// node port positions (Go owns progress, the editor owns live placement). The
-// wire's delivery goroutine calls this every ~16 ms while the bead is in flight,
-// and once more at t==1 just before delivery.
-// bead is the per-wire bead id (paced_wire.go gen): a wire may carry N beads at
-// once (a clock-paced train), so the renderer keys each in-flight bead by it.
-func (t *Trace) Position(node, port string, value int, x, y, z, f float64, bead uint64) {
-	t.emit(Event{Kind: KindPosition, Node: node, Port: port, Value: value, X: x, Y: y, Z: z, hasPos: true, F: f, Bead: bead})
-}
-
-// Geometry emits an edge's authoritative straight-segment endpoints (Phase 3),
-// keyed by edge label (== the TS edge id). (sx,sy,sz) is the source OUT-port world
-// pos (Start), (ex,ey,ez) is the dest IN-port world pos (End) — still carried for now
-// (see the Event struct's SX..EZ comment) but no longer the buffer's endpoint source of
-// truth. srcPort/dstPort are the edge's source (output) and dest (input) port NAMES —
-// the edgeMover's own dedicated stream frame resolves these to buffer PORT-ROW indices so
-// the Edge block references the Port block row that OWNS the endpoint, instead of
-// duplicating it. src/dst are the edge's source and destination NODE ids; the buffer maps
-// them to node-row indices so the on-surface selection highlight has the edge-graph
-// adjacency (the JSON/pump path ignores them — it keys segments by Edge). Carried on
-// the existing Node (source) and Target (dest) fields; unused on geometry otherwise.
-func (t *Trace) Geometry(edge, src, dst, srcPort, dstPort string, sx, sy, sz, ex, ey, ez float64) {
-	t.emit(Event{
-		Kind: KindGeometry, Edge: edge, Node: src, Target: dst,
-		SrcPort: srcPort, DstPort: dstPort,
-		SX: sx, SY: sy, SZ: sz,
-		EX: ex, EY: ey, EZ: ez,
-	})
-}
-
-// NodeGeometry emits one node's authoritative center + per-port world geometry,
-// plus the two great-circle ring normals (vertical + flat) owned by Go.
-// (item 1), keyed by node id. cx/cy/cz is the node center world position; ports
-// carries each port's world position + direction. Each node's goroutine calls this
-// once on startup via its injected EmitGeometry closure (the node owns its geometry
-// emission; wires still own bead-position emission).
-func (t *Trace) NodeGeometry(nodeID, label, nodeKind string, cx, cy, cz, radius, sphereR float64, ports []PortGeom, vrx, vry, vrz, frx, fry, frz float64) {
-	t.emit(Event{Kind: KindNodeGeometry, Node: nodeID, Label: label, NodeKind: nodeKind, NX: cx, NY: cy, NZ: cz, Radius: radius, SphereR: sphereR, Ports: ports,
-		VRX: vrx, VRY: vry, VRZ: vrz, FRX: frx, FRY: fry, FRZ: frz})
-}
-
-// SeedNodeGeometry is identical to NodeGeometry but marks the event Seed-only (see
-// Event.Seed's doc comment): it still prefills SnapshotState's row tables via the
-// onEvent hook, but is never appended to t.events and so never appears in a -trace
-// dump or the .probe logs. Used ONLY by main.go's pre-launch row-seed loop.
-func (t *Trace) SeedNodeGeometry(nodeID, label, nodeKind string, cx, cy, cz, radius, sphereR float64, ports []PortGeom, vrx, vry, vrz, frx, fry, frz float64) {
-	t.emit(Event{Kind: KindNodeGeometry, Node: nodeID, Label: label, NodeKind: nodeKind, NX: cx, NY: cy, NZ: cz, Radius: radius, SphereR: sphereR, Ports: ports,
-		VRX: vrx, VRY: vry, VRZ: vrz, FRX: frx, FRY: fry, FRZ: frz, Seed: true})
-}
-
-// SeedGeometry is identical to Geometry but marks the event Seed-only (see
-// Event.Seed's doc comment). Used ONLY by main.go's pre-launch row-seed loop.
-func (t *Trace) SeedGeometry(edge, src, dst, srcPort, dstPort string, sx, sy, sz, ex, ey, ez float64) {
-	t.emit(Event{
-		Kind: KindGeometry, Edge: edge, Node: src, Target: dst,
-		SrcPort: srcPort, DstPort: dstPort,
-		SX: sx, SY: sy, SZ: sz,
-		EX: ex, EY: ey, EZ: ez,
-		Seed: true,
-	})
-}
-
-// Arrive marks a bead completing its traversal — delivered into the destination
-// slot. Keyed by the bead's SOURCE node+port (the same routing key as send/
-// position), so the renderer clears the transit pulse on arrival. The wire's
-// deliverLocked is the single caller; it fires exactly once per bead.
-func (t *Trace) Arrive(node, port string, value int, bead uint64) {
-	t.emit(Event{Kind: KindArrive, Node: node, Port: port, Value: value, Bead: bead})
-}
-
-// NodeBead emits one interior grid SLOT's authoritative state (node 1's 2x2
-// buffer), keyed by node id + (row,col): row 0 = top/backup, row 1 =
-// bottom/working; col is the index within that row. present marks whether the slot
-// is filled; value is the bead value (0|1) and x/y/z the slot's world position
-// (meaningful when present). Node 1's Update calls this for ALL 4 slots whenever the
-// working/backup arrays change (the seed pop, each feedback pop, each refill) — a
-// 4-slot snapshot, with empty slots carrying present=false so TS clears them.
-// Discrete positions only — beads snap to their slots; no slide interpolation yet.
-func (t *Trace) NodeBead(nodeID string, row, col int, present bool, value int, x, y, z float64) {
-	t.emit(Event{Kind: KindNodeBead, Node: nodeID, Row: row, Col: col, Present: present, Value: value, X: x, Y: y, Z: z, hasPos: true})
-}
-
-// Camera emits the polar camera viewpoint state: pivot world position (px,py,pz),
-// orbit radius r, pivot→camera direction (posTheta,posPhi), and up-hint direction
-// (upTheta,upPhi). Go emits this whenever the camera is set, orbited, zoomed, or panned.
-func (t *Trace) Camera(px, py, pz, r, posTheta, posPhi, upTheta, upPhi float64) {
-	t.emit(Event{Kind: KindCamera, PX: px, PY: py, PZ: pz, R: r, PosTheta: posTheta, PosPhi: posPhi, UpTheta: upTheta, UpPhi: upPhi})
-}
-
-// SceneSphere emits the persisted scene sphere (center cx,cy,cz + radius): the fixed world
-// anchor every node's scene polar is measured about. Established once at load and never
-// moved (see LoadSceneSphere); reuses the PX/PY/PZ/R fields (center/radius) — no new Event
-// fields needed.
-func (t *Trace) SceneSphere(cx, cy, cz, radius float64) {
-	t.emit(Event{Kind: KindSceneSphere, PX: cx, PY: cy, PZ: cz, R: radius})
-}
-
-// SceneTori emits the polar-guide tori visibility state. visible=true = tori shown;
-// visible=false = tori hidden. Go emits this on op="tori-vis" so the renderer
-// shows/hides the two polar tori in NavGuides without computing any geometry.
-func (t *Trace) SceneTori(visible bool) {
-	t.emit(Event{Kind: KindSceneTori, Visible: visible})
-}
-
-// ScenePoles emits the scene-center pole frame visibility state. visible=true = shown;
-// visible=false = hidden. Go emits this on op="scene-poles".
-func (t *Trace) ScenePoles(visible bool) {
-	t.emit(Event{Kind: KindScenePoles, Visible: visible})
-}
-
-// NodePoles emits the per-node pole frame visibility state. visible=true = shown;
-// visible=false = hidden. Go emits this on op="node-poles".
-func (t *Trace) NodePoles(visible bool) {
-	t.emit(Event{Kind: KindNodePoles, Visible: visible})
-}
-
-// SelSpherePoles emits the selection-sphere pole axis visibility state. visible=true = shown;
-// visible=false = hidden. Go emits this on op="sel-sphere-poles".
-func (t *Trace) SelSpherePoles(visible bool) {
-	t.emit(Event{Kind: KindSelSpherePoles, Visible: visible})
-}
-
-// Handholds emits the rotation-handhold grab-sphere visibility state. visible=true = shown;
-// visible=false = hidden. Go emits this on op="handholds-vis".
-func (t *Trace) Handholds(visible bool) {
-	t.emit(Event{Kind: KindHandholds, Visible: visible})
-}
-
-// LabelsGlobal emits the global node-label visibility state. visible=true = labels shown;
-// visible=false = labels hidden. Go emits this on op="labels-vis" so the renderer
-// shows/hides all node labels in ThreeView without computing any geometry.
-func (t *Trace) LabelsGlobal(visible bool) {
-	t.emit(Event{Kind: KindLabelsGlobal, Visible: visible})
-}
-
-// OverlaysVis emits the master overlays visibility state. visible=true = all overlays shown;
-// visible=false = all overlays hidden. Go emits this on op="overlays-vis" so the renderer
-// shows/hides all 8 overlays at once without mutating individual overlay bools.
-func (t *Trace) OverlaysVis(visible bool) {
-	t.emit(Event{Kind: KindOverlaysVis, Visible: visible})
-}
-
-// DoubleLinks emits the layout-link overlay visibility state. visible=true = overlay shown;
-// visible=false = overlay hidden. Go emits this on op="double-links".
-func (t *Trace) DoubleLinks(visible bool) {
-	t.emit(Event{Kind: KindDoubleLinks, Visible: visible})
-}
-
-// LayoutLink emits one double-linked node PAIR (src, dst) from the LAYOUT model
-// (LocalPolars) — NOT the bead-edge graph. Streamed once per unordered pair at load
-// (nodes/Wiring/loader.go emitLayoutLinks dedupes by the alphabetically-first id).
-func (t *Trace) LayoutLink(src, dst string) {
-	t.emit(Event{Kind: KindLayoutLink, Node: src, Target: dst})
-}
-
-// AbcDrag emits one time-node abc-drag re-quantize event (KindAbcDrag). nodeID is the
-// firing time node (selfID) that just received the drag re-quantize — the snapshot layer
-// increments a running count AND resolves nodeID to its buffer node row for the in-editor
-// label. deltaA/deltaB/deltaC are the DRAGGED node's own quantized-triple change (see
-// Event.DeltaA doc) riding along so the in-editor drag-log can show what nodeID received.
-// Emitted alongside the "time.abc-drag" debug breadcrumb, never in place of it.
-func (t *Trace) AbcDrag(nodeID string, deltaA, deltaB, deltaC int) {
-	t.emit(Event{Kind: KindAbcDrag, Node: nodeID, DeltaA: deltaA, DeltaB: deltaB, DeltaC: deltaC})
-}
-
-// AbcDragReset emits one drag-start event (KindAbcDragReset), marking the beginning of a
-// single drag operation — called once at the gesture FSM's pending→dragging transition,
-// not per pointer-move. The snapshot layer clears its abc-drag recipient set on receipt,
-// so this drag's neighborSetC fan (AbcDrag marks) starts from an empty set instead of
-// accumulating across drags. No payload.
-func (t *Trace) AbcDragReset() {
-	t.emit(Event{Kind: KindAbcDragReset})
-}
-
-// Select emits the currently-selected node id (KindSelect). node="" clears the selection.
-// Go owns selection state; the gesture FSM emits this on a click so the buffer snapshot
-// marks the node's Selected column.
-func (t *Trace) Select(node string) {
-	t.emit(Event{Kind: KindSelect, Node: node})
-}
-
-// SelectEdge emits an EDGE selection (KindSelect with the edge label in Edge, Node empty).
-// Selection is single + exclusive: selecting an edge clears any node selection on the
-// snapshot side. edge="" clears the edge selection. This reuses the KindSelect kind (no new
-// trace-kind string) — the snapshot distinguishes a node vs edge select by which field is
-// set.
-func (t *Trace) SelectEdge(edge string) {
-	t.emit(Event{Kind: KindSelect, Edge: edge})
-}
-
-// Hover emits the currently-hovered entity (KindHover). Go owns hover state; the gesture
-// FSM emits this on a pointer-move when the hovered entity CHANGES so the buffer snapshot
-// marks the node's / port's Hovered column. port!="" hovers that port (node is its owning
-// node id; isInput picks the input vs output port when matching); port=="" hovers the node
-// named by node (node="" clears all hover). isInput rides the Value field (1=input) so no
-// dedicated struct field is needed.
-func (t *Trace) Hover(node, port string, isInput bool) {
-	v := 0
-	if isInput {
-		v = 1
-	}
-	t.emit(Event{Kind: KindHover, Node: node, Port: port, Value: v})
-}
-
-// Breadcrumb sends a free-form diagnostic line as an ordinary event on t.ch —
-// same path as Recv/Fire/Send — so the single drain goroutine is the one that
-// writes it to the sink(s), same as everything else. It is logging-only:
-// breadcrumbs are NOT added to the buffered event slice, do NOT receive a Step
-// ordinal, and are outside the closed trace vocabulary used for replay/parity
-// (drain's writeBreadcrumb intercepts kindBreadcrumb before record()). The line
-// shape is {"kind":"breadcrumb","label":...,"node":...,"port":...,"value":...}
-// with empty fields omitted (marshalBreadcrumb, unchanged), so the TS relay
-// still routes it to go-debug.jsonl alongside real trace events.
-//
-// Used to trace one-off control events (e.g. edge delete / wire reset)
-// that have no place in the recv/fire/send lifecycle.
-func (t *Trace) Breadcrumb(label, node, port, value string) {
-	if t == nil {
-		return
-	}
-	// sink = the in-process test observation buffer (headless model/gate tests poll it).
-	// debugSink = the PRODUCTION debug channel (os.Stdout, wired in main via SetDebugSink),
-	// which the ext host recognises by the "breadcrumb" kind and routes to .probe/go-debug.jsonl.
-	// A breadcrumb with neither sink wired is a cheap no-op — both fields are set once at
-	// startup (New*/SetDebugSink), before any node goroutine runs, and never mutated again,
-	// so reading them here from an arbitrary caller goroutine has a happens-before edge from
-	// goroutine creation and needs no lock.
-	if t.sink == nil && t.debugSink == nil {
-		return
-	}
-	t.emit(Event{Kind: kindBreadcrumb, Node: node, Port: port, BreadcrumbLabel: label, BreadcrumbValue: value})
+	return &Trace{sink: sink, onEvent: onEvent}
 }
 
 // SetDebugSink wires the production DEBUG BREADCRUMB channel: after this call every
 // Breadcrumb() line is ALSO written to w in real time (in addition to the optional
 // in-process test sink). main passes os.Stdout so breadcrumbs ride stdout as
 // {"kind":"breadcrumb",...} lines; the ext host routes those to .probe/go-debug.jsonl
-// (distinct from trace events, which flow on fd3, and from errors on stderr). This is
-// diagnostic-only and fire-and-forget — it never blocks node loops and is safe to leave
-// unset (Breadcrumb stays a no-op). Set once at startup before nodes run — no lock: the
-// happens-before edge from goroutine creation is what makes every later Breadcrumb()
-// caller (running in a goroutine spawned after this call returns) see the write.
+// (distinct from RowEvents, which ride the per-owner stream fds, and from errors on
+// stderr). Diagnostic-only and fire-and-forget — never blocks a node loop and is safe
+// to leave unset (Breadcrumb stays a no-op on that sink). Set once at startup before
+// nodes run — no lock: the happens-before edge from goroutine creation is what makes
+// every later Breadcrumb() caller (running in a goroutine spawned after this call
+// returns) see the write.
 func (t *Trace) SetDebugSink(w io.Writer) {
 	if t == nil {
 		return
 	}
 	t.debugSink = w
+}
+
+// Close is a no-op kept for call-site compatibility (there is no channel/goroutine to
+// drain anymore — every producer writes its own RowEvent/breadcrumb directly and
+// synchronously).
+func (t *Trace) Close() {}
+
+// Breadcrumb writes a free-form diagnostic line DIRECTLY — one `sink.Write` call per
+// sink, on the CALLING goroutine. No channel, no lock, no ordinal: breadcrumbs are
+// outside the closed Kind vocabulary (RowEvents carry the closed vocabulary; this is a
+// control-event log line). A single small write to a pipe is atomic per POSIX
+// PIPE_BUF, so concurrent breadcrumb lines from many goroutines never interleave into
+// one fused line — breadcrumbs are short, sparse control events (see CLAUDE.md's
+// "Debugging the Go layer" section), never a per-tick firehose, so line length never
+// approaches that limit in practice.
+//
+// sink = the in-process test observation buffer (headless model/gate tests poll it).
+// debugSink = the PRODUCTION debug channel (os.Stdout, wired via SetDebugSink), which
+// the ext host recognises by the "breadcrumb" kind and routes to .probe/go-debug.jsonl.
+// A breadcrumb with neither sink wired is a cheap no-op.
+func (t *Trace) Breadcrumb(label, node, port, value string) {
+	if t == nil || (t.sink == nil && t.debugSink == nil) {
+		return
+	}
+	b, err := marshalBreadcrumb(label, node, port, value)
+	if err != nil {
+		return
+	}
+	b = append(b, '\n')
+	if t.sink != nil {
+		_, _ = t.sink.Write(b)
+	}
+	if t.debugSink != nil {
+		_, _ = t.debugSink.Write(b)
+	}
+}
+
+// NodeBead is the one surviving Trace EVENT (see this file's header doc comment):
+// emitRefillSlide (nodes/Wiring/emit_geometry.go) calls it directly, once per animation
+// frame, with no RowEvent dual of its own. Delivered synchronously to the optional
+// onEvent hook and/or sink — neither wired in production, so this is a cheap no-op on
+// the live path. nodeID + (row,col) key the slot; present/value/x/y/z carry its state.
+func (t *Trace) NodeBead(nodeID string, row, col int, present bool, value int, x, y, z float64) {
+	if t == nil {
+		return
+	}
+	ev := Event{Kind: KindNodeBead, Node: nodeID, Row: row, Col: col, Present: present, Value: value, X: x, Y: y, Z: z}
+	if t.sink != nil {
+		if b, err := marshalNodeBead(ev); err == nil {
+			_, _ = t.sink.Write(append(b, '\n'))
+		}
+	}
+	if t.onEvent != nil {
+		t.onEvent(ev)
+	}
 }

@@ -24,110 +24,59 @@ type overlayState struct {
 	doubleLinksVisible    bool
 }
 
-// setFlag flips *field and emits the new value via emit. Shared body of the uniform
-// (flip-then-emit) Toggle* methods.
-func (o *overlayState) setFlag(field *bool, emit func(bool)) {
+// setFlag flips *field. Shared body of the uniform Toggle* methods. The RowEvent
+// carrying the new value is written by the caller's own goroutine directly (see
+// stdin_reader.go's applyUpdate) — this no longer emits through Trace.
+func (o *overlayState) setFlag(field *bool) {
 	*field = !*field
-	emit(*field)
 }
 
-// ToggleSceneTori flips sceneToriVisible and emits a scene-tori event.
+// ToggleSceneTori flips sceneToriVisible.
 func (o *overlayState) ToggleSceneTori(tr *T.Trace) {
-	o.setFlag(&o.sceneToriVisible, tr.SceneTori)
+	o.setFlag(&o.sceneToriVisible)
 }
 
-// EmitSceneTori emits the current sceneToriVisible without toggling it.
-func (o *overlayState) EmitSceneTori(tr *T.Trace) {
-	tr.SceneTori(o.sceneToriVisible)
-}
-
-// ToggleScenePoles flips scenePolesVisible and emits a scene-poles event.
+// ToggleScenePoles flips scenePolesVisible.
 func (o *overlayState) ToggleScenePoles(tr *T.Trace) {
 	o.scenePolesVisible = !o.scenePolesVisible
 	tr.Breadcrumb("pole-toggle-go", "scene", "", fmt.Sprintf("visible=%v", o.scenePolesVisible))
-	tr.ScenePoles(o.scenePolesVisible)
 }
 
-// EmitScenePoles emits the current scenePolesVisible without toggling it.
-func (o *overlayState) EmitScenePoles(tr *T.Trace) {
-	tr.ScenePoles(o.scenePolesVisible)
-}
-
-// ToggleNodePoles flips nodePolesVisible and emits a node-poles event.
+// ToggleNodePoles flips nodePolesVisible.
 func (o *overlayState) ToggleNodePoles(tr *T.Trace) {
 	o.nodePolesVisible = !o.nodePolesVisible
 	tr.Breadcrumb("pole-toggle-go", "nodes", "", fmt.Sprintf("visible=%v", o.nodePolesVisible))
-	tr.NodePoles(o.nodePolesVisible)
 }
 
-// EmitNodePoles emits the current nodePolesVisible without toggling it.
-func (o *overlayState) EmitNodePoles(tr *T.Trace) {
-	tr.NodePoles(o.nodePolesVisible)
-}
-
-// ToggleSelSpherePoles flips selSpherePolesVisible and emits a sel-sphere-poles event.
+// ToggleSelSpherePoles flips selSpherePolesVisible.
 func (o *overlayState) ToggleSelSpherePoles(tr *T.Trace) {
-	o.setFlag(&o.selSpherePolesVisible, tr.SelSpherePoles)
+	o.setFlag(&o.selSpherePolesVisible)
 }
 
-// EmitSelSpherePoles emits the current selSpherePolesVisible without toggling it.
-func (o *overlayState) EmitSelSpherePoles(tr *T.Trace) {
-	tr.SelSpherePoles(o.selSpherePolesVisible)
-}
-
-// ToggleHandholds flips handholdsVisible and emits a handholds event.
+// ToggleHandholds flips handholdsVisible.
 func (o *overlayState) ToggleHandholds(tr *T.Trace) {
-	o.setFlag(&o.handholdsVisible, tr.Handholds)
+	o.setFlag(&o.handholdsVisible)
 }
 
-// EmitHandholds emits the current handholdsVisible without toggling it.
-func (o *overlayState) EmitHandholds(tr *T.Trace) {
-	tr.Handholds(o.handholdsVisible)
-}
-
-// ToggleLabelsGlobal flips labelsGlobalVisible and emits a labels-global event.
+// ToggleLabelsGlobal flips labelsGlobalVisible.
 func (o *overlayState) ToggleLabelsGlobal(tr *T.Trace) {
-	o.setFlag(&o.labelsGlobalVisible, tr.LabelsGlobal)
+	o.setFlag(&o.labelsGlobalVisible)
 }
 
-// EmitLabelsGlobal emits the current labelsGlobalVisible without toggling it.
-func (o *overlayState) EmitLabelsGlobal(tr *T.Trace) {
-	tr.LabelsGlobal(o.labelsGlobalVisible)
-}
-
-// ToggleOverlaysVis flips overlaysVisible and emits a overlays-vis event.
+// ToggleOverlaysVis flips overlaysVisible.
 func (o *overlayState) ToggleOverlaysVis(tr *T.Trace) {
-	o.setFlag(&o.overlaysVisible, tr.OverlaysVis)
+	o.setFlag(&o.overlaysVisible)
 }
 
-// EmitOverlaysVis emits the current overlaysVisible without toggling it.
-func (o *overlayState) EmitOverlaysVis(tr *T.Trace) {
-	tr.OverlaysVis(o.overlaysVisible)
-}
-
-// ToggleDoubleLinks flips doubleLinksVisible and emits a double-links event.
+// ToggleDoubleLinks flips doubleLinksVisible.
 func (o *overlayState) ToggleDoubleLinks(tr *T.Trace) {
-	o.setFlag(&o.doubleLinksVisible, tr.DoubleLinks)
-}
-
-// EmitDoubleLinks emits the current doubleLinksVisible without toggling it.
-func (o *overlayState) EmitDoubleLinks(tr *T.Trace) {
-	tr.DoubleLinks(o.doubleLinksVisible)
+	o.setFlag(&o.doubleLinksVisible)
 }
 
 // SetGuideVisibility installs an explicit-visibility snapshot wholesale (the TS
-// startup push so settings survive a Go respawn) and emits each so the renderer
-// reflects them.
-func (o *overlayState) SetGuideVisibility(ov overlayState, tr *T.Trace) {
+// startup push so settings survive a Go respawn).
+func (o *overlayState) SetGuideVisibility(ov overlayState) {
 	*o = ov
-	o.EmitSceneTori(tr)
-	o.EmitScenePoles(tr)
-	o.EmitNodePoles(tr)
-	o.EmitSelSpherePoles(tr)
-	o.EmitHandholds(tr)
-	o.EmitLabelsGlobal(tr)
-	o.EmitOverlaysVis(tr)
-	o.EmitDoubleLinks(tr)
 }
 
 // defaultOverlayState is the startup overlay snapshot used by newMoveDispatch.

@@ -157,30 +157,27 @@ func writeOverlayGen(outPath string, flags []overlayFlag) error {
 	fmt.Fprintln(w)
 
 	// setFlag helper.
-	fmt.Fprintln(w, `// setFlag flips *field and emits the new value via emit. Shared body of the uniform`)
-	fmt.Fprintln(w, `// (flip-then-emit) Toggle* methods.`)
-	fmt.Fprintln(w, `func (o *overlayState) setFlag(field *bool, emit func(bool)) {`)
+	fmt.Fprintln(w, `// setFlag flips *field. Shared body of the uniform Toggle* methods. The RowEvent`)
+	fmt.Fprintln(w, `// carrying the new value is written by the caller's own goroutine directly (see`)
+	fmt.Fprintln(w, `// stdin_reader.go's applyUpdate) — this no longer emits through Trace.`)
+	fmt.Fprintln(w, `func (o *overlayState) setFlag(field *bool) {`)
 	fmt.Fprintln(w, "\t*field = !*field")
-	fmt.Fprintln(w, "\temit(*field)")
 	fmt.Fprintln(w, `}`)
 	fmt.Fprintln(w)
 
-	// Per-flag Toggle/Emit (+ accessor) on overlayState.
+	// Per-flag Toggle (+ accessor) on overlayState. tr is kept only for the breadcrumb
+	// variants (scenePoles/nodePoles) and to keep every Toggle* method's signature
+	// uniform for the overlayToggles method-expression table; the per-owner RowEvent
+	// write lives at the call site (stdin_reader.go's applyUpdate), not here.
 	for _, f := range flags {
-		fmt.Fprintf(w, "// Toggle%s flips %s and emits a %s event.\n", f.method, f.field, kebabOf(f.method))
+		fmt.Fprintf(w, "// Toggle%s flips %s.\n", f.method, f.field)
 		fmt.Fprintf(w, "func (o *overlayState) Toggle%s(tr *T.Trace) {\n", f.method)
 		if f.breadcrumb != "" {
 			fmt.Fprintf(w, "\to.%s = !o.%s\n", f.field, f.field)
 			fmt.Fprintf(w, "\ttr.Breadcrumb(\"pole-toggle-go\", %q, \"\", fmt.Sprintf(\"visible=%%v\", o.%s))\n", f.breadcrumb, f.field)
-			fmt.Fprintf(w, "\ttr.%s(o.%s)\n", f.method, f.field)
 		} else {
-			fmt.Fprintf(w, "\to.setFlag(&o.%s, tr.%s)\n", f.field, f.method)
+			fmt.Fprintf(w, "\to.setFlag(&o.%s)\n", f.field)
 		}
-		fmt.Fprintln(w, `}`)
-		fmt.Fprintln(w)
-		fmt.Fprintf(w, "// Emit%s emits the current %s without toggling it.\n", f.method, f.field)
-		fmt.Fprintf(w, "func (o *overlayState) Emit%s(tr *T.Trace) {\n", f.method)
-		fmt.Fprintf(w, "\ttr.%s(o.%s)\n", f.method, f.field)
 		fmt.Fprintln(w, `}`)
 		fmt.Fprintln(w)
 		if f.accessor {
@@ -192,15 +189,12 @@ func writeOverlayGen(outPath string, flags []overlayFlag) error {
 		}
 	}
 
-	// SetGuideVisibility on overlayState.
+	// SetGuideVisibility on overlayState. The 8 RowEvents this snapshot implies are
+	// written by the caller (scene_overlays_persist.go's LoadOverlays) directly.
 	fmt.Fprintln(w, `// SetGuideVisibility installs an explicit-visibility snapshot wholesale (the TS`)
-	fmt.Fprintln(w, `// startup push so settings survive a Go respawn) and emits each so the renderer`)
-	fmt.Fprintln(w, `// reflects them.`)
-	fmt.Fprintln(w, `func (o *overlayState) SetGuideVisibility(ov overlayState, tr *T.Trace) {`)
+	fmt.Fprintln(w, `// startup push so settings survive a Go respawn).`)
+	fmt.Fprintln(w, `func (o *overlayState) SetGuideVisibility(ov overlayState) {`)
 	fmt.Fprintln(w, "\t*o = ov")
-	for _, f := range flags {
-		fmt.Fprintf(w, "\to.Emit%s(tr)\n", f.method)
-	}
 	fmt.Fprintln(w, `}`)
 	fmt.Fprintln(w)
 
@@ -250,20 +244,4 @@ func writeOverlayGen(outPath string, flags []overlayFlag) error {
 		return fmt.Errorf("format overlay_gen.go: %w", err)
 	}
 	return os.WriteFile(outPath, formatted, 0644)
-}
-
-// kebabOf converts a PascalCase method name to its kebab trace-kind string (doc only).
-func kebabOf(s string) string {
-	var out []rune
-	for i, r := range s {
-		if i > 0 && r >= 'A' && r <= 'Z' {
-			out = append(out, '-')
-		}
-		if r >= 'A' && r <= 'Z' {
-			out = append(out, r+32)
-		} else {
-			out = append(out, r)
-		}
-	}
-	return string(out)
 }

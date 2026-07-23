@@ -69,7 +69,6 @@ func (i *In) PollRecv() (int, bool) {
 		if !ok {
 			return 0, false
 		}
-		i.trace.Recv(i.node, i.port, n)
 		i.flushRecvEvent(n)
 		return n, true
 	}
@@ -78,7 +77,6 @@ func (i *In) PollRecv() (int, bool) {
 	}
 	select {
 	case v := <-i.ch:
-		i.trace.Recv(i.node, i.port, v)
 		i.flushRecvEvent(v)
 		return v, true
 	default:
@@ -352,7 +350,7 @@ func (o *Out) Gated() bool {
 
 // placeDrivenNoWalker sends one bead placement onto the paced wire's in-channel
 // (PacedWire.Send — non-blocking, never waits on the wire or the destination) and
-// emits the SendWire trace at placement time. The wire's own goroutine stamps the
+// flushes this send as a RowEvent at placement time. The wire's own goroutine stamps the
 // placement tick from its own clock when it drains the send; the source no longer
 // pins one (MODEL.md: "The wire goroutine reads its OWN clock copy and its own
 // tick"). Caller must have already checked o.pw != nil. Returns the wire's
@@ -365,7 +363,6 @@ func (o *Out) placeDrivenNoWalker(v int) SendOutcome {
 	if outcome != SendPlaced {
 		return outcome
 	}
-	o.trace.SendWire(o.node, o.port, v, g.ArcLength, g.SimLatencyMs, o.pw.Target, o.pw.TargetHandle)
 	o.flushSendEvent(v, g.ArcLength, g.SimLatencyMs)
 	return SendPlaced
 }
@@ -503,7 +500,6 @@ func (o *Out) PlaceDrivenAt(v int) DriveItem {
 	if o.ch != nil {
 		select {
 		case o.ch <- v:
-			o.trace.Send(o.node, o.port, v)
 			o.flushSendEvent(v, 0, 0)
 		default:
 		}

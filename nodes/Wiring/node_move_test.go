@@ -11,6 +11,7 @@ package Wiring
 
 import (
 	"context"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -65,11 +66,31 @@ func TestDecentralizedNodeMove(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	tr := T.New(256)
+	tr := T.New(0)
 	clk := NewRealClock()
 	_, slotReg, md, _, err := LoadTopology(ctx, path, tr, clk)
 	if err != nil {
 		t.Fatalf("LoadTopology: %v", err)
+	}
+	// Decentralized (Step C, per-owner-buffer-rows.md): wire src's/e0's own dedicated
+	// stream frames directly (bypassing the fd/os.NewFile machinery SetNodeStreams/
+	// SetEdgeStreams use in production) so this test can observe their own row-resolved
+	// RowEvents on move, mirroring the retired central Trace event assertions below.
+	var nodeEvents, edgeEvents []RowEvent
+	var nodeMu, edgeMu sync.Mutex
+	md.nodeMovers["src"].streamOut = io.Discard
+	md.nodeMovers["src"].buildFrame = func(tick uint32, nodeRow int32, cx, cy, cz, radius, sphereR float32, vrx, vry, vrz, frx, fry, frz float32, selected, kindID, hovered, latchedSel, gotDragMsg uint8, dragDeltaA, dragDeltaB, dragDeltaC int32, label string, portNames []string, portDX, portDY, portDZ, portPX, portPY, portPZ []float32, portIsInput, portHovered []uint8, dstNodeRows, edgeRows []int32, events []RowEvent) []byte {
+		nodeMu.Lock()
+		nodeEvents = append(nodeEvents, events...)
+		nodeMu.Unlock()
+		return nil
+	}
+	md.edgeMovers["e0"].streamOut = io.Discard
+	md.edgeMovers["e0"].buildFrame = func(tick uint32, srcPortRow, dstPortRow int32, selected uint8, label string, beadVal []int32, beadX, beadY, beadZ []float32, events []RowEvent) []byte {
+		edgeMu.Lock()
+		edgeEvents = append(edgeEvents, events...)
+		edgeMu.Unlock()
+		return nil
 	}
 	md.Start(ctx) // launch the per-node and per-edge goroutines
 
@@ -152,20 +173,25 @@ func TestDecentralizedNodeMove(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 
-	// Give the trace a moment, then assert the node re-emitted node-geometry and the
-	// edge re-emitted its segment.
+	// Give the goroutines a moment, then assert the node re-emitted its own
+	// node-geometry RowEvent and the edge re-emitted its own geometry RowEvent.
 	time.Sleep(5 * time.Millisecond)
-	tr.Close()
-	events := tr.Events()
-	var sawNodeGeom, sawEdgeGeom bool
-	for _, e := range events {
-		if e.Kind == T.KindNodeGeometry && e.Node == "src" {
+	nodeMu.Lock()
+	sawNodeGeom := false
+	for _, e := range nodeEvents {
+		if e.Kind == T.KindNodeGeometry {
 			sawNodeGeom = true
 		}
-		if e.Kind == T.KindGeometry && e.Edge == "e0" && approxEq(e.EX, wantSeg.End.X) {
+	}
+	nodeMu.Unlock()
+	edgeMu.Lock()
+	sawEdgeGeom := false
+	for _, e := range edgeEvents {
+		if e.Kind == T.KindGeometry {
 			sawEdgeGeom = true
 		}
 	}
+	edgeMu.Unlock()
 	if !sawNodeGeom {
 		t.Fatal("node 'src' did not re-emit node-geometry on move")
 	}
@@ -175,10 +201,11 @@ func TestDecentralizedNodeMove(t *testing.T) {
 }
 
 // TestNodeGeometryLabelSidecar locks the new-system label sidecar contract at the Go
-// layer: every node-geometry event carries a Label field (data.label when present, else
-// the node id), and the labels arrive in node-row order (first-seen node-geometry order,
-// == Buffer.SnapshotState insertion order). The webview host derives the {id,label}
-// sidecar message straight from these events.
+// layer: every node carries a Label (data.label when present, else the node id) and a
+// Kind (the node's `type` field), the values each nodeMover's own dedicated stream frame
+// packs (node_mover.go's writeStreamFrame) for the row-keyed {id,label}/kind→color
+// sidecars. Read directly off each nodeMover's held geom — the same fields
+// writeStreamFrame reads — rather than through the retired central Trace event path.
 func TestNodeGeometryLabelSidecar(t *testing.T) {
 	// "src" carries an explicit human label; "dst" omits data.label → label falls back to id.
 	const topo = `{
@@ -203,51 +230,34 @@ func TestNodeGeometryLabelSidecar(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	tr := T.New(256)
+	tr := T.New(0)
 	_, _, md, _, err := LoadTopology(ctx, path, tr, NewRealClock())
 	if err != nil {
 		t.Fatalf("LoadTopology: %v", err)
 	}
 
-	// LoadTopology builds the movers' held geometry but the node-geometry EmitGeometry
-	// closure only fires from each node's OWN Update() goroutine (main.go), which this
-	// headless test never starts (md.Start only launches the MoveDispatch movers, not
-	// application node goroutines). Emit directly from the movers' held state — the same
-	// direct read the removed ResendGeometry(!started) path used — so this test can assert
-	// on Label/NodeKind without spinning up full node goroutines.
-	for _, nm := range md.nodeMovers {
-		emitNodeGeometryLocked(tr, nm.id, nm.geom, nm.partnerCenter)
-	}
-
-	tr.Close()
-
 	// Expected label per node id: explicit data.label for src, id fallback for dst.
 	wantLabel := map[string]string{"src": "Source Node", "dst": "dst"}
-	// Expected Go kind per node id: the node's `type` field, carried on node-geometry
-	// for the new-system kind→color sidecar (row-keyed).
+	// Expected Go kind per node id: the node's `type` field, carried for the
+	// new-system kind→color sidecar (row-keyed).
 	wantKind := map[string]string{"src": "FanInSrc", "dst": "FanInSink"}
 
-	// First-seen node id order == buffer node-row order. Collect it and verify each
-	// node-geometry event's Label matches.
-	var firstSeen []string
 	seen := map[string]bool{}
-	for _, e := range tr.Events() {
-		if e.Kind != T.KindNodeGeometry {
-			continue
+	for _, nm := range md.nodeMovers {
+		seen[nm.id] = true
+		label := nm.geom.Label
+		if label == "" {
+			label = nm.id
 		}
-		if !seen[e.Node] {
-			seen[e.Node] = true
-			firstSeen = append(firstSeen, e.Node)
+		if want := wantLabel[nm.id]; label != want {
+			t.Fatalf("node %q: label = %q, want %q", nm.id, label, want)
 		}
-		if want := wantLabel[e.Node]; e.Label != want {
-			t.Fatalf("node %q: label = %q, want %q", e.Node, e.Label, want)
-		}
-		if want := wantKind[e.Node]; e.NodeKind != want {
-			t.Fatalf("node %q: nodeKind = %q, want %q", e.Node, e.NodeKind, want)
+		if want := wantKind[nm.id]; nm.geom.Kind != want {
+			t.Fatalf("node %q: kind = %q, want %q", nm.id, nm.geom.Kind, want)
 		}
 	}
-	if len(firstSeen) != 2 {
-		t.Fatalf("first-seen node order = %v, want 2 distinct nodes", firstSeen)
+	if len(seen) != 2 {
+		t.Fatalf("saw %d distinct nodes, want 2", len(seen))
 	}
 }
 

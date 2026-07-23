@@ -1,71 +1,101 @@
 package Wiring
 
 import (
+	"io"
 	"math"
 	"testing"
 
 	T "github.com/dtauraso/wirefold/Trace"
 )
 
+// nodeBeadSnapshot captures one interiorStream.write() call's full 4-slot arrays plus
+// its row-resolved RowEvents, so a test can assert on emitNodeBeads/emitHeldBead/
+// emitInputBeads' output without a real fd. Slot index == row*2+col (see
+// interiorStream's doc comment).
+type nodeBeadSnapshot struct {
+	present    []uint8
+	value      []int32
+	ox, oy, oz []float32
+	events     []RowEvent
+}
+
+func captureInteriorSnapshot(snap *nodeBeadSnapshot) *interiorStream {
+	return &interiorStream{
+		out: io.Discard,
+		buildFrame: func(tick uint32, present []uint8, value []int32, ox, oy, oz []float32, evs []RowEvent) []byte {
+			snap.present, snap.value = present, value
+			snap.ox, snap.oy, snap.oz = ox, oy, oz
+			snap.events = evs
+			return nil
+		},
+	}
+}
+
 // TestEmitNodeBeadsPositions verifies that emitNodeBeads streams a 4-SLOT SNAPSHOT
 // (all rows {0,1} × cols {0,1}) with positions matching interiorSlotPos for each
 // (row,col): top row (0) = backup, bottom row (1) = working. A popped/absent slot is
-// emitted with present=false (not omitted) so TS can clear it. Always 4 events.
+// present=false (not omitted) so TS can clear it. Always a 4-element snapshot.
 func TestEmitNodeBeadsPositions(t *testing.T) {
 	// Full state: working=[1,0], backup=[1,0] → 4 present slots.
 	tr := T.New(0)
-	emitNodeBeads(tr, "in", []int{1, 0}, []int{1, 0}, nil)
-	tr.Close()
-	full := tr.Events()
-	if len(full) != 4 {
-		t.Fatalf("full state: got %d node-bead events, want 4", len(full))
+	var snap nodeBeadSnapshot
+	emitNodeBeads(tr, "in", []int{1, 0}, []int{1, 0}, captureInteriorSnapshot(&snap))
+	if len(snap.present) != 4 {
+		t.Fatalf("full state: got %d slots, want 4", len(snap.present))
+	}
+	if len(snap.events) != 4 {
+		t.Fatalf("full state: got %d node-bead events, want 4", len(snap.events))
 	}
 
-	// Each event's position must equal interiorSlotPos(row,col); present must be
-	// true for every slot, and value must equal the slice value at that slot.
-	type slot struct{ row, col int }
-	wantVal := map[slot]int{
-		{0, 0}: 1, {0, 1}: 0, // backup row
-		{1, 0}: 1, {1, 1}: 0, // working row
+	// Slot index == row*2+col: 0=(0,0) 1=(0,1) 2=(1,0) 3=(1,1). Position asserted from
+	// the RowEvent's float64 X/Y/Z (not the ox/oy/oz float32 arrays, which are lossy).
+	byslot := map[int32]RowEvent{}
+	for _, e := range snap.events {
+		byslot[e.Slot] = e
 	}
-	seen := map[slot]bool{}
-	for _, e := range full {
-		if e.Kind != T.KindNodeBead || e.Node != "in" {
-			t.Fatalf("unexpected event: %+v", e)
+	wantVal := []int32{1, 0, 1, 0}
+	for slot := 0; slot < 4; slot++ {
+		row, col := slot/2, slot%2
+		if snap.present[slot] == 0 {
+			t.Errorf("slot (%d,%d): present=false, want true", row, col)
 		}
-		s := slot{e.Row, e.Col}
-		seen[s] = true
-		if !e.Present {
-			t.Errorf("slot %+v: present=false, want true", s)
+		if snap.value[slot] != wantVal[slot] {
+			t.Errorf("slot (%d,%d): value=%d, want %d", row, col, snap.value[slot], wantVal[slot])
 		}
-		if e.Value != wantVal[s] {
-			t.Errorf("slot %+v: value=%d, want %d", s, e.Value, wantVal[s])
+		p := interiorSlotOffset(row, col)
+		e, ok := byslot[int32(slot)]
+		if !ok {
+			t.Errorf("slot (%d,%d): no RowEvent", row, col)
+			continue
 		}
-		p := interiorSlotOffset(e.Row, e.Col)
 		if e.X != p.X || e.Y != p.Y || e.Z != p.Z {
-			t.Errorf("slot %+v: pos=(%v,%v,%v), want (%v,%v,%v)", s, e.X, e.Y, e.Z, p.X, p.Y, p.Z)
+			t.Errorf("slot (%d,%d): pos=(%v,%v,%v), want (%v,%v,%v)", row, col, e.X, e.Y, e.Z, p.X, p.Y, p.Z)
 		}
 	}
-	if len(seen) != 4 {
-		t.Fatalf("expected 4 distinct slots, got %d", len(seen))
+	for _, e := range snap.events {
+		if e.Kind != T.KindNodeBead {
+			t.Fatalf("unexpected event kind: %+v", e)
+		}
 	}
 
 	// After one pop: working=[1] (end 0 removed). Still a 4-slot snapshot, but the
-	// working col-1 slot is now present=false; the other 3 are present=true.
+	// working col-1 slot (row=1,col=1 → slot 3) is now present=false; the other 3
+	// are present=true.
 	tr2 := T.New(0)
-	emitNodeBeads(tr2, "in", []int{1}, []int{1, 0}, nil)
-	tr2.Close()
-	ev := tr2.Events()
-	if len(ev) != 4 {
-		t.Fatalf("after pop: got %d node-bead events, want 4 (snapshot)", len(ev))
+	var snap2 nodeBeadSnapshot
+	emitNodeBeads(tr2, "in", []int{1}, []int{1, 0}, captureInteriorSnapshot(&snap2))
+	if len(snap2.present) != 4 {
+		t.Fatalf("after pop: got %d slots, want 4 (snapshot)", len(snap2.present))
 	}
-	for _, e := range ev {
-		emptySlot := e.Row == 1 && e.Col == 1
-		if emptySlot && e.Present {
+	for slot := 0; slot < 4; slot++ {
+		emptySlot := slot == 3
+		present := snap2.present[slot] != 0
+		if emptySlot && present {
 			t.Errorf("popped slot (1,1): present=true, want false")
 		}
-		if !emptySlot && !e.Present {
-			t.Errorf("slot (%d,%d): present=false, want true", e.Row, e.Col)
+		if !emptySlot && !present {
+			row, col := slot/2, slot%2
+			t.Errorf("slot (%d,%d): present=false, want true", row, col)
 		}
 	}
 }

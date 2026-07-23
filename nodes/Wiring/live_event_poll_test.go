@@ -1,53 +1,68 @@
-// live_event_poll_test.go — shared helper for tests that need to POLL a live
-// Trace's events while node goroutines are still running (i.e. before Close()).
-//
-// Trace.Events() is documented as drain-only: safe to read once the drain
-// goroutine has exited (Close()), racy before that (Trace/drain.go). That used
-// to be masked by Trace.mu; with the lock removed (docs/planning/visual-editor/
-// close-everything.md), a live read of Events() is a real, race-detector-visible
-// bug. Tests that must observe events while the trace is still live (waiting for
-// an async condition, e.g. "has node X fired yet") need their own
-// thread-safe collector instead — built here on Trace's onEvent hook
-// (NewWithSinkHook), which the drain goroutine already calls for every event on
-// its own goroutine. This collector adds its own mutex around a local slice, so
-// polling it from the test goroutine is safe without touching Trace's internals.
+// live_event_poll_test.go — shared helper for external-package tests (Wiring_test) that
+// need to poll a live MoveDispatch's per-owner RowEvents while node goroutines are still
+// running. Decentralized (Step C, per-owner-buffer-rows.md): each node/edge goroutine now
+// writes its own dedicated stream frame directly (no central Trace event channel to hook
+// into), so a live-observing test wires md.SetNodeStreams with a capturing buildFrame/
+// buildInteriorFrame, exactly as main.go wires the real Buffer builders — just capturing
+// the RowEvent slice instead of encoding it to bytes. streamOut is a real fd (os.Pipe)
+// so os.NewFile(uintptr(fd), ...) inside SetNodeStreams resolves to a valid, if unread,
+// write end — the write itself is fire-and-forget (errors ignored) so an unread pipe
+// never blocks or fails the capture.
 package Wiring_test
 
 import (
+	"os"
 	"sync"
 
-	T "github.com/dtauraso/wirefold/Trace"
+	W "github.com/dtauraso/wirefold/nodes/Wiring"
 )
 
-// liveEventCollector is a thread-safe sink for events recorded before Close().
-type liveEventCollector struct {
+// rowEventLog is a thread-safe sink for RowEvents captured from a live MoveDispatch's
+// per-node/per-edge dedicated stream frames.
+type rowEventLog struct {
 	mu     sync.Mutex
-	events []T.Event
+	events []W.RowEvent
 }
 
-func (c *liveEventCollector) record(e T.Event) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.events = append(c.events, e)
+func (l *rowEventLog) record(events []W.RowEvent) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.events = append(l.events, events...)
 }
 
-// snapshot returns a copy of every event recorded so far. Safe to call
-// concurrently with record (the drain goroutine) at any time, including before
-// the trace is closed.
-func (c *liveEventCollector) snapshot() []T.Event {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	out := make([]T.Event, len(c.events))
-	copy(out, c.events)
+// snapshot returns a copy of every RowEvent recorded so far. Safe to call concurrently
+// with record (the owning node/edge goroutines) at any time.
+func (l *rowEventLog) snapshot() []W.RowEvent {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	out := make([]W.RowEvent, len(l.events))
+	copy(out, l.events)
 	return out
 }
 
-// newTraceWithLiveEvents builds a Trace (buf-sized channel) whose events are
-// ALSO mirrored into a liveEventCollector as they're recorded, so a test
-// goroutine can poll snapshot() while node goroutines are still running,
-// without racing Trace's own drain-only Events()/events field.
-func newTraceWithLiveEvents(buf int) (*T.Trace, *liveEventCollector) {
-	c := &liveEventCollector{}
-	tr := T.NewWithSinkHook(buf, nil, c.record)
-	return tr, c
+// wireLiveRowEvents installs a capturing SetNodeStreams on md so every node's own
+// Fire/Recv/Send/NodeBead RowEvents (and node-geometry ones) land in the returned
+// rowEventLog as they're emitted, live, while node goroutines run. Uses real pipe fds
+// (os.Pipe) so os.NewFile inside SetNodeStreams gets a valid write end; the pipes are
+// intentionally never read (fire-and-forget capture happens in buildFrame itself, not
+// by decoding the written bytes).
+func wireLiveRowEvents(md *W.MoveDispatch) *rowEventLog {
+	log := &rowEventLog{}
+	_, nodeW, _ := os.Pipe()
+	_, interiorW, _ := os.Pipe()
+	nodeBase := int(nodeW.Fd())
+	interiorBase := int(interiorW.Fd())
+	md.SetNodeStreams(nodeBase, interiorBase,
+		md.NodeRowFor, md.EdgeRowForPair,
+		func(tick uint32, nodeRow int32, cx, cy, cz, radius, sphereR float32, vrx, vry, vrz, frx, fry, frz float32, selected, kindID, hovered, latchedSel, gotDragMsg uint8, dragDeltaA, dragDeltaB, dragDeltaC int32, label string, portNames []string, portDX, portDY, portDZ, portPX, portPY, portPZ []float32, portIsInput, portHovered []uint8, dstNodeRows, edgeRows []int32, events []W.RowEvent) []byte {
+			log.record(events)
+			return nil
+		},
+		func(tick uint32, present []uint8, value []int32, ox, oy, oz []float32, events []W.RowEvent) []byte {
+			log.record(events)
+			return nil
+		},
+		func(kind string) uint8 { return 0 },
+	)
+	return log
 }

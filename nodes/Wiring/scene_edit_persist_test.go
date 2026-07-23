@@ -24,9 +24,23 @@ func TestLoadOverlaysEmitsDefaultsWhenNoPersistedKeys(t *testing.T) {
 	root := writeTree(t) // no view/scene.json → loadSceneOverlays returns found=false
 	md := &MoveDispatch{ov: defaultOverlayState()}
 	var kinds []string
-	tr := T.NewWithSinkHook(256, io.Discard, func(e T.Event) { kinds = append(kinds, e.Kind) })
+	// Decentralized (Step C, per-owner-buffer-rows.md): LoadOverlays writes its own VIEW
+	// frame directly via md.emitViewFrame; capture the RowEvent kinds it carries instead of
+	// the retired central Trace onEvent hook.
+	md.SetViewStream(io.Discard, func(tick uint32,
+		camPX, camPY, camPZ, camR, camPosTheta, camPosPhi, camUpTheta, camUpPhi float32,
+		sceneTori, scenePoles, nodePoles, selSpherePoles, handholds, labelsGlobal, overlaysVis, doubleLinks uint8,
+		abcDragCount uint32,
+		sceneCX, sceneCY, sceneCZ, sceneRadius float32,
+		events []RowEvent,
+	) []byte {
+		for _, e := range events {
+			kinds = append(kinds, e.Kind)
+		}
+		return nil
+	})
+	tr := T.New(0)
 	md.LoadOverlays(root, tr)
-	tr.Close() // drain the goroutine so all emitted events are recorded before asserting
 	// The default-visible overlay flags must have been emitted, not skipped.
 	for _, want := range []string{"scene-tori", "overlays-vis"} {
 		seen := false

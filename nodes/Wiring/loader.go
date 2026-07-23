@@ -353,7 +353,6 @@ func buildFromSpec(ctx context.Context, spec topoSpec, tr *T.Trace, clk Clock, s
 	if err := b.buildNodes(); err != nil {
 		return nil, nil, nil, nil, err
 	}
-	b.emitLayoutLinks()
 	b.bindDispatch()
 
 	return b.nodes, SlotRegistry(b.destWire), b.md, b.speedSinks, nil
@@ -685,27 +684,6 @@ func (b *buildCtx) buildNodes() error {
 	b.outSink = outSink
 	b.nodes = nodes
 	return nil
-}
-
-// emitLayoutLinks streams each double-linked node pair once via tr.LayoutLink, sourced from
-// the per-node LocalPolars list computed by computeLocalPolars (b.localPolars) — the LAYOUT
-// model, NOT b.spec.Edges (the bead-edge graph). Each unordered pair emits exactly once, from
-// its alphabetically-first id, so Go (not the renderer) owns de-duplication. This is the sole
-// source of the buffer's LayoutLink block: the layout-link overlay must reflect
-// LocalPolars even on a topology where its pairs diverge from the Edge block's.
-func (b *buildCtx) emitLayoutLinks() {
-	ids := make([]string, 0, len(b.localPolars))
-	for id := range b.localPolars {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	for _, id := range ids {
-		for _, lp := range b.localPolars[id] {
-			if id < lp.To {
-				b.tr.LayoutLink(id, lp.To)
-			}
-		}
-	}
 }
 
 // bindDispatch binds per-edge source Outs and dest wires into each edgeMover so

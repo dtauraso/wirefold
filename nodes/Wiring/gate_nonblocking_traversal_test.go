@@ -55,7 +55,7 @@ func TestGateFireAndOutputTraversal(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tr, live := newTraceWithLiveEvents(256)
+	tr := T.New(0)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -63,10 +63,20 @@ func TestGateFireAndOutputTraversal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadTopology: %v", err)
 	}
+	live := wireLiveRowEvents(nmr)
 	nmr.Start(ctx)
 
 	for _, n := range nodes {
 		go n.Update(ctx)
+	}
+
+	gateRow, ok := nmr.NodeRowFor("gate")
+	if !ok {
+		t.Fatal("no NODE-ROW for gate")
+	}
+	dstRow, ok := nmr.NodeRowFor("dst")
+	if !ok {
+		t.Fatal("no NODE-ROW for dst")
 	}
 
 	// The gate window is 3000ms and the fire dwell is 800ms, so the fire
@@ -85,10 +95,10 @@ func TestGateFireAndOutputTraversal(t *testing.T) {
 			t.Fatalf("timed out: fired=%v delivered=%v", fired, delivered)
 		case <-poll.C:
 			for _, e := range live.snapshot() {
-				if e.Kind == T.KindFire && e.Node == "gate" {
+				if e.Kind == T.KindFire && e.NodeRow == gateRow {
 					fired = true
 				}
-				if e.Kind == T.KindRecv && e.Node == "dst" && e.Port == "In" && e.Value == 1 {
+				if e.Kind == T.KindRecv && e.NodeRow == dstRow && e.Value == 1 {
 					delivered = true
 				}
 			}

@@ -106,13 +106,9 @@ func (md *MoveDispatch) LoadSceneSphere(topologyPath string) {
 			_ = writeSceneSphere(sphereFilePath(topologyPath), md.sceneSphere)
 		}
 	}
-	// Emit the scene sphere ONCE at load, on both paths: it is established here and never
-	// moves again (MODEL.md), so this is the single source-of-truth broadcast the renderer
-	// uses in place of deriving a content-sphere centroid from live node positions.
-	if md.tr != nil {
-		c := md.sceneSphere.Center
-		md.tr.SceneSphere(c.X, c.Y, c.Z, md.sceneSphere.Radius)
-	}
+	// The scene sphere is established here and never moves again (MODEL.md), so the VIEW
+	// frame emit below is the single source-of-truth broadcast the renderer uses in place
+	// of deriving a content-sphere centroid from live node positions.
 	// Decentralized (Step C, per-owner-buffer-rows.md): the gesture/stdin-reader goroutine
 	// (this one — LoadSceneSphere runs before any other goroutine launches) also writes its
 	// own VIEW frame directly, carrying this one-time scene-sphere event. SceneSphere

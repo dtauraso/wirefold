@@ -1,5 +1,5 @@
 // emit_geometry.go — the geometry-emission half of builders.go, split out as a pure move (no
-// logic changes): partnerCenterFn/buildPartnerCenterFn, emitNodeGeometryLocked/emitNodeGeometryWith,
+// logic changes): partnerCenterFn/buildPartnerCenterFn, aimedPortPosDir,
 // buildPortGeoms, effectiveRadius, emitNodeBeads, emitHeldBead, emitInputBeads, emitRefillSlide.
 // builders.go keeps the reflection-driven port-manifest/node-construction half.
 
@@ -125,19 +125,9 @@ func buildPartnerCenterFn(nodeID string, edgeEndpoints map[string]EdgeEndpoints,
 	}
 }
 
-// emitNodeGeometryLocked is the emit entry point used by the move dispatch. A CONNECTED port (partnerCenter reports hasPartner) is AIMED at its
-// partner's center (portWorldPosAimed) so port→edge→port stays colinear; an edgeless port falls
-// back to its own polar-torus ring offset (portWorldPos). A `port ∈ torus` lock is still
-// movement-only and only ever applies to an edgeless (ring-placed) port, so it never overrides
-// an aimed port's placement. partnerCenter may be nil (no edges known / test callers), in which
-// case every port takes the ring-placement fallback.
-func emitNodeGeometryLocked(tr *T.Trace, nodeName string, g nodeGeom, partnerCenter partnerCenterFn) {
-	emitNodeGeometryWith(tr, nodeName, g, aimedPortPosDir(g, partnerCenter))
-}
-
 // aimedPortPosDir returns the port-position/direction closure used by BOTH the node's own
-// live geometry emit (emitNodeGeometryLocked, above) and the load-time row seed
-// (newMoveDispatch's md.nodeSeeds, node_move.go) — the ONE place aimed-vs-static port
+// live geometry re-derive (nodeMover.writeStreamFrame, node_mover.go) and the load-time row
+// seed (newMoveDispatch's md.nodeSeeds, node_move.go) — the ONE place aimed-vs-static port
 // placement is computed, so seed and live emit can never drift apart. partnerCenter may
 // be nil (no edges known / test callers), in which case every port takes the ring-placement
 // fallback.
@@ -159,10 +149,9 @@ func aimedPortPosDir(g nodeGeom, partnerCenter partnerCenterFn) func(name string
 	}
 }
 
-// buildPortGeoms derives the full port-geometry slice (input ports then output ports, same
-// order emitNodeGeometryWith streams) from g and a port-position/direction function. Shared
-// by emitNodeGeometryWith (live emit) and the load-time row seed so both agree on port order
-// and values.
+// buildPortGeoms derives the full port-geometry slice (input ports then output ports) from g
+// and a port-position/direction function. Shared by nodeMover.writeStreamFrame (live re-derive)
+// and the load-time row seed so both agree on port order and values.
 func buildPortGeoms(g nodeGeom, portPosDir func(name string, isInput bool) (pos, dir vec3)) []T.PortGeom {
 	ports := make([]T.PortGeom, 0, len(g.Inputs)+len(g.Outputs))
 	appendPort := func(name string, isInput bool) {
@@ -184,36 +173,12 @@ func buildPortGeoms(g nodeGeom, portPosDir func(name string, isInput bool) (pos,
 
 // effectiveRadius returns the node's REACH radius (max distance to a surface child),
 // falling back to nodeR for childless nodes (ReachR == 0) so the value stays sane.
-// Used by emitNodeGeometryWith (sphereR).
+// Used by nodeMover.writeStreamFrame (sphereR).
 func effectiveRadius(g nodeGeom) float64 {
 	if g.ReachR > 0 {
 		return g.ReachR
 	}
 	return nodeR(g)
-}
-
-// emitNodeGeometryWith streams a node-geometry event for g, deriving each port's
-// world position + direction from portPosDir. It is called by the one live
-// caller, emitNodeGeometryLocked, which supplies the aimed-vs-static port
-// direction logic; center, the input-then-output port order, the reach-radius
-// fallback, and the ring normals all live here regardless of that logic.
-func emitNodeGeometryWith(tr *T.Trace, nodeName string, g nodeGeom, portPosDir func(name string, isInput bool) (pos, dir vec3)) {
-	center := nodeWorldPos(g)
-	ports := buildPortGeoms(g, portPosDir)
-	// sphereR streams the REACH radius (max distance to a surface child) so the TS
-	// SphereRing sizes correctly without recomputing geometry. Childless nodes
-	// (ReachR == 0) fall back to nodeR so the value stays sane.
-	sphereR := effectiveRadius(g)
-	// label = the node's human label (g.Label), falling back to the node id so the
-	// sidecar always carries a non-empty pill string even for hand-written specs whose
-	// geom omits Label.
-	label := g.Label
-	if label == "" {
-		label = nodeName
-	}
-	tr.NodeGeometry(nodeName, label, g.Kind, center.X, center.Y, center.Z, nodeRadius(g.Kind), sphereR, ports,
-		verticalRingNormalX, verticalRingNormalY, verticalRingNormalZ,
-		flatRingNormalX, flatRingNormalY, flatRingNormalZ)
 }
 
 // emitNodeBeads streams node 1's interior 2x2 buffer as a 4-SLOT SNAPSHOT: one
@@ -246,7 +211,6 @@ func emitNodeBeads(tr *T.Trace, nodeName string, working, backup []int, stream *
 			if has {
 				v = slice[col]
 			}
-			tr.NodeBead(nodeName, row, col, has, v, p.X, p.Y, p.Z)
 			events = append(events, RowEvent{
 				Kind: T.KindNodeBead, NodeRow: nodeRow, Slot: int32(row*2 + col), Value: int32(v),
 				PortRow: -1, TargetRow: -1, TargetPortRow: -1, EdgeRow: -1,
@@ -278,7 +242,6 @@ const NoValue = -1
 // EmitHeldBead closure only when the held value changes.
 func emitHeldBead(tr *T.Trace, nodeName string, held int, stream *interiorStream) {
 	has := held != NoValue
-	tr.NodeBead(nodeName, 0, 0, has, held, 0, 0, 0)
 	// Only slot (0,0) is meaningful for a HoldNewSendOld node; the remaining 3 fixed
 	// slots stay absent, matching the fd-3 Interior block's convention for this kind
 	// (writeInteriorBlock reads n.interior[slot], and only slot 0 was ever set here).
@@ -310,8 +273,6 @@ func emitHeldBead(tr *T.Trace, nodeName string, held int, stream *interiorStream
 func emitInputBeads(tr *T.Trace, nodeName string, left, right int, stream *interiorStream) {
 	s := interiorSlot
 	hasL, hasR := left != NoValue, right != NoValue
-	tr.NodeBead(nodeName, 0, 0, hasL, left, -s, 0, 0)
-	tr.NodeBead(nodeName, 0, 1, hasR, right, s, 0, 0)
 	vL, vR := 0, 0
 	if hasL {
 		vL = left

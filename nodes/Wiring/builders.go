@@ -268,16 +268,14 @@ func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindi
 func injectClosures(ctx context.Context, v reflect.Value, name string, pb PortBindings, tr *T.Trace, geom nodeGeom, sourceOuts *[]*Out, partnerCenter partnerCenterFn, getStream func() *interiorStream) {
 	// Inject Fire closure if the struct has a `Fire func()` field. The closure
 	// captures the node name so the node calls n.Fire() with no arguments and
-	// cannot mis-name itself in the trace. tr.Fire still feeds the -trace JSONL sink
-	// unchanged; the RowEvent flush below additionally lands this Fire on THIS node's
-	// OWN interior-stream frame (KindFire is fully decentralized — it never rides the
-	// VIEW stream's fallback bucket) — this node's own Update goroutine is the
-	// sole owner of when it fires, so it resolves its own NodeRow at the call site
-	// (owner_events.go) via the shared interiorStream (getStream), never a shared
+	// cannot mis-name itself in the trace. The RowEvent flush below lands this Fire
+	// on THIS node's OWN interior-stream frame (KindFire is fully decentralized — it
+	// never rides the VIEW stream's fallback bucket) — this node's own Update goroutine
+	// is the sole owner of when it fires, so it resolves its own NodeRow at the call
+	// site (owner_events.go) via the shared interiorStream (getStream), never a shared
 	// accumulator. writeEvents is nil-safe (no-op) when this node has no dedicated
 	// interior fd (test builds without a loader).
 	injectFunc(v, "Fire", tFireFunc, func() {
-		tr.Fire(name)
 		if s := getStream(); s != nil {
 			s.writeEvents([]RowEvent{{
 				Kind: T.KindFire, NodeRow: s.nodeRow,
