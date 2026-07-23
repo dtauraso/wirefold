@@ -30,7 +30,7 @@ func deliver(md *MoveDispatch, nodeID string, x, y, z float64) {
 	center := &vec3{X: x, Y: y, Z: z}
 	acks := make([]chan struct{}, 0, len(md.edgeMovers)+1)
 	nodeAck := make(chan struct{})
-	md.extRoute[nodeID] <- moveMsg{Kind: moveMsgKindCenter, NodeID: nodeID, Center: center, testDone: nodeAck}
+	md.nodeMovers[nodeID].extIn <- moveMsg{Kind: moveMsgKindCenter, NodeID: nodeID, Center: center, testDone: nodeAck}
 	acks = append(acks, nodeAck)
 	for _, em := range md.edgeMovers {
 		if em.srcID != nodeID && em.dstID != nodeID {
@@ -49,8 +49,8 @@ func TestDecentralizedNodeMove(t *testing.T) {
 	// Initial positions are scene polar about the origin: src (100,0,0), dst (0,0,0).
 	const topo = `{
 	  "nodes": [
-	    {"id":"src","type":"SrcNode","scenePolarR":100,"scenePolarTheta":1.5707963267948966,"scenePolarPhi":0,"outputs":[{"name":"Out"}]},
-	    {"id":"dst","type":"SinkNode","scenePolarR":0,"scenePolarTheta":0,"scenePolarPhi":0,"inputs":[{"name":"In"}]}
+	    {"id":"src","type":"FanInSrc","scenePolarR":100,"scenePolarTheta":1.5707963267948966,"scenePolarPhi":0,"outputs":[{"name":"Out"}]},
+	    {"id":"dst","type":"FanInSink","scenePolarR":0,"scenePolarTheta":0,"scenePolarPhi":0,"inputs":[{"name":"In"}]}
 	  ],
 	  "edges": [
 	    {"label":"e0","kind":"data","source":"src","sourceHandle":"Out","target":"dst","targetHandle":"In"}
@@ -65,21 +65,7 @@ func TestDecentralizedNodeMove(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	// beadInFlight closes once the wire has emitted a Position event for the placed
-	// src.Out bead — a PRODUCTION happens-before edge proving the wire's own goroutine
-	// drained the Send into its inflight set AND advanced it. Waiting on this instead of a
-	// fixed sleep is what de-flakes the move-revises-in-flight-bead check: the drag below
-	// needs a non-empty inflight, and a wall-clock sleep raced the wire goroutine under
-	// scheduler starvation (parallel -race). onEvent runs on the trace drain goroutine;
-	// sync.Once makes the close idempotent across the bead's many Position events.
-	beadInFlight := make(chan struct{})
-	var beadOnce sync.Once
-	onEvt := func(e T.Event) {
-		if e.Kind == T.KindPosition && e.Node == "src" && e.Port == "Out" {
-			beadOnce.Do(func() { close(beadInFlight) })
-		}
-	}
-	tr := T.NewWithSinkHook(256, nil, onEvt)
+	tr := T.New(256)
 	clk := NewRealClock()
 	_, slotReg, md, _, err := LoadTopology(ctx, path, tr, clk)
 	if err != nil {
@@ -101,15 +87,10 @@ func TestDecentralizedNodeMove(t *testing.T) {
 	if pw.Send(7, bp) != SendPlaced {
 		t.Fatal("Send rejected on fresh wire")
 	}
-	// Wait on the production happens-before edge (beadInFlight, above) instead of a fixed
-	// sleep: block until the wire has actually drained the Send into inflight and emitted a
-	// Position for it, so the move below is guaranteed to find a non-empty inflight to
-	// revise. The timeout fails loud (rather than flaking) if the wire goroutine never runs.
-	select {
-	case <-beadInFlight:
-	case <-time.After(2 * time.Second):
-		t.Fatal("bead never entered flight (no Position event for src.Out within 2s) — wire goroutine starved?")
-	}
+	// Give the wire's own goroutine a moment to drain the send into its inflight
+	// state (its next DriveOneCycle, at most one human-clock cycle away) before
+	// the move below asks it to revise that bead's geometry.
+	time.Sleep(cascadeSettle)
 
 	// Move src — delivered per-goroutine (no central registry). The world target
 	// snaps to a lattice cell (the only position model).
@@ -128,8 +109,8 @@ func TestDecentralizedNodeMove(t *testing.T) {
 	}
 	srcCenter := vec3{X: nx, Y: ny, Z: nz}
 	dstCenter := dstCenterHeld
-	srcGeom := nodeGeom{nodeIdentity: nodeIdentity{Kind: "SrcNode"}, HasPos: true, ScenePolar: cart2polar(srcCenter), Outputs: []portGeom{{Name: "Out"}}}
-	dstGeom := nodeGeom{nodeIdentity: nodeIdentity{Kind: "SinkNode"}, HasPos: true, ScenePolar: cart2polar(dstCenter), Inputs: []portGeom{{Name: "In"}}}
+	srcGeom := nodeGeom{nodeIdentity: nodeIdentity{Kind: "FanInSrc"}, HasPos: true, ScenePolar: cart2polar(srcCenter), Outputs: []portGeom{{Name: "Out"}}}
+	dstGeom := nodeGeom{nodeIdentity: nodeIdentity{Kind: "FanInSink"}, HasPos: true, ScenePolar: cart2polar(dstCenter), Inputs: []portGeom{{Name: "In"}}}
 	// Polar-torus port-to-port model: segment/arc between the two ports' world points.
 	wantSeg := edgeSegment(srcGeom, dstGeom, "Out", "In")
 	wantArc := edgeArcPolar(srcGeom, dstGeom, "Out", "In")
@@ -142,35 +123,47 @@ func TestDecentralizedNodeMove(t *testing.T) {
 		t.Fatalf("Out segment = %+v..%+v, want %+v..%+v", out.Geom().Start, out.Geom().End, wantSeg.Start, wantSeg.End)
 	}
 
-	// "In-flight bead's geometry was revised to the new segment (still in flight)"
-	// is now proven from two PRODUCTION-EMITTED trace facts instead of peeking
-	// pw's live (unexported, unlocked, cross-goroutine-unsafe) inflight slice:
+	// In-flight bead's geometry was revised to the new segment (still in flight).
+	// pw is owned exclusively by its own goroutine now (the edgeMover md.Start
+	// launched) — read its state via the atomic InFlightSegments snapshot rather
+	// than the live (unexported, unlocked) inflight slice.
 	//
-	//   (a) SEGMENT REVISED — the edgeMover emits a KindGeometry event for e0
-	//       carrying the new SX..EZ (checked below as sawEdgeGeom, against the
-	//       known-authoritative wantSeg endpoints — comparing to an EXPECTED
-	//       value, not re-deriving one from a point).
-	//   (b) BEAD STILL IN FLIGHT ON THE REVISED GEOMETRY — the wire only emits a
-	//       KindPosition ("edge-bead") event for a bead that is still in flight,
-	//       so an edge-bead event for this wire's source/port AFTER the revise
-	//       proves the bead was still traveling on the new segment.
-	//
-	// Neither needs on-segment/collinearity math. Wait a few tick periods after
-	// the move (deliver's ack only guarantees the FIRST DriveOneCycle post-revise
-	// ran; a later cycle's own Position emit needs real time to elapse) before
-	// closing the trace, since Events() is only safe to read post-Close.
-	time.Sleep(5 * tickPeriod)
+	// deliver() acks once the edgeMover has recomputed out.Geom, but the wire
+	// republishes its in-flight-segment snapshot (publishSnap) on its OWN next
+	// DriveOneCycle — one human-clock cycle after the revision, not at ack time.
+	// So poll the atomic snapshot until the revision is observable rather than
+	// reading it once (flake fix: wait on the real happens-before edge — the
+	// published revision — instead of assuming it lands synchronously with the ack).
+	var revisedSeg wireSegment
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		segs := pw.InFlightSegments()
+		if len(segs) == 0 {
+			t.Fatal("bead left flight unexpectedly during move")
+		}
+		revisedSeg = segs[0]
+		if approxEq(revisedSeg.End.X, wantSeg.End.X) && approxEq(revisedSeg.Start.X, wantSeg.Start.X) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("in-flight segment not revised within timeout: got %+v..%+v, want %+v..%+v",
+				revisedSeg.Start, revisedSeg.End, wantSeg.Start, wantSeg.End)
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	// Give the trace a moment, then assert the node re-emitted node-geometry and the
+	// edge re-emitted its segment.
+	time.Sleep(5 * time.Millisecond)
 	tr.Close()
 	events := tr.Events()
 	var sawNodeGeom, sawEdgeGeom bool
-	var edgeGeomStep = -1
-	for i, e := range events {
+	for _, e := range events {
 		if e.Kind == T.KindNodeGeometry && e.Node == "src" {
 			sawNodeGeom = true
 		}
 		if e.Kind == T.KindGeometry && e.Edge == "e0" && approxEq(e.EX, wantSeg.End.X) {
 			sawEdgeGeom = true
-			edgeGeomStep = i
 		}
 	}
 	if !sawNodeGeom {
@@ -178,16 +171,6 @@ func TestDecentralizedNodeMove(t *testing.T) {
 	}
 	if !sawEdgeGeom {
 		t.Fatal("edge 'e0' did not re-emit its re-derived segment on move")
-	}
-	var stillInFlight bool
-	for _, e := range events[edgeGeomStep+1:] {
-		if e.Kind == T.KindPosition && e.Node == "src" && e.Port == "Out" {
-			stillInFlight = true
-			break
-		}
-	}
-	if !stillInFlight {
-		t.Fatal("no edge-bead position event for src.Out after the geometry revise — bead left flight unexpectedly during move")
 	}
 }
 
@@ -200,8 +183,8 @@ func TestNodeGeometryLabelSidecar(t *testing.T) {
 	// "src" carries an explicit human label; "dst" omits data.label → label falls back to id.
 	const topo = `{
 	  "nodes": [
-	    {"id":"src","type":"SrcNode","data":{"label":"Source Node"},"outputs":[{"name":"Out"}]},
-	    {"id":"dst","type":"SinkNode","inputs":[{"name":"In"}]}
+	    {"id":"src","type":"FanInSrc","data":{"label":"Source Node"},"outputs":[{"name":"Out"}]},
+	    {"id":"dst","type":"FanInSink","inputs":[{"name":"In"}]}
 	  ],
 	  "edges": [
 	    {"label":"e0","kind":"data","source":"src","sourceHandle":"Out","target":"dst","targetHandle":"In"}
@@ -232,9 +215,8 @@ func TestNodeGeometryLabelSidecar(t *testing.T) {
 	// application node goroutines). Emit directly from the movers' held state — the same
 	// direct read the removed ResendGeometry(!started) path used — so this test can assert
 	// on Label/NodeKind without spinning up full node goroutines.
-	for _, sd := range md.NodeSeeds() {
-		tr.NodeGeometry(sd.ID, sd.Label, sd.Kind, sd.CX, sd.CY, sd.CZ, sd.Radius, sd.SphereR, sd.Ports,
-			sd.VRX, sd.VRY, sd.VRZ, sd.FRX, sd.FRY, sd.FRZ)
+	for _, nm := range md.nodeMovers {
+		emitNodeGeometryLocked(tr, nm.id, nm.geom, nm.partnerCenter)
 	}
 
 	tr.Close()
@@ -243,7 +225,7 @@ func TestNodeGeometryLabelSidecar(t *testing.T) {
 	wantLabel := map[string]string{"src": "Source Node", "dst": "dst"}
 	// Expected Go kind per node id: the node's `type` field, carried on node-geometry
 	// for the new-system kind→color sidecar (row-keyed).
-	wantKind := map[string]string{"src": "SrcNode", "dst": "SinkNode"}
+	wantKind := map[string]string{"src": "FanInSrc", "dst": "FanInSink"}
 
 	// First-seen node id order == buffer node-row order. Collect it and verify each
 	// node-geometry event's Label matches.
@@ -278,8 +260,8 @@ func TestNodeGeometryLabelSidecar(t *testing.T) {
 func TestMoverCenterRace(t *testing.T) {
 	const topo = `{
 	  "nodes": [
-	    {"id":"src","type":"SrcNode","outputs":[{"name":"Out"}]},
-	    {"id":"dst","type":"SinkNode","inputs":[{"name":"In"}]}
+	    {"id":"src","type":"FanInSrc","outputs":[{"name":"Out"}]},
+	    {"id":"dst","type":"FanInSink","inputs":[{"name":"In"}]}
 	  ],
 	  "edges": [
 	    {"label":"e0","kind":"data","source":"src","sourceHandle":"Out","target":"dst","targetHandle":"In"}
@@ -332,8 +314,8 @@ func TestMoverCenterRace(t *testing.T) {
 func TestOutGeomRace(t *testing.T) {
 	const topo = `{
 	  "nodes": [
-	    {"id":"src","type":"SrcNode","outputs":[{"name":"Out"}]},
-	    {"id":"dst","type":"SinkNode","inputs":[{"name":"In"}]}
+	    {"id":"src","type":"FanInSrc","outputs":[{"name":"Out"}]},
+	    {"id":"dst","type":"FanInSink","inputs":[{"name":"In"}]}
 	  ],
 	  "edges": [
 	    {"label":"e0","kind":"data","source":"src","sourceHandle":"Out","target":"dst","targetHandle":"In"}
@@ -399,8 +381,8 @@ func TestOutGeomRace(t *testing.T) {
 func TestRootMoveContinuousPositionLocalPolarRequantize(t *testing.T) {
 	const topo = `{
 	  "nodes": [
-	    {"id":"src","type":"SrcNode","outputs":[{"name":"Out"}]},
-	    {"id":"dst","type":"SinkNode","inputs":[{"name":"In"}]}
+	    {"id":"src","type":"FanInSrc","outputs":[{"name":"Out"}]},
+	    {"id":"dst","type":"FanInSink","inputs":[{"name":"In"}]}
 	  ],
 	  "edges": [
 	    {"label":"e0","kind":"data","source":"src","sourceHandle":"Out","target":"dst","targetHandle":"In"}
@@ -430,14 +412,14 @@ func TestRootMoveContinuousPositionLocalPolarRequantize(t *testing.T) {
 	// Sync points for the two LayoutHolder reads below, both racy against a live mover
 	// goroutine if read via a bare poll (data race under -race, not just theoretically):
 	//   - lhSrc is written by src's OWN mover goroutine (requantizeLocalPolars) strictly
-	//     BEFORE that same call enqueues src's moveMsgKindNeighborSetC to dst, which src
-	//     must send before dst can ever process it and log its own "abc-drag" breadcrumb
-	//     — so waiting for dst's breadcrumb (below) transitively establishes a
-	//     happens-before edge for lhSrc's write too, not just lhDst's.
+	//     BEFORE that same call enqueues src's moveMsgKindNeighborSetC to dst — waiting
+	//     for the tapped message (captureNeighborSetC, same mechanism drag_anchor_test.go
+	//     uses) establishes a happens-before edge for lhSrc's write.
 	//   - lhDst is written by dst's OWN mover goroutine (neighborSetCRequantize) strictly
 	//     BEFORE that same call logs its "abc-drag" breadcrumb — waiting for the
 	//     breadcrumb (same mechanism time_node_abc_drag_breadcrumb_test.go uses)
 	//     establishes a happens-before edge for lhDst's write.
+	got := captureNeighborSetC(md, "dst")
 	var dbg syncBuffer
 	tr.SetDebugSink(&dbg)
 
@@ -453,7 +435,6 @@ func TestRootMoveContinuousPositionLocalPolarRequantize(t *testing.T) {
 	const eps = 1e-9
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		md.drainPositions()
 		c, ok := md.centerOfNode("src")
 		if ok && math.Abs(c.X-target.X) <= eps && math.Abs(c.Y-target.Y) <= eps && math.Abs(c.Z-target.Z) <= eps {
 			break
@@ -463,7 +444,7 @@ func TestRootMoveContinuousPositionLocalPolarRequantize(t *testing.T) {
 		}
 		time.Sleep(time.Millisecond)
 	}
-	waitForAbcDrag(t, &dbg, "dst")
+	waitForNeighborSetC(t, got, 1)
 
 	// (b) src's local polar to dst reconstructs the distance to a whole tick of the
 	// LOCAL-POLAR grid (localStepR/localStepTheta/localStepPhi — small, uniform cells,
