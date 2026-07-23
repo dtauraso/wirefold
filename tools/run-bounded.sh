@@ -10,8 +10,8 @@
 # Usage:
 #   tools/run-bounded.sh <seconds> <command> [args...]
 #
-# Example (capture the sim's startup trace without risking a hang):
-#   tools/run-bounded.sh 5 ./wirefold -topology ./topology -trace /tmp/t.jsonl -duration 1s </dev/null
+# Example (bounded self-terminating run without risking a hang):
+#   tools/run-bounded.sh 5 ./wirefold -topology ./topology -duration 1s </dev/null
 #
 # Exits with the command's own status if it finishes in time, or 124 if it was
 # killed at the deadline (matching GNU `timeout`'s convention).
