@@ -198,24 +198,6 @@ type MoveDispatch struct {
 	// the same way vp/ov/gest are, so a bare test-constructed MoveDispatch only has to
 	// reason about one zero-value sub-struct instead of six loose nilable fields.
 	persist persisters
-	// portRows resolves a numeric buffer PORT-ROW index (carried on a new-system raw hit)
-	// back to its (node, port, isInput) identity. Wired to the buffer SnapshotState's
-	// port-row table in main.go (new-system only); nil on the old path and in unit tests, in
-	// which case the gesture FSM falls back to parsing the legacy port-id string. Go owns the
-	// topology and wrote the Port block, so it — not TS — maps a port row to a (node, port).
-	portRows PortRowResolver
-	// edgeRows resolves a numeric buffer EDGE-ROW index (carried on a new-system raw hit)
-	// back to its edge label. Wired to the buffer SnapshotState's edge-row table in main.go
-	// (new-system only); nil on the old path and in unit tests, in which case the gesture
-	// FSM falls back to the raw hit's Id string. Go owns the topology and wrote the Edge
-	// block, so it — not TS — maps an edge row to its label.
-	edgeRows EdgeRowResolver
-	// nodeRows resolves a numeric buffer NODE-ROW index (carried on a new-system raw hit)
-	// back to its node id. Wired to the buffer SnapshotState's node-row table in main.go
-	// (new-system only); nil on the old path and in unit tests, in which case the gesture
-	// FSM falls back to the raw hit's Id string. Go owns the topology and wrote the Node
-	// block, so it — not TS — maps a node row to its id.
-	nodeRows NodeRowResolver
 	// interiorOuts holds ONE dedicated per-node interior-bead fd, keyed by node id — the
 	// SECOND emitting goroutine per node (its own Update loop, not its nodeMover) writes
 	// here (memory/feedback_no_single_writer_bridge.md). Populated ONCE by
@@ -262,6 +244,143 @@ type MoveDispatch struct {
 	// calling Start — sendMove treats a nil ctx as "no cancellation available"
 	// and falls back to the plain blocking send (matches prior test behavior).
 	ctx context.Context
+
+	// --- row-identity tables (hit-testing + mover row resolution) ---
+	//
+	// These four tables used to live on Buffer.SnapshotState, built as a side effect of
+	// the Trace-drain goroutine observing the FIRST geometry event for each node/edge — a
+	// discovery log. Node/edge/port row order is actually a LOAD-TIME CONSTANT (spec
+	// order, md.nodeSeeds/md.edgeSeeds — see their doc comments): nodes/edges are only
+	// ever added via respawn, which re-runs load from scratch. So the tables are built
+	// ONCE here, in newMoveDispatch, from the SAME nodeSeeds/edgeSeeds order the seed loop
+	// in main.go streams through tr.NodeGeometry/tr.Geometry — reproducing byte-for-byte
+	// the row order SnapshotState used to discover independently. Built before Start (and
+	// never mutated afterward), so — unlike SnapshotState's atomic.Pointer tables — a plain
+	// slice/map here is already safe for every reader goroutine (gesture, movers) to read
+	// concurrently with no lock and no atomic: the write happened-before every goroutine
+	// that could read it (Go launches nodeMover/edgeMover goroutines only in Start, which
+	// runs after newMoveDispatch returns).
+	//
+	// nodeRowTable: node ids in stable row order (== md.nodeSeeds order).
+	nodeRowTable []string
+	// edgeRowTable: edge labels in stable row order (== md.edgeSeeds order).
+	edgeRowTable []string
+	// portRowTable: the flattened port-row table in the SAME order Buffer's Port block is
+	// written — node-row order × each node's Ports order (== md.nodeSeeds[i].Ports order).
+	portRowTable []moveDispatchPortRow
+	// edgeEndpointRowTable: each edge row's (srcNode, dstNode) ids, same order as edgeRowTable.
+	edgeEndpointRowTable []moveDispatchEdgeEndpoint
+}
+
+// moveDispatchPortRow is one row of MoveDispatch's port-row table — the (node, port)
+// identity a numeric buffer PORT-ROW index resolves to. Mirrors Buffer.PortRowEntry's
+// shape (kept as a local type so this package stays Buffer-independent).
+type moveDispatchPortRow struct {
+	node    string
+	port    string
+	isInput bool
+}
+
+// moveDispatchEdgeEndpoint is one edge row's endpoint node ids.
+type moveDispatchEdgeEndpoint struct {
+	srcNode, dstNode string
+}
+
+// buildRowTables constructs the four row-identity tables from md.nodeSeeds/md.edgeSeeds
+// (already in stable spec order at this point in newMoveDispatch). Called once, before
+// any mover goroutine exists.
+func (md *MoveDispatch) buildRowTables() {
+	md.nodeRowTable = make([]string, len(md.nodeSeeds))
+	for i, sd := range md.nodeSeeds {
+		md.nodeRowTable[i] = sd.ID
+	}
+	md.portRowTable = md.portRowTable[:0]
+	for _, sd := range md.nodeSeeds {
+		for _, p := range sd.Ports {
+			md.portRowTable = append(md.portRowTable, moveDispatchPortRow{node: sd.ID, port: p.Name, isInput: p.IsInput})
+		}
+	}
+	md.edgeRowTable = make([]string, len(md.edgeSeeds))
+	md.edgeEndpointRowTable = make([]moveDispatchEdgeEndpoint, len(md.edgeSeeds))
+	for i, sd := range md.edgeSeeds {
+		md.edgeRowTable[i] = sd.Label
+		md.edgeEndpointRowTable[i] = moveDispatchEdgeEndpoint{srcNode: sd.SrcNode, dstNode: sd.DstNode}
+	}
+}
+
+// LookupNodeRow resolves a numeric buffer NODE-ROW index to its node id via the row table
+// built at load. ok=false for an out-of-range row. This is the node analogue of
+// LookupPortRow/LookupEdgeRow: a numeric node-row hit (the node InstancedMesh instanceId
+// == its buffer node row) resolves back to the node id here in Go, so the numeric buffer
+// carries no node id strings and the webview forwards only the row.
+func (md *MoveDispatch) LookupNodeRow(row int) (nodeID string, ok bool) {
+	if row < 0 || row >= len(md.nodeRowTable) {
+		return "", false
+	}
+	return md.nodeRowTable[row], true
+}
+
+// NodeRowFor resolves nodeID to its buffer NODE-ROW index via the row table built at
+// load — the REVERSE of LookupNodeRow. Used by a dedicated nodeMover goroutine
+// (memory/feedback_no_single_writer_bridge.md) to resolve its own layout-link's dst node
+// row for its per-node stream frame. ok=false when nodeID is not a registered node.
+func (md *MoveDispatch) NodeRowFor(nodeID string) (int32, bool) {
+	for i, id := range md.nodeRowTable {
+		if id == nodeID {
+			return int32(i), true
+		}
+	}
+	return -1, false
+}
+
+// LookupEdgeRow resolves a numeric buffer EDGE-ROW index to its edge label via the row
+// table built at load. ok=false for an out-of-range row. This is the row→edge resolution
+// the gesture FSM uses to mark the Go-owned edge selection — the numeric buffer carries
+// no edge label strings.
+func (md *MoveDispatch) LookupEdgeRow(row int) (label string, ok bool) {
+	if row < 0 || row >= len(md.edgeRowTable) {
+		return "", false
+	}
+	return md.edgeRowTable[row], true
+}
+
+// EdgeRowForPair resolves the buffer edge-row index of the bead edge connecting node ids
+// a/b (in either direction) via the edge-endpoint table built at load — the cross-
+// goroutine-safe counterpart of edgeRowForPair (Buffer/pack.go, drain-goroutine-only).
+// Used by a dedicated nodeMover goroutine to resolve its own layout-link's edge row for
+// its per-node stream frame. ok=false when no such edge exists.
+func (md *MoveDispatch) EdgeRowForPair(a, b string) (int32, bool) {
+	for i, e := range md.edgeEndpointRowTable {
+		if (e.srcNode == a && e.dstNode == b) || (e.srcNode == b && e.dstNode == a) {
+			return int32(i), true
+		}
+	}
+	return -1, false
+}
+
+// LookupPortRow resolves a numeric buffer PORT-ROW index to its (node, port, isInput)
+// identity via the port-row table built at load. ok=false for an out-of-range row. This is
+// the row→(node,port) resolution the gesture FSM uses for wiring/handhold — the numeric
+// buffer carries no port strings.
+func (md *MoveDispatch) LookupPortRow(row int) (node, port string, isInput, ok bool) {
+	if row < 0 || row >= len(md.portRowTable) {
+		return "", "", false, false
+	}
+	e := md.portRowTable[row]
+	return e.node, e.port, e.isInput, true
+}
+
+// PortRowFor resolves (node, port, isInput) to its buffer PORT-ROW index via the port-row
+// table built at load — the REVERSE of LookupPortRow. Used by a dedicated edgeMover
+// goroutine to resolve its own SrcPortRow/DstPortRow for its per-edge stream frame.
+// ok=false when no port matches.
+func (md *MoveDispatch) PortRowFor(node, port string, isInput bool) (int32, bool) {
+	for i, e := range md.portRowTable {
+		if e.node == node && e.port == port && e.isInput == isInput {
+			return int32(i), true
+		}
+	}
+	return -1, false
 }
 
 // SetMsgTap installs (or clears, with nil) the test-only message-trace hook. Test-only —
@@ -273,42 +392,6 @@ func (md *MoveDispatch) SetMsgTap(tap func(destID string, msg moveMsg)) {
 	}
 	md.msgTap.Store(&tap)
 }
-
-// NodeRowResolver maps a numeric buffer NODE-ROW index to its node id. Implemented by
-// Buffer.SnapshotState (which wrote the Node block in this same row order). Kept as an
-// interface here so the Wiring package needs no dependency on the Buffer package — main.go
-// injects the concrete resolver.
-type NodeRowResolver interface {
-	LookupNodeRow(row int) (nodeID string, ok bool)
-}
-
-// SetNodeRowResolver injects the node-row resolver (new-system only). Called once at
-// startup after LoadTopology.
-func (md *MoveDispatch) SetNodeRowResolver(r NodeRowResolver) { md.nodeRows = r }
-
-// EdgeRowResolver maps a numeric buffer EDGE-ROW index to its edge label. Implemented by
-// Buffer.SnapshotState (which wrote the Edge block in this same row order). Kept as an
-// interface here so the Wiring package needs no dependency on the Buffer package — main.go
-// injects the concrete resolver.
-type EdgeRowResolver interface {
-	LookupEdgeRow(row int) (label string, ok bool)
-}
-
-// SetEdgeRowResolver injects the edge-row resolver (new-system only). Called once at
-// startup after LoadTopology.
-func (md *MoveDispatch) SetEdgeRowResolver(r EdgeRowResolver) { md.edgeRows = r }
-
-// PortRowResolver maps a numeric buffer PORT-ROW index to its (node, port, isInput)
-// identity. Implemented by Buffer.SnapshotState (which wrote the Port block in this same
-// row order). Kept as an interface here so the Wiring package needs no dependency on the
-// Buffer package — main.go injects the concrete resolver.
-type PortRowResolver interface {
-	LookupPortRow(row int) (node, port string, isInput, ok bool)
-}
-
-// SetPortRowResolver injects the port-row resolver (new-system only). Called once at
-// startup after LoadTopology.
-func (md *MoveDispatch) SetPortRowResolver(r PortRowResolver) { md.portRows = r }
 
 // SetEdgeStreams wires every edgeMover to ITS OWN dedicated fd — the per-edge stream
 // (memory/feedback_no_single_writer_bridge.md): fd = baseFd + row, where row is the
@@ -611,6 +694,10 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 			}
 		}
 	}
+	// Row-identity tables: built ONCE here, from nodeSeeds/edgeSeeds (already in stable
+	// spec order above) — see buildRowTables' doc comment for why this is a load-time
+	// constant, not a discovery log.
+	md.buildRowTables()
 	return md
 }
 

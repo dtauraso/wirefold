@@ -531,24 +531,24 @@ func (md *MoveDispatch) applySelect(ev rawInputMsg, tr *T.Trace) {
 
 // nodeFromHit resolves a node hit to its node id. A node hit carries only a numeric buffer
 // NODE-ROW index (the node InstancedMesh instanceId == its buffer node row); Go maps it back
-// through its own node-row table (md.nodeTbl, this goroutine's own copy — see nodeTbl's doc
-// comment on MoveDispatch), since Go owns the topology and wrote the Node block in that same
-// row order.
+// through its own node-row table (built at load — see buildRowTables), since Go owns the
+// topology and wrote the Node block in that same row order.
 func (md *MoveDispatch) nodeFromHit(h rawHit) (node string, ok bool) {
-	if h.NodeRow < 0 || h.NodeRow >= len(md.nodeTbl) {
-		return "", false
+	if h.NodeRow >= 0 {
+		return md.LookupNodeRow(h.NodeRow)
 	}
-	return md.nodeTbl[h.NodeRow], true
+	return "", false
 }
 
 // edgeFromHit resolves an edge hit to its edge label. An edge hit carries only a numeric
 // buffer EDGE-ROW index (no label string); Go maps it back through its own edge-row table
-// (md.edgeTbl), since Go owns the topology and wrote the Edge block in that same row order.
+// (built at load — see buildRowTables), since Go owns the topology and wrote the Edge block
+// in that same row order.
 func (md *MoveDispatch) edgeFromHit(h rawHit) (label string, ok bool) {
-	if h.EdgeRow < 0 || h.EdgeRow >= len(md.edgeTbl) {
-		return "", false
+	if h.EdgeRow >= 0 {
+		return md.LookupEdgeRow(h.EdgeRow)
 	}
-	return md.edgeTbl[h.EdgeRow], true
+	return "", false
 }
 
 // gestWheel mirrors interaction-handlers.ts handleWheelNative: ctrl+wheel = zoom-to-cursor
@@ -653,18 +653,16 @@ func (g *gestureState) reset(vp *viewpoint) {
 func (md *MoveDispatch) applyRingAnchor(node, port string, isInput bool, dir vec3) {
 	anchorID := snapToRingAnchorIndex(md.NodeKind(node), dir)
 	msg := moveMsg{Kind: moveMsgKindAnchor, NodeID: node, Port: port, IsInput: isInput, AnchorId: anchorID}
-	// Both sends are ctx-guarded (sendMove for the node, sendExtCtx for each incident
-	// edge) — matching the drag/dragStart path. A raw blocking `ch <- msg` here could park
-	// this stdin/gesture goroutine forever on shutdown (target's run loop already returned)
-	// or stall it if a fast ring-drag fills the 8-slot extIn faster than the ~16ms drain.
-	md.sendMove(node, msg)
+	if nm, ok := md.nodeMovers[node]; ok {
+		nm.extIn <- msg
+	}
 	for _, em := range md.edgeMovers {
 		incident := (isInput && em.dstID == node && em.dstH == port) ||
 			(!isInput && em.srcID == node && em.srcH == port)
 		if !incident {
 			continue
 		}
-		md.sendExtCtx(em.extIn, msg)
+		em.extIn <- msg
 	}
 	// Persist the snapped anchor index to the port file (debounced, fire-and-forget).
 	if md.persist.anchor != nil {
@@ -690,14 +688,13 @@ func (md *MoveDispatch) portConnected(node, port string, isInput bool) bool {
 	return false
 }
 
-// portFromHit resolves a port hit to its (node, port, isInput) identity. On the new-system
-// A port hit carries only a numeric buffer PORT-ROW index (no name string); Go maps it
-// back through its own port-row table (md.portTbl), since Go owns the topology and wrote
-// the Port block in that same row order.
+// portFromHit resolves a port hit to its (node, port, isInput) identity. A port hit
+// carries only a numeric buffer PORT-ROW index (no name string); Go maps it back through
+// its own port-row table (built at load — see buildRowTables), since Go owns the topology
+// and wrote the Port block in that same row order.
 func (md *MoveDispatch) portFromHit(h rawHit) (node, port string, isInput, ok bool) {
-	if h.PortRow < 0 || h.PortRow >= len(md.portTbl) {
-		return "", "", false, false
+	if h.PortRow >= 0 {
+		return md.LookupPortRow(h.PortRow)
 	}
-	e := md.portTbl[h.PortRow]
-	return e.Node, e.Port, e.IsInput, true
+	return "", "", false, false
 }

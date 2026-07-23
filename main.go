@@ -43,6 +43,19 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 		}
 	}
 	snapState := B.NewSnapshotState(snapOut)
+	// The VIEW stream (camera+overlay+scene, one singleton row owned by the gesture/
+	// MoveDispatch goroutine) is the first stream migrated OFF fd 3 onto its own
+	// dedicated inherited pipe, per the no-single-writer-bridge rule (memory/
+	// feedback_no_single_writer_bridge.md) and the fd-allocation contract documented in
+	// Buffer/stream_fds.go. WIREFOLD_STREAM_FDS unset/empty (headless tests, non-
+	// extension launches) ⇒ ParseStreamFDs returns an empty map ⇒ Open reports not-found
+	// ⇒ viewOut stays nil ⇒ SetViewOut is never called ⇒ buildSnapshot's fallback packs
+	// camera/overlay/scene into the fd-3 scene frame exactly as before. This dual path is
+	// required, not optional (headless/test launches never set this env var).
+	streamFDs := B.ParseStreamFDs(os.Getenv("WIREFOLD_STREAM_FDS"))
+	if viewOut, ok := streamFDs.Open(B.StreamKindView, 0); ok {
+		snapState.SetViewOut(viewOut)
+	}
 	// Coalesce the high-volume KindPosition stream to at most one emit per tick (clock.go: "the
 	// tick IS the animation clock", not per-bead-event).
 	//
@@ -113,7 +126,7 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 	// running it first means every event the drain goroutine ever sees (seed or live) is
 	// processed with the final edgeStreamActive value already in effect.
 	if edgeBase, ok := streamFDs[B.StreamKindEdge]; ok {
-		md.SetEdgeStreams(edgeBase, snapState.PortRowFor, snapState.IsEdgeSelected, B.BuildEdgeStreamFrame)
+		md.SetEdgeStreams(edgeBase, md.PortRowFor, snapState.IsEdgeSelected, B.BuildEdgeStreamFrame)
 		snapState.SetEdgeStreamActive(true)
 	}
 	// The two per-node dedicated streams (memory/feedback_no_single_writer_bridge.md):
@@ -127,7 +140,7 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 	if nodeBase, ok := streamFDs[B.StreamKindNode]; ok {
 		if interiorBase, ok2 := streamFDs[B.StreamKindInterior]; ok2 {
 			md.SetNodeStreams(nodeBase, interiorBase, snapState.NodeUIStateFor, snapState.PortHoveredFor,
-				snapState.NodeRowFor, snapState.EdgeRowForPair,
+				md.NodeRowFor, md.EdgeRowForPair,
 				B.BuildNodeStreamFrame, B.BuildInteriorStreamFrame)
 			snapState.SetNodeStreamActive(true)
 		}
@@ -135,32 +148,6 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 	// One example startup breadcrumb — proves the debug channel end-to-end and is genuinely
 	// useful (which topology loaded, how many nodes). Sparse: once per run.
 	tr.Breadcrumb("topology-loaded", topologyPath, "", fmt.Sprintf("nodes=%d", len(nodes)))
-
-	// Hand the buffer's three row-lookup tables from the Trace-drain goroutine (which owns
-	// SnapshotState and rebuilds these on every node/edge-geometry change) to the
-	// stdin/gesture goroutine (which owns MoveDispatch and resolves raw hits against them)
-	// over depth-1, replace-latest channels — ownership handoff, not a shared atomic (see
-	// Buffer/snapshot.go portTableC / nodes/Wiring/node_move.go portTblC doc comments). Each
-	// channel is created once here and wired to BOTH ends: Buffer's Set*TableChan is the
-	// send side (rebuild* calls sendLatestTableNonBlocking on it), Wiring's Set*TableChan is
-	// the receive side (drainRowTables, called at the top of every stdin dispatch
-	// iteration, pulls the latest pending value into MoveDispatch's own plain field). A port
-	// hit carries only a numeric buffer PORT-ROW index; it resolves back to its (node, port)
-	// via the port-row table. Likewise an edge hit's EDGE-ROW index resolves to its edge
-	// label, and a node hit's NODE-ROW index resolves to its node id — no port/edge/node
-	// string ever crosses the TS↔Go bridge. Wired BEFORE the row-seed loop below (which
-	// itself queues tr.NodeGeometry/tr.Geometry through the drain goroutine) so the very
-	// first rebuild*Table send has somewhere to land — a table rebuilt while unwired would
-	// be silently dropped (sendLatestTableNonBlocking on a nil channel is a no-op).
-	portTblC := make(chan []T.PortRow, 1)
-	edgeTblC := make(chan []string, 1)
-	nodeTblC := make(chan []string, 1)
-	snapState.SetPortTableChan(portTblC)
-	snapState.SetEdgeTableChan(edgeTblC)
-	snapState.SetNodeTableChan(nodeTblC)
-	md.SetPortTableChan(portTblC)
-	md.SetEdgeTableChan(edgeTblC)
-	md.SetNodeTableChan(nodeTblC)
 
 	// Seed the buffer's node/edge row tables from the diagram itself — SPEC ORDER,
 	// prefilled with the diagram's own load-time geometry — BEFORE any node goroutine
@@ -209,6 +196,14 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 	// <topologyPath>/view/scene.json itself and installs it into the gesture-FSM viewpoint,
 	// so the buffer camera columns carry a real, non-degenerate saved pose from the first
 	// frame (pan works immediately). Absent/malformed file → a fixed non-degenerate default.
+	//
+	// The buffer's node/edge/port row-identity tables now live ON md itself (built once at
+	// load, in newMoveDispatch's buildRowTables call, from the same spec-order nodeSeeds/
+	// edgeSeeds used to seed SnapshotState's rows below) — a node/edge/port hit (which
+	// carries only a numeric buffer row index) resolves back to its identity via
+	// md.LookupNodeRow/LookupEdgeRow/LookupPortRow with no separate resolver wiring.
+	// Initial camera viewpoint = FILE DATA: Go reads the saved camera from
+	// <topologyPath>/view/scene.json and installs it into the gesture-FSM viewpoint.
 	W.SeedInitialViewpoint(topologyPath, md, tr)
 	// Restore persisted overlay visibility: seed md.ov from scene.json and emit each flag so
 	// the buffer streams the saved overlay state from the first frame. Seed BEFORE
@@ -230,14 +225,6 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 	// running; installing it after Start left md.sceneSphere written unsynchronized
 	// while the mover/gesture goroutines could already read it on the drag path.
 	md.LoadSceneSphere(topologyPath)
-
-	// Seed md.positions (the gesture goroutine's own node-center cache) from load-time
-	// geometry, BEFORE launching any mover/gesture goroutine — so the very first
-	// gesture/camera interaction has data. Movers only report a center over
-	// posReportCh AFTER a real center commit (drainPositions, RunStdinReader), so
-	// without this seed heldCenters()/centerOfNode would see nothing until the first
-	// drag.
-	md.SeedPositions()
 
 	// Launch the per-node and per-edge move-handler goroutines (decentralized
 	// node-move: each node/edge drains its own inbox and recomputes its own geometry).

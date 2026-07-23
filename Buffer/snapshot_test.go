@@ -14,95 +14,9 @@ import (
 	T "github.com/dtauraso/wirefold/Trace"
 )
 
-// recvLatestOrNil non-blockingly drains ch, returning its latest sent value or the zero
-// value if nothing has been sent yet. Mirrors, for tests, the "nothing published yet" case
-// the removed atomic.Pointer's nil-Load used to cover: SnapshotState now hands its row
-// tables to the stdin/gesture goroutine over a channel (see SetPortTableChan et al.)
-// instead of publishing them for on-demand Load, so a test that wants "the latest table"
-// drains the channel itself, exactly as nodes/Wiring's MoveDispatch.drainRowTables does.
-func recvLatestOrNil[V any](ch chan V) (v V) {
-	select {
-	case v = <-ch:
-	default:
-	}
-	return
-}
-
-// lookupNodeOrEdgeRow mirrors the removed SnapshotState.LookupNodeRow/LookupEdgeRow's
-// row-resolution logic exactly (out-of-range/empty → ok=false) against a []string table
-// (node ids or edge labels) already drained off the channel — both tables share this shape.
-func lookupNodeOrEdgeRow(tbl []string, row int) (string, bool) {
-	if row < 0 || row >= len(tbl) {
-		return "", false
-	}
-	return tbl[row], true
-}
-
-// lookupPortRow mirrors the removed SnapshotState.LookupPortRow's row-resolution logic
-// exactly (out-of-range/empty → ok=false) against a table already drained off the channel.
-func lookupPortRow(tbl []T.PortRow, row int) (node, port string, isInput, ok bool) {
-	if row < 0 || row >= len(tbl) {
-		return "", "", false, false
-	}
-	e := tbl[row]
-	return e.Node, e.Port, e.IsInput, true
-}
-
-// TestLookupPortRow verifies the port-row resolution table the gesture FSM uses: a numeric
-// buffer PORT-ROW index maps back to its (node, port, isInput) in the SAME flattened order
-// the Port block is written (node-row order × each node's Ports order). No port name crosses
-// the buffer — the table IS the row→(node,port) authority.
-func TestLookupPortRow(t *testing.T) {
-	s := NewSnapshotState(nil)
-	ch := make(chan []T.PortRow, 1)
-	s.SetPortTableChan(ch)
-
-	// Out-of-range before any node registers (channel never sent on).
-	if _, _, _, ok := lookupPortRow(recvLatestOrNil(ch), 0); ok {
-		t.Fatalf("LookupPortRow(0) before any port: want ok=false")
-	}
-
-	s.Update(T.Event{
-		Kind: T.KindNodeGeometry, Node: "n0", Radius: 1,
-		Ports: []T.PortGeom{
-			{Name: "in", IsInput: true, DX: -1},
-			{Name: "out", IsInput: false, DX: 1},
-		},
-	})
-	s.Update(T.Event{
-		Kind: T.KindNodeGeometry, Node: "n1", Radius: 1,
-		Ports: []T.PortGeom{
-			{Name: "in", IsInput: true, DY: 1},
-		},
-	})
-	tbl := recvLatestOrNil(ch)
-
-	cases := []struct {
-		row     int
-		node    string
-		port    string
-		isInput bool
-	}{
-		{0, "n0", "in", true},
-		{1, "n0", "out", false},
-		{2, "n1", "in", true},
-	}
-	for _, c := range cases {
-		node, port, isInput, ok := lookupPortRow(tbl, c.row)
-		if !ok || node != c.node || port != c.port || isInput != c.isInput {
-			t.Errorf("LookupPortRow(%d): got (%q,%q,%v,%v), want (%q,%q,%v,true)",
-				c.row, node, port, isInput, ok, c.node, c.port, c.isInput)
-		}
-	}
-
-	// Out-of-range row → ok=false.
-	if _, _, _, ok := lookupPortRow(tbl, 3); ok {
-		t.Errorf("LookupPortRow(3) out of range: want ok=false")
-	}
-	if _, _, _, ok := lookupPortRow(tbl, -1); ok {
-		t.Errorf("LookupPortRow(-1): want ok=false")
-	}
-}
+// The port-row hit-test resolution table (formerly SnapshotState.LookupPortRow) moved off
+// SnapshotState onto MoveDispatch — built once at load from the seed order, not discovered
+// from geometry events. See nodes/Wiring/node_move_row_table_test.go for its test.
 
 // TestHoverColumn verifies that KindHover marks the Hovered column on the hovered node OR
 // port (exclusive, cleared on others), and that an empty hover clears all hover flags.
@@ -113,19 +27,17 @@ func TestHoverColumn(t *testing.T) {
 	s.Update(T.Event{Kind: T.KindNodeGeometry, Node: "n1", Radius: 1})
 
 	nodeHovered := func(row int) byte {
-		snap := s.BuildSnapshot()
-		nodeOff := BufHeaderSize + int(readU32(snap, 4))*BufBeadStride
-		return snap[nodeOff+row*BufNodeStride+BufNodeColHovered]
+		nodeFrame := s.BuildNodeFrame()
+		nodeOff := BufNodeFrameHeaderSize
+		return nodeFrame[nodeOff+row*BufNodeStride+BufNodeColHovered]
 	}
 	portHovered := func() byte {
-		snap := s.BuildSnapshot()
-		nodeCount := readU32(snap, 8)
-		edgeCount := readU32(snap, 12)
-		portOff := BufHeaderSize + int(readU32(snap, 4))*BufBeadStride +
+		nodeFrame := s.BuildNodeFrame()
+		nodeCount := readU32(nodeFrame, 4)
+		portOff := BufNodeFrameHeaderSize +
 			int(nodeCount)*BufNodeStride +
-			int(nodeCount)*BufInteriorSlotsPerNode*BufInteriorStride +
-			int(edgeCount)*BufEdgeStride
-		return snap[portOff+BufPortColHovered] // port row 0 = n0/in
+			int(nodeCount)*BufInteriorSlotsPerNode*BufInteriorStride
+		return nodeFrame[portOff+BufPortColHovered] // port row 0 = n0/in
 	}
 
 	// Hover node n0 → node row 0 Hovered=1, node row 1 = 0.
@@ -164,20 +76,13 @@ func TestLayoutLinkUnresolvableEndpointFiltered(t *testing.T) {
 
 	snap := s.BuildSnapshot()
 
-	beadCount := int(readU32(snap, 4))
-	nodeCount := int(readU32(snap, 8))
-	edgeCount := int(readU32(snap, 12))
-	layoutLinkCount := int(readU32(snap, 36))
+	layoutLinkCount := int(readU32(snap, 8))
 
 	if layoutLinkCount != 1 {
 		t.Fatalf("layoutLinkCount: got %d, want 1 (unresolvable pair must be dropped)", layoutLinkCount)
 	}
 
-	llOff := BufHeaderSize +
-		beadCount*BufBeadStride +
-		nodeCount*BufNodeStride +
-		nodeCount*BufInteriorSlotsPerNode*BufInteriorStride +
-		edgeCount*BufEdgeStride
+	llOff := BufHeaderSize
 
 	for i := 0; i < layoutLinkCount; i++ {
 		base := llOff + i*BufLayoutLinkStride
@@ -210,7 +115,7 @@ func TestTransientFlagsCleared(t *testing.T) {
 	// After the position-triggered snapshot, transients should be cleared.
 	// Build a second snapshot immediately (without producing any new events).
 	snap := s.BuildSnapshot()
-	eventCount := readU32(snap, 24)
+	eventCount := readU32(snap, 4)
 	if eventCount != 0 {
 		t.Errorf("eventCount not cleared after snapshot: got %d, want 0", eventCount)
 	}
@@ -228,43 +133,44 @@ func TestInteriorBeadReachesSnapshot(t *testing.T) {
 	// (row 1, col 0) → slot 2: present value 0 (a valid black bead) at (1,1,1).
 	s.Update(T.Event{Kind: T.KindNodeBead, Node: "n1", Row: 1, Col: 0, Present: true, Value: 0, X: 1, Y: 1, Z: 1})
 
-	snap := s.BuildSnapshot()
-	// Interior block starts right after the single node row (no beads).
-	interiorOff := BufHeaderSize + 1*BufNodeStride
+	nodeFrame := s.BuildNodeFrame()
+	// Interior block starts right after the single node row (no beads). The
+	// Node/Interior blocks now live in the node-owner-group frame (see BufBlockTagNode).
+	interiorOff := BufNodeFrameHeaderSize + 1*BufNodeStride
 	slot := func(i int) int { return interiorOff + i*BufInteriorStride }
 
-	if snap[slot(0)+BufInteriorColPresent] != 1 {
-		t.Errorf("slot0.Present: got %d, want 1", snap[slot(0)+BufInteriorColPresent])
+	if nodeFrame[slot(0)+BufInteriorColPresent] != 1 {
+		t.Errorf("slot0.Present: got %d, want 1", nodeFrame[slot(0)+BufInteriorColPresent])
 	}
-	if v := readI32(snap, slot(0)+BufInteriorColValue); v != 1 {
+	if v := readI32(nodeFrame, slot(0)+BufInteriorColValue); v != 1 {
 		t.Errorf("slot0.Value: got %d, want 1", v)
 	}
-	if x := readF32(snap, slot(0)+BufInteriorColOX); x != 2 {
+	if x := readF32(nodeFrame, slot(0)+BufInteriorColOX); x != 2 {
 		t.Errorf("slot0.OX: got %v, want 2", x)
 	}
-	if y := readF32(snap, slot(0)+BufInteriorColOY); y != -3 {
+	if y := readF32(nodeFrame, slot(0)+BufInteriorColOY); y != -3 {
 		t.Errorf("slot0.OY: got %v, want -3", y)
 	}
-	if z := readF32(snap, slot(0)+BufInteriorColOZ); z != 4 {
+	if z := readF32(nodeFrame, slot(0)+BufInteriorColOZ); z != 4 {
 		t.Errorf("slot0.OZ: got %v, want 4", z)
 	}
 	// Slot 1 (row 0, col 1) was never emitted → absent.
-	if snap[slot(1)+BufInteriorColPresent] != 0 {
-		t.Errorf("slot1.Present: got %d, want 0 (never emitted)", snap[slot(1)+BufInteriorColPresent])
+	if nodeFrame[slot(1)+BufInteriorColPresent] != 0 {
+		t.Errorf("slot1.Present: got %d, want 0 (never emitted)", nodeFrame[slot(1)+BufInteriorColPresent])
 	}
 	// Slot 2 (row 1, col 0): present, value 0.
-	if snap[slot(2)+BufInteriorColPresent] != 1 {
-		t.Errorf("slot2.Present: got %d, want 1", snap[slot(2)+BufInteriorColPresent])
+	if nodeFrame[slot(2)+BufInteriorColPresent] != 1 {
+		t.Errorf("slot2.Present: got %d, want 1", nodeFrame[slot(2)+BufInteriorColPresent])
 	}
-	if v := readI32(snap, slot(2)+BufInteriorColValue); v != 0 {
+	if v := readI32(nodeFrame, slot(2)+BufInteriorColValue); v != 0 {
 		t.Errorf("slot2.Value: got %d, want 0", v)
 	}
 
 	// A present=false event on slot 0 clears it (popped bead disappears).
 	s.Update(T.Event{Kind: T.KindNodeBead, Node: "n1", Row: 0, Col: 0, Present: false, Value: 0, X: 2, Y: -3, Z: 4})
-	snap = s.BuildSnapshot()
-	if snap[slot(0)+BufInteriorColPresent] != 0 {
-		t.Errorf("slot0.Present after pop: got %d, want 0", snap[slot(0)+BufInteriorColPresent])
+	nodeFrame = s.BuildNodeFrame()
+	if nodeFrame[slot(0)+BufInteriorColPresent] != 0 {
+		t.Errorf("slot0.Present after pop: got %d, want 0", nodeFrame[slot(0)+BufInteriorColPresent])
 	}
 }
 
@@ -277,32 +183,33 @@ func TestSelectionPersistsAndIsExclusive(t *testing.T) {
 	s.Update(T.Event{Kind: T.KindNodeGeometry, Node: "n1", Radius: 1})
 	s.Update(T.Event{Kind: T.KindNodeGeometry, Node: "n2", Radius: 1})
 
-	n1 := BufHeaderSize // no beads, no need to offset
+	// The Node block now lives in the node-owner-group frame (see BufBlockTagNode).
+	n1 := BufNodeFrameHeaderSize
 	n2 := n1 + BufNodeStride
 
 	// Select n1.
 	s.Update(T.Event{Kind: T.KindSelect, Node: "n1"})
-	snap := s.BuildSnapshot()
+	snap := s.BuildNodeFrame()
 	if snap[n1+BufNodeColSelected] != 1 || snap[n2+BufNodeColSelected] != 0 {
 		t.Fatalf("after select n1: n1.Selected=%d n2.Selected=%d want 1,0", snap[n1+BufNodeColSelected], snap[n2+BufNodeColSelected])
 	}
 
 	// Persists: a fresh snapshot with no further select keeps n1 selected.
-	snap = s.BuildSnapshot()
+	snap = s.BuildNodeFrame()
 	if snap[n1+BufNodeColSelected] != 1 {
 		t.Fatalf("selection did not persist: n1.Selected=%d want 1", snap[n1+BufNodeColSelected])
 	}
 
 	// Exclusive: selecting n2 clears n1.
 	s.Update(T.Event{Kind: T.KindSelect, Node: "n2"})
-	snap = s.BuildSnapshot()
+	snap = s.BuildNodeFrame()
 	if snap[n1+BufNodeColSelected] != 0 || snap[n2+BufNodeColSelected] != 1 {
 		t.Fatalf("after select n2: n1.Selected=%d n2.Selected=%d want 0,1", snap[n1+BufNodeColSelected], snap[n2+BufNodeColSelected])
 	}
 
 	// Clear: node="" deselects all.
 	s.Update(T.Event{Kind: T.KindSelect, Node: ""})
-	snap = s.BuildSnapshot()
+	snap = s.BuildNodeFrame()
 	if snap[n1+BufNodeColSelected] != 0 || snap[n2+BufNodeColSelected] != 0 {
 		t.Fatalf("after clear: n1.Selected=%d n2.Selected=%d want 0,0", snap[n1+BufNodeColSelected], snap[n2+BufNodeColSelected])
 	}
@@ -317,19 +224,20 @@ func TestLatchedSelPersistsThroughDeselect(t *testing.T) {
 	s.Update(T.Event{Kind: T.KindNodeGeometry, Node: "n1", Radius: 1})
 	s.Update(T.Event{Kind: T.KindNodeGeometry, Node: "n2", Radius: 1})
 
-	n1 := BufHeaderSize
+	// The Node block now lives in the node-owner-group frame (see BufBlockTagNode).
+	n1 := BufNodeFrameHeaderSize
 	n2 := n1 + BufNodeStride
 
 	// Select n1: both Selected and LatchedSel move to n1.
 	s.Update(T.Event{Kind: T.KindSelect, Node: "n1"})
-	snap := s.BuildSnapshot()
+	snap := s.BuildNodeFrame()
 	if snap[n1+BufNodeColSelected] != 1 || snap[n1+BufNodeColLatchedSel] != 1 {
 		t.Fatalf("after select n1: Selected=%d LatchedSel=%d want 1,1", snap[n1+BufNodeColSelected], snap[n1+BufNodeColLatchedSel])
 	}
 
 	// Deselect (Node=""): Selected clears, but LatchedSel STAYS on n1.
 	s.Update(T.Event{Kind: T.KindSelect, Node: ""})
-	snap = s.BuildSnapshot()
+	snap = s.BuildNodeFrame()
 	if snap[n1+BufNodeColSelected] != 0 {
 		t.Fatalf("after deselect: n1.Selected=%d want 0", snap[n1+BufNodeColSelected])
 	}
@@ -339,7 +247,7 @@ func TestLatchedSelPersistsThroughDeselect(t *testing.T) {
 
 	// Selecting a DIFFERENT node (n2) moves the latch to n2 and clears it on n1.
 	s.Update(T.Event{Kind: T.KindSelect, Node: "n2"})
-	snap = s.BuildSnapshot()
+	snap = s.BuildNodeFrame()
 	if snap[n2+BufNodeColSelected] != 1 || snap[n2+BufNodeColLatchedSel] != 1 {
 		t.Fatalf("after select n2: n2.Selected=%d n2.LatchedSel=%d want 1,1", snap[n2+BufNodeColSelected], snap[n2+BufNodeColLatchedSel])
 	}
@@ -351,73 +259,65 @@ func TestLatchedSelPersistsThroughDeselect(t *testing.T) {
 // TestEdgeSelectionExclusiveWithNode verifies KindSelect with the Edge field marks exactly
 // one edge's Selected column, persists it, moves it exclusively to another edge, and that
 // node/edge selection is MUTUALLY exclusive (selecting an edge clears the node, and vice
-// versa). Also exercises LookupEdgeRow: an edge row resolves to its label.
+// versa). Also asserts the edge rows registered in stable order (edgeLabels; the row→label
+// hit-test table itself now lives on MoveDispatch, not here — see
+// nodes/Wiring/node_move_row_table_test.go).
 func TestEdgeSelectionExclusiveWithNode(t *testing.T) {
 	s := NewSnapshotState(nil)
-	edgeCh := make(chan []string, 1)
-	s.SetEdgeTableChan(edgeCh)
 	s.Update(T.Event{Kind: T.KindNodeGeometry, Node: "n1", Radius: 1})
 	s.Update(T.Event{Kind: T.KindNodeGeometry, Node: "n2", Radius: 1})
 	// Two edges (KindGeometry registers them in first-seen order → rows 0,1).
 	s.Update(T.Event{Kind: T.KindGeometry, Edge: "e0", Node: "n1", Target: "n2"})
 	s.Update(T.Event{Kind: T.KindGeometry, Edge: "e1", Node: "n2", Target: "n1"})
 
-	// Edge-row table resolves rows → labels in stable order.
-	edgeTbl := recvLatestOrNil(edgeCh)
-	if l, ok := lookupNodeOrEdgeRow(edgeTbl, 0); !ok || l != "e0" {
-		t.Fatalf("LookupEdgeRow(0)=%q,%v want e0,true", l, ok)
-	}
-	if l, ok := lookupNodeOrEdgeRow(edgeTbl, 1); !ok || l != "e1" {
-		t.Fatalf("LookupEdgeRow(1)=%q,%v want e1,true", l, ok)
-	}
-	if _, ok := lookupNodeOrEdgeRow(edgeTbl, 2); ok {
-		t.Fatalf("LookupEdgeRow(2) ok=true want false (out of range)")
+	// Edge rows registered in stable order.
+	if len(s.edgeLabels) != 2 || s.edgeLabels[0] != "e0" || s.edgeLabels[1] != "e1" {
+		t.Fatalf("edgeLabels=%v want [e0 e1]", s.edgeLabels)
 	}
 
-	nodeCount := 2
-	edgeBase := BufHeaderSize +
-		0*BufBeadStride +
-		nodeCount*BufNodeStride +
-		nodeCount*BufInteriorSlotsPerNode*BufInteriorStride
+	// The Edge block now lives in its own tagged frame (see BufBlockTagEdge); the Node
+	// block lives in the separate node-owner-group frame (see BufBlockTagNode).
+	edgeBase := BufEdgeFrameHeaderSize
 	e0Sel := edgeBase + 0*BufEdgeStride + BufEdgeColSelected
 	e1Sel := edgeBase + 1*BufEdgeStride + BufEdgeColSelected
-	n1Sel := BufHeaderSize + 0*BufNodeStride + BufNodeColSelected
+	n1Sel := BufNodeFrameHeaderSize + 0*BufNodeStride + BufNodeColSelected
 
 	// Select node n1 first.
 	s.Update(T.Event{Kind: T.KindSelect, Node: "n1"})
-	snap := s.BuildSnapshot()
-	if snap[n1Sel] != 1 {
-		t.Fatalf("after select n1: n1.Selected=%d want 1", snap[n1Sel])
+	nodeFrame := s.BuildNodeFrame()
+	if nodeFrame[n1Sel] != 1 {
+		t.Fatalf("after select n1: n1.Selected=%d want 1", nodeFrame[n1Sel])
 	}
 
 	// Select edge e0: sets e0, clears the node selection (exclusive).
 	s.Update(T.Event{Kind: T.KindSelect, Edge: "e0"})
-	snap = s.BuildSnapshot()
-	if snap[e0Sel] != 1 || snap[e1Sel] != 0 {
-		t.Fatalf("after select e0: e0.Selected=%d e1.Selected=%d want 1,0", snap[e0Sel], snap[e1Sel])
+	edgeFrame := s.BuildEdgeFrame()
+	nodeFrame = s.BuildNodeFrame()
+	if edgeFrame[e0Sel] != 1 || edgeFrame[e1Sel] != 0 {
+		t.Fatalf("after select e0: e0.Selected=%d e1.Selected=%d want 1,0", edgeFrame[e0Sel], edgeFrame[e1Sel])
 	}
-	if snap[n1Sel] != 0 {
-		t.Fatalf("after select e0: n1.Selected=%d want 0 (edge select clears node)", snap[n1Sel])
+	if nodeFrame[n1Sel] != 0 {
+		t.Fatalf("after select e0: n1.Selected=%d want 0 (edge select clears node)", nodeFrame[n1Sel])
 	}
 
 	// Persists across snapshots.
-	snap = s.BuildSnapshot()
-	if snap[e0Sel] != 1 {
-		t.Fatalf("edge selection did not persist: e0.Selected=%d want 1", snap[e0Sel])
+	edgeFrame = s.BuildEdgeFrame()
+	if edgeFrame[e0Sel] != 1 {
+		t.Fatalf("edge selection did not persist: e0.Selected=%d want 1", edgeFrame[e0Sel])
 	}
 
 	// Exclusive among edges: selecting e1 clears e0.
 	s.Update(T.Event{Kind: T.KindSelect, Edge: "e1"})
-	snap = s.BuildSnapshot()
-	if snap[e0Sel] != 0 || snap[e1Sel] != 1 {
-		t.Fatalf("after select e1: e0.Selected=%d e1.Selected=%d want 0,1", snap[e0Sel], snap[e1Sel])
+	edgeFrame = s.BuildEdgeFrame()
+	if edgeFrame[e0Sel] != 0 || edgeFrame[e1Sel] != 1 {
+		t.Fatalf("after select e1: e0.Selected=%d e1.Selected=%d want 0,1", edgeFrame[e0Sel], edgeFrame[e1Sel])
 	}
 
 	// Selecting a node again clears the edge selection (exclusive both ways).
 	s.Update(T.Event{Kind: T.KindSelect, Node: "n2"})
-	snap = s.BuildSnapshot()
-	if snap[e1Sel] != 0 {
-		t.Fatalf("after select node n2: e1.Selected=%d want 0 (node select clears edge)", snap[e1Sel])
+	edgeFrame = s.BuildEdgeFrame()
+	if edgeFrame[e1Sel] != 0 {
+		t.Fatalf("after select node n2: e1.Selected=%d want 0 (node select clears edge)", edgeFrame[e1Sel])
 	}
 }
 
@@ -457,12 +357,12 @@ func TestNodeKindIDRoundTrip(t *testing.T) {
 	}
 	s.Update(nodeGeom("n0", "Input")) // KindId = 3
 	s.Update(nodeGeom("n1", "Pulse")) // KindId = 5
-	snap := s.BuildSnapshot()
+	nodeFrame := s.BuildNodeFrame()
 
-	// Skip the 20-byte header. Node block starts there.
-	nodeOff := BufHeaderSize
-	n0KindId := snap[nodeOff+0*BufNodeStride+BufNodeColKindId]
-	n1KindId := snap[nodeOff+1*BufNodeStride+BufNodeColKindId]
+	// Skip the node frame's own header. Node block starts there (see BufBlockTagNode).
+	nodeOff := BufNodeFrameHeaderSize
+	n0KindId := nodeFrame[nodeOff+0*BufNodeStride+BufNodeColKindId]
+	n1KindId := nodeFrame[nodeOff+1*BufNodeStride+BufNodeColKindId]
 	if n0KindId != 3 {
 		t.Errorf("n0 KindId = %d, want 3 (Input)", n0KindId)
 	}

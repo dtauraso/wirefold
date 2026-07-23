@@ -21,21 +21,21 @@ func nodeGeomEvent(id, label string, cx, cy, cz float64) T.Event {
 
 func TestSequentialEmitProducesRowsInGivenOrder(t *testing.T) {
 	s := NewSnapshotState(nil)
-	nodeCh := make(chan []string, 1)
-	s.SetNodeTableChan(nodeCh)
 	// The order these are Update()'d in — NOT alphabetical, NOT insertion-into-a-map
 	// order — is what determines row order; this mirrors main.go's spec-order pre-emit
 	// loop running before any node goroutine exists to race it.
 	s.Update(nodeGeomEvent("z-node", "z-node", 1, 2, 3))
 	s.Update(nodeGeomEvent("a-node", "a-node", 4, 5, 6))
 	s.Update(nodeGeomEvent("m-node", "m-node", 7, 8, 9))
-	nodeTbl := recvLatestOrNil(nodeCh)
 
+	// LookupNodeRow moved off SnapshotState onto MoveDispatch (built once at load from the
+	// seed order — see node_move_row_table_test.go for the MoveDispatch-side row-identity
+	// test). SnapshotState's own row bookkeeping (nodeIDs, its ingest-order index into
+	// s.nodes) is asserted directly here.
 	want := []string{"z-node", "a-node", "m-node"}
 	for row, id := range want {
-		got, ok := lookupNodeOrEdgeRow(nodeTbl, row)
-		if !ok || got != id {
-			t.Fatalf("row %d: got (%q,%v), want %q", row, got, ok, id)
+		if row >= len(s.nodeIDs) || s.nodeIDs[row] != id {
+			t.Fatalf("row %d: got %q, want %q", row, s.nodeIDs[row], id)
 		}
 	}
 	if len(s.nodes) != 3 {
@@ -52,8 +52,6 @@ func TestSequentialEmitProducesRowsInGivenOrder(t *testing.T) {
 // must overwrite that node's pre-assigned row, not append a new row at the end.
 func TestLaterGeometryWritesPreAssignedRow(t *testing.T) {
 	s := NewSnapshotState(nil)
-	nodeCh := make(chan []string, 1)
-	s.SetNodeTableChan(nodeCh)
 	s.Update(nodeGeomEvent("z-node", "z-node", 0, 0, 0))
 	s.Update(nodeGeomEvent("a-node", "a-node", 0, 0, 0))
 
@@ -61,38 +59,31 @@ func TestLaterGeometryWritesPreAssignedRow(t *testing.T) {
 	// startup EmitGeometry, arriving after main.go's pre-emit loop already created the
 	// row) must land back in row 1, with the row COUNT unchanged (2), not 3.
 	s.Update(nodeGeomEvent("a-node", "a-node", 99, 98, 97))
-	nodeTbl := recvLatestOrNil(nodeCh)
 
 	if len(s.nodes) != 2 {
 		t.Fatalf("nodes: got %d rows after re-emit, want 2 (no new row appended)", len(s.nodes))
 	}
-	got, ok := lookupNodeOrEdgeRow(nodeTbl, 1)
-	if !ok || got != "a-node" {
-		t.Fatalf("row 1: got (%q,%v), want a-node (row identity must not move)", got, ok)
+	if s.nodeIDs[1] != "a-node" {
+		t.Fatalf("row 1: got %q, want a-node (row identity must not move)", s.nodeIDs[1])
 	}
 	if s.nodes[1].cx != 99 || s.nodes[1].cy != 98 || s.nodes[1].cz != 97 {
 		t.Fatalf("row 1 geometry: got (%v,%v,%v), want (99,98,97) (the re-emit's own values)", s.nodes[1].cx, s.nodes[1].cy, s.nodes[1].cz)
 	}
 	// Row 0 (z-node) must be untouched by a-node's re-emit.
-	got0, ok0 := lookupNodeOrEdgeRow(nodeTbl, 0)
-	if !ok0 || got0 != "z-node" {
-		t.Fatalf("row 0: got (%q,%v), want z-node", got0, ok0)
+	if s.nodeIDs[0] != "z-node" {
+		t.Fatalf("row 0: got %q, want z-node", s.nodeIDs[0])
 	}
 }
 
 func TestSequentialEdgeEmitProducesRowsInGivenOrder(t *testing.T) {
 	s := NewSnapshotState(nil)
-	edgeCh := make(chan []string, 1)
-	s.SetEdgeTableChan(edgeCh)
 	s.Update(T.Event{Kind: T.KindGeometry, Edge: "e2", Node: "n1", Target: "n2"})
 	s.Update(T.Event{Kind: T.KindGeometry, Edge: "e1", Node: "n2", Target: "n3"})
-	edgeTbl := recvLatestOrNil(edgeCh)
 
 	want := []string{"e2", "e1"}
 	for row, label := range want {
-		got, ok := lookupNodeOrEdgeRow(edgeTbl, row)
-		if !ok || got != label {
-			t.Fatalf("row %d: got (%q,%v), want %q", row, got, ok, label)
+		if row >= len(s.edgeLabels) || s.edgeLabels[row] != label {
+			t.Fatalf("row %d: got %q, want %q", row, s.edgeLabels[row], label)
 		}
 	}
 	if s.edges[0].srcNode != "n1" || s.edges[0].dstNode != "n2" {
