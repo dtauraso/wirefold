@@ -35,19 +35,31 @@ func readI32(buf []byte, off int) int32 {
 	return int32(binary.LittleEndian.Uint32(buf[off:]))
 }
 
-// TestEventBlockPopulate asserts the SEND event (a kind not yet decentralized to its own
-// owner fd — see decentralizedEventKinds) rides the VIEW frame's trailing EVENTS section,
-// NOT the fd-3 scene frame (the EVENT block was retired from the scene frame; memory/
-// feedback_no_single_writer_bridge.md). NodeGeometry events are decentralized (their own
-// owner fd), so they must NOT appear here.
+// TestEventBlockPopulate asserts a SELECT event (a kind not yet decentralized to its
+// own owner fd — see decentralizedEventKinds) rides the VIEW frame's trailing EVENTS
+// section, NOT the fd-3 scene frame (the EVENT block was retired from the scene frame;
+// memory/feedback_no_single_writer_bridge.md), while NodeGeometry/Send (decentralized
+// to nodeMover/edgeMover's own frame and the node's own Update goroutine's
+// interior-stream frame, respectively) never appear here even though recordEvent still
+// buffers them into s.pendingEvents (recordEvent has no decentralization filter — only
+// viewEventsSection, the PACK side, does).
+//
+// Select (unlike Recv/Fire/Send) triggers Update's own emitSnapshot arm, so it is
+// recorded directly via recordEvent (same package) rather than through Update, keeping
+// this test's own explicit buildViewFrame() call the only thing that packs it.
 func TestEventBlockPopulate(t *testing.T) {
 	s := NewSnapshotState(nil)
 	s.Update(T.Event{Kind: T.KindNodeGeometry, Node: "A", Radius: 1,
 		Ports: []T.PortGeom{{Name: "out", IsInput: false, DX: 1}}})
 	s.Update(T.Event{Kind: T.KindNodeGeometry, Node: "B", Radius: 1,
 		Ports: []T.PortGeom{{Name: "in", IsInput: true, DX: -1}}})
-	s.Update(T.Event{Kind: T.KindSend, Node: "A", Port: "out", Value: 7,
+	// Both these events are decentralized (see decentralizedEventKinds): recordEvent still
+	// buffers them (no filter on that side), but the pack-time filter below must exclude
+	// them from this VIEW frame's EVENTS section.
+	s.recordEvent(T.Event{Kind: T.KindNodeGeometry, Node: "A"})
+	s.recordEvent(T.Event{Kind: T.KindSend, Node: "A", Port: "out", Value: 7,
 		ArcLength: 12.5, SimLatencyMs: 33.0, Target: "B", TargetHandle: "in"})
+	s.recordEvent(T.Event{Kind: T.KindSelect, Node: "A"})
 
 	// The fd-3 scene frame no longer carries an EVENT block at all.
 	snap := s.BuildSnapshot()
@@ -58,52 +70,35 @@ func TestEventBlockPopulate(t *testing.T) {
 	view := s.buildViewFrame()
 	eventsOff := BufViewFrameHeaderSize + BufCameraStride + BufOverlayStride + BufSceneStride
 	eventCount := int(readU32(view, eventsOff))
-	// The two node-geometry events are decentralized (their own owner fd) and are never
-	// recorded into this fallback bucket; only the send (not yet decentralized) lands here.
+	// The node-geometry and send events are decentralized (their own owner fd) and are
+	// never packed into this fallback bucket; only the select (not yet decentralized)
+	// lands here.
 	if eventCount != 1 {
-		t.Fatalf("eventCount: got %d, want 1 (send only; node-geometry is decentralized)", eventCount)
+		t.Fatalf("eventCount: got %d, want 1 (select only; node-geometry/send are decentralized)", eventCount)
 	}
 	eventOff := eventsOff + 4
 
-	// Find the send row (kind == index of "send" in TraceEventKinds).
-	sendKind := -1
+	// Find the select row (kind == index of "select" in TraceEventKinds).
+	selectKind := -1
 	for i, k := range T.TraceEventKinds {
-		if k == T.KindSend {
-			sendKind = i
+		if k == T.KindSelect {
+			selectKind = i
 		}
 	}
 	found := false
 	for r := 0; r < eventCount; r++ {
 		base := eventOff + r*BufEventStride
-		if int(view[base+BufEventColKind]) != sendKind {
+		if int(view[base+BufEventColKind]) != selectKind {
 			continue
 		}
 		found = true
-		// A=row0, out=port row0; B=row1, in=port row1.
+		// A=row0.
 		if got := readI32(view, base+BufEventColNodeRow); got != 0 {
-			t.Errorf("send NodeRow: got %d, want 0 (A)", got)
-		}
-		if got := readI32(view, base+BufEventColPortRow); got != 0 {
-			t.Errorf("send PortRow: got %d, want 0 (A/out)", got)
-		}
-		if got := readI32(view, base+BufEventColTargetRow); got != 1 {
-			t.Errorf("send TargetRow: got %d, want 1 (B)", got)
-		}
-		if got := readI32(view, base+BufEventColTargetPortRow); got != 1 {
-			t.Errorf("send TargetPortRow: got %d, want 1 (B/in)", got)
-		}
-		if got := readI32(view, base+BufEventColValue); got != 7 {
-			t.Errorf("send Value: got %d, want 7", got)
-		}
-		if got := readF32(view, base+BufEventColArcLength); got != 12.5 {
-			t.Errorf("send ArcLength: got %v, want 12.5", got)
-		}
-		if got := readF32(view, base+BufEventColSimLatencyMs); got != 33.0 {
-			t.Errorf("send SimLatencyMs: got %v, want 33", got)
+			t.Errorf("select NodeRow: got %d, want 0 (A)", got)
 		}
 	}
 	if !found {
-		t.Fatal("no send event row found in EVENT block")
+		t.Fatal("no select event row found in EVENT block")
 	}
 }
 

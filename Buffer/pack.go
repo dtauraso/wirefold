@@ -567,12 +567,23 @@ func (s *SnapshotState) buildViewFrame() []byte {
 // EmitGeometry closure) that used to ALSO emit both kinds once per node/edge is now
 // left uninjected (see injectClosures' doc comment) — it would have double-counted
 // against this per-owner emit for the identical, redundant values.
+//
+// Fire/Recv/Send are now fully decentralized too: each fires on a node's own Update
+// goroutine (builders.go's injected Fire closure; In.PollRecv/Out.PlaceDrivenAt —
+// see ports.go) — the SAME goroutine that already writes that node's own interior-
+// stream frame (Buffer.BuildInteriorStreamFrame). Each call resolves its own
+// NodeRow/PortRow/TargetRow/TargetPortRow via the shared per-node interiorStream
+// (nodes/Wiring's newInteriorStreamGetter) and flushes onto that frame's own EVENTS
+// section (interiorStream.writeEvents), never through this central pipeline.
 var decentralizedEventKinds = map[string]bool{
 	T.KindPosition:     true,
 	T.KindArrive:       true,
 	T.KindNodeBead:     true,
 	T.KindNodeGeometry: true,
 	T.KindGeometry:     true,
+	T.KindFire:         true,
+	T.KindRecv:         true,
+	T.KindSend:         true,
 }
 
 // viewEventsSection packs the VIEW frame's trailing EVENTS section: every buffered event

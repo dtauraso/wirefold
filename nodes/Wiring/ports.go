@@ -34,6 +34,17 @@ type In struct {
 	node  string
 	port  string
 	trace *T.Trace
+	// stream is this In's owning node's shared interior-stream getter
+	// (Wiring.newInteriorStreamGetter, injected by wireInPort) — lazily resolves to the
+	// SAME *interiorStream instance every closure/port on this node shares. Recv flushes
+	// its own row-resolved RowEvent onto it (owner_events.go). nil for a bare chan-mode
+	// In built outside reflectBuild (e.g. gatecommon test helpers) — PollRecv's nil
+	// check below skips the flush in that case.
+	stream func() *interiorStream
+	// portRow is this In's own buffer PORT-ROW index (isInput=true), resolved once at
+	// construction (wireInPort) from pb.md's row table — see wireInPort's doc comment.
+	// -1 when unresolved (no md, or an unwired dead-end port).
+	portRow int32
 }
 
 // PollRecv is the non-blocking receive used by windowed nodes. In paced mode it
@@ -42,6 +53,13 @@ type In struct {
 // delivered bead) while emitting the same trace events as TryRecv. There is no
 // separate Done step — the read itself consumes. In chan mode it does a
 // non-blocking select, identical to TryRecv's default branch.
+//
+// Each successful receive ALSO flushes a KindRecv RowEvent onto this node's own
+// interior-stream frame (i.stream — Buffer/pack.go's decentralizedEventKinds
+// excludes KindRecv from the central VIEW-bucket): this node's own Update goroutine
+// (the SAME goroutine calling PollRecv) is the sole owner of when it receives, so it
+// resolves its own NodeRow/PortRow at the call site (owner_events.go) rather than
+// routing through a shared accumulator.
 func (i *In) PollRecv() (int, bool) {
 	if i == nil {
 		return 0, false
@@ -52,6 +70,7 @@ func (i *In) PollRecv() (int, bool) {
 			return 0, false
 		}
 		i.trace.Recv(i.node, i.port, n)
+		i.flushRecvEvent(n)
 		return n, true
 	}
 	if i.ch == nil {
@@ -60,10 +79,28 @@ func (i *In) PollRecv() (int, bool) {
 	select {
 	case v := <-i.ch:
 		i.trace.Recv(i.node, i.port, v)
+		i.flushRecvEvent(v)
 		return v, true
 	default:
 		return 0, false
 	}
+}
+
+// flushRecvEvent records this receive as a row-resolved RowEvent on this In's owning
+// node's shared interior-stream frame. No-op when stream is unset (bare chan-mode In
+// built outside reflectBuild) or the node has no dedicated interior fd.
+func (i *In) flushRecvEvent(value int) {
+	if i.stream == nil {
+		return
+	}
+	s := i.stream()
+	if s == nil {
+		return
+	}
+	s.writeEvents([]RowEvent{{
+		Kind: T.KindRecv, NodeRow: s.nodeRow, PortRow: i.portRow,
+		TargetRow: -1, TargetPortRow: -1, EdgeRow: -1, Value: int32(value),
+	}})
 }
 
 // Wired reports whether this In port is bound to a real edge (paced-wire
@@ -185,6 +222,16 @@ type Out struct {
 	// Rule is the per-edge send policy applied by the source node after a
 	// successful TrySend. Empty string defaults to consumeGated (see Gated).
 	Rule SendRule
+	// stream is this Out's owning node's shared interior-stream getter
+	// (Wiring.newInteriorStreamGetter, injected by wireOutPort/wireOutMultiPort) — see
+	// In.stream's doc comment. nil for a bare chan-mode Out built outside reflectBuild
+	// (NewOutChanForTest, node unit tests).
+	stream func() *interiorStream
+	// portRow is this Out's own buffer PORT-ROW index (isInput=false); targetRow/
+	// targetPortRow are the destination node/port's buffer rows (b.pw.Target/
+	// TargetHandle — static after wiring). All resolved once at construction
+	// (wireOutPort/wireOutMultiPort's doc comment). -1 when unresolved.
+	portRow, targetRow, targetPortRow int32
 }
 
 // Geom returns the current per-edge geometry snapshot as seen by THIS Out's one
@@ -319,7 +366,29 @@ func (o *Out) placeDrivenNoWalker(v int) SendOutcome {
 		return outcome
 	}
 	o.trace.SendWire(o.node, o.port, v, g.ArcLength, g.SimLatencyMs, o.pw.Target, o.pw.TargetHandle)
+	o.flushSendEvent(v, g.ArcLength, g.SimLatencyMs)
 	return SendPlaced
+}
+
+// flushSendEvent records this send as a row-resolved RowEvent on this Out's owning
+// node's shared interior-stream frame (Buffer/pack.go's decentralizedEventKinds
+// excludes KindSend from the central VIEW-bucket): this node's own Update goroutine
+// (the SAME goroutine driving the send) is the sole owner, so it resolves its own
+// NodeRow/PortRow/TargetRow/TargetPortRow at the call site (owner_events.go). No-op
+// when stream is unset (bare chan-mode Out) or the node has no dedicated interior fd.
+func (o *Out) flushSendEvent(value int, arcLength, simLatencyMs float64) {
+	if o.stream == nil {
+		return
+	}
+	s := o.stream()
+	if s == nil {
+		return
+	}
+	s.writeEvents([]RowEvent{{
+		Kind: T.KindSend, NodeRow: s.nodeRow, PortRow: o.portRow,
+		TargetRow: o.targetRow, TargetPortRow: o.targetPortRow, EdgeRow: -1,
+		Value: int32(value), ArcLength: arcLength, SimLatencyMs: simLatencyMs,
+	}})
 }
 
 // Wired reports whether this Out port is bound to a real edge (paced-wire
@@ -428,11 +497,14 @@ func (o *Out) PlaceDrivenAt(v int) DriveItem {
 			return DriveItem{outcome: DriveBufferFull}
 		}
 	}
-	// chan mode (tests): no drive needed, send now and return DriveSentChan.
+	// chan mode (tests, or a production dead-end unwired Out): no drive needed, send
+	// now and return DriveSentChan. flushSendEvent no-ops when stream is unset (both
+	// cases: no reflectBuild-injected getter).
 	if o.ch != nil {
 		select {
 		case o.ch <- v:
 			o.trace.Send(o.node, o.port, v)
+			o.flushSendEvent(v, 0, 0)
 		default:
 		}
 		return DriveItem{outcome: DriveSentChan}

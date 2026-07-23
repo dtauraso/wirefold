@@ -22,9 +22,20 @@ type interiorStream struct {
 	buildFrame func(tick uint32, present []uint8, value []int32, ox, oy, oz []float32, events []RowEvent) []byte
 	tick       uint32
 	// nodeRow is this node's stable buffer NODE-ROW index, resolved once at
-	// construction (buildInteriorStream) — carried on every NodeBead event this stream
-	// records (memory/feedback_no_single_writer_bridge.md).
+	// construction (buildInteriorStream) — carried on every NodeBead/Fire/Recv/Send
+	// event this stream records (memory/feedback_no_single_writer_bridge.md).
 	nodeRow int32
+	// lastPresent/lastValue/lastOx/lastOy/lastOz cache the most recently written 4-slot
+	// interior-bead snapshot. BuildInteriorStreamFrame's slot count is FIXED (the decoder
+	// reads a constant INTERIOR_SLOTS_PER_NODE, not a length carried by the frame — see
+	// buffer-decode.ts), so an events-only flush (writeEvents, for a Fire/Recv/Send
+	// occurring BETWEEN bead-state changes) must still ship a full, valid 4-slot
+	// snapshot — it reuses this cache rather than inventing/omitting bead state.
+	// Populated to an all-absent 4-slot snapshot at construction (buildInteriorStream)
+	// and refreshed by every write() call.
+	lastPresent            []uint8
+	lastValue              []int32
+	lastOx, lastOy, lastOz []float32
 }
 
 // write packs and writes this node's current interior-slot arrays via
@@ -32,12 +43,28 @@ type interiorStream struct {
 // nil receiver) when out/buildFrame aren't wired — the fallback path. events carries
 // this call's own row-resolved NodeBead events, recorded by the caller in the SAME
 // function invocation (emitNodeBeads/emitHeldBead/emitInputBeads) that built them.
+// Caches the passed bead-slot arrays (see lastPresent's doc comment) so a later
+// writeEvents call has a valid snapshot to reuse.
 func (s *interiorStream) write(present []uint8, value []int32, ox, oy, oz []float32, events []RowEvent) {
 	if s == nil {
 		return
 	}
+	s.lastPresent, s.lastValue = present, value
+	s.lastOx, s.lastOy, s.lastOz = ox, oy, oz
 	s.tick++
 	writeInteriorStreamFrame(s.out, s.buildFrame, s.tick, present, value, ox, oy, oz, events)
+}
+
+// writeEvents flushes an events-only interior-stream frame: no bead-slot state has
+// changed since the last write, so it reuses the cached last-known 4-slot snapshot
+// (lastPresent's doc comment) and carries only the caller's new row-resolved
+// RowEvents (Fire/Recv/Send — see owner_events.go). No-op on a nil receiver, same as
+// write.
+func (s *interiorStream) writeEvents(events []RowEvent) {
+	if s == nil {
+		return
+	}
+	s.write(s.lastPresent, s.lastValue, s.lastOx, s.lastOy, s.lastOz, events)
 }
 
 // boolU8 converts a bool to the buffer's canonical 0/1 byte encoding — a local copy of

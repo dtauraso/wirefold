@@ -237,9 +237,15 @@ func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindi
 	nodePtr := e.newNode()
 	v := reflect.ValueOf(nodePtr).Elem()
 
+	// getStream is THIS node's one shared interior-stream getter (lazy-cache-once — see
+	// its doc comment): every closure/port that records a Fire/Recv/Send/NodeBead event
+	// for this node calls the SAME func, so they all land on the SAME *interiorStream
+	// instance (and share its cached bead-slot snapshot).
+	getStream := newInteriorStreamGetter(name, pb)
+
 	var sourceOuts []*Out
-	injectClosures(ctx, v, name, pb, tr, geom, &sourceOuts, partnerCenter)
-	wirePorts(ctx, v, nodePtr, name, pb, tr, &sourceOuts)
+	injectClosures(ctx, v, name, pb, tr, geom, &sourceOuts, partnerCenter, getStream)
+	wirePorts(ctx, v, nodePtr, name, pb, tr, &sourceOuts, getStream)
 	populateData(v, nodePtr, data)
 
 	node, ok := nodePtr.(Node)
@@ -259,11 +265,26 @@ func reflectBuild(ctx context.Context, name string, data *NodeData, pb PortBindi
 // sourceOuts is owned by the caller (reflectBuild) and shared with wirePorts,
 // which appends to it as it resolves each Out/OutMulti binding; the EmitGeometry
 // closure reads through the same pointer so it sees the completed slice.
-func injectClosures(ctx context.Context, v reflect.Value, name string, pb PortBindings, tr *T.Trace, geom nodeGeom, sourceOuts *[]*Out, partnerCenter partnerCenterFn) {
+func injectClosures(ctx context.Context, v reflect.Value, name string, pb PortBindings, tr *T.Trace, geom nodeGeom, sourceOuts *[]*Out, partnerCenter partnerCenterFn, getStream func() *interiorStream) {
 	// Inject Fire closure if the struct has a `Fire func()` field. The closure
 	// captures the node name so the node calls n.Fire() with no arguments and
-	// cannot mis-name itself in the trace.
-	injectFunc(v, "Fire", tFireFunc, func() { tr.Fire(name) })
+	// cannot mis-name itself in the trace. tr.Fire still feeds the -trace JSONL sink
+	// unchanged; the RowEvent flush below additionally lands this Fire on THIS node's
+	// OWN interior-stream frame (Buffer/pack.go's decentralizedEventKinds excludes
+	// KindFire from the central VIEW-bucket) — this node's own Update goroutine is the
+	// sole owner of when it fires, so it resolves its own NodeRow at the call site
+	// (owner_events.go) via the shared interiorStream (getStream), never a shared
+	// accumulator. writeEvents is nil-safe (no-op) when this node has no dedicated
+	// interior fd (test builds without a loader).
+	injectFunc(v, "Fire", tFireFunc, func() {
+		tr.Fire(name)
+		if s := getStream(); s != nil {
+			s.writeEvents([]RowEvent{{
+				Kind: T.KindFire, NodeRow: s.nodeRow,
+				PortRow: -1, TargetRow: -1, TargetPortRow: -1, EdgeRow: -1,
+			}})
+		}
+	})
 
 	// EmitGeometry is deliberately left UNINJECTED (the `EmitGeometry func()` field on
 	// node structs stays nil, and Wiring.TryEmit(n.EmitGeometry) no-ops at node startup —
@@ -279,36 +300,12 @@ func injectClosures(ctx context.Context, v reflect.Value, name string, pb PortBi
 	// (geom/partnerCenter/sourceOuts are otherwise still referenced below/by callers,
 	// so their params stay; nothing left in THIS function reads them for geometry).
 
-	// interiorStr bundles this node's OWN dedicated interior fd (looked up by name from
-	// pb.md.interiorOuts, populated by SetNodeStreams — see interiorOuts' doc comment)
-	// plus the injected frame builder — the SECOND emitting goroutine per node
-	// (memory/feedback_no_single_writer_bridge.md). Looked up LAZILY inside the
-	// closures (not here) because pb.md.interiorOuts is only populated by main.go
-	// AFTER LoadTopology returns, i.e. after injectClosures runs; the map itself is
-	// never mutated again once any node's Update goroutine could be reading it (main.go
-	// wires it before the node-goroutine launch loop), so a lock-free read at call time
-	// is safe. buildInteriorStream resolves both from pb.md at CALL time.
-	buildInteriorStream := func() *interiorStream {
-		if pb.md == nil || pb.md.interiorOuts == nil {
-			return nil
-		}
-		out, ok := pb.md.interiorOuts[name]
-		if !ok || out == nil || pb.md.buildInteriorFrame == nil {
-			return nil
-		}
-		nodeRow := int32(-1)
-		if r, ok := pb.md.NodeRowFor(name); ok {
-			nodeRow = r
-		}
-		return &interiorStream{out: out, buildFrame: pb.md.buildInteriorFrame, nodeRow: nodeRow}
-	}
-
 	// Inject EmitNodeBeads closure if the struct has an `EmitNodeBeads
 	// func(working, backup []int)` field (node 1's interior buffer). Emits one
 	// node-bead event per present interior bead. The node's Update calls it with the
 	// LIVE working/backup contents whenever the arrays change.
 	injectFunc(v, "EmitNodeBeads", tEmitBeadsFunc, func(working, backup []int) {
-		emitNodeBeads(tr, name, working, backup, buildInteriorStream())
+		emitNodeBeads(tr, name, working, backup, getStream())
 	})
 
 	// Inject EmitHeldBead closure if the struct has an `EmitHeldBead func(held int)`
@@ -316,14 +313,14 @@ func injectClosures(ctx context.Context, v reflect.Value, name string, pb PortBi
 	// (slot 0,0 at offset 0,0,0) colored by the held value; held == -1 →
 	// present=false (empty interior).
 	injectFunc(v, "EmitHeldBead", tEmitHeldFunc, func(held int) {
-		emitHeldBead(tr, name, held, buildInteriorStream())
+		emitHeldBead(tr, name, held, getStream())
 	})
 
 	// Inject EmitInputBeads closure if the struct has an `EmitInputBeads
 	// func(left, right int)` field (a gate's two-sided held-input beads): LEFT input
 	// on the left of the node, RIGHT on the right; -1 = not held → present=false.
 	injectFunc(v, "EmitInputBeads", tEmitInputBeadsFunc, func(left, right int) {
-		emitInputBeads(tr, name, left, right, buildInteriorStream())
+		emitInputBeads(tr, name, left, right, getStream())
 	})
 
 	// EmitRefillSlide func(clk Clock, speedCh <-chan float64, beads []int): the
@@ -406,12 +403,69 @@ func injectSpeedChans(v reflect.Value, pb PortBindings) {
 	}
 }
 
+// bufInteriorSlotsPerNode is a local copy of Buffer.BufInteriorSlotsPerNode's value
+// (4 — the fixed interior-bead slot count per node), kept here rather than importing
+// Buffer (see boolU8's doc comment for the existing precedent of this package
+// duplicating a small Buffer constant to stay Buffer-independent). Used only to size
+// newInteriorStreamGetter's initial all-absent bead-slot cache.
+const bufInteriorSlotsPerNode = 4
+
+// newInteriorStreamGetter returns a func() *interiorStream that lazily builds
+// (exactly once) and thereafter always returns THIS node's one dedicated
+// interior-stream instance from pb.md.interiorOuts — so every closure/port
+// belonging to this node (EmitNodeBeads/EmitHeldBead/EmitInputBeads via
+// injectClosures, and Fire/Recv/Send via the Fire closure and In/Out — see
+// wirePorts) shares the SAME instance, and therefore the same cached last-known
+// bead-slot snapshot (interiorStream.lastPresent's doc comment) a Fire/Recv/Send
+// event needs to flush a valid frame between bead-state changes.
+//
+// Lazy because pb.md.interiorOuts is only populated by main.go AFTER LoadTopology
+// returns (i.e. after this node's own construction runs) — see the prior
+// buildInteriorStream doc comment this replaces. The returned func's first REAL
+// call is always made from this node's OWN Update goroutine (after node-goroutine
+// launch, by which point interiorOuts is fully populated and never mutated again),
+// so no lock is needed: exactly one goroutine ever calls this closure, matching
+// every other single-writer-per-goroutine field in this package.
+func newInteriorStreamGetter(name string, pb PortBindings) func() *interiorStream {
+	var built bool
+	var stream *interiorStream
+	return func() *interiorStream {
+		if built {
+			return stream
+		}
+		built = true
+		if pb.md == nil || pb.md.interiorOuts == nil {
+			return nil
+		}
+		out, ok := pb.md.interiorOuts[name]
+		if !ok || out == nil || pb.md.buildInteriorFrame == nil {
+			return nil
+		}
+		nodeRow := int32(-1)
+		if r, ok := pb.md.NodeRowFor(name); ok {
+			nodeRow = r
+		}
+		absent := make([]uint8, bufInteriorSlotsPerNode)
+		zeroI := make([]int32, bufInteriorSlotsPerNode)
+		zeroF := make([]float32, bufInteriorSlotsPerNode)
+		stream = &interiorStream{
+			out: out, buildFrame: pb.md.buildInteriorFrame, nodeRow: nodeRow,
+			lastPresent: absent, lastValue: zeroI,
+			lastOx: zeroF, lastOy: append([]float32{}, zeroF...), lastOz: append([]float32{}, zeroF...),
+		}
+		return stream
+	}
+}
+
 // wirePorts wires every port field (In/Out/OutMulti) discovered by reflectPorts
 // with traced wrappers, resolving each from pb's paced bindings when present and
 // falling back to a dead-end chan/slice otherwise. sourceOuts accumulates every
 // paced Out built (for EmitGeometry's closure, injected by injectClosures) and
 // pb.outSink (when non-nil) is populated so the loader can index Outs by edge.
-func wirePorts(ctx context.Context, v reflect.Value, nodePtr any, name string, pb PortBindings, tr *T.Trace, sourceOuts *[]*Out) {
+// getStream is this node's shared interior-stream getter (newInteriorStreamGetter),
+// threaded through so Recv/Send can flush their own RowEvent onto the same frame
+// Fire/EmitNodeBeads use.
+func wirePorts(ctx context.Context, v reflect.Value, nodePtr any, name string, pb PortBindings, tr *T.Trace, sourceOuts *[]*Out, getStream func() *interiorStream) {
 	ports := reflectPorts(nodePtr)
 	for _, port := range ports {
 		f := v.FieldByName(port.Name)
@@ -420,11 +474,11 @@ func wirePorts(ctx context.Context, v reflect.Value, nodePtr any, name string, p
 		}
 		switch port.Dir {
 		case PortIn:
-			wireInPort(f, port.Name, ctx, name, pb, tr)
+			wireInPort(f, port.Name, ctx, name, pb, tr, getStream)
 		case PortOut:
-			wireOutPort(f, port.Name, ctx, name, pb, tr, sourceOuts)
+			wireOutPort(f, port.Name, ctx, name, pb, tr, sourceOuts, getStream)
 		case PortOutMulti:
-			wireOutMultiPort(f, port.Name, ctx, name, pb, tr, sourceOuts)
+			wireOutMultiPort(f, port.Name, ctx, name, pb, tr, sourceOuts, getStream)
 		}
 	}
 }
@@ -437,12 +491,26 @@ func wirePorts(ctx context.Context, v reflect.Value, nodePtr any, name string, p
 // delivers, staying inert by precondition-gating (validate.go) exactly like a wired
 // node whose peer never sends; its owning node paces off its OWN Clock field/Copy(),
 // never off this port.
-func wireInPort(f reflect.Value, portName string, ctx context.Context, name string, pb PortBindings, tr *T.Trace) {
+//
+// A paced In's portRow (its own buffer PORT-ROW, isInput=true) is resolved once here
+// from pb.md's row table (populated at MoveDispatch construction, before any node's
+// own construction — see PortRowFor's doc comment), and stream is this node's shared
+// interior-stream getter: both are read later by In.PollRecv, on this node's own
+// Update goroutine, to flush a KindRecv RowEvent (owner_events.go).
+func wireInPort(f reflect.Value, portName string, ctx context.Context, name string, pb PortBindings, tr *T.Trace, getStream func() *interiorStream) {
 	if b := pb.singlePaced[portName]; b.pw != nil {
-		f.Set(reflect.ValueOf(NewInPaced(b.pw, ctx, name, portName, tr)))
+		in := NewInPaced(b.pw, ctx, name, portName, tr)
+		in.stream = getStream
+		in.portRow = -1
+		if pb.md != nil {
+			if r, ok := pb.md.PortRowFor(name, portName, true); ok {
+				in.portRow = r
+			}
+		}
+		f.Set(reflect.ValueOf(in))
 	} else {
 		ch := pb.deadEndIn(portName)
-		f.Set(reflect.ValueOf(&In{ch: ch, node: name, port: portName, trace: tr}))
+		f.Set(reflect.ValueOf(&In{ch: ch, node: name, port: portName, trace: tr, stream: getStream, portRow: -1}))
 	}
 }
 
@@ -451,9 +519,31 @@ func wireInPort(f reflect.Value, portName string, ctx context.Context, name stri
 // has one for this port name, otherwise a dead-end chan wrapper. The resolved
 // paced Out is appended to sourceOuts and (when pb.outSink is non-nil) recorded
 // under "node.port" for the loader's node-move travel-time updates.
-func wireOutPort(f reflect.Value, portName string, ctx context.Context, name string, pb PortBindings, tr *T.Trace, sourceOuts *[]*Out) {
+//
+// A paced Out's own portRow (isInput=false) plus its destination's targetRow/
+// targetPortRow are resolved once here from pb.md's row tables (same timing as
+// wireInPort's portRow) — the destination is static (b.pw.Target/TargetHandle never
+// change after wiring), so resolving it once at construction and reading it later on
+// this node's own Update goroutine (Out.PlaceDrivenAt/placeDrivenNoWalker) matches
+// edgeMover's existing static-field-resolved-once discipline (edgeRow).
+func wireOutPort(f reflect.Value, portName string, ctx context.Context, name string, pb PortBindings, tr *T.Trace, sourceOuts *[]*Out, getStream func() *interiorStream) {
 	if b := pb.singlePaced[portName]; b.pw != nil {
 		o := NewOutPaced(b.pw, ctx, name, portName, tr, b.rule, b.arc, b.latency, b.seg, b.label)
+		o.stream = getStream
+		o.portRow, o.targetRow, o.targetPortRow = -1, -1, -1
+		if pb.md != nil {
+			if r, ok := pb.md.PortRowFor(name, portName, false); ok {
+				o.portRow = r
+			}
+			if b.pw.Target != "" {
+				if r, ok := pb.md.NodeRowFor(b.pw.Target); ok {
+					o.targetRow = r
+				}
+				if r, ok := pb.md.PortRowFor(b.pw.Target, b.pw.TargetHandle, true); ok {
+					o.targetPortRow = r
+				}
+			}
+		}
 		*sourceOuts = append(*sourceOuts, o)
 		if pb.outSink != nil {
 			pb.outSink[name+"."+portName] = o
@@ -469,15 +559,32 @@ func wireOutPort(f reflect.Value, portName string, ctx context.Context, name str
 // element recorded in pb.multiPaced (each with its own handle/rule/arc/
 // latency/segment/label) when present, otherwise a dead-end chan slice. Each
 // resolved paced Out is appended to sourceOuts and (when pb.outSink is
-// non-nil) recorded under "node.handle".
-func wireOutMultiPort(f reflect.Value, portName string, ctx context.Context, name string, pb PortBindings, tr *T.Trace, sourceOuts *[]*Out) {
+// non-nil) recorded under "node.handle". Row resolution mirrors wireOutPort's,
+// per fan-out element.
+func wireOutMultiPort(f reflect.Value, portName string, ctx context.Context, name string, pb PortBindings, tr *T.Trace, sourceOuts *[]*Out, getStream func() *interiorStream) {
 	if bs := pb.multiPaced[portName]; len(bs) > 0 {
 		outs := make(OutMulti, len(bs))
 		for i, b := range bs {
-			outs[i] = NewOutPaced(b.pw, ctx, name, b.handle, tr, b.rule, b.arc, b.latency, b.seg, b.label)
-			*sourceOuts = append(*sourceOuts, outs[i])
+			o := NewOutPaced(b.pw, ctx, name, b.handle, tr, b.rule, b.arc, b.latency, b.seg, b.label)
+			o.stream = getStream
+			o.portRow, o.targetRow, o.targetPortRow = -1, -1, -1
+			if pb.md != nil {
+				if r, ok := pb.md.PortRowFor(name, b.handle, false); ok {
+					o.portRow = r
+				}
+				if b.pw.Target != "" {
+					if r, ok := pb.md.NodeRowFor(b.pw.Target); ok {
+						o.targetRow = r
+					}
+					if r, ok := pb.md.PortRowFor(b.pw.Target, b.pw.TargetHandle, true); ok {
+						o.targetPortRow = r
+					}
+				}
+			}
+			outs[i] = o
+			*sourceOuts = append(*sourceOuts, o)
 			if pb.outSink != nil {
-				pb.outSink[name+"."+b.handle] = outs[i]
+				pb.outSink[name+"."+b.handle] = o
 			}
 		}
 		f.Set(reflect.ValueOf(outs))
