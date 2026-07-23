@@ -11,10 +11,11 @@
 import { describe, it, expect, vi } from "vitest";
 import {
   decodeNodeStreamFrame, decodeInteriorStreamFrame, decodeNodeFrame,
+  readNodeStreamLayoutLinkDstNodeRow, readNodeStreamLayoutLinkEdgeRow,
 } from "../src/webview/three/buffer-decode";
 import {
   BUF_NODE_STREAM_FRAME_HEADER_SIZE, BUF_INTERIOR_STREAM_FRAME_HEADER_SIZE,
-  BUF_NODE_FRAME_HEADER_SIZE,
+  BUF_NODE_FRAME_HEADER_SIZE, NODE_STREAM_LAYOUT_LINK_STRIDE,
 } from "../src/schema/frame-tags";
 import {
   NODE_STRIDE, PORT_STRIDE, INTERIOR_STRIDE, INTERIOR_SLOTS_PER_NODE,
@@ -24,6 +25,7 @@ import {
   readNodeCX, readNodeCY, readNodeCZ, readNodeRadius,
   readPortNodeRow, readPortPX, readPortPY, readPortPZ,
   readInteriorPresent, readInteriorValue,
+  readLayoutLinkSrcNodeRow, readLayoutLinkDstNodeRow, readLayoutLinkEdgeRow,
 } from "../src/schema/buffer-layout";
 
 // Every test below that touches the STATEFUL per-node cells (snapshot-buffer.ts's plain
@@ -45,28 +47,32 @@ function expectF32(got: number, want: number) {
 }
 
 /** Build one node's BUF_BLOCK_TAG_NODE_STREAM frame: [tick][portCount][labelLen]
- *  [portNameBytesCount] + 1 Node row (LabelOff always 0 here) + label bytes + portCount
- *  Port rows (NodeRow column = nodeRow) + port-name bytes. */
+ *  [portNameBytesCount][layoutLinkCount] + 1 Node row (LabelOff always 0 here) + label
+ *  bytes + portCount Port rows (NodeRow column = nodeRow) + port-name bytes + this node's
+ *  own outbound LayoutLink rows ([DstNodeRow][EdgeRow] each). */
 function makeNodeStreamFrame(opts: {
   nodeRow: number;
   cx: number; cy: number; cz: number; radius: number;
   label: string;
   ports: Array<{ px: number; py: number; pz: number; name: string }>;
+  layoutLinks?: Array<{ dstNodeRow: number; edgeRow: number }>;
 }): ArrayBuffer {
   const enc = new TextEncoder();
   const labelBytes = enc.encode(opts.label);
   const portNameChunks = opts.ports.map((p) => enc.encode(p.name));
   const portNameBytesCount = portNameChunks.reduce((a, c) => a + c.length, 0);
   const portCount = opts.ports.length;
+  const layoutLinks = opts.layoutLinks ?? [];
 
   const total = BUF_NODE_STREAM_FRAME_HEADER_SIZE + NODE_STRIDE + labelBytes.length
-    + portCount * PORT_STRIDE + portNameBytesCount;
+    + portCount * PORT_STRIDE + portNameBytesCount + layoutLinks.length * NODE_STREAM_LAYOUT_LINK_STRIDE;
   const buf = new ArrayBuffer(total);
   const dv = new DataView(buf);
   dv.setUint32(0, 7, true); // tick
   dv.setUint32(4, portCount, true);
   dv.setUint32(8, labelBytes.length, true);
   dv.setUint32(12, portNameBytesCount, true);
+  dv.setUint32(16, layoutLinks.length, true);
 
   let off = BUF_NODE_STREAM_FRAME_HEADER_SIZE;
   dv.setFloat32(off + NODE_COL_CX, opts.cx, true);
@@ -102,6 +108,13 @@ function makeNodeStreamFrame(opts: {
     portNameSection.set(chunk, nameCursor);
     nameCursor += chunk.length;
   }
+  off += portNameBytesCount;
+
+  layoutLinks.forEach((ll, i) => {
+    const rowOff = off + i * NODE_STREAM_LAYOUT_LINK_STRIDE;
+    dv.setInt32(rowOff, ll.dstNodeRow, true);
+    dv.setInt32(rowOff + 4, ll.edgeRow, true);
+  });
 
   return buf;
 }
@@ -141,6 +154,21 @@ describe("decodeNodeStreamFrame", () => {
 
   it("returns null for a truncated buffer", () => {
     expect(decodeNodeStreamFrame(0, new ArrayBuffer(2))).toBeNull();
+  });
+
+  it("decodes this node's own outbound layout-links (DstNodeRow/EdgeRow, no SrcNodeRow — implicit)", () => {
+    const buf = makeNodeStreamFrame({
+      nodeRow: 3, cx: 0, cy: 0, cz: 0, radius: 1, label: "n3",
+      ports: [],
+      layoutLinks: [{ dstNodeRow: 7, edgeRow: 2 }, { dstNodeRow: 9, edgeRow: -1 }],
+    });
+    const d = decodeNodeStreamFrame(3, buf)!;
+    expect(d).not.toBeNull();
+    expect(d.layoutLinkCount).toBe(2);
+    expect(readNodeStreamLayoutLinkDstNodeRow(d.layoutLinkView, 0)).toBe(7);
+    expect(readNodeStreamLayoutLinkEdgeRow(d.layoutLinkView, 0)).toBe(2);
+    expect(readNodeStreamLayoutLinkDstNodeRow(d.layoutLinkView, 1)).toBe(9);
+    expect(readNodeStreamLayoutLinkEdgeRow(d.layoutLinkView, 1)).toBe(-1);
   });
 });
 
@@ -256,5 +284,56 @@ describe("getNodeFrameOrFallback — fallback to fd3 combined Node frame", () =>
     const direct = decodeNodeFrame(buf)!;
     expect(direct.nodeCount).toBe(1);
     expectF32(readNodeCX(direct.nodeView, 0), 42);
+  });
+});
+
+// ── getLayoutLinksOrFallback: aggregation + fallback ───────────────────────────
+
+describe("getLayoutLinksOrFallback", () => {
+  it("aggregates each per-node stream's own outbound layout-links into full Src/Dst/Edge rows", async () => {
+    const { snapshotBuffer, nodeStreamBlocks } = await freshNodeStreamModules();
+    const frame0 = makeNodeStreamFrame({
+      nodeRow: 0, cx: 0, cy: 0, cz: 0, radius: 1, label: "a",
+      ports: [],
+      layoutLinks: [{ dstNodeRow: 1, edgeRow: 0 }],
+    });
+    const frame1 = makeNodeStreamFrame({
+      nodeRow: 1, cx: 0, cy: 0, cz: 0, radius: 1, label: "b",
+      ports: [],
+      layoutLinks: [{ dstNodeRow: 2, edgeRow: -1 }],
+    });
+    const frame2 = makeNodeStreamFrame({
+      nodeRow: 2, cx: 0, cy: 0, cz: 0, radius: 1, label: "c",
+      ports: [],
+      // no outbound layout-links (b<c and c<? — c is never source in this fixture)
+    });
+    snapshotBuffer.setLatestNodeStreamFrame(0, frame0);
+    snapshotBuffer.setLatestNodeStreamFrame(1, frame1);
+    snapshotBuffer.setLatestNodeStreamFrame(2, frame2);
+
+    const agg = nodeStreamBlocks.getLayoutLinksOrFallback(999, new DataView(new ArrayBuffer(0)));
+    expect(agg.layoutLinkCount).toBe(2);
+    // Row order is source-node-row order (0 then 1) — SrcNodeRow is the reconstructed
+    // implicit source, DstNodeRow/EdgeRow carried straight from that node's own frame.
+    expect(readLayoutLinkSrcNodeRow(agg.layoutLinkView, 0)).toBe(0);
+    expect(readLayoutLinkDstNodeRow(agg.layoutLinkView, 0)).toBe(1);
+    expect(readLayoutLinkEdgeRow(agg.layoutLinkView, 0)).toBe(0);
+    expect(readLayoutLinkSrcNodeRow(agg.layoutLinkView, 1)).toBe(1);
+    expect(readLayoutLinkDstNodeRow(agg.layoutLinkView, 1)).toBe(2);
+    expect(readLayoutLinkEdgeRow(agg.layoutLinkView, 1)).toBe(-1);
+  });
+
+  it("falls back to the fd-3 scene frame's LayoutLink block when no per-node stream has arrived", async () => {
+    const { nodeStreamBlocks } = await freshNodeStreamModules();
+    const sceneView = new DataView(new ArrayBuffer(12));
+    sceneView.setInt32(0, 4, true); // SrcNodeRow
+    sceneView.setInt32(4, 5, true); // DstNodeRow
+    sceneView.setInt32(8, -1, true); // EdgeRow
+
+    const agg = nodeStreamBlocks.getLayoutLinksOrFallback(1, sceneView);
+    expect(agg.layoutLinkCount).toBe(1);
+    expect(agg.layoutLinkView).toBe(sceneView);
+    expect(readLayoutLinkSrcNodeRow(agg.layoutLinkView, 0)).toBe(4);
+    expect(readLayoutLinkDstNodeRow(agg.layoutLinkView, 0)).toBe(5);
   });
 });

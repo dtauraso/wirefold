@@ -57,7 +57,7 @@ import {
   readEdgeEdgeLabelOff,
   readEdgeEdgeLabelLen,
 } from "../../schema/buffer-layout";
-import { BUF_BEAD_HEADER_SIZE, BUF_NODE_FRAME_HEADER_SIZE, BUF_EDGE_FRAME_HEADER_SIZE, BUF_VIEW_FRAME_HEADER_SIZE, BUF_EDGE_STREAM_FRAME_HEADER_SIZE, BUF_NODE_STREAM_FRAME_HEADER_SIZE, BUF_INTERIOR_STREAM_FRAME_HEADER_SIZE } from "../../schema/frame-tags";
+import { BUF_BEAD_HEADER_SIZE, BUF_NODE_FRAME_HEADER_SIZE, BUF_EDGE_FRAME_HEADER_SIZE, BUF_VIEW_FRAME_HEADER_SIZE, BUF_EDGE_STREAM_FRAME_HEADER_SIZE, BUF_NODE_STREAM_FRAME_HEADER_SIZE, BUF_INTERIOR_STREAM_FRAME_HEADER_SIZE, NODE_STREAM_LAYOUT_LINK_STRIDE } from "../../schema/frame-tags";
 // Generated (part of BUF_LAYOUT_FINGERPRINT) — re-exported here so existing consumers
 // (buffer-scene.tsx, InteriorBeadInstances.tsx, buffer-log.ts) keep importing it from the
 // decode module rather than reaching into schema/buffer-layout directly.
@@ -510,9 +510,12 @@ export function edgeLabel(decoded: DecodedEdgeFrame, row: number): string {
 
 /** Decoded view over ONE node's dedicated per-fd NODE-stream frame (BUF_BLOCK_TAG_NODE_STREAM
  *  — see frame-tags.ts's BUF_NODE_STREAM_FRAME_HEADER_SIZE doc comment for the byte layout):
- *  [tick:u32][portCount:u32][labelLen:u32][portNameBytesCount:u32] + this node's own single
- *  NODE_STRIDE row (index 0) + its own inline label bytes + its own Port rows (each row's
- *  NodeRow column already the global node row) + its own inline port-name bytes. */
+ *  [tick:u32][portCount:u32][labelLen:u32][portNameBytesCount:u32][layoutLinkCount:u32] +
+ *  this node's own single NODE_STRIDE row (index 0) + its own inline label bytes + its own
+ *  Port rows (each row's NodeRow column already the global node row) + its own inline
+ *  port-name bytes + its own outbound LAYOUT-link rows (this node is always the SOURCE —
+ *  see node_mover.go's layoutLinkTos doc comment; each row is
+ *  [DstNodeRow:i32][EdgeRow:i32], NODE_STREAM_LAYOUT_LINK_STRIDE bytes). */
 export interface DecodedNodeStreamFrame {
   tick: number;
   /** DataView over this node's single Node row; byteLength = NODE_STRIDE. */
@@ -525,6 +528,21 @@ export interface DecodedNodeStreamFrame {
   portView: DataView;
   /** Uint8 view over this node's own port-name bytes (flattened port-row order). */
   portNameBytes: Uint8Array;
+  layoutLinkCount: number;
+  /** DataView over this node's own outbound LayoutLink rows; byteLength = layoutLinkCount
+   *  × NODE_STREAM_LAYOUT_LINK_STRIDE. Read with readNodeStreamLayoutLinkDstNodeRow /
+   *  readNodeStreamLayoutLinkEdgeRow below — this node's own row is the SrcNodeRow. */
+  layoutLinkView: DataView;
+}
+
+/** Reads DstNodeRow (i32) from row `row` of a node stream frame's LayoutLink section. */
+export function readNodeStreamLayoutLinkDstNodeRow(view: DataView, row: number): number {
+  return view.getInt32(row * NODE_STREAM_LAYOUT_LINK_STRIDE, true);
+}
+
+/** Reads EdgeRow (i32) from row `row` of a node stream frame's LayoutLink section. */
+export function readNodeStreamLayoutLinkEdgeRow(view: DataView, row: number): number {
+  return view.getInt32(row * NODE_STREAM_LAYOUT_LINK_STRIDE + 4, true);
 }
 
 // Per-node-row memo (keyed by row), mirroring decodeEdgeStreamFrame's per-row memo.
@@ -553,9 +571,11 @@ function decodeNodeStreamFrameUncached(buf: ArrayBuffer): DecodedNodeStreamFrame
   const portCount          = hdr.getUint32(4,  true);
   const labelLen           = hdr.getUint32(8,  true);
   const portNameBytesCount = hdr.getUint32(12, true);
+  const layoutLinkCount    = hdr.getUint32(16, true);
 
   const portBytes = portCount * PORT_STRIDE;
-  const expectedLen = BUF_NODE_STREAM_FRAME_HEADER_SIZE + NODE_STRIDE + labelLen + portBytes + portNameBytesCount;
+  const layoutLinkBytes = layoutLinkCount * NODE_STREAM_LAYOUT_LINK_STRIDE;
+  const expectedLen = BUF_NODE_STREAM_FRAME_HEADER_SIZE + NODE_STRIDE + labelLen + portBytes + portNameBytesCount + layoutLinkBytes;
   if (buf.byteLength < expectedLen) return null;
 
   let off = BUF_NODE_STREAM_FRAME_HEADER_SIZE;
@@ -570,8 +590,11 @@ function decodeNodeStreamFrameUncached(buf: ArrayBuffer): DecodedNodeStreamFrame
   off += portBytes;
 
   const portNameBytes = new Uint8Array(buf, off, portNameBytesCount);
+  off += portNameBytesCount;
 
-  return { tick, nodeView, label, portCount, portView, portNameBytes };
+  const layoutLinkView = new DataView(buf, off, layoutLinkBytes);
+
+  return { tick, nodeView, label, portCount, portView, portNameBytes, layoutLinkCount, layoutLinkView };
 }
 
 /** Decoded view over ONE node's dedicated per-fd INTERIOR-stream frame

@@ -144,11 +144,19 @@ export const BUF_BLOCK_TAG_NODE_STREAM = 6;
 export const BUF_BLOCK_TAG_INTERIOR_STREAM = 7;
 
 /** Byte layout of one node's combined per-fd frame (Buffer.BuildNodeStreamFrame), no outer
- * tag: [tick:u32][portCount:u32][labelLen:u32][portNameBytesCount:u32] + one NODE_STRIDE row
- * (LabelOff=0 into this frame's own label bytes) + labelLen label bytes + portCount ×
- * PORT_STRIDE port rows (each row's NodeRow column already the global node row) +
- * portNameBytesCount port-name bytes. */
-export const BUF_NODE_STREAM_FRAME_HEADER_SIZE = 16;
+ * tag: [tick:u32][portCount:u32][labelLen:u32][portNameBytesCount:u32][layoutLinkCount:u32]
+ * + one NODE_STRIDE row (LabelOff=0 into this frame's own label bytes) + labelLen label
+ * bytes + portCount × PORT_STRIDE port rows (each row's NodeRow column already the global
+ * node row) + portNameBytesCount port-name bytes + layoutLinkCount ×
+ * NODE_STREAM_LAYOUT_LINK_STRIDE layout-link rows (this node's OWN outbound layout-links —
+ * see buffer-decode.ts's DecodedNodeStreamFrame doc comment). */
+export const BUF_NODE_STREAM_FRAME_HEADER_SIZE = 20;
+
+/** Byte width of ONE layout-link row within a node stream frame:
+ * [DstNodeRow:i32][EdgeRow:i32]. Narrower than LAYOUT_LINK_STRIDE (the shared fd-3
+ * LayoutLink block's 12-byte row, SrcNodeRow+DstNodeRow+EdgeRow) because on a per-node
+ * stream the source IS this node — implicit from the fd position / aggregate row index. */
+export const NODE_STREAM_LAYOUT_LINK_STRIDE = 8;
 
 /** Byte layout of one node's INTERIOR per-fd frame (Buffer.BuildInteriorStreamFrame), no
  * outer tag: [tick:u32] followed by a FIXED INTERIOR_SLOTS_PER_NODE × INTERIOR_STRIDE bytes

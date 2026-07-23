@@ -11,7 +11,7 @@ import { getLatestSnapshot, getLatestEdgeFrame } from "../snapshot-buffer";
 import { decodeSnapshot, decodeEdgeFrame } from "./buffer-decode";
 import { getViewBlocks } from "./view-blocks";
 import { getEdgeStreamAccessor } from "./edge-stream-blocks";
-import { getNodeFrameOrFallback } from "./node-stream-blocks";
+import { getNodeFrameOrFallback, getLayoutLinksOrFallback } from "./node-stream-blocks";
 import {
   SHADING_PARAM_TUBE_COLOR,
   SHADING_PARAM_TUBE_EMISSIVE,
@@ -266,7 +266,11 @@ export function EdgeTubes({ capacity, layoutLinkCapacity }: { capacity: number; 
       dstPortRowAt = (row) => readEdgeDstPortRow(edgeView, row);
       selectedAt = (row) => readEdgeSelected(edgeView, row) > 0;
     }
-    const { layoutLinkCount, layoutLinkView } = decoded;
+    // Layout-link overlay pairs: aggregated from the per-node dedicated streams' own
+    // outbound layout-links when active, else the fd-3 scene frame's shared LayoutLink
+    // block (decoded.layoutLinkCount/layoutLinkView, the required fallback) — see
+    // getLayoutLinksOrFallback's doc comment (memory/feedback_no_single_writer_bridge.md).
+    const { layoutLinkCount, layoutLinkView } = getLayoutLinksOrFallback(decoded.layoutLinkCount, decoded.layoutLinkView);
     const { overlayView } = blocks;
     // LayoutLink's SrcNodeRow/DstNodeRow resolve against the NODE frame's Node block — both
     // frames are built from the same Go SnapshotState in the same emitSnapshot call, so they

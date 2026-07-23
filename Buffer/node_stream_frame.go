@@ -16,6 +16,13 @@ package Buffer
 
 import "encoding/binary"
 
+// BufNodeStreamLayoutLinkStride is the byte width of ONE layout-link row within a node
+// stream frame: [DstNodeRow:i32][EdgeRow:i32]. Narrower than the shared fd-3 LayoutLink
+// block's BufLayoutLinkStride (12 bytes, SrcNodeRow+DstNodeRow+EdgeRow) because on a
+// per-node stream the source IS this node — its own row is implicit (the fd position /
+// the aggregator's row index), so only the dst endpoint + resolved edge row travel.
+const BufNodeStreamLayoutLinkStride = 8
+
 // BuildNodeStreamFrame packs one node's combined per-fd frame payload (no outer tag byte
 // — the fd position already identifies which node this is):
 //
@@ -23,15 +30,20 @@ import "encoding/binary"
 //	[portCount:u32]
 //	[labelLen:u32]
 //	[portNameBytesCount:u32]
-//	Node     BufNodeStride bytes (SAME SetNodeRow column writer buildNodeFrame uses;
-//	         LabelOff=0 into this frame's own label bytes, NodeRow-local — nodeRow is
-//	         carried separately below for the Port rows' NodeRow column)
-//	Label    labelLen bytes (this node's own label bytes — inline, not a shared section)
-//	Port     portCount × BufPortStride bytes (SAME SetPortRow column writer buildNodeFrame
-//	         uses; every row's NodeRow = nodeRow, PortNameOff/Len into this frame's own
-//	         port-name bytes)
-//	PortName portNameBytesCount bytes (this node's own ports' name bytes, concatenated in
-//	         the same order as the Port rows above)
+//	[layoutLinkCount:u32]
+//	Node       BufNodeStride bytes (SAME SetNodeRow column writer buildNodeFrame uses;
+//	           LabelOff=0 into this frame's own label bytes, NodeRow-local — nodeRow is
+//	           carried separately below for the Port rows' NodeRow column)
+//	Label      labelLen bytes (this node's own label bytes — inline, not a shared section)
+//	Port       portCount × BufPortStride bytes (SAME SetPortRow column writer buildNodeFrame
+//	           uses; every row's NodeRow = nodeRow, PortNameOff/Len into this frame's own
+//	           port-name bytes)
+//	PortName   portNameBytesCount bytes (this node's own ports' name bytes, concatenated in
+//	           the same order as the Port rows above)
+//	LayoutLink layoutLinkCount × BufNodeStreamLayoutLinkStride bytes — the LAYOUT
+//	           double-link pairs for which THIS node is the SOURCE (see
+//	           nodes/Wiring/node_mover.go's layoutLinkTos doc comment): each row is
+//	           [DstNodeRow:i32][EdgeRow:i32], dstNodeRows/edgeRows parallel slices.
 func BuildNodeStreamFrame(
 	tick uint32, nodeRow int32,
 	cx, cy, cz, radius, sphereR float32,
@@ -42,6 +54,7 @@ func BuildNodeStreamFrame(
 	portNames []string,
 	portDX, portDY, portDZ, portPX, portPY, portPZ []float32,
 	portIsInput, portHovered []uint8,
+	dstNodeRows, edgeRows []int32,
 ) []byte {
 	labelBytes := []byte(label)
 	portCount := len(portNames)
@@ -54,8 +67,10 @@ func BuildNodeStreamFrame(
 		portNameLens[i] = uint32(len(nb))
 		portNameBytes = append(portNameBytes, nb...)
 	}
+	layoutLinkCount := len(dstNodeRows)
 
-	size := 16 + BufNodeStride + len(labelBytes) + portCount*BufPortStride + len(portNameBytes)
+	size := 20 + BufNodeStride + len(labelBytes) + portCount*BufPortStride + len(portNameBytes) +
+		layoutLinkCount*BufNodeStreamLayoutLinkStride
 	buf := make([]byte, size)
 	off := 0
 	binary.LittleEndian.PutUint32(buf[off:], tick)
@@ -65,6 +80,8 @@ func BuildNodeStreamFrame(
 	binary.LittleEndian.PutUint32(buf[off:], uint32(len(labelBytes)))
 	off += 4
 	binary.LittleEndian.PutUint32(buf[off:], uint32(len(portNameBytes)))
+	off += 4
+	binary.LittleEndian.PutUint32(buf[off:], uint32(layoutLinkCount))
 	off += 4
 
 	SetNodeRow(buf[off:off+BufNodeStride], 0, cx, cy, cz, radius, sphereR, vrx, vry, vrz, frx, fry, frz,
@@ -83,6 +100,14 @@ func BuildNodeStreamFrame(
 	off += portCount * BufPortStride
 
 	copy(buf[off:off+len(portNameBytes)], portNameBytes)
+	off += len(portNameBytes)
+
+	for i := 0; i < layoutLinkCount; i++ {
+		rowOff := off + i*BufNodeStreamLayoutLinkStride
+		binary.LittleEndian.PutUint32(buf[rowOff:], uint32(dstNodeRows[i]))
+		binary.LittleEndian.PutUint32(buf[rowOff+4:], uint32(edgeRows[i]))
+	}
+
 	return buf
 }
 

@@ -1,15 +1,14 @@
 // loader.go — runtime topology loader.
 //
 // LoadTopology reads topology.json, allocates one PacedWire per destination
-// port, and returns ([]Node, SlotRegistry, *MoveDispatch).
+// port (fan-in safe), and returns ([]Node, SlotRegistry, *MoveDispatch).
 // An edge-label-keyed WireRegistry is built internally to bind each source Out to
 // its wire, but it is not returned: no caller consumed the map.
 //
 // Key behaviors:
-//   - One *PacedWire per (destNode, destPort), fed by exactly one edge — fan-in
-//     (two edges into one port) is rejected at parse (validateNoFanIn), so a
-//     destination port maps 1:1 to a wire and a single incident edge.
-//   - SlotRegistry maps "target.targetHandle" → wire.
+//   - One *PacedWire per (destNode, destPort); multiple edges sharing a
+//     destination port reuse the same wire (fan-in support).
+//   - SlotRegistry maps "target.targetHandle" → wire for create/delete ops.
 //   - Input nodes: data.init values pre-seeded via pw.Send in a goroutine.
 //   - HoldNewSendOld: data.state["held"] → Held via wire:"data.state" tag.
 //   - Slice output ports (ToEdge): all outbound wires appended in spec order.
@@ -141,7 +140,7 @@ func (n specNode) toNodeGeom(sceneCenter vec3) nodeGeom {
 			}
 			if len(g.Outputs) == 0 {
 				for _, p := range bind.Ports {
-					if p.Dir == PortOut || p.Dir == PortBroadcast {
+					if p.Dir == PortOut || p.Dir == PortOutMulti {
 						g.Outputs = append(g.Outputs, portGeom{Name: p.Name})
 					}
 				}
@@ -151,12 +150,12 @@ func (n specNode) toNodeGeom(sceneCenter vec3) nodeGeom {
 	return g
 }
 
-// broadcastBaseName strips a trailing digit suffix from a sourceHandle when the
-// base name is an Broadcast port on the given kind, per kindBroadcastPorts (kind →
-// set of Broadcast port names). e.g. "ToNext0" → "ToNext" for a kind with Broadcast
+// outMultiBaseName strips a trailing digit suffix from a sourceHandle when the
+// base name is an OutMulti port on the given kind, per kindOutMultiPorts (kind →
+// set of OutMulti port names). e.g. "ToNext0" → "ToNext" for a kind with OutMulti
 // port "ToNext". Returns the canonical port name and whether it resolved. Shared
 // by buildFromSpec and validateSpec so the two normalizations can never drift.
-func broadcastBaseName(handle, kind string, kindBroadcastPorts map[string]map[string]bool) (string, bool) {
+func outMultiBaseName(handle, kind string, kindOutMultiPorts map[string]map[string]bool) (string, bool) {
 	if len(handle) == 0 {
 		return handle, false
 	}
@@ -165,7 +164,7 @@ func broadcastBaseName(handle, kind string, kindBroadcastPorts map[string]map[st
 		return handle, false
 	}
 	base := handle[:len(handle)-1]
-	if kindBroadcastPorts[kind][base] {
+	if kindOutMultiPorts[kind][base] {
 		return base, true
 	}
 	return handle, false
@@ -251,22 +250,6 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace, clk Clock) 
 // (loadTree) or a monolithic topology.json — into a topoSpec, WITHOUT validating
 // or building. LoadTopology validates + builds from the result.
 func parseSpec(path string) (topoSpec, error) {
-	spec, err := readSpec(path)
-	if err != nil {
-		return topoSpec{}, err
-	}
-	// Fan-in is not part of the model: reject a spec where two edges target the same
-	// input port, at parse time, so it fails cleanly at load rather than silently sharing
-	// one wire deeper in the build.
-	if err := validateNoFanIn(spec); err != nil {
-		return topoSpec{}, fmt.Errorf("LoadTopology: %s: %w", path, err)
-	}
-	return spec, nil
-}
-
-// readSpec loads the raw topoSpec from either a directory tree or a single JSON file,
-// without semantic validation (that is parseSpec's job).
-func readSpec(path string) (topoSpec, error) {
 	if info, err := os.Stat(path); err == nil && info.IsDir() { // path-resolution-ok: loader dispatch, not scene path resolution
 		return loadTree(path)
 	}
@@ -279,24 +262,6 @@ func readSpec(path string) (topoSpec, error) {
 		return topoSpec{}, fmt.Errorf("LoadTopology: parse %s: %w", path, err)
 	}
 	return spec, nil
-}
-
-// validateNoFanIn rejects a topology where two edges target the SAME destination input
-// port (target + targetHandle). Fan-in was removed from the model: an input port accepts
-// exactly ONE incident edge; multiple sources into one node use DISTINCT input ports — as
-// every production node already does (e.g. a gate's FromLeft/FromRight, each fed by one
-// edge). Enforced at parse so edge:wire:input-port is strictly 1:1 from load onward.
-func validateNoFanIn(spec topoSpec) error {
-	seen := make(map[string]string, len(spec.Edges))
-	for _, e := range spec.Edges {
-		key := e.Target + "." + e.TargetHandle
-		if prev, dup := seen[key]; dup {
-			return fmt.Errorf("fan-in not allowed: edges %q and %q both target input port %s.%s — an input port takes exactly one edge; use distinct input ports for multiple sources",
-				prev, e.Label, e.Target, e.TargetHandle)
-		}
-		seen[key] = e.Label
-	}
-	return nil
 }
 
 // buildCtx carries the shared state threaded through the buildFromSpec phase
@@ -349,11 +314,6 @@ type buildCtx struct {
 
 	// Phase 5: the MoveDispatch.
 	md *MoveDispatch
-	// nodeMovers is the LOAD-TIME-LOCAL node-mover directory newMoveDispatch returns
-	// alongside md (see that function's doc comment) — used only by the remaining
-	// construction-time seeds below (buildNodes' LayoutHolder wiring), then dropped;
-	// MoveDispatch itself keeps no id-keyed nodeMovers field.
-	nodeMovers map[string]*nodeMover
 
 	// speedSinks accumulates the SEND end of every speed channel created for
 	// any clock-owning goroutine across the whole build — edge movers
@@ -362,9 +322,9 @@ type buildCtx struct {
 	// buildFromSpec/LoadTopology (per-goroutine-clock.md "Delivery").
 	speedSinks []chan float64
 
-	// Phase 6: id→type map and per-kind Broadcast port set.
-	nodeType           map[string]string
-	kindBroadcastPorts map[string]map[string]bool
+	// Phase 6: id→type map and per-kind OutMulti port set.
+	nodeType          map[string]string
+	kindOutMultiPorts map[string]map[string]bool
 
 	// Phase 7: inbound/outbound edge maps.
 	inbound        map[string]map[string]string
@@ -426,9 +386,9 @@ func (b *buildCtx) computeNodeGeometry() {
 
 // computeQuantizedLayout makes the quantized flat absolute scene-polar layout
 // (quantized_layout.go) AUTHORITATIVE for every node's world center. It resolves each
-// allocateWires allocates one *PacedWire per destination port (one edge per port —
-// fan-in is rejected at parse) and computes each edge's own travel-time (arc length /
-// sim latency) and straight-segment endpoints.
+// allocateWires allocates one *PacedWire per destination port (fan-in safe) and
+// computes each edge's own travel-time (arc length / sim latency) and
+// straight-segment endpoints.
 //   - destWire: "destNode.destPort" → *PacedWire (owned by the destination).
 //   - edgeWire: edge label → *PacedWire (same pointer; for stdin_reader lookup).
 //   - edgeEndpoints: edge label → source/target node IDs + handles (for NodeMoveRegistry).
@@ -457,18 +417,14 @@ func (b *buildCtx) allocateWires() {
 		edgeArc[e.Label] = arcLength
 		edgeLatency[e.Label] = simLatencyMs
 		edgeSegments[e.Label] = seg
-		// One wire per destination input port, and — since fan-in is removed
-		// (validateNoFanIn) — exactly one edge per port, so this is strictly one wire per
-		// edge. A destKey already present means a fan-in spec slipped past the parser: that
-		// is a build-invariant violation, not a topology to silently share a wire for.
-		if _, exists := destWire[destKey]; exists {
-			panic("allocateWires: two edges target " + destKey + " — validateNoFanIn should have rejected this fan-in at parse")
+		pw, exists := destWire[destKey]
+		if !exists {
+			pw = NewPacedWire(arcLength, PulseSpeedWuPerTick)
+			pw.Target = e.Target
+			pw.TargetHandle = e.TargetHandle
+			pw.Trace = b.tr
+			destWire[destKey] = pw
 		}
-		pw := NewPacedWire(arcLength, PulseSpeedWuPerTick)
-		pw.Target = e.Target
-		pw.TargetHandle = e.TargetHandle
-		pw.Trace = b.tr
-		destWire[destKey] = pw
 		edgeWire[e.Label] = pw
 		edgeEndpoints[e.Label] = EdgeEndpoints{
 			Source: e.Source, Target: e.Target,
@@ -504,15 +460,7 @@ func (b *buildCtx) buildMoveDispatch() {
 	for i, e := range b.spec.Edges {
 		edgeOrder[i] = e.Label
 	}
-	md, nodeMovers := newMoveDispatch(b.nodeGeoms, b.edgeEndpoints, b.tr, nodeOrder, edgeOrder, b.clk, &b.speedSinks)
-	b.nodeMovers = nodeMovers
-	// Seed md.positions (the gesture goroutine's own node-center cache, see its doc
-	// comment) from these same load-time geoms right away — every caller of
-	// LoadTopology (production main.go and every test) gets a MoveDispatch whose
-	// centerOfNode/heldCenters already see every node's loaded position, matching what
-	// the old atomic snap gave for free at construction. main.go's own SeedPositions
-	// call (belt-and-suspenders, before Start) is a no-op re-seed of the same data.
-	md.SeedPositions()
+	md := newMoveDispatch(b.nodeGeoms, b.edgeEndpoints, b.tr, nodeOrder, edgeOrder, b.clk, &b.speedSinks)
 	if b.hasScene {
 		// Persisted scene sphere: install it now so md.sceneSphere is consistent straight out
 		// of LoadTopology (a fresh/legacy scene has none — main.go's LoadSceneSphere then
@@ -531,46 +479,53 @@ func (b *buildCtx) buildMoveDispatch() {
 	// nodeMover's zero-value quantOffset, matching the old map's zero-value-on-miss read.
 	md.quantizedLayout = true
 	for id, off := range b.quantizedOffsets {
-		if nm, ok := nodeMovers[id]; ok {
+		if nm, ok := md.nodeMovers[id]; ok {
 			nm.quantOffset = off
 		}
 	}
-
-	// Each unique dest wire is its own goroutine (PacedWire.run, launched by Start). Give
-	// it its clock source and a speed sink (it is a clock-owning goroutine, so a global
-	// playback-speed change must reach it too), and hand the set to MoveDispatch to launch.
-	// b.destWire is keyed per destination port, and each port has exactly one edge (no
-	// fan-in), so its values are exactly the unique wires — one per edge.
-	for _, pw := range b.destWire {
-		pw.clockSrc = b.clk
-		wireSpeedCh := make(chan float64, 1)
-		pw.speedCh = wireSpeedCh
-		b.speedSinks = append(b.speedSinks, wireSpeedCh)
-		md.wires = append(md.wires, pw)
+	// Seed each node's OWN layoutLinkTos (nodeMover.layoutLinkTos doc comment) from
+	// b.localPolars — the SAME LAYOUT model + de-dup rule (alphabetically-first id is the
+	// source) emitLayoutLinks uses for the legacy shared fd-3 block, so the per-node
+	// stream carries exactly the same pairs, split by source node instead of merged. Sort
+	// ids for determinism, matching emitLayoutLinks' own sort.
+	ids := make([]string, 0, len(b.localPolars))
+	for id := range b.localPolars {
+		ids = append(ids, id)
 	}
-
+	sort.Strings(ids)
+	for _, id := range ids {
+		nm, ok := md.nodeMovers[id]
+		if !ok {
+			continue
+		}
+		for _, lp := range b.localPolars[id] {
+			if id < lp.To {
+				nm.layoutLinkTos = append(nm.layoutLinkTos, lp.To)
+			}
+		}
+	}
 	b.md = md
 }
 
-// buildTypeMaps builds the id→type map and per-kind Broadcast port set (needed
+// buildTypeMaps builds the id→type map and per-kind OutMulti port set (needed
 // for sourceHandle normalization in buildEdgeMaps).
 func (b *buildCtx) buildTypeMaps() {
 	nodeType := map[string]string{}
 	for _, n := range b.spec.Nodes {
 		nodeType[n.ID] = n.Type
 	}
-	kindBroadcastPorts := map[string]map[string]bool{}
+	kindOutMultiPorts := map[string]map[string]bool{}
 	for kind, bind := range Registry {
 		outMultis := map[string]bool{}
 		for _, p := range bind.Ports {
-			if p.Dir == PortBroadcast {
+			if p.Dir == PortOutMulti {
 				outMultis[p.Name] = true
 			}
 		}
-		kindBroadcastPorts[kind] = outMultis
+		kindOutMultiPorts[kind] = outMultis
 	}
 	b.nodeType = nodeType
-	b.kindBroadcastPorts = kindBroadcastPorts
+	b.kindOutMultiPorts = kindOutMultiPorts
 }
 
 // buildEdgeMaps builds the inbound and outbound edge maps.
@@ -578,7 +533,7 @@ func (b *buildCtx) buildTypeMaps() {
 //   - outbound: source node id → port name → []edge label
 //   - outboundHandle: source node id → port name → []sourceHandle (indexed, same order as outbound)
 //
-// For Broadcast ports, sourceHandle may be "<portName><index>" — normalize to portName.
+// For OutMulti ports, sourceHandle may be "<portName><index>" — normalize to portName.
 func (b *buildCtx) buildEdgeMaps() {
 	inbound := map[string]map[string]string{}
 	outbound := map[string]map[string][]string{}
@@ -595,7 +550,7 @@ func (b *buildCtx) buildEdgeMaps() {
 		}
 		inbound[e.Target][e.TargetHandle] = e.Target + "." + e.TargetHandle
 		srcKey := e.SourceHandle
-		if base, isMulti := broadcastBaseName(e.SourceHandle, b.nodeType[e.Source], b.kindBroadcastPorts); isMulti {
+		if base, isMulti := outMultiBaseName(e.SourceHandle, b.nodeType[e.Source], b.kindOutMultiPorts); isMulti {
 			srcKey = base
 		}
 		outbound[e.Source][srcKey] = append(outbound[e.Source][srcKey], e.Label)
@@ -659,7 +614,7 @@ func (b *buildCtx) buildNodes() error {
 				labels := b.outbound[n.ID][port.Name]
 				if len(labels) > 0 {
 					// Look up wire by destination of the first outbound edge.
-					// The destination port owns the wire (one edge per input port).
+					// For fan-in, the destination port owns the wire.
 					// Send rule is node-owned, keyed by this output port name.
 					rule := nodeSendRule(n, port.Name)
 					lbl := labels[0]
@@ -667,7 +622,7 @@ func (b *buildCtx) buildNodes() error {
 				}
 				// If no outbound edge, reflectBuild falls back to dead-end chan.
 
-			case PortBroadcast:
+			case PortOutMulti:
 				labels := b.outbound[n.ID][port.Name]
 				handles := b.outboundHandle[n.ID][port.Name]
 				for i, lbl := range labels {
@@ -675,10 +630,10 @@ func (b *buildCtx) buildNodes() error {
 					if i < len(handles) {
 						handle = handles[i]
 					}
-					// Per-port (per broadcast element): the rule is keyed by the
+					// Per-port (per fan-out element): the rule is keyed by the
 					// concrete output port name (sourceHandle, e.g. "ToNext0").
 					rule := nodeSendRule(n, handle)
-					pb.AppendBroadcastWithHandle(port.Name, handle, b.edgeWire[lbl], rule, b.edgeArc[lbl], b.edgeLatency[lbl], b.edgeSegments[lbl], lbl)
+					pb.AppendMultiPacedWithHandle(port.Name, handle, b.edgeWire[lbl], rule, b.edgeArc[lbl], b.edgeLatency[lbl], b.edgeSegments[lbl], lbl)
 				}
 				// If no outbound edges, builder falls back to a dead-end slice.
 			}
@@ -688,7 +643,7 @@ func (b *buildCtx) buildNodes() error {
 		// (buildMoveDispatch runs before buildNodes) so the INITIAL geometry emit and every
 		// later re-emit compute a connected port's aim identically.
 		var pc partnerCenterFn
-		if nm, ok := b.nodeMovers[n.ID]; ok {
+		if nm, ok := b.md.nodeMovers[n.ID]; ok {
 			pc = nm.partnerCenter
 		}
 		nd, err := bind.Build(b.ctx, n.ID, n.Data, pb, b.tr, b.nodeGeoms[n.ID], pc)

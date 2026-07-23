@@ -102,7 +102,16 @@ func (s *SnapshotState) buildEdgeLabelSection() ([]byte, []uint32, []uint32) {
 // buildSnapshot call, plus the total buffer size. The block-writer helpers read from
 // the returned struct only — none of them recompute this data.
 func (s *SnapshotState) newSnapshotBuild() *snapshotBuild {
-	renderableLayoutLinks := s.resolvableLayoutLinks()
+	// Either/or (memory/feedback_no_single_writer_bridge.md): once the dedicated per-node
+	// streams are active, each node's OWN layout-links stream on its own fd
+	// (Buffer.BuildNodeStreamFrame's LayoutLink section) — the fd-3 scene frame's
+	// LayoutLink block is never double-sourced alongside it. Falls back to the fd-3 block
+	// (renderableLayoutLinks non-empty) when node streams are not active (env unset —
+	// headless tests, non-extension launches).
+	var renderableLayoutLinks []layoutLinkSnapState
+	if !s.nodeStreamActive.Load() {
+		renderableLayoutLinks = s.resolvableLayoutLinks()
+	}
 	b := &snapshotBuild{
 		beadCount:             uint32(len(s.beads)),
 		nodeCount:             uint32(len(s.nodes)),

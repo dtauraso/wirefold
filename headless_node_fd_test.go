@@ -34,7 +34,10 @@ import (
 // dedicated=false leaves WIREFOLD_STREAM_FDS unset (the fallback). Returns whether ANY
 // fd-3 frame carried the Node tag, plus (when dedicated) the first non-empty frame read
 // off each node row's own "node" and "interior" fds.
-func runHeadlessNodeFdCase(t *testing.T, dedicated bool) (sawNodeTag bool, nodeFrames, interiorFrames map[int][]byte) {
+// runHeadlessNodeFdCase also returns the LAST fd-3 scene frame's header layoutLinkCount
+// (see Buffer/pack.go's newSnapshotBuild) so callers can assert the LayoutLink block's
+// either/or with the per-node streams (gated by nodeStreamActive).
+func runHeadlessNodeFdCase(t *testing.T, dedicated bool) (sawNodeTag bool, nodeFrames, interiorFrames map[int][]byte, lastSceneLayoutLinks uint32) {
 	t.Helper()
 	repoRoot, err := os.Getwd()
 	if err != nil {
@@ -136,6 +139,13 @@ func runHeadlessNodeFdCase(t *testing.T, dedicated bool) (sawNodeTag bool, nodeF
 		switch buf[0] {
 		case B.BufBlockTagScene:
 			sawScene = true
+			// Scene block payload (buf[1:]) header: [tick:u32][eventCount:u32]
+			// [layoutLinkCount:u32] (Buffer/pack.go's writeHeader) — capture the LAST
+			// one seen so the caller can assert the required either/or with the
+			// per-node streams.
+			if len(buf) >= 1+12 {
+				lastSceneLayoutLinks = readU32(buf[1:], 8)
+			}
 		case B.BufBlockTagNode:
 			sawNodeTag = true
 		}
@@ -172,7 +182,7 @@ func runHeadlessNodeFdCase(t *testing.T, dedicated bool) (sawNodeTag bool, nodeF
 		interiorFrames = readLast(interiorReads, "interior")
 	}
 
-	return sawNodeTag, nodeFrames, interiorFrames
+	return sawNodeTag, nodeFrames, interiorFrames, lastSceneLayoutLinks
 }
 
 // itoa avoids importing strconv twice across test files in this package; trivial base-10
@@ -197,27 +207,34 @@ func itoa(n int) string {
 // arrives on its OWN "interior" fd, and the fd-3 stream never carries a Node-tagged frame
 // (i.e. it is NOT double-sourced from both places).
 func TestHeadlessNodeFdDedicatedStream(t *testing.T) {
-	sawNodeTag, nodeFrames, interiorFrames := runHeadlessNodeFdCase(t, true)
+	sawNodeTag, nodeFrames, interiorFrames, sceneLayoutLinks := runHeadlessNodeFdCase(t, true)
 
 	if sawNodeTag {
 		t.Fatalf("fd-3 stream carried a Node-tagged frame while the dedicated node fds were active — the fd-3 Node block was not excluded")
+	}
+	if sceneLayoutLinks != 0 {
+		t.Fatalf("fd-3 scene frame's LayoutLink block carried %d rows while the dedicated node fds were active — it must be empty (each node's own layout-links now stream on its own node fd)", sceneLayoutLinks)
 	}
 
 	repoRoot, _ := os.Getwd()
 	wantLabels := wantNodeRowOrder(t, repoRoot)
 	sort.Strings(wantLabels) // wantNodeRowOrder already returns sorted spec order
 
+	totalLayoutLinks := 0
 	for row, frame := range nodeFrames {
 		// Combined frame layout (Buffer.BuildNodeStreamFrame): [tick:u32][portCount:u32]
-		// [labelLen:u32][portNameBytesCount:u32] + Node row + label bytes + Port rows +
-		// port-name bytes.
-		if len(frame) < 16+B.BufNodeStride {
+		// [labelLen:u32][portNameBytesCount:u32][layoutLinkCount:u32] + Node row + label
+		// bytes + Port rows + port-name bytes + LayoutLink rows
+		// ([DstNodeRow:i32][EdgeRow:i32] each, BufNodeStreamLayoutLinkStride bytes).
+		const hdrSize = 20
+		if len(frame) < hdrSize+B.BufNodeStride {
 			t.Fatalf("node row %d: frame too short (%d bytes) to hold header+Node row", row, len(frame))
 		}
 		portCount := readU32(frame, 4)
 		labelLen := readU32(frame, 8)
 		portNameBytesCount := readU32(frame, 12)
-		nodeOff := 16
+		layoutLinkCount := readU32(frame, 16)
+		nodeOff := hdrSize
 		labelOff := nodeOff + B.BufNodeStride
 		if labelOff+int(labelLen) > len(frame) {
 			t.Fatalf("node row %d: label overruns frame (labelLen=%d, frameLen=%d)", row, labelLen, len(frame))
@@ -231,9 +248,11 @@ func TestHeadlessNodeFdDedicatedStream(t *testing.T) {
 		}
 		portsOff := labelOff + int(labelLen)
 		portNamesOff := portsOff + int(portCount)*B.BufPortStride
-		if portNamesOff+int(portNameBytesCount) != len(frame) {
+		layoutLinksOff := portNamesOff + int(portNameBytesCount)
+		wantLen := layoutLinksOff + int(layoutLinkCount)*B.BufNodeStreamLayoutLinkStride
+		if wantLen != len(frame) {
 			t.Fatalf("node row %d: frame length %d does not match computed layout end %d",
-				row, len(frame), portNamesOff+int(portNameBytesCount))
+				row, len(frame), wantLen)
 		}
 		// Every Port row's NodeRow column must equal this frame's own node row (the
 		// tear-free cross-stream contract: EdgeTube resolves a port row to (nodeRow,
@@ -245,6 +264,34 @@ func TestHeadlessNodeFdDedicatedStream(t *testing.T) {
 				t.Fatalf("node row %d: port %d's NodeRow column = %d, want %d", row, p, gotNodeRow, row)
 			}
 		}
+		// Every LayoutLink row's DstNodeRow must be a valid, DIFFERENT node row (never
+		// this node's own row — a node is never its own layout-link partner). EdgeRow is
+		// either -1 (no bead edge connects the pair — the node-centers overlay fallback)
+		// or a non-negative resolved edge row; either is valid, so only the sign is
+		// checked here (its exact value is cross-checked against the Edge block by the
+		// TS-side EdgeTube/node-stream-blocks tests, not this Go-side frame-shape test).
+		for l := 0; l < int(layoutLinkCount); l++ {
+			rowOff := layoutLinksOff + l*B.BufNodeStreamLayoutLinkStride
+			dstNodeRow := int32(readU32(frame, rowOff))
+			edgeRow := int32(readU32(frame, rowOff+4))
+			if dstNodeRow < 0 || int(dstNodeRow) >= len(nodeFrames) {
+				t.Fatalf("node row %d: layout-link %d DstNodeRow=%d out of range [0,%d)", row, l, dstNodeRow, len(nodeFrames))
+			}
+			if int(dstNodeRow) == row {
+				t.Fatalf("node row %d: layout-link %d DstNodeRow equals its own row (self-link)", row, l)
+			}
+			if edgeRow < -1 {
+				t.Fatalf("node row %d: layout-link %d EdgeRow=%d invalid (must be -1 or >= 0)", row, l, edgeRow)
+			}
+		}
+		totalLayoutLinks += int(layoutLinkCount)
+	}
+	// This topology's local-polars data (topology/nodes/*/local-polars.json) declares real
+	// double-link pairs — the per-node streams must actually carry SOME layout-links, not
+	// silently zero every row (a real regression: e.g. layoutLinkTos never wired, or every
+	// dst id failing to resolve a node row).
+	if totalLayoutLinks == 0 {
+		t.Fatalf("no node row streamed any layout-link — expected this topology's local-polars pairs to appear on their source node's own fd")
 	}
 
 	for row, frame := range interiorFrames {
@@ -262,9 +309,12 @@ func TestHeadlessNodeFdDedicatedStream(t *testing.T) {
 // every existing headless launch already gets), the Node/Interior/Port/Label/PortName
 // frame keeps shipping on fd 3 exactly as before this migration.
 func TestHeadlessNodeFdFallback(t *testing.T) {
-	sawNodeTag, _, _ := runHeadlessNodeFdCase(t, false)
+	sawNodeTag, _, _, sceneLayoutLinks := runHeadlessNodeFdCase(t, false)
 
 	if !sawNodeTag {
 		t.Fatalf("fd-3 stream never carried a Node-tagged frame with the dedicated node fds inactive — the fallback path is broken")
+	}
+	if sceneLayoutLinks == 0 {
+		t.Fatalf("fd-3 scene frame's LayoutLink block carried 0 rows with the dedicated node fds inactive — the fallback must keep emitting the shared LayoutLink block (this topology's local-polars data declares real pairs)")
 	}
 }

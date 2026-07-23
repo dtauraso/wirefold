@@ -127,6 +127,7 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 	if nodeBase, ok := streamFDs[B.StreamKindNode]; ok {
 		if interiorBase, ok2 := streamFDs[B.StreamKindInterior]; ok2 {
 			md.SetNodeStreams(nodeBase, interiorBase, snapState.NodeUIStateFor, snapState.PortHoveredFor,
+				snapState.NodeRowFor, snapState.EdgeRowForPair,
 				B.BuildNodeStreamFrame, B.BuildInteriorStreamFrame)
 			snapState.SetNodeStreamActive(true)
 		}

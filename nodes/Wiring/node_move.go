@@ -359,7 +359,9 @@ func (md *MoveDispatch) SetNodeStreams(
 	nodeBase, interiorBase int,
 	uiStateFor func(id string) (selected, hovered, latchedSel, gotDragMsg, kindID uint8, dragDeltaA, dragDeltaB, dragDeltaC int32, ok bool),
 	portHoveredFor func(node, port string, isInput bool) uint8,
-	buildFrame func(tick uint32, nodeRow int32, cx, cy, cz, radius, sphereR float32, vrx, vry, vrz, frx, fry, frz float32, selected, kindID, hovered, latchedSel, gotDragMsg uint8, dragDeltaA, dragDeltaB, dragDeltaC int32, label string, portNames []string, portDX, portDY, portDZ, portPX, portPY, portPZ []float32, portIsInput, portHovered []uint8) []byte,
+	nodeRowFor func(id string) (int32, bool),
+	edgeRowForPair func(a, b string) (int32, bool),
+	buildFrame func(tick uint32, nodeRow int32, cx, cy, cz, radius, sphereR float32, vrx, vry, vrz, frx, fry, frz float32, selected, kindID, hovered, latchedSel, gotDragMsg uint8, dragDeltaA, dragDeltaB, dragDeltaC int32, label string, portNames []string, portDX, portDY, portDZ, portPX, portPY, portPZ []float32, portIsInput, portHovered []uint8, dstNodeRows, edgeRows []int32) []byte,
 	buildInteriorFrame func(tick uint32, present []uint8, value []int32, ox, oy, oz []float32) []byte,
 ) {
 	md.interiorOuts = map[string]io.Writer{}
@@ -374,6 +376,8 @@ func (md *MoveDispatch) SetNodeStreams(
 		nm.nodeRow = int32(row)
 		nm.uiStateFor = uiStateFor
 		nm.portHoveredFor = portHoveredFor
+		nm.nodeRowFor = nodeRowFor
+		nm.edgeRowForPair = edgeRowForPair
 		nm.buildFrame = buildFrame
 
 		iFd := interiorBase + row

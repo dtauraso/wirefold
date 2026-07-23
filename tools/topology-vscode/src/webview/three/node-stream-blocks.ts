@@ -28,12 +28,14 @@
 import { getLatestNodeFrame, getLatestNodeStreamFrames, getLatestInteriorStreamFrames, getNodeStreamVersion, getInteriorStreamVersion, subscribeNodeFrame, subscribeNodeStreamFrame, subscribeInteriorStreamFrame } from "../snapshot-buffer";
 import {
   decodeNodeFrame, decodeNodeStreamFrame, decodeInteriorStreamFrame,
+  readNodeStreamLayoutLinkDstNodeRow, readNodeStreamLayoutLinkEdgeRow,
   type DecodedNodeFrame,
 } from "./buffer-decode";
 import {
   NODE_STRIDE, PORT_STRIDE, INTERIOR_STRIDE, INTERIOR_SLOTS_PER_NODE,
   NODE_COL_LABEL_OFF, NODE_COL_LABEL_LEN,
   PORT_COL_PORT_NAME_OFF, PORT_COL_PORT_NAME_LEN,
+  LAYOUT_LINK_STRIDE, LAYOUT_LINK_COL_SRC_NODE_ROW, LAYOUT_LINK_COL_DST_NODE_ROW, LAYOUT_LINK_COL_EDGE_ROW,
 } from "../../schema/buffer-layout";
 
 const STR_ENCODER = new TextEncoder();
@@ -67,6 +69,71 @@ export function getNodeFrameOrFallback(): DecodedNodeFrame | null {
   lastInteriorVersion = iv;
   lastAggregate = aggregate;
   return aggregate;
+}
+
+/** Shape of the LayoutLink block the LayoutLink overlay (EdgeTube.tsx) consumes — the SAME
+ *  shape the fd-3 scene frame's LayoutLink block produces (SrcNodeRow/DstNodeRow/EdgeRow,
+ *  LAYOUT_LINK_STRIDE-byte rows), so EdgeTube's read logic doesn't have to change. */
+export interface LayoutLinkAgg {
+  layoutLinkCount: number;
+  layoutLinkView: DataView;
+}
+
+let lastLayoutLinkVersion = -1;
+let lastLayoutLinkAgg: LayoutLinkAgg | null = null;
+
+/**
+ * getLayoutLinksOrFallback returns the current LAYOUT-link overlay pairs: aggregated from
+ * every per-node dedicated NODE stream's own outbound layout-links (each node streams the
+ * pairs for which it is the SOURCE — see node_mover.go's layoutLinkTos) when those streams
+ * are active, else the fd-3 scene frame's shared LayoutLink block (sceneLayoutLinkCount/
+ * sceneLayoutLinkView, the required fallback — pass decodeSnapshot's own fields straight
+ * through). Reconstructs full SrcNodeRow/DstNodeRow/EdgeRow rows (SrcNodeRow = the node
+ * row whose own frame carried that entry) so the aggregate is BYTE-COMPATIBLE with the
+ * pre-migration shared block.
+ */
+export function getLayoutLinksOrFallback(sceneLayoutLinkCount: number, sceneLayoutLinkView: DataView): LayoutLinkAgg {
+  const nodeFrames = getLatestNodeStreamFrames();
+  if (nodeFrames.size === 0) {
+    return { layoutLinkCount: sceneLayoutLinkCount, layoutLinkView: sceneLayoutLinkView };
+  }
+  const nv = getNodeStreamVersion();
+  if (nv === lastLayoutLinkVersion && lastLayoutLinkAgg) {
+    return lastLayoutLinkAgg;
+  }
+
+  let maxRow = -1;
+  for (const r of nodeFrames.keys()) if (r > maxRow) maxRow = r;
+  const nodeCount = maxRow + 1;
+
+  const srcRows: number[] = [];
+  const dstRows: number[] = [];
+  const edgeRows: number[] = [];
+  for (let row = 0; row < nodeCount; row++) {
+    const buf = nodeFrames.get(row);
+    if (!buf) continue;
+    const decoded = decodeNodeStreamFrame(row, buf);
+    if (!decoded) continue;
+    for (let i = 0; i < decoded.layoutLinkCount; i++) {
+      srcRows.push(row);
+      dstRows.push(readNodeStreamLayoutLinkDstNodeRow(decoded.layoutLinkView, i));
+      edgeRows.push(readNodeStreamLayoutLinkEdgeRow(decoded.layoutLinkView, i));
+    }
+  }
+
+  const layoutLinkCount = srcRows.length;
+  const layoutLinkView = new DataView(new ArrayBuffer(layoutLinkCount * LAYOUT_LINK_STRIDE));
+  for (let i = 0; i < layoutLinkCount; i++) {
+    const off = i * LAYOUT_LINK_STRIDE;
+    layoutLinkView.setInt32(off + LAYOUT_LINK_COL_SRC_NODE_ROW, srcRows[i]!, true);
+    layoutLinkView.setInt32(off + LAYOUT_LINK_COL_DST_NODE_ROW, dstRows[i]!, true);
+    layoutLinkView.setInt32(off + LAYOUT_LINK_COL_EDGE_ROW, edgeRows[i]!, true);
+  }
+
+  const agg: LayoutLinkAgg = { layoutLinkCount, layoutLinkView };
+  lastLayoutLinkVersion = nv;
+  lastLayoutLinkAgg = agg;
+  return agg;
 }
 
 /** Subscribe to either source updating (subscribe-fn shape, e.g. for a React external-store

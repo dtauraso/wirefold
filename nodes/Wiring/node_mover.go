@@ -206,6 +206,23 @@ type nodeMover struct {
 	// writes so a port row can be resolved back to (nodeRow, portIndex) on the TS side
 	// without a shared port table.
 	nodeRow int32
+	// layoutLinkTos holds the dst node ids of every LAYOUT double-link pair for which THIS
+	// node is the SOURCE (alphabetically-first id — mirrors loader.go's emitLayoutLinks
+	// de-dup rule, so each unordered pair streams from exactly one node's own fd, never
+	// both). Sourced from LocalPolars (b.localPolars, the same LAYOUT model
+	// computeLocalPolars/emitLayoutLinks use), set ONCE at construction (buildMoveDispatch)
+	// since layout-link pairs are static after load — no per-cycle recompute. nil when
+	// this node has no outbound layout-link pair (or in bare test construction).
+	layoutLinkTos []string
+	// nodeRowFor resolves a node id to its buffer NODE-ROW index (Buffer.SnapshotState.
+	// NodeRowFor), injected via MoveDispatch.SetNodeStreams so this package stays
+	// Buffer-independent. Used only to resolve this node's own layoutLinkTos dst rows.
+	nodeRowFor func(id string) (int32, bool)
+	// edgeRowForPair resolves the buffer EDGE-ROW index of the bead edge connecting two
+	// node ids (Buffer.SnapshotState.EdgeRowForPair), injected the same way as
+	// nodeRowFor. -1/false when no bead edge connects the pair (the node-centers
+	// fallback the overlay already handles for the shared fd-3 block).
+	edgeRowForPair func(a, b string) (int32, bool)
 	// uiStateFor resolves this node's CURRENT selected/hovered/latchedSel/gotDragMsg/
 	// kindID/dragDelta* UI state (Buffer.SnapshotState.NodeUIStateFor — state this
 	// SnapshotState, not this nodeMover, is the sole writer of), injected here (rather
@@ -218,7 +235,7 @@ type nodeMover struct {
 	// buildFrame packs this node's combined per-fd frame (node fields + ports + label)
 	// using Buffer's own row-writer columns (Buffer.BuildNodeStreamFrame), injected so
 	// this package needs no Buffer import.
-	buildFrame func(tick uint32, nodeRow int32, cx, cy, cz, radius, sphereR float32, vrx, vry, vrz, frx, fry, frz float32, selected, kindID, hovered, latchedSel, gotDragMsg uint8, dragDeltaA, dragDeltaB, dragDeltaC int32, label string, portNames []string, portDX, portDY, portDZ, portPX, portPY, portPZ []float32, portIsInput, portHovered []uint8) []byte
+	buildFrame func(tick uint32, nodeRow int32, cx, cy, cz, radius, sphereR float32, vrx, vry, vrz, frx, fry, frz float32, selected, kindID, hovered, latchedSel, gotDragMsg uint8, dragDeltaA, dragDeltaB, dragDeltaC int32, label string, portNames []string, portDX, portDY, portDZ, portPX, portPY, portPZ []float32, portIsInput, portHovered []uint8, dstNodeRows, edgeRows []int32) []byte
 }
 
 func newNodeMover(id string, geom nodeGeom, tr *T.Trace, clockSrc Clock) *nodeMover {
@@ -400,13 +417,39 @@ func (m *nodeMover) writeStreamFrame() {
 			selected, hovered, latchedSel, gotDragMsg, kindID, dA, dB, dC = s, h, l, g, k, a, b, c
 		}
 	}
+	// This node's own outbound layout-links (layoutLinkTos, static since load — see its
+	// doc comment): resolve each dst id to its CURRENT buffer node row + the CURRENT bead
+	// edge row connecting the pair (both re-resolved every emit, mirroring the shared fd-3
+	// block's edgeRowForPair re-resolve every buildSnapshot). A dst id that hasn't
+	// registered a node row yet is skipped (mirrors resolvableLayoutLinks' endpoint
+	// filter) rather than packed with a -1 dst row.
+	var dstNodeRows, edgeRows []int32
+	if len(m.layoutLinkTos) > 0 && m.nodeRowFor != nil {
+		dstNodeRows = make([]int32, 0, len(m.layoutLinkTos))
+		edgeRows = make([]int32, 0, len(m.layoutLinkTos))
+		for _, to := range m.layoutLinkTos {
+			dstRow, ok := m.nodeRowFor(to)
+			if !ok {
+				continue
+			}
+			edgeRow := int32(-1)
+			if m.edgeRowForPair != nil {
+				if r, ok := m.edgeRowForPair(m.id, to); ok {
+					edgeRow = r
+				}
+			}
+			dstNodeRows = append(dstNodeRows, dstRow)
+			edgeRows = append(edgeRows, edgeRow)
+		}
+	}
 	frame := m.buildFrame(uint32(m.clk.Tick()), m.nodeRow,
 		float32(center.X), float32(center.Y), float32(center.Z),
 		float32(nodeRadius(m.geom.Kind)), float32(sphereR),
 		verticalRingNormalX, verticalRingNormalY, verticalRingNormalZ,
 		flatRingNormalX, flatRingNormalY, flatRingNormalZ,
 		selected, kindID, hovered, latchedSel, gotDragMsg, dA, dB, dC,
-		label, portNames, portDX, portDY, portDZ, portPX, portPY, portPZ, portIsInput, portHovered)
+		label, portNames, portDX, portDY, portDZ, portPX, portPY, portPZ, portIsInput, portHovered,
+		dstNodeRows, edgeRows)
 	var hdr [4]byte
 	binary.LittleEndian.PutUint32(hdr[:], uint32(len(frame)))
 	// Fire-and-forget, same reasoning as SnapshotState.writeFrame: no delivery

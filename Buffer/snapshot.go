@@ -213,6 +213,15 @@ type SnapshotState struct {
 	// its node id so the gesture FSM can drag/select the Go-owned node.
 	nodeTable atomic.Pointer[[]string]
 
+	// edgeEndpointTable publishes each edge row's (srcNode, dstNode) node ids — the SAME
+	// stable edge-row order as edgeTable/s.edges. Republished on every onEdgeGeometry call
+	// (endpoints are set once at load and never change at runtime, but republishing on
+	// every call keeps this simple, matching the other rebuildX functions' recompute-from-
+	// state shape). Read cross-goroutine by EdgeRowForPair — a dedicated nodeMover
+	// goroutine's per-node-stream analogue of edgeRowForPair (Buffer/pack.go, which the
+	// Trace-drain goroutine's buildSnapshot still uses directly for the fd-3 fallback).
+	edgeEndpointTable atomic.Pointer[[]edgeEndpointEntry]
+
 	// pendingEvents accumulates the per-tick causal trace events since the last snapshot
 	// emit (the same accumulate-then-flush lifecycle as the transient node event flags).
 	// buildSnapshot resolves each to numeric rows + string-section slices and writes the
@@ -811,6 +820,25 @@ func (s *SnapshotState) LookupNodeRow(row int) (nodeID string, ok bool) {
 	return (*tbl)[row], true
 }
 
+// NodeRowFor resolves nodeID to its buffer NODE-ROW index via the published node-row
+// table — the REVERSE of LookupNodeRow. Safe to call from a goroutine other than the
+// Trace drain (same lock-free published-table shape as LookupNodeRow/PortRowFor). Used
+// by a dedicated nodeMover goroutine (memory/feedback_no_single_writer_bridge.md) to
+// resolve its own layout-link's dst node row for its per-node stream frame. ok=false
+// when nodeID hasn't registered a node-geometry event yet.
+func (s *SnapshotState) NodeRowFor(nodeID string) (int32, bool) {
+	tbl := s.nodeTable.Load()
+	if tbl == nil {
+		return -1, false
+	}
+	for i, id := range *tbl {
+		if id == nodeID {
+			return int32(i), true
+		}
+	}
+	return -1, false
+}
+
 // --- internal helpers --------------------------------------------------------
 
 func (s *SnapshotState) onNodeGeometry(ev T.Event) {
@@ -886,6 +914,44 @@ func (s *SnapshotState) onEdgeGeometry(ev T.Event) {
 	if ev.DstPort != "" {
 		e.dstPort = ev.DstPort
 	}
+	// Republish the edge-endpoint table: (srcNode,dstNode) just changed or a new row was
+	// added. Read cross-goroutine by EdgeRowForPair.
+	s.rebuildEdgeEndpointTable()
+}
+
+// edgeEndpointEntry is one published edge row's endpoint node ids — see
+// edgeEndpointTable's doc comment.
+type edgeEndpointEntry struct {
+	srcNode, dstNode string
+}
+
+// rebuildEdgeEndpointTable rebuilds and atomically publishes the edge-endpoint table (see
+// edgeEndpointTable's doc comment). Called from the Trace-drain goroutine.
+func (s *SnapshotState) rebuildEdgeEndpointTable() {
+	tbl := make([]edgeEndpointEntry, len(s.edges))
+	for i, e := range s.edges {
+		tbl[i] = edgeEndpointEntry{srcNode: e.srcNode, dstNode: e.dstNode}
+	}
+	s.edgeEndpointTable.Store(&tbl)
+}
+
+// EdgeRowForPair resolves the buffer edge-row index of the bead edge connecting node ids
+// a/b (in either direction) via the published edge-endpoint table — the cross-goroutine-
+// safe counterpart of edgeRowForPair (Buffer/pack.go, drain-goroutine-only). Used by a
+// dedicated nodeMover goroutine to resolve its own layout-link's edge row for its
+// per-node stream frame. ok=false when no such edge exists (or endpoints haven't
+// published yet).
+func (s *SnapshotState) EdgeRowForPair(a, b string) (int32, bool) {
+	tbl := s.edgeEndpointTable.Load()
+	if tbl == nil {
+		return -1, false
+	}
+	for i, e := range *tbl {
+		if (e.srcNode == a && e.dstNode == b) || (e.srcNode == b && e.dstNode == a) {
+			return int32(i), true
+		}
+	}
+	return -1, false
 }
 
 // onLayoutLink registers one LAYOUT-link pair (Node=one endpoint, Target=the other), sourced
