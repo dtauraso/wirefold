@@ -243,12 +243,17 @@ func (md *MoveDispatch) neighborSetCRequantize(selfID, fromID string, selfCenter
 		// received.
 		md.tr.AbcDrag(selfID, deltaA, deltaB, deltaC)
 	}
-	// MoveDispatch's OWN published recipient state (ui_publish.go): this runs on selfID's
-	// OWN nodeMover goroutine (neighborSetC dispatch, node_mover.go), concurrently with
-	// every other recipient's own call — recordAbcDrag synchronizes via uiMu. Unlike
-	// md.tr.AbcDrag above (EVENT LOG only now), this is what nodeMover.uiStateFor
-	// (wired to md.NodeUIStateFor) actually reads for its own dedicated stream frame.
-	md.recordAbcDrag(selfID, deltaA, deltaB, deltaC)
+	// selfID's OWN recipient bit: this runs on selfID's OWN nodeMover goroutine
+	// (neighborSetC dispatch, node_mover.go's moveMsgKindNeighborSetC case), so it is
+	// safe to write nm's fields directly — no shared map, no lock. This is what
+	// writeStreamFrame (also this goroutine) reads for its own dedicated stream frame.
+	// md.tr.AbcDrag above (EVENT LOG only) separately still drives Buffer.SnapshotState's
+	// own s.overlay.AbcDragCount for the VIEW frame (the fd-3-fallback path's existing
+	// single-goroutine counter — no change needed here).
+	if nm, ok := md.nodeMovers[selfID]; ok {
+		nm.gotDragMsg = 1
+		nm.dragDeltaA, nm.dragDeltaB, nm.dragDeltaC = int32(deltaA), int32(deltaB), int32(deltaC)
+	}
 
 	if md.persist.quantOffset != nil {
 		if root := md.persist.quantOffset.root; root != "" {

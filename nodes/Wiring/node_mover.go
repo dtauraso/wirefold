@@ -223,15 +223,27 @@ type nodeMover struct {
 	// nodeRowFor. -1/false when no bead edge connects the pair (the node-centers
 	// fallback the overlay already handles for the shared fd-3 block).
 	edgeRowForPair func(a, b string) (int32, bool)
-	// uiStateFor resolves this node's CURRENT selected/hovered/latchedSel/gotDragMsg/
-	// kindID/dragDelta* UI state (Buffer.SnapshotState.NodeUIStateFor — state this
-	// SnapshotState, not this nodeMover, is the sole writer of), injected here (rather
-	// than importing Buffer) via MoveDispatch.SetNodeStreams so this package stays
-	// Buffer-independent, matching edgeMover's portRowFor/edgeSelected pattern.
-	uiStateFor func(id string) (selected, hovered, latchedSel, gotDragMsg, kindID uint8, dragDeltaA, dragDeltaB, dragDeltaC int32, ok bool)
-	// portHoveredFor resolves whether (node,port,isInput) is currently hovered
-	// (Buffer.SnapshotState.PortHoveredFor), injected the same way as uiStateFor.
-	portHoveredFor func(node, port string, isInput bool) uint8
+	// --- own selection/hover/abc-drag UI state (per-owner, no shared/republished map) ---
+	//
+	// This node's OWN current selected/hovered/latchedSel/gotDragMsg/dragDelta* bits —
+	// set only by THIS node's own goroutine, from messages the gesture goroutine sends
+	// on extIn (moveMsgKindSelect/Hover/Latched/AbcReset) or, for gotDragMsg/dragDelta*,
+	// from this node's own neighborSetC handler when IT is the recipient of a peer's
+	// drag (quantized_move.go's neighborSetCRequantize, dispatched via handle's
+	// moveMsgKindNeighborSetC case — that already runs on this same goroutine). No
+	// lock: only nm.handle (this goroutine) ever writes these, and writeStreamFrame
+	// (also this goroutine) is the only reader.
+	selected, hovered, latchedSel, gotDragMsg uint8
+	dragDeltaA, dragDeltaB, dragDeltaC        int32
+	// hoverPort/hoverIsInput name the specific port currently hovered on this node (""
+	// = whole-node hover, only meaningful when hovered==1). Set alongside hovered by a
+	// moveMsgKindHover message.
+	hoverPort    string
+	hoverIsInput bool
+	// kindID is this node's static numeric kind (Buffer.NodeKindID) — set ONCE at
+	// construction (MoveDispatch.SetNodeStreams), never touched again: a node's kind
+	// never changes after load, so there is no per-emit lookup to perform.
+	kindID uint8
 	// buildFrame packs this node's combined per-fd frame (node fields + ports + label)
 	// using Buffer's own row-writer columns (Buffer.BuildNodeStreamFrame), injected so
 	// this package needs no Buffer import.
@@ -307,6 +319,39 @@ func (m *nodeMover) handle(msg moveMsg) {
 	}
 	if msg.Kind == moveMsgKindDragStart {
 		m.armDragAnchor()
+		return
+	}
+	if msg.Kind == moveMsgKindSelect {
+		if msg.Bool {
+			m.selected = 1
+		} else {
+			m.selected = 0
+		}
+		return
+	}
+	if msg.Kind == moveMsgKindHover {
+		if msg.Bool {
+			m.hovered = 1
+			m.hoverPort = msg.Port
+			m.hoverIsInput = msg.IsInput
+		} else {
+			m.hovered = 0
+			m.hoverPort = ""
+			m.hoverIsInput = false
+		}
+		return
+	}
+	if msg.Kind == moveMsgKindLatched {
+		if msg.Bool {
+			m.latchedSel = 1
+		} else {
+			m.latchedSel = 0
+		}
+		return
+	}
+	if msg.Kind == moveMsgKindAbcReset {
+		m.gotDragMsg = 0
+		m.dragDeltaA, m.dragDeltaB, m.dragDeltaC = 0, 0, 0
 		return
 	}
 	if msg.Kind == moveMsgKindNeighborSetC {
@@ -406,17 +451,12 @@ func (m *nodeMover) writeStreamFrame() {
 		if p.IsInput {
 			portIsInput[i] = 1
 		}
-		if m.portHoveredFor != nil {
-			portHovered[i] = m.portHoveredFor(m.id, p.Name, p.IsInput)
+		if m.hovered == 1 && m.hoverPort != "" && m.hoverPort == p.Name && m.hoverIsInput == p.IsInput {
+			portHovered[i] = 1
 		}
 	}
-	var selected, hovered, latchedSel, gotDragMsg, kindID uint8
-	var dA, dB, dC int32
-	if m.uiStateFor != nil {
-		if s, h, l, g, k, a, b, c, ok := m.uiStateFor(m.id); ok {
-			selected, hovered, latchedSel, gotDragMsg, kindID, dA, dB, dC = s, h, l, g, k, a, b, c
-		}
-	}
+	selected, hovered, latchedSel, gotDragMsg, kindID := m.selected, m.hovered, m.latchedSel, m.gotDragMsg, m.kindID
+	dA, dB, dC := m.dragDeltaA, m.dragDeltaB, m.dragDeltaC
 	// This node's own outbound layout-links (layoutLinkTos, static since load — see its
 	// doc comment): resolve each dst id to its CURRENT buffer node row + the CURRENT bead
 	// edge row connecting the pair (both re-resolved every emit, mirroring the shared fd-3
@@ -623,9 +663,10 @@ type edgeMover struct {
 	// Buffer-independent, matching PortRowResolver/EdgeRowResolver's existing
 	// interface-injection pattern.
 	portRowFor func(node, port string, isInput bool) (int32, bool)
-	// edgeSelected reports whether this edge (by its label/edgeID) is the CURRENT
-	// click-selected edge, injected the same way as portRowFor.
-	edgeSelected func(label string) bool
+	// selected is this edge's OWN CURRENT click-selected bit — set only by this
+	// edgeMover's own goroutine (handle's moveMsgKindSelect case, from a
+	// MoveDispatch.sendEdgeSelect message), no shared map.
+	selected uint8
 	// buildFrame packs this edge's combined per-fd frame (edge fields + this wire's
 	// live beads) using Buffer's own row-writer columns (Buffer.BuildEdgeStreamFrame),
 	// injected so this package needs no Buffer import.
@@ -661,6 +702,14 @@ func newEdgeMover(ep EdgeEndpoints, edgeID string, srcGeom, dstGeom nodeGeom, tr
 // source Out, revises any in-flight bead, emits the new edge geometry, and updates
 // the dest port's latency aggregate. A move that touches neither endpoint is ignored.
 func (m *edgeMover) handle(msg moveMsg) {
+	if msg.Kind == moveMsgKindSelect {
+		if msg.Bool {
+			m.selected = 1
+		} else {
+			m.selected = 0
+		}
+		return
+	}
 	if msg.Kind == moveMsgKindAnchor {
 		// A port-anchor change recomputes this edge's segment/arc only if the changed
 		// port is one of THIS edge's endpoints (matching node id, port name, direction).
@@ -775,10 +824,7 @@ func (m *edgeMover) writeStreamFrame(tick int64) {
 			dstRow = r
 		}
 	}
-	var selected uint8
-	if m.edgeSelected != nil && m.edgeSelected(m.edgeID) {
-		selected = 1
-	}
+	selected := m.selected
 	var beadVal []int32
 	var beadX, beadY, beadZ []float32
 	if m.dest != nil {

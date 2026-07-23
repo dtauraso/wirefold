@@ -490,11 +490,11 @@ func (md *MoveDispatch) setHover(node, port string, isInput bool, tr *T.Trace) {
 	if node == md.sel.hoverNode && port == md.sel.hoverPort && isInput == md.sel.hoverInput {
 		return // no change → no re-emit (dedupe)
 	}
-	// setHoverUI (ui_publish.go) is the AUTHORITATIVE write: it sets md.sel's hover fields
-	// under uiMu and republishes MoveDispatch's own published UI state, which nodeMover/
-	// edgeMover now read directly (NodeUIStateFor/PortHoveredFor). tr.Hover below is the
-	// .probe EVENT LOG only, and also feeds Buffer.SnapshotState's OWN copy of this state
-	// (KindHover → setHovered), which serves the fd-3 fallback packer.
+	// setHoverUI (node_move.go) is the AUTHORITATIVE write: it sets md.sel's hover
+	// fields (mutated only by this goroutine, no lock) and MESSAGES the affected
+	// node(s) to set their OWN hovered bit — no shared/republished map. tr.Hover below
+	// is the .probe EVENT LOG only, and also feeds Buffer.SnapshotState's OWN copy of
+	// this state (KindHover → setHovered), which serves the fd-3 fallback packer.
 	md.setHoverUI(node, port, isInput)
 	if tr != nil {
 		tr.Hover(node, port, isInput)
@@ -507,11 +507,12 @@ func (md *MoveDispatch) setHover(node, port string, isInput bool, tr *T.Trace) {
 // empty-space hit CLEARS the transient highlight (md.sel.selected / md.sel.selectedEdge) — this is
 // the original click-empty-clears behavior.
 func (md *MoveDispatch) applySelect(ev rawInputMsg, tr *T.Trace) {
-	// setSelectionUI (ui_publish.go) is the AUTHORITATIVE write, same reasoning as
-	// setHoverUI above: it sets md.sel's selection fields (+ latchedNode) under uiMu and
-	// republishes MoveDispatch's own published UI state. tr.Select/tr.SelectEdge below are
-	// the .probe EVENT LOG only, and also feed Buffer.SnapshotState's OWN copy (KindSelect
-	// → setSelected/setSelectedEdge), which serves the fd-3 fallback packer.
+	// setSelectionUI (node_move.go) is the AUTHORITATIVE write, same reasoning as
+	// setHoverUI above: it sets md.sel's selection fields (+ latchedNode, mutated only
+	// by this goroutine, no lock) and MESSAGES the affected node(s)/edge to set their
+	// OWN selected/latchedSel bit. tr.Select/tr.SelectEdge below are the .probe EVENT
+	// LOG only, and also feed Buffer.SnapshotState's OWN copy (KindSelect →
+	// setSelected/setSelectedEdge), which serves the fd-3 fallback packer.
 	if ev.Hit.Kind == "empty" {
 		md.setSelectionUI("", "")
 		tr.Select("")

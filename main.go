@@ -111,12 +111,11 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 	// Register the snapshot tick source's own speed channel alongside every other
 	// clock-holder's, so a speed change reaches it too (see the SetTickSource comment above).
 	speedSinks = append(speedSinks, snapSpeedCh)
-	// The VIEW frame's AbcDragCount now reads from MoveDispatch's OWN published count
-	// (md.AbcDragCount — ui_publish.go's recordAbcDrag), not the accumulator's own
-	// overlay.AbcDragCount: the gesture/quantized-move goroutine that RECORDS an abc-drag
-	// owns this counter directly. Wired unconditionally (not gated on the node/edge stream
-	// env vars above) since it's independent of those — md always exists here regardless.
-	snapState.SetAbcDragCountSource(md.AbcDragCount)
+	// The VIEW frame's AbcDragCount is Buffer.SnapshotState's OWN plain counter
+	// (s.overlay.AbcDragCount), incremented by its KindAbcDrag handler on the single
+	// Trace-drain goroutine — no injected source, no shared/atomic counter in the
+	// Wiring package: tr.AbcDrag (quantized_move.go's neighborSetCRequantize) still
+	// fires on every abc-drag recipient exactly as before, which is what drives this.
 	// The per-edge dedicated stream (memory/feedback_no_single_writer_bridge.md): when
 	// WIREFOLD_STREAM_FDS carries an "edge" entry, wire every edgeMover to its OWN fd
 	// (fd = baseFd + edgeRow, edgeRow = the stable seed order — see
@@ -132,12 +131,11 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 	// running it first means every event the drain goroutine ever sees (seed or live) is
 	// processed with the final edgeStreamActive value already in effect.
 	if edgeBase, ok := streamFDs[B.StreamKindEdge]; ok {
-		// edgeSelected is sourced from MoveDispatch's OWN published selection state
-		// (md.IsEdgeSelected — ui_publish.go), not snapState.IsEdgeSelected: the gesture
-		// goroutine that SETS edge selection (applySelect) now republishes it directly,
-		// instead of round-tripping through the Trace-drain accumulator for this per-owner
-		// stream's read. snapState.IsEdgeSelected keeps serving the fd-3 fallback only.
-		md.SetEdgeStreams(edgeBase, md.PortRowFor, md.IsEdgeSelected, B.BuildEdgeStreamFrame)
+		// Edge selection is no longer an injected lookup: each edgeMover owns its OWN
+		// selected bit, set via a moveMsgKindSelect message the gesture goroutine sends
+		// on select/deselect (MoveDispatch.sendEdgeSelect). snapState.IsEdgeSelected
+		// keeps serving the fd-3 fallback only.
+		md.SetEdgeStreams(edgeBase, md.PortRowFor, B.BuildEdgeStreamFrame)
 		snapState.SetEdgeStreamActive(true)
 	}
 	// The two per-node dedicated streams (memory/feedback_no_single_writer_bridge.md):
@@ -150,15 +148,15 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 	// same ordering reasoning as SetEdgeStreams above.
 	if nodeBase, ok := streamFDs[B.StreamKindNode]; ok {
 		if interiorBase, ok2 := streamFDs[B.StreamKindInterior]; ok2 {
-			// uiStateFor/portHoveredFor are sourced from MoveDispatch's OWN published
-			// selection/hover/abc-drag state (md.NodeUIStateFor/md.PortHoveredFor —
-			// ui_publish.go), not snapState's: the gesture/quantized-move goroutine that
-			// SETS this state now republishes it directly, instead of round-tripping
-			// through the Trace-drain accumulator for this per-owner stream's read.
-			// snapState.NodeUIStateFor/PortHoveredFor keep serving the fd-3 fallback only.
-			// kindIDFor resolves a node's static load-time kind string to its NODE_DEFS
-			// index (Buffer.NodeKindID) — injected so Wiring stays Buffer-independent.
-			md.SetNodeStreams(nodeBase, interiorBase, md.NodeUIStateFor, md.PortHoveredFor,
+			// Selection/hover/abc-drag/kind are no longer injected lookups: each
+			// nodeMover owns its OWN selected/hovered/latchedSel/gotDragMsg/dragDelta*
+			// bits, set via moveMsgKindSelect/Hover/Latched/AbcReset messages the gesture
+			// goroutine sends (or, for kindID, resolved once here at construction).
+			// snapState.NodeUIStateFor/PortHoveredFor keep serving the fd-3 fallback
+			// only. kindIDFor resolves a node's static load-time kind string to its
+			// NODE_DEFS index (Buffer.NodeKindID) — injected so Wiring stays
+			// Buffer-independent.
+			md.SetNodeStreams(nodeBase, interiorBase,
 				md.NodeRowFor, md.EdgeRowForPair,
 				B.BuildNodeStreamFrame, B.BuildInteriorStreamFrame, B.NodeKindID)
 			snapState.SetNodeStreamActive(true)
