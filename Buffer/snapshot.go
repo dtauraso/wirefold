@@ -156,6 +156,33 @@ type SnapshotState struct {
 	// goroutine's write and emitSnapshot's read on the drain goroutine.
 	edgeStreamActive atomic.Bool
 
+	// nodeStreamActive is true once the dedicated per-node stream (StreamKindNode) is
+	// active — the required either/or with fd 3's Node/Interior/Port/Label/PortName
+	// frame, mirroring edgeStreamActive's role for the per-edge stream. False (the
+	// default) is the REQUIRED fallback: fd 3 keeps emitting that combined frame exactly
+	// as before this migration. Ingestion (Update/onNodeGeometry/onNodeBead, the node/
+	// port tables) is UNCHANGED either way; only the fd-3 WRITE is gated. ATOMIC for the
+	// same reason edgeStreamActive is (set after the Trace drain goroutine already
+	// exists).
+	nodeStreamActive atomic.Bool
+
+	// nodeUIStates publishes the CURRENT selection/hover/drag/kind UI state for every
+	// node, keyed by node id, as an immutable map — the node analogue of selectedEdges,
+	// letting a dedicated nodeMover goroutine (a goroutine other than the Trace drain)
+	// read this node's current selected/hovered/latchedSel/gotDragMsg/dragDelta*/kindID
+	// via NodeUIStateFor with no lock. Rebuilt once per emitSnapshot call (rebuildNodeUIStates)
+	// — a nodeMover's own per-cycle poll (writeStreamFrame) reads whatever is currently
+	// published, matching edgeSelected's same at-most-one-snapshot-old freshness.
+	nodeUIStates atomic.Pointer[map[string]nodeUIStateSnap]
+
+	// portHovered publishes the CURRENT per-port hover state, keyed by "node\x00port\x00
+	// isInput" ("0"/"1"), as an immutable map — the per-PORT analogue of nodeUIStates
+	// (a node's own hover lives in nodeUIStateSnap; a PORT's hover is separate UI state
+	// on portSnapState). Rebuilt alongside nodeUIStates (rebuildNodeUIStates) so a
+	// dedicated nodeMover stream's own poll can read this node's own ports' hover with no
+	// lock.
+	portHovered atomic.Pointer[map[string]uint8]
+
 	// selectedEdges publishes the CURRENT edge-selection state (label -> selected) as an
 	// immutable map, atomically, so a dedicated edgeMover goroutine (a stream-owning
 	// goroutine other than the Trace-drain goroutine) can read the current selection via
@@ -259,6 +286,85 @@ func (s *SnapshotState) SetViewOut(w io.Writer) {
 // before this migration — required for headless tests and non-extension launches.
 func (s *SnapshotState) SetEdgeStreamActive(active bool) {
 	s.edgeStreamActive.Store(active)
+}
+
+// SetNodeStreamActive installs the either/or for the fd-3 Node/Interior/Port/Label/
+// PortName frame (see nodeStreamActive's doc comment): pass true once every nodeMover has
+// been wired to its own dedicated fd (nodes/Wiring's MoveDispatch.SetNodeStreams, called
+// from main.go when WIREFOLD_STREAM_FDS carries a "node" entry). Leave uncalled
+// (nodeStreamActive stays false) to keep the fallback — required for headless tests and
+// non-extension launches.
+func (s *SnapshotState) SetNodeStreamActive(active bool) {
+	s.nodeStreamActive.Store(active)
+}
+
+// nodeUIStateSnap is one node's published UI-state snapshot (see nodeUIStates' doc
+// comment) — everything a dedicated nodeMover stream needs to emit its own Node row that
+// this SnapshotState (not the nodeMover) is the sole owner/writer of.
+type nodeUIStateSnap struct {
+	selected, hovered, latchedSel, gotDragMsg, kindID uint8
+	dragDeltaA, dragDeltaB, dragDeltaC                int32
+}
+
+// rebuildNodeUIStates republishes nodeUIStates from the current s.nodes/s.nodeIndex
+// state. Called once per emitSnapshot (Trace-drain goroutine) regardless of whether the
+// dedicated node stream is active — cheap, and keeps the published map from ever going
+// stale by more than one snapshot cycle.
+func (s *SnapshotState) rebuildNodeUIStates() {
+	m := make(map[string]nodeUIStateSnap, len(s.nodeIndex))
+	ph := map[string]uint8{}
+	for id, i := range s.nodeIndex {
+		n := s.nodes[i]
+		m[id] = nodeUIStateSnap{
+			selected: n.selected, hovered: n.hovered, latchedSel: n.latchedSel,
+			gotDragMsg: n.gotDragMsg, kindID: n.kindID,
+			dragDeltaA: n.dragDeltaA, dragDeltaB: n.dragDeltaB, dragDeltaC: n.dragDeltaC,
+		}
+		for _, p := range n.ports {
+			if p.hovered != 0 {
+				ph[portHoverKey(id, p.name, p.isInput)] = 1
+			}
+		}
+	}
+	s.nodeUIStates.Store(&m)
+	s.portHovered.Store(&ph)
+}
+
+// portHoverKey builds the portHovered map key for (node, port, isInput).
+func portHoverKey(node, port string, isInput bool) string {
+	iv := "0"
+	if isInput {
+		iv = "1"
+	}
+	return node + "\x00" + port + "\x00" + iv
+}
+
+// PortHoveredFor reports whether (node, port, isInput) is CURRENTLY hovered, via the
+// published portHovered map. Safe to call from a goroutine other than the Trace drain,
+// same lock-free shape as NodeUIStateFor/IsEdgeSelected.
+func (s *SnapshotState) PortHoveredFor(node, port string, isInput bool) uint8 {
+	m := s.portHovered.Load()
+	if m == nil {
+		return 0
+	}
+	return (*m)[portHoverKey(node, port, isInput)]
+}
+
+// NodeUIStateFor resolves id's current published UI-state snapshot (see nodeUIStates' doc
+// comment). Safe to call from a goroutine other than the Trace drain (reads an immutable
+// atomically-published map, same shape as selectedEdges/portTable/edgeTable/nodeTable).
+// ok=false when id has never registered a node-geometry event yet.
+func (s *SnapshotState) NodeUIStateFor(id string) (selected, hovered, latchedSel, gotDragMsg, kindID uint8, dragDeltaA, dragDeltaB, dragDeltaC int32, ok bool) {
+	m := s.nodeUIStates.Load()
+	if m == nil {
+		return 0, 0, 0, 0, 0, 0, 0, 0, false
+	}
+	st, found := (*m)[id]
+	if !found {
+		return 0, 0, 0, 0, 0, 0, 0, 0, false
+	}
+	return st.selected, st.hovered, st.latchedSel, st.gotDragMsg, st.kindID,
+		st.dragDeltaA, st.dragDeltaB, st.dragDeltaC, true
 }
 
 // PortRowFor resolves (node, port, isInput) to its buffer PORT-ROW index via the
@@ -990,9 +1096,21 @@ func (s *SnapshotState) emitSnapshot() {
 			s.writeFrame(BufBlockTagBead, beadFrame)
 			s.writeFrame(BufBlockTagEdge, edgeFrame)
 		}
-		s.writeFrame(BufBlockTagNode, nodeFrame)
+		// Either/or with the dedicated per-node streams (nodeStreamActive — see its doc
+		// comment): when active, every nodeMover writes its OWN combined node+ports+label
+		// frame to its OWN fd, and every node's own Update goroutine writes its OWN
+		// interior-bead frame to its OWN fd, so the fd-3 Node block (which carries
+		// Node/Interior/Port/Label/PortName together) is skipped here entirely.
+		if !s.nodeStreamActive.Load() {
+			s.writeFrame(BufBlockTagNode, nodeFrame)
+		}
 		s.writeFrame(BufBlockTagScene, snap)
 	}
+	// Republish the node UI-state map every emit, regardless of which write path is
+	// active (rebuildNodeUIStates' doc comment) — cheap, and keeps a dedicated nodeMover
+	// stream's own poll (writeStreamFrame) from ever reading state more than one
+	// snapshot cycle stale.
+	s.rebuildNodeUIStates()
 	// VIEW stream: when the dedicated fd is active (s.viewOut != nil), camera/overlay/
 	// scene were already EXCLUDED from `snap` above (buildSnapshot's either/or) — write
 	// them here instead, as their own untagged frame on their own fd (no tag byte: the

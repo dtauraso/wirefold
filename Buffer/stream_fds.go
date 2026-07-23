@@ -56,6 +56,19 @@ const StreamKindView = "view"
 // no shared writer (memory/feedback_no_single_writer_bridge.md).
 const StreamKindEdge = "edge"
 
+// StreamKindNode is the per-nodeMover stream kind: one dedicated fd PER NODE ROW
+// (rowIndex = that node's stable seed-order row, matching Buffer's Node block row order —
+// see nodes/Wiring's MoveDispatch.SetNodeStreams and main.go). Each nodeMover goroutine
+// writes ITS OWN node geometry + ports + label as one combined frame
+// (Buffer.BuildNodeStreamFrame) to fd = baseFd["node"] + nodeRow.
+const StreamKindNode = "node"
+
+// StreamKindInterior is the per-node-Update-loop stream kind: one dedicated fd PER NODE
+// ROW (same row order as StreamKindNode), written by that node's OWN Update goroutine
+// (the SECOND emitting goroutine per node, alongside its nodeMover) whenever its interior
+// beads change (Buffer.BuildInteriorStreamFrame) to fd = baseFd["interior"] + nodeRow.
+const StreamKindInterior = "interior"
+
 // StreamFDs is the parsed WIREFOLD_STREAM_FDS env var: kind name -> base fd number.
 type StreamFDs map[string]int
 

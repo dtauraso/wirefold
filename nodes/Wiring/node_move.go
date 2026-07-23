@@ -29,6 +29,7 @@ package Wiring
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"sync"
@@ -215,6 +216,21 @@ type MoveDispatch struct {
 	// FSM falls back to the raw hit's Id string. Go owns the topology and wrote the Node
 	// block, so it — not TS — maps a node row to its id.
 	nodeRows NodeRowResolver
+	// interiorOuts holds ONE dedicated per-node interior-bead fd, keyed by node id — the
+	// SECOND emitting goroutine per node (its own Update loop, not its nodeMover) writes
+	// here (memory/feedback_no_single_writer_bridge.md). Populated ONCE by
+	// SetNodeStreams, BEFORE any node's Update goroutine launches (mirrors
+	// SetEdgeStreams' "wire before launch" ordering) — read-only afterward, so a node's
+	// own Update-loop closures (builders.go's injectClosures) can look it up by name with
+	// no lock. nil map entries / a nil map itself (no WIREFOLD_STREAM_FDS "interior"
+	// entry) are the REQUIRED fallback: tr.NodeBead keeps flowing into the shared
+	// Buffer.SnapshotState (fd 3's Node/Interior/Port/Label/PortName frame) unchanged.
+	interiorOuts map[string]io.Writer
+	// buildInteriorFrame packs one node's fixed-slot interior frame bytes
+	// (Buffer.BuildInteriorStreamFrame), injected here (rather than importing Buffer) so
+	// this package stays Buffer-independent, matching portRowFor/buildFrame's existing
+	// interface-injection pattern on edgeMover.
+	buildInteriorFrame func(tick uint32, present []uint8, value []int32, ox, oy, oz []float32) []byte
 	// sel groups the CURRENTLY-SELECTED (click-select) and CURRENTLY-HOVERED (pointer hover)
 	// UI-only state (selection_state.go) — pure routing-directory-parked UI state, owned by
 	// Go but not part of the dispatch/persist/camera concerns. Grouped the same way
@@ -322,6 +338,46 @@ func (md *MoveDispatch) SetEdgeStreams(
 		em.portRowFor = portRowFor
 		em.edgeSelected = edgeSelected
 		em.buildFrame = buildFrame
+	}
+}
+
+// SetNodeStreams wires every nodeMover to ITS OWN dedicated node-fd (geometry+ports+
+// label), AND wires the interiorOuts directory + buildInteriorFrame func every node's own
+// Update-loop closures (builders.go's injectClosures) look up for its own dedicated
+// interior-fd — the two emitting goroutines per node (memory/feedback_no_single_writer_bridge.md).
+// nodeBase/interiorBase are the two fd ranges' base fds; row is the STABLE node-seed
+// order (md.nodeSeeds, the same spec order Buffer.SnapshotState's Node block uses — see
+// main.go's md.NodeSeeds() seed loop). uiStateFor/buildFrame/buildInteriorFrame are
+// injected funcs (not a Buffer import), matching SetEdgeStreams' existing pattern:
+// uiStateFor resolves a node's current selection/hover/drag/kind UI state
+// (Buffer.SnapshotState.NodeUIStateFor), buildFrame packs the combined per-node frame
+// bytes (Buffer.BuildNodeStreamFrame), buildInteriorFrame packs the per-node interior
+// frame bytes (Buffer.BuildInteriorStreamFrame). Call once at startup after
+// LoadTopology, before Start — mirrors SetEdgeStreams' call site in main.go. A missing
+// nodeMover for a seed row (should not happen) is skipped rather than panicking.
+func (md *MoveDispatch) SetNodeStreams(
+	nodeBase, interiorBase int,
+	uiStateFor func(id string) (selected, hovered, latchedSel, gotDragMsg, kindID uint8, dragDeltaA, dragDeltaB, dragDeltaC int32, ok bool),
+	portHoveredFor func(node, port string, isInput bool) uint8,
+	buildFrame func(tick uint32, nodeRow int32, cx, cy, cz, radius, sphereR float32, vrx, vry, vrz, frx, fry, frz float32, selected, kindID, hovered, latchedSel, gotDragMsg uint8, dragDeltaA, dragDeltaB, dragDeltaC int32, label string, portNames []string, portDX, portDY, portDZ, portPX, portPY, portPZ []float32, portIsInput, portHovered []uint8) []byte,
+	buildInteriorFrame func(tick uint32, present []uint8, value []int32, ox, oy, oz []float32) []byte,
+) {
+	md.interiorOuts = map[string]io.Writer{}
+	md.buildInteriorFrame = buildInteriorFrame
+	for row, seed := range md.nodeSeeds {
+		nm, ok := md.nodeMovers[seed.ID]
+		if !ok {
+			continue
+		}
+		nFd := nodeBase + row
+		nm.streamOut = os.NewFile(uintptr(nFd), fmt.Sprintf("node-fd%d", nFd))
+		nm.nodeRow = int32(row)
+		nm.uiStateFor = uiStateFor
+		nm.portHoveredFor = portHoveredFor
+		nm.buildFrame = buildFrame
+
+		iFd := interiorBase + row
+		md.interiorOuts[seed.ID] = os.NewFile(uintptr(iFd), fmt.Sprintf("interior-fd%d", iFd))
 	}
 }
 

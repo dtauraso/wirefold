@@ -1,0 +1,270 @@
+// headless_node_fd_test.go — drives the REAL compiled binary headlessly and proves the
+// per-node dedicated-stream migration end-to-end, both paths of the required dual path
+// (memory/feedback_no_single_writer_bridge.md, Buffer/stream_fds.go's StreamKindNode/
+// StreamKindInterior):
+//
+//   - TestHeadlessNodeFdDedicatedStream: WIREFOLD_STREAM_FDS="view:4,node:<base>,
+//     interior:<base>" wired (one fd per node row for each of the two kinds) — every
+//     node's own combined frame (Node fields + ports + label) arrives on its OWN "node"
+//     fd, every node's own interior-bead frame arrives on its OWN "interior" fd, and the
+//     fd-3 stream's frames carry NO Node block tag at all.
+//   - TestHeadlessNodeFdFallback: WIREFOLD_STREAM_FDS unset — the Node/Interior/Port/
+//     Label/PortName frame stays on fd 3 exactly as before this migration.
+//
+// See headless_edge_fd_test.go for the spawn/fd3/cleanup pattern this reuses; NEVER run
+// the sim in the foreground (memory/feedback_no_foreground_sim_runs.md).
+package main
+
+import (
+	"bufio"
+	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"sort"
+	"testing"
+	"time"
+
+	B "github.com/dtauraso/wirefold/Buffer"
+)
+
+// runHeadlessNodeFdCase builds the real binary and spawns it with fd3 always wired.
+// dedicated=true additionally wires fd4 as the VIEW stream and one fd per node row for
+// EACH of "node" and "interior" (WIREFOLD_STREAM_FDS="view:4,node:5,interior:5+N").
+// dedicated=false leaves WIREFOLD_STREAM_FDS unset (the fallback). Returns whether ANY
+// fd-3 frame carried the Node tag, plus (when dedicated) the first non-empty frame read
+// off each node row's own "node" and "interior" fds.
+func runHeadlessNodeFdCase(t *testing.T, dedicated bool) (sawNodeTag bool, nodeFrames, interiorFrames map[int][]byte) {
+	t.Helper()
+	repoRoot, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	nodeIDs := wantNodeRowOrder(t, repoRoot)
+	nodeCount := len(nodeIDs)
+	binPath := filepath.Join(t.TempDir(), "wirefold-headless-node-fd-test")
+
+	buildCtx, buildCancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer buildCancel()
+	buildCmd := exec.CommandContext(buildCtx, "go", "build", "-o", binPath, ".")
+	buildCmd.Dir = repoRoot
+	if out, err := buildCmd.CombinedOutput(); err != nil {
+		t.Fatalf("go build: %v\n%s", err, out)
+	}
+
+	runCtx, runCancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer runCancel()
+
+	cmd := exec.CommandContext(runCtx, binPath, "-topology", filepath.Join(repoRoot, "topology"))
+	cmd.Dir = repoRoot
+	cmd.Stderr = os.Stderr
+
+	stdinRead, stdinWrite, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("Pipe (stdin): %v", err)
+	}
+	cmd.Stdin = stdinRead
+
+	fd3Read, fd3Write, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("Pipe (fd3): %v", err)
+	}
+	cmd.ExtraFiles = []*os.File{fd3Write} // fd3
+
+	var nodeReads, interiorReads []*os.File
+	if dedicated {
+		_, viewWrite, err := os.Pipe()
+		if err != nil {
+			t.Fatalf("Pipe (view): %v", err)
+		}
+		cmd.ExtraFiles = append(cmd.ExtraFiles, viewWrite) // fd4
+		nodeBase := 5
+		interiorBase := nodeBase + nodeCount
+		for i := 0; i < nodeCount; i++ {
+			nr, nw, err := os.Pipe()
+			if err != nil {
+				t.Fatalf("Pipe (node %d): %v", i, err)
+			}
+			cmd.ExtraFiles = append(cmd.ExtraFiles, nw) // fd nodeBase+i
+			nodeReads = append(nodeReads, nr)
+		}
+		for i := 0; i < nodeCount; i++ {
+			ir, iw, err := os.Pipe()
+			if err != nil {
+				t.Fatalf("Pipe (interior %d): %v", i, err)
+			}
+			cmd.ExtraFiles = append(cmd.ExtraFiles, iw) // fd interiorBase+i
+			interiorReads = append(interiorReads, ir)
+		}
+		cmd.Env = append(os.Environ(),
+			"WIREFOLD_STREAM_FDS=view:4,node:5,interior:"+itoa(interiorBase))
+	}
+
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	_ = stdinRead.Close()
+	fd3Write.Close()
+	for _, f := range cmd.ExtraFiles[1:] {
+		_ = f.Close()
+	}
+
+	t.Cleanup(func() {
+		runCancel()
+		_ = stdinWrite.Close()
+		_ = fd3Read.Close()
+		for _, r := range nodeReads {
+			_ = r.Close()
+		}
+		for _, r := range interiorReads {
+			_ = r.Close()
+		}
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		_ = cmd.Wait()
+	})
+
+	br := bufio.NewReader(fd3Read)
+	const maxFrames = 120
+	sawScene := false
+	for i := 0; i < maxFrames; i++ {
+		buf, err := readOneTaggedFrame(br)
+		if err != nil {
+			t.Fatalf("frame %d: readOneTaggedFrame: %v", i, err)
+		}
+		switch buf[0] {
+		case B.BufBlockTagScene:
+			sawScene = true
+		case B.BufBlockTagNode:
+			sawNodeTag = true
+		}
+	}
+	if !sawScene {
+		t.Fatalf("no scene frame seen within %d frames", maxFrames)
+	}
+
+	readLast := func(reads []*os.File, kind string) map[int][]byte {
+		out := make(map[int][]byte, len(reads))
+		for row, f := range reads {
+			r := bufio.NewReader(f)
+			var last []byte
+			for i := 0; i < maxFrames; i++ {
+				buf, err := readOneRawFrame(r)
+				if err != nil {
+					if i == 0 {
+						t.Fatalf("readOneRawFrame (%s row %d), frame %d: %v", kind, row, i, err)
+					}
+					break
+				}
+				last = buf
+			}
+			if last == nil {
+				t.Fatalf("no frame seen on %s row %d's dedicated fd", kind, row)
+			}
+			out[row] = last
+		}
+		return out
+	}
+
+	if dedicated {
+		nodeFrames = readLast(nodeReads, "node")
+		interiorFrames = readLast(interiorReads, "interior")
+	}
+
+	return sawNodeTag, nodeFrames, interiorFrames
+}
+
+// itoa avoids importing strconv twice across test files in this package; trivial base-10
+// non-negative int formatter, sufficient for fd numbers.
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	var buf [20]byte
+	i := len(buf)
+	for n > 0 {
+		i--
+		buf[i] = byte('0' + n%10)
+		n /= 10
+	}
+	return string(buf[i:])
+}
+
+// TestHeadlessNodeFdDedicatedStream proves the PROOF half of the dual path: with every
+// node row's own "node"+"interior" fds wired, each node's combined geometry+ports+label
+// frame arrives on its OWN "node" fd with resolvable content, each node's interior frame
+// arrives on its OWN "interior" fd, and the fd-3 stream never carries a Node-tagged frame
+// (i.e. it is NOT double-sourced from both places).
+func TestHeadlessNodeFdDedicatedStream(t *testing.T) {
+	sawNodeTag, nodeFrames, interiorFrames := runHeadlessNodeFdCase(t, true)
+
+	if sawNodeTag {
+		t.Fatalf("fd-3 stream carried a Node-tagged frame while the dedicated node fds were active — the fd-3 Node block was not excluded")
+	}
+
+	repoRoot, _ := os.Getwd()
+	wantLabels := wantNodeRowOrder(t, repoRoot)
+	sort.Strings(wantLabels) // wantNodeRowOrder already returns sorted spec order
+
+	for row, frame := range nodeFrames {
+		// Combined frame layout (Buffer.BuildNodeStreamFrame): [tick:u32][portCount:u32]
+		// [labelLen:u32][portNameBytesCount:u32] + Node row + label bytes + Port rows +
+		// port-name bytes.
+		if len(frame) < 16+B.BufNodeStride {
+			t.Fatalf("node row %d: frame too short (%d bytes) to hold header+Node row", row, len(frame))
+		}
+		portCount := readU32(frame, 4)
+		labelLen := readU32(frame, 8)
+		portNameBytesCount := readU32(frame, 12)
+		nodeOff := 16
+		labelOff := nodeOff + B.BufNodeStride
+		if labelOff+int(labelLen) > len(frame) {
+			t.Fatalf("node row %d: label overruns frame (labelLen=%d, frameLen=%d)", row, labelLen, len(frame))
+		}
+		label := string(frame[labelOff : labelOff+int(labelLen)])
+		if label == "" {
+			t.Fatalf("node row %d: empty inline label", row)
+		}
+		if row < len(wantLabels) && label != wantLabels[row] {
+			t.Fatalf("node row %d: label = %q, want %q (falls back to node id)", row, label, wantLabels[row])
+		}
+		portsOff := labelOff + int(labelLen)
+		portNamesOff := portsOff + int(portCount)*B.BufPortStride
+		if portNamesOff+int(portNameBytesCount) != len(frame) {
+			t.Fatalf("node row %d: frame length %d does not match computed layout end %d",
+				row, len(frame), portNamesOff+int(portNameBytesCount))
+		}
+		// Every Port row's NodeRow column must equal this frame's own node row (the
+		// tear-free cross-stream contract: EdgeTube resolves a port row to (nodeRow,
+		// portIndex) and looks up coordinates in THIS node's own cell).
+		for p := 0; p < int(portCount); p++ {
+			portRowOff := portsOff + p*B.BufPortStride
+			gotNodeRow := int32(readU32(frame, portRowOff))
+			if int(gotNodeRow) != row {
+				t.Fatalf("node row %d: port %d's NodeRow column = %d, want %d", row, p, gotNodeRow, row)
+			}
+		}
+	}
+
+	for row, frame := range interiorFrames {
+		// Fixed-slot frame (Buffer.BuildInteriorStreamFrame): [tick:u32] + 4 Interior rows.
+		want := 4 + 4*B.BufInteriorStride
+		if len(frame) != want {
+			t.Fatalf("interior row %d: frame length %d, want %d (fixed 4-slot layout)", row, len(frame), want)
+		}
+	}
+}
+
+// TestHeadlessNodeFdFallback proves the FALLBACK half of the dual path
+// (feedback_headless_repro_verifies_persistence: real binary, on-wire bytes, strong
+// assertions): with WIREFOLD_STREAM_FDS unset (no dedicated node/interior fds — the shape
+// every existing headless launch already gets), the Node/Interior/Port/Label/PortName
+// frame keeps shipping on fd 3 exactly as before this migration.
+func TestHeadlessNodeFdFallback(t *testing.T) {
+	sawNodeTag, _, _ := runHeadlessNodeFdCase(t, false)
+
+	if !sawNodeTag {
+		t.Fatalf("fd-3 stream never carried a Node-tagged frame with the dedicated node fds inactive — the fallback path is broken")
+	}
+}

@@ -21,7 +21,7 @@ func nodeBeadAt(events []T.Event, node string, row, col int) (T.Event, bool) {
 
 func TestEmitInputBeadsBothHeld(t *testing.T) {
 	tr := T.New(16)
-	emitInputBeads(tr, "G", 1, 0)
+	emitInputBeads(tr, "G", 1, 0, nil)
 	tr.Close()
 	evs := tr.Events()
 
@@ -48,7 +48,7 @@ func TestEmitInputBeadsBothHeld(t *testing.T) {
 // TestEmitInputBeadsNotHeld: a -1 input marks the slot empty (Present=false).
 func TestEmitInputBeadsNotHeld(t *testing.T) {
 	tr := T.New(16)
-	emitInputBeads(tr, "G", -1, 5)
+	emitInputBeads(tr, "G", -1, 5, nil)
 	tr.Close()
 	evs := tr.Events()
 

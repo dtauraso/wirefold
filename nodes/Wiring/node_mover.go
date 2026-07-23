@@ -191,6 +191,34 @@ type nodeMover struct {
 	// stale anchor from a previous drag.
 	dragAnchorByTo  map[string]LocalPolar
 	dragAnchorArmed bool
+
+	// --- dedicated per-node stream (memory/feedback_no_single_writer_bridge.md) ---
+	// streamOut, when non-nil, is THIS node's OWN dedicated fd (see
+	// MoveDispatch.SetNodeStreams / Buffer/stream_fds.go's StreamKindNode). Nil (the
+	// default — no WIREFOLD_STREAM_FDS "node" entry, e.g. headless tests) is the
+	// REQUIRED fallback: this node's geometry+ports+label keep flowing only through
+	// tr.NodeGeometry into the shared Buffer.SnapshotState (fd 3's Node/Interior/Port/
+	// Label/PortName frame), exactly as before this migration. Written ONLY by this
+	// nodeMover's own goroutine (emitGeometry/run) — no lock.
+	streamOut io.Writer
+	// nodeRow is this node's stable buffer NODE-ROW index (the seed order — see
+	// MoveDispatch.SetNodeStreams), carried on every Port row this node's stream frame
+	// writes so a port row can be resolved back to (nodeRow, portIndex) on the TS side
+	// without a shared port table.
+	nodeRow int32
+	// uiStateFor resolves this node's CURRENT selected/hovered/latchedSel/gotDragMsg/
+	// kindID/dragDelta* UI state (Buffer.SnapshotState.NodeUIStateFor — state this
+	// SnapshotState, not this nodeMover, is the sole writer of), injected here (rather
+	// than importing Buffer) via MoveDispatch.SetNodeStreams so this package stays
+	// Buffer-independent, matching edgeMover's portRowFor/edgeSelected pattern.
+	uiStateFor func(id string) (selected, hovered, latchedSel, gotDragMsg, kindID uint8, dragDeltaA, dragDeltaB, dragDeltaC int32, ok bool)
+	// portHoveredFor resolves whether (node,port,isInput) is currently hovered
+	// (Buffer.SnapshotState.PortHoveredFor), injected the same way as uiStateFor.
+	portHoveredFor func(node, port string, isInput bool) uint8
+	// buildFrame packs this node's combined per-fd frame (node fields + ports + label)
+	// using Buffer's own row-writer columns (Buffer.BuildNodeStreamFrame), injected so
+	// this package needs no Buffer import.
+	buildFrame func(tick uint32, nodeRow int32, cx, cy, cz, radius, sphereR float32, vrx, vry, vrz, frx, fry, frz float32, selected, kindID, hovered, latchedSel, gotDragMsg uint8, dragDeltaA, dragDeltaB, dragDeltaC int32, label string, portNames []string, portDX, portDY, portDZ, portPX, portPY, portPZ []float32, portIsInput, portHovered []uint8) []byte
 }
 
 func newNodeMover(id string, geom nodeGeom, tr *T.Trace, clockSrc Clock) *nodeMover {
@@ -320,6 +348,71 @@ func (m *nodeMover) applyCenter(center vec3, reach float64) {
 // so a plain field read here can never race a concurrent writer.
 func (m *nodeMover) emitGeometry() {
 	emitNodeGeometryLocked(m.tr, m.id, m.geom, m.partnerCenter)
+	// Dedicated per-node stream (either/or with the shared fd-3 Node/Interior/Port/
+	// Label/PortName frame — see streamOut's doc comment): write this node's own
+	// combined frame immediately on a geometry change, in addition to the tick-driven
+	// write in run()'s loop (mirrors edgeMover.recomputeGeometry's writeStreamFrame call).
+	m.writeStreamFrame()
+}
+
+// writeStreamFrame packs and writes this node's combined per-fd frame (center/radius/
+// ring-normals + ports + label + selection-UI columns) to its OWN dedicated fd
+// (streamOut). No-op when streamOut is nil (the fallback — see its doc comment) or
+// buildFrame was never injected (bare test construction). Called only by this nodeMover's
+// own goroutine (emitGeometry and run's per-cycle loop), so no lock is needed reading
+// m.geom.
+func (m *nodeMover) writeStreamFrame() {
+	if m.streamOut == nil || m.buildFrame == nil {
+		return
+	}
+	center := nodeWorldPos(m.geom)
+	sphereR := effectiveRadius(m.geom)
+	label := m.geom.Label
+	if label == "" {
+		label = m.id
+	}
+	portPosDir := aimedPortPosDir(m.geom, m.partnerCenter)
+	ports := buildPortGeoms(m.geom, portPosDir)
+	portNames := make([]string, len(ports))
+	portDX := make([]float32, len(ports))
+	portDY := make([]float32, len(ports))
+	portDZ := make([]float32, len(ports))
+	portPX := make([]float32, len(ports))
+	portPY := make([]float32, len(ports))
+	portPZ := make([]float32, len(ports))
+	portIsInput := make([]uint8, len(ports))
+	portHovered := make([]uint8, len(ports))
+	for i, p := range ports {
+		portNames[i] = p.Name
+		portDX[i], portDY[i], portDZ[i] = float32(p.DX), float32(p.DY), float32(p.DZ)
+		portPX[i], portPY[i], portPZ[i] = float32(p.PX), float32(p.PY), float32(p.PZ)
+		if p.IsInput {
+			portIsInput[i] = 1
+		}
+		if m.portHoveredFor != nil {
+			portHovered[i] = m.portHoveredFor(m.id, p.Name, p.IsInput)
+		}
+	}
+	var selected, hovered, latchedSel, gotDragMsg, kindID uint8
+	var dA, dB, dC int32
+	if m.uiStateFor != nil {
+		if s, h, l, g, k, a, b, c, ok := m.uiStateFor(m.id); ok {
+			selected, hovered, latchedSel, gotDragMsg, kindID, dA, dB, dC = s, h, l, g, k, a, b, c
+		}
+	}
+	frame := m.buildFrame(uint32(m.clk.Tick()), m.nodeRow,
+		float32(center.X), float32(center.Y), float32(center.Z),
+		float32(nodeRadius(m.geom.Kind)), float32(sphereR),
+		verticalRingNormalX, verticalRingNormalY, verticalRingNormalZ,
+		flatRingNormalX, flatRingNormalY, flatRingNormalZ,
+		selected, kindID, hovered, latchedSel, gotDragMsg, dA, dB, dC,
+		label, portNames, portDX, portDY, portDZ, portPX, portPY, portPZ, portIsInput, portHovered)
+	var hdr [4]byte
+	binary.LittleEndian.PutUint32(hdr[:], uint32(len(frame)))
+	// Fire-and-forget, same reasoning as SnapshotState.writeFrame: no delivery
+	// guarantee on this channel, errors ignored.
+	_, _ = m.streamOut.Write(hdr[:])
+	_, _ = m.streamOut.Write(frame)
 }
 
 // flushPending retries every message in m.pending in order, attempting a non-blocking
@@ -417,6 +510,12 @@ func (m *nodeMover) run(ctx context.Context) {
 		// Retry any pending sends (nm.pending/flushPending) every cycle — a
 		// destination that was full earlier may have drained since.
 		m.flushPending()
+		// Selection/hover/drag UI state may have changed even with no geometry change
+		// this cycle (that state is Buffer.SnapshotState-owned, not this nodeMover's own
+		// — see uiStateFor's doc comment) — write this node's dedicated stream frame
+		// every cycle (no-op when streamOut is nil, the fallback path), mirroring
+		// edgeMover.run's same every-cycle writeStreamFrame call.
+		m.writeStreamFrame()
 		if err := m.clk.SleepCycle(ctx); err != nil {
 			return
 		}

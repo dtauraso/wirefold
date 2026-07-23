@@ -14,7 +14,7 @@ import (
 func TestEmitNodeBeadsPositions(t *testing.T) {
 	// Full state: working=[1,0], backup=[1,0] → 4 present slots.
 	tr := T.New(0)
-	emitNodeBeads(tr, "in", []int{1, 0}, []int{1, 0})
+	emitNodeBeads(tr, "in", []int{1, 0}, []int{1, 0}, nil)
 	tr.Close()
 	full := tr.Events()
 	if len(full) != 4 {
@@ -53,7 +53,7 @@ func TestEmitNodeBeadsPositions(t *testing.T) {
 	// After one pop: working=[1] (end 0 removed). Still a 4-slot snapshot, but the
 	// working col-1 slot is now present=false; the other 3 are present=true.
 	tr2 := T.New(0)
-	emitNodeBeads(tr2, "in", []int{1}, []int{1, 0})
+	emitNodeBeads(tr2, "in", []int{1}, []int{1, 0}, nil)
 	tr2.Close()
 	ev := tr2.Events()
 	if len(ev) != 4 {

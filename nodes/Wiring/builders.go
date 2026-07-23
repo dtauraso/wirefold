@@ -75,6 +75,14 @@ type PortBindings struct {
 	// with no speed channel just never hears a speed change, same as it never
 	// had a clock to speed up before this plan).
 	speedSinks *[]chan float64
+	// md, when non-nil, gives injectClosures's interior-bead Emit* closures access to
+	// this node's OWN dedicated interior fd (md.interiorOuts, keyed by node id) and the
+	// injected interior-frame builder (md.buildInteriorFrame) — see
+	// MoveDispatch.SetNodeStreams / memory/feedback_no_single_writer_bridge.md. Set once
+	// per node at construction (loader.go's buildNodes: pb.md = b.md); nil in test builds
+	// with no loader, in which case the Emit* closures just skip the dedicated-stream
+	// write (tr.NodeBead alone, unchanged).
+	md *MoveDispatch
 }
 
 // singleBinding is the resolved paced binding for one single port. For an INPUT
@@ -282,12 +290,32 @@ func injectClosures(ctx context.Context, v reflect.Value, name string, pb PortBi
 		}
 	})
 
+	// interiorStr bundles this node's OWN dedicated interior fd (looked up by name from
+	// pb.md.interiorOuts, populated by SetNodeStreams — see interiorOuts' doc comment)
+	// plus the injected frame builder — the SECOND emitting goroutine per node
+	// (memory/feedback_no_single_writer_bridge.md). Looked up LAZILY inside the
+	// closures (not here) because pb.md.interiorOuts is only populated by main.go
+	// AFTER LoadTopology returns, i.e. after injectClosures runs; the map itself is
+	// never mutated again once any node's Update goroutine could be reading it (main.go
+	// wires it before the node-goroutine launch loop), so a lock-free read at call time
+	// is safe. buildInteriorStream resolves both from pb.md at CALL time.
+	buildInteriorStream := func() *interiorStream {
+		if pb.md == nil || pb.md.interiorOuts == nil {
+			return nil
+		}
+		out, ok := pb.md.interiorOuts[name]
+		if !ok || out == nil || pb.md.buildInteriorFrame == nil {
+			return nil
+		}
+		return &interiorStream{out: out, buildFrame: pb.md.buildInteriorFrame}
+	}
+
 	// Inject EmitNodeBeads closure if the struct has an `EmitNodeBeads
 	// func(working, backup []int)` field (node 1's interior buffer). Emits one
 	// node-bead event per present interior bead. The node's Update calls it with the
 	// LIVE working/backup contents whenever the arrays change.
 	injectFunc(v, "EmitNodeBeads", tEmitBeadsFunc, func(working, backup []int) {
-		emitNodeBeads(tr, name, working, backup)
+		emitNodeBeads(tr, name, working, backup, buildInteriorStream())
 	})
 
 	// Inject EmitHeldBead closure if the struct has an `EmitHeldBead func(held int)`
@@ -295,14 +323,14 @@ func injectClosures(ctx context.Context, v reflect.Value, name string, pb PortBi
 	// (slot 0,0 at offset 0,0,0) colored by the held value; held == -1 →
 	// present=false (empty interior).
 	injectFunc(v, "EmitHeldBead", tEmitHeldFunc, func(held int) {
-		emitHeldBead(tr, name, held)
+		emitHeldBead(tr, name, held, buildInteriorStream())
 	})
 
 	// Inject EmitInputBeads closure if the struct has an `EmitInputBeads
 	// func(left, right int)` field (a gate's two-sided held-input beads): LEFT input
 	// on the left of the node, RIGHT on the right; -1 = not held → present=false.
 	injectFunc(v, "EmitInputBeads", tEmitInputBeadsFunc, func(left, right int) {
-		emitInputBeads(tr, name, left, right)
+		emitInputBeads(tr, name, left, right, buildInteriorStream())
 	})
 
 	// EmitRefillSlide func(clk Clock, speedCh <-chan float64, beads []int): the

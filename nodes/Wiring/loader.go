@@ -638,6 +638,13 @@ func (b *buildCtx) buildNodes() error {
 		// onto the SAME build-wide accumulator, so LoadTopology's one returned
 		// list carries every clock-owning goroutine across the whole build.
 		pb.speedSinks = &b.speedSinks
+		// md gives injectClosures's interior-bead Emit* closures access to this node's
+		// OWN dedicated interior fd (md.interiorOuts, keyed by node id) + the injected
+		// frame builder (md.buildInteriorFrame) — the SECOND emitting goroutine per node
+		// (memory/feedback_no_single_writer_bridge.md). nil until SetNodeStreams runs
+		// (main.go, after LoadTopology returns); the Emit* closures nil-check both before
+		// writing, so this is the required fallback (fd3-only) until then.
+		pb.md = b.md
 
 		for _, port := range bind.Ports {
 			switch port.Dir {

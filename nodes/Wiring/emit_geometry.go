@@ -7,9 +7,64 @@ package Wiring
 
 import (
 	"context"
+	"encoding/binary"
+	"io"
 
 	T "github.com/dtauraso/wirefold/Trace"
 )
+
+// interiorStream bundles ONE node's own dedicated interior fd + injected frame builder +
+// a local monotonic tick counter, so emitNodeBeads/emitHeldBead/emitInputBeads can pass
+// one small value instead of three loose params. Built once per node (injectClosures);
+// nil-safe (a zero-value *interiorStream is fine — write is a no-op when out is nil).
+type interiorStream struct {
+	out        io.Writer
+	buildFrame func(tick uint32, present []uint8, value []int32, ox, oy, oz []float32) []byte
+	tick       uint32
+}
+
+// write packs and writes this node's current interior-slot arrays via
+// writeInteriorStreamFrame, advancing its own local tick counter. No-op (including on a
+// nil receiver) when out/buildFrame aren't wired — the fallback path.
+func (s *interiorStream) write(present []uint8, value []int32, ox, oy, oz []float32) {
+	if s == nil {
+		return
+	}
+	s.tick++
+	writeInteriorStreamFrame(s.out, s.buildFrame, s.tick, present, value, ox, oy, oz)
+}
+
+// boolU8 converts a bool to the buffer's canonical 0/1 byte encoding — a local copy of
+// Buffer.boolU8 (unexported there), avoided rather than importing Buffer into this
+// Buffer-independent package.
+func boolU8(b bool) uint8 {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// writeInteriorStreamFrame packs and writes ONE node's current fixed 4-slot interior
+// state to its OWN dedicated fd (out) via buildFrame (Buffer.BuildInteriorStreamFrame,
+// injected so this package needs no Buffer import) — the SECOND emitting goroutine per
+// node (memory/feedback_no_single_writer_bridge.md): this node's own Update loop, called
+// from the SAME goroutine as the tr.NodeBead calls beside each call site below. No-op
+// when out is nil (no dedicated interior fd for this node — the fallback path) or
+// buildFrame is nil (no WIREFOLD_STREAM_FDS "interior" entry). tick is a local
+// monotonically-increasing counter (informational only — freshness, not correctness; the
+// Interior columns themselves carry the authoritative state).
+func writeInteriorStreamFrame(out io.Writer, buildFrame func(tick uint32, present []uint8, value []int32, ox, oy, oz []float32) []byte, tick uint32, present []uint8, value []int32, ox, oy, oz []float32) {
+	if out == nil || buildFrame == nil {
+		return
+	}
+	frame := buildFrame(tick, present, value, ox, oy, oz)
+	var hdr [4]byte
+	binary.LittleEndian.PutUint32(hdr[:], uint32(len(frame)))
+	// Fire-and-forget, same reasoning as SnapshotState.writeFrame: no delivery
+	// guarantee on this channel, errors ignored.
+	_, _ = out.Write(hdr[:])
+	_, _ = out.Write(frame)
+}
 
 // partnerCenterFn returns the CURRENT world center of the single partner node connected
 // to (port, isInput) via one edge — the aimed-port model's one input. ok is false for an
@@ -140,20 +195,28 @@ func emitNodeGeometryWith(tr *T.Trace, nodeName string, g nodeGeom, portPosDir f
 // slot can. Discrete positions only (beads snap to slots; no slide yet). Called from
 // the node's injected EmitNodeBeads closure whenever the arrays change. Offsets are
 // node-local, so no node geometry is needed.
-func emitNodeBeads(tr *T.Trace, nodeName string, working, backup []int) {
+func emitNodeBeads(tr *T.Trace, nodeName string, working, backup []int, stream *interiorStream) {
 	const cols = 2
+	present := make([]uint8, 0, 4)
+	value := make([]int32, 0, 4)
+	ox, oy, oz := make([]float32, 0, 4), make([]float32, 0, 4), make([]float32, 0, 4)
 	emitRow := func(row int, slice []int) {
 		for col := 0; col < cols; col++ {
 			p := interiorSlotOffset(row, col)
-			if col < len(slice) {
-				tr.NodeBead(nodeName, row, col, true, slice[col], p.X, p.Y, p.Z)
-			} else {
-				tr.NodeBead(nodeName, row, col, false, 0, p.X, p.Y, p.Z)
+			has := col < len(slice)
+			v := 0
+			if has {
+				v = slice[col]
 			}
+			tr.NodeBead(nodeName, row, col, has, v, p.X, p.Y, p.Z)
+			present = append(present, boolU8(has))
+			value = append(value, int32(v))
+			ox, oy, oz = append(ox, float32(p.X)), append(oy, float32(p.Y)), append(oz, float32(p.Z))
 		}
 	}
 	emitRow(0, backup)  // top row = backup
 	emitRow(1, working) // bottom row = working
+	stream.write(present, value, ox, oy, oz)
 }
 
 // emitHeldBead streams the HoldNewSendOld node's interior as a SINGLE centered
@@ -170,8 +233,21 @@ const NoValue = -1
 // existing node-bead convention); held == NoValue (no value seen yet) →
 // present=false so the interior renders empty. Called from the node's injected
 // EmitHeldBead closure only when the held value changes.
-func emitHeldBead(tr *T.Trace, nodeName string, held int) {
-	tr.NodeBead(nodeName, 0, 0, held != NoValue, held, 0, 0, 0)
+func emitHeldBead(tr *T.Trace, nodeName string, held int, stream *interiorStream) {
+	has := held != NoValue
+	tr.NodeBead(nodeName, 0, 0, has, held, 0, 0, 0)
+	// Only slot (0,0) is meaningful for a HoldNewSendOld node; the remaining 3 fixed
+	// slots stay absent, matching the fd-3 Interior block's convention for this kind
+	// (writeInteriorBlock reads n.interior[slot], and only slot 0 was ever set here).
+	v := 0
+	if has {
+		v = held
+	}
+	stream.write(
+		[]uint8{boolU8(has), 0, 0, 0},
+		[]int32{int32(v), 0, 0, 0},
+		[]float32{0, 0, 0, 0}, []float32{0, 0, 0, 0}, []float32{0, 0, 0, 0},
+	)
 }
 
 // emitInputBeads streams a gate's two held inputs as interior beads: the LEFT
@@ -179,10 +255,23 @@ func emitHeldBead(tr *T.Trace, nodeName string, held int) {
 // (positive x), vertically centered. NoValue = not held → present=false. Slot
 // keys (0,0)=left, (0,1)=right. Offsets use interiorSlot so they sit inside the
 // sphere.
-func emitInputBeads(tr *T.Trace, nodeName string, left, right int) {
+func emitInputBeads(tr *T.Trace, nodeName string, left, right int, stream *interiorStream) {
 	s := interiorSlot
-	tr.NodeBead(nodeName, 0, 0, left != NoValue, left, -s, 0, 0)
-	tr.NodeBead(nodeName, 0, 1, right != NoValue, right, s, 0, 0)
+	hasL, hasR := left != NoValue, right != NoValue
+	tr.NodeBead(nodeName, 0, 0, hasL, left, -s, 0, 0)
+	tr.NodeBead(nodeName, 0, 1, hasR, right, s, 0, 0)
+	vL, vR := 0, 0
+	if hasL {
+		vL = left
+	}
+	if hasR {
+		vR = right
+	}
+	stream.write(
+		[]uint8{boolU8(hasL), boolU8(hasR), 0, 0},
+		[]int32{int32(vL), int32(vR), 0, 0},
+		[]float32{float32(-s), float32(s), 0, 0}, []float32{0, 0, 0, 0}, []float32{0, 0, 0, 0},
+	)
 }
 
 // emitRefillSlide runs the clock-paced animated refill for the Input node's

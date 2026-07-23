@@ -116,6 +116,21 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 		md.SetEdgeStreams(edgeBase, snapState.PortRowFor, snapState.IsEdgeSelected, B.BuildEdgeStreamFrame)
 		snapState.SetEdgeStreamActive(true)
 	}
+	// The two per-node dedicated streams (memory/feedback_no_single_writer_bridge.md):
+	// NODE (geometry+ports+label, written by each nodeMover) and INTERIOR (interior
+	// beads, written by each node's OWN Update goroutine — the SECOND emitting goroutine
+	// per node). Both require the SAME "node" AND "interior" WIREFOLD_STREAM_FDS entries
+	// (a node stream with no interior counterpart, or vice versa, would leave one of the
+	// two goroutines with nowhere fresh to write while the other already skips fd 3 —
+	// so both are required together). MUST run BEFORE the node/edge row-seed loop below,
+	// same ordering reasoning as SetEdgeStreams above.
+	if nodeBase, ok := streamFDs[B.StreamKindNode]; ok {
+		if interiorBase, ok2 := streamFDs[B.StreamKindInterior]; ok2 {
+			md.SetNodeStreams(nodeBase, interiorBase, snapState.NodeUIStateFor, snapState.PortHoveredFor,
+				B.BuildNodeStreamFrame, B.BuildInteriorStreamFrame)
+			snapState.SetNodeStreamActive(true)
+		}
+	}
 	// One example startup breadcrumb — proves the debug channel end-to-end and is genuinely
 	// useful (which topology loaded, how many nodes). Sparse: once per run.
 	tr.Breadcrumb("topology-loaded", topologyPath, "", fmt.Sprintf("nodes=%d", len(nodes)))
