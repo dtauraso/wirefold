@@ -1,15 +1,14 @@
-// Unit tests for buffer-decode.ts — pure decodeSnapshot + decodeBeadFrame + decodeNodeFrame
+// Unit tests for buffer-decode.ts — pure decodeBeadFrame + decodeNodeFrame + decodeEdgeFrame
 // functions.
 //
-// Builds raw ArrayBuffers matching the Go snapshot / bead-frame / node-frame layouts
-// (little-endian, packed) and asserts that decodeSnapshot/decodeBeadFrame/decodeNodeFrame
+// Builds raw ArrayBuffers matching the Go bead-frame / node-frame / edge-frame layouts
+// (little-endian, packed) and asserts that decodeBeadFrame/decodeNodeFrame/decodeEdgeFrame
 // produce the correct counts and per-row values via the buffer-layout.ts read helpers.
 
 import { describe, it, expect } from "vitest";
-import { decodeSnapshot, decodeBeadFrame, decodeNodeFrame, decodeEdgeFrame, nodeLabel, INTERIOR_SLOTS_PER_NODE } from "../src/webview/three/buffer-decode";
+import { decodeBeadFrame, decodeNodeFrame, decodeEdgeFrame, nodeLabel, INTERIOR_SLOTS_PER_NODE } from "../src/webview/three/buffer-decode";
 import {
-  BUF_HEADER_SIZE,
-  BEAD_STRIDE, NODE_STRIDE, INTERIOR_STRIDE, EDGE_STRIDE, PORT_STRIDE, CAMERA_STRIDE, OVERLAY_STRIDE, SCENE_STRIDE,
+  BEAD_STRIDE, NODE_STRIDE, INTERIOR_STRIDE, EDGE_STRIDE, PORT_STRIDE,
   PORT_COL_NODE_ROW, PORT_COL_DX, PORT_COL_DY, PORT_COL_DZ, PORT_COL_IS_INPUT,
   NODE_COL_LABEL_OFF, NODE_COL_LABEL_LEN,
   EDGE_COL_SRC_PORT_ROW, EDGE_COL_DST_PORT_ROW,
@@ -25,33 +24,6 @@ import { BUF_BEAD_HEADER_SIZE, BUF_NODE_FRAME_HEADER_SIZE, BUF_EDGE_FRAME_HEADER
 
 function expectF32(got: number, want: number) {
   expect(got).toBeCloseTo(want, 5);
-}
-
-/**
- * Build a minimal SCENE snapshot ArrayBuffer. The Node/Interior/Port blocks +
- * Label/PortName bytes are NOT part of the scene frame anymore (see BUF_BLOCK_TAG_NODE —
- * use makeNodeFrame for those), and neither is the Edge block + EdgeLabel bytes (see
- * BUF_BLOCK_TAG_EDGE — use makeEdgeFrame for those). Caller receives a DataView over the
- * entire buffer so it can fill in fields.
- */
-function makeSnapshot(): {
-  buf: ArrayBuffer;
-  dv: DataView;
-  cameraOff: number;
-  overlayOff: number;
-} {
-  const totalBytes = BUF_HEADER_SIZE + CAMERA_STRIDE + OVERLAY_STRIDE + SCENE_STRIDE;
-
-  const buf = new ArrayBuffer(totalBytes);
-  const dv  = new DataView(buf);
-
-  // Write header: [tick=0][eventCount=0][layoutLinkCount=0]
-  dv.setUint32(0, 0, true); // tick
-
-  const cameraOff  = BUF_HEADER_SIZE;
-  const overlayOff = cameraOff + CAMERA_STRIDE;
-
-  return { buf, dv, cameraOff, overlayOff };
 }
 
 /**
@@ -112,45 +84,6 @@ function makeBeadFrame(beadCount: number): { buf: ArrayBuffer; dv: DataView; bea
 }
 
 // ── tests ─────────────────────────────────────────────────────────────────────
-
-describe("decodeSnapshot — null for bad input", () => {
-  it("returns null for empty buffer", () => {
-    expect(decodeSnapshot(new ArrayBuffer(0))).toBeNull();
-  });
-
-  it("returns null for header-only buffer (truncated body)", () => {
-    // Header says 1 layout link but body is missing.
-    const buf = new ArrayBuffer(BUF_HEADER_SIZE);
-    const dv  = new DataView(buf);
-    dv.setUint32(4, 1, true); // layoutLinkCount=1 but no body
-    expect(decodeSnapshot(buf)).toBeNull();
-  });
-
-  it("returns null when buffer is one byte short of expected size", () => {
-    // 0 layout links → expected = header + camera + overlay + scene
-    const expected = BUF_HEADER_SIZE + CAMERA_STRIDE + OVERLAY_STRIDE + SCENE_STRIDE;
-    const buf = new ArrayBuffer(expected - 1);
-    expect(decodeSnapshot(buf)).toBeNull();
-  });
-});
-
-describe("decodeSnapshot — empty snapshot", () => {
-  it("decodes header counts as 0", () => {
-    const { buf } = makeSnapshot();
-    const d = decodeSnapshot(buf);
-    expect(d).not.toBeNull();
-    expect(d!.layoutLinkCount).toBe(0);
-    expect(d!.tick).toBe(0);
-  });
-
-  it("block views have zero byteLength for empty blocks", () => {
-    const { buf } = makeSnapshot();
-    const d = decodeSnapshot(buf)!;
-    expect(d.layoutLinkView.byteLength).toBe(0);
-    expect(d.cameraView.byteLength).toBe(CAMERA_STRIDE);
-    expect(d.overlayView.byteLength).toBe(OVERLAY_STRIDE);
-  });
-});
 
 describe("decodeNodeFrame — null for bad input", () => {
   it("returns null for empty buffer", () => {
@@ -383,18 +316,6 @@ describe("decodeNodeFrame — port block", () => {
   });
 });
 
-describe("decodeSnapshot — camera/overlay offset", () => {
-  it("keeps camera/overlay correctly offset (scene frame no longer carries edges or ports)", () => {
-    // Regression guard, now scoped to the scene frame alone: the camera view must start
-    // right after the header, not aliased onto some other block's bytes.
-    const { buf, dv, cameraOff } = makeSnapshot();
-    dv.setFloat32(cameraOff, 123.5, true); // Camera PX
-    const d = decodeSnapshot(buf)!;
-    expect(d.cameraView.byteLength).toBe(CAMERA_STRIDE);
-    expectF32(d.cameraView.getFloat32(0, true), 123.5);
-  });
-});
-
 describe("decodeNodeFrame — label section", () => {
   it("decodes the labelBytesCount header field and slices each node's label", () => {
     // 2 nodes with labels "alpha" and "β-node" (β is 2 UTF-8 bytes → 7-byte label).
@@ -439,12 +360,10 @@ describe("decodeNodeFrame — label section", () => {
   });
 });
 
-describe("decodeSnapshot / decodeNodeFrame / decodeEdgeFrame — mixed counts", () => {
+describe("decodeNodeFrame / decodeEdgeFrame — mixed counts", () => {
   it("correctly slices views when nodes and edges are present", () => {
-    const { buf: sceneBuf } = makeSnapshot();
     const { buf: nodeBuf } = makeNodeFrame(2);
     const { buf: edgeBuf } = makeEdgeFrame(4);
-    const d = decodeSnapshot(sceneBuf)!;
     const dn = decodeNodeFrame(nodeBuf)!;
     const de = decodeEdgeFrame(edgeBuf)!;
     expect(dn.nodeCount).toBe(2);
@@ -453,8 +372,6 @@ describe("decodeSnapshot / decodeNodeFrame / decodeEdgeFrame — mixed counts", 
     expect(dn.interiorCount).toBe(2 * INTERIOR_SLOTS_PER_NODE);
     expect(dn.interiorView.byteLength).toBe(2 * INTERIOR_SLOTS_PER_NODE * INTERIOR_STRIDE);
     expect(de.edgeView.byteLength).toBe(4 * EDGE_STRIDE);
-    expect(d.cameraView.byteLength).toBe(CAMERA_STRIDE);
-    expect(d.overlayView.byteLength).toBe(OVERLAY_STRIDE);
   });
 
   it("views alias the original buffer (no copy)", () => {

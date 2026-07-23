@@ -306,8 +306,6 @@ func writeBufferLayoutGo(outPath string, schema bufLayoutSchema) error {
 	fmt.Fprintln(w, `import (`)
 	fmt.Fprintln(w, `	"encoding/binary"`)
 	fmt.Fprintln(w, `	"math"`)
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, `	T "github.com/dtauraso/wirefold/Trace"`)
 	fmt.Fprintln(w, `)`)
 	fmt.Fprintln(w)
 	fmt.Fprintf(w, "// BufLayoutVersionGenerated must equal BufLayoutVersion in layout.go.\n")
@@ -366,43 +364,6 @@ func writeBufferLayoutGo(outPath string, schema bufLayoutSchema) error {
 			fmt.Fprintln(w, `}`)
 			fmt.Fprintln(w)
 
-			// overlayFlagFieldsOf / IsOverlayFlagKind: mechanically generated from the
-			// block's u8 columns (the boolean toggle flags — AbcDragCount is u32 and is
-			// excluded by type, not by a hand-maintained exclusion list). Each u8 column
-			// name X is matched to Trace's T.KindX by the same naming convention
-			// overlay_gen.go already relies on (method name == Trace Kind suffix).
-			var flagCols []bufCol
-			for _, c := range blk.columns {
-				if c.bufType == "u8" {
-					flagCols = append(flagCols, c)
-				}
-			}
-			fmt.Fprintln(w, `// overlayFlagFieldsOf returns the Trace-Kind -> field-pointer map used to apply an`)
-			fmt.Fprintln(w, `// incoming overlay-flag event to row. Mechanically generated from the Overlay`)
-			fmt.Fprintln(w, `// block's u8 columns in Buffer/layout.go — adding a flag column here requires no`)
-			fmt.Fprintln(w, `// separate hand-edit anywhere else.`)
-			fmt.Fprintln(w, `func overlayFlagFieldsOf(row *OverlayRow) map[string]*uint8 {`)
-			fmt.Fprintln(w, `	return map[string]*uint8{`)
-			for _, c := range flagCols {
-				fmt.Fprintf(w, "\t\tT.Kind%s: &row.%s,\n", c.name, c.name)
-			}
-			fmt.Fprintln(w, `	}`)
-			fmt.Fprintln(w, `}`)
-			fmt.Fprintln(w)
-			fmt.Fprintln(w, `// IsOverlayFlagKind reports whether kind is one of the Overlay block's u8`)
-			fmt.Fprintln(w, `// boolean-flag Trace Kinds (the keys overlayFlagFieldsOf returns) — used instead`)
-			fmt.Fprintln(w, `// of a hand-listed switch case in SnapshotState.Update.`)
-			fmt.Fprintln(w, `func IsOverlayFlagKind(kind string) bool {`)
-			fmt.Fprintln(w, `	switch kind {`)
-			var kindNames []string
-			for _, c := range flagCols {
-				kindNames = append(kindNames, "T.Kind"+c.name)
-			}
-			fmt.Fprintf(w, "\tcase %s:\n", strings.Join(kindNames, ", "))
-			fmt.Fprintln(w, `		return true`)
-			fmt.Fprintln(w, `	}`)
-			fmt.Fprintln(w, `	return false`)
-			fmt.Fprintln(w, `}`)
 		} else if blk.name == "Camera" || blk.name == "RuleBuilder" || blk.name == "Scene" {
 			// Camera/RuleBuilder/Scene always have exactly 1 row; omit row param.
 			for _, c := range blk.columns {

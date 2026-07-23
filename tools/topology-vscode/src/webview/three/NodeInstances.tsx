@@ -6,7 +6,7 @@
 import { useRef, useContext } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
-import { getNodeFrameOrFallback } from "./node-stream-blocks";
+import { getNodeFrame } from "./node-stream-blocks";
 import { getViewBlocks } from "./view-blocks";
 import { EnvTexContext } from "./scene-env";
 import {
@@ -48,7 +48,7 @@ export function NodeInstances({ capacity }: { capacity: number }) {
     if (!body || !ring || !ringPick) return;
 
     const blocks = getViewBlocks();
-    const decodedNode = getNodeFrameOrFallback();
+    const decodedNode = getNodeFrame();
     if (!decodedNode || !blocks) { body.count = 0; ring.count = 0; ringPick.count = 0; return; }
     const { overlayView } = blocks;
     const { nodeCount, nodeView } = decodedNode;

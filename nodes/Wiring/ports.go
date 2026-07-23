@@ -55,8 +55,8 @@ type In struct {
 // non-blocking select, identical to TryRecv's default branch.
 //
 // Each successful receive ALSO flushes a KindRecv RowEvent onto this node's own
-// interior-stream frame (i.stream — Buffer/pack.go's decentralizedEventKinds
-// excludes KindRecv from the central VIEW-bucket): this node's own Update goroutine
+// interior-stream frame (i.stream — KindRecv is fully decentralized, it never rides
+// the VIEW stream's fallback bucket): this node's own Update goroutine
 // (the SAME goroutine calling PollRecv) is the sole owner of when it receives, so it
 // resolves its own NodeRow/PortRow at the call site (owner_events.go) rather than
 // routing through a shared accumulator.
@@ -371,8 +371,8 @@ func (o *Out) placeDrivenNoWalker(v int) SendOutcome {
 }
 
 // flushSendEvent records this send as a row-resolved RowEvent on this Out's owning
-// node's shared interior-stream frame (Buffer/pack.go's decentralizedEventKinds
-// excludes KindSend from the central VIEW-bucket): this node's own Update goroutine
+// node's shared interior-stream frame (KindSend is fully decentralized, it never
+// rides the VIEW stream's fallback bucket): this node's own Update goroutine
 // (the SAME goroutine driving the send) is the sole owner, so it resolves its own
 // NodeRow/PortRow/TargetRow/TargetPortRow at the call site (owner_events.go). No-op
 // when stream is unset (bare chan-mode Out) or the node has no dedicated interior fd.

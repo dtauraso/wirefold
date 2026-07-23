@@ -7,7 +7,11 @@
 // this section as "whatever bytes remain" once each frame's own known counts are exhausted.
 package Buffer
 
-import "encoding/binary"
+import (
+	"encoding/binary"
+
+	T "github.com/dtauraso/wirefold/Trace"
+)
 
 // StreamEvent is one packed EVENT-block row. Kind is already resolved to its numeric
 // TRACE_EVENT_KINDS index (via KindID) by the caller.
@@ -19,11 +23,20 @@ type StreamEvent struct {
 }
 
 // kindIDByName is built once at package init from the closed T.TraceEventKinds
-// vocabulary (buildKindIDMap, snapshot.go) and never mutated again, so concurrent reads
-// from many owner goroutines need no synchronization — this is the SAME map
-// SnapshotState.kindID held, exposed as a pure package-level lookup so any per-owner
-// goroutine can resolve its own event kind without a SnapshotState instance.
+// vocabulary and never mutated again, so concurrent reads from many owner goroutines
+// need no synchronization — a pure package-level lookup so any per-owner goroutine can
+// resolve its own event kind with no shared accumulator instance.
 var kindIDByName = buildKindIDMap()
+
+// buildKindIDMap indexes T.TraceEventKinds so the EVENT block Kind column matches the
+// TS TRACE_EVENT_KINDS array (both generated from Trace.go's Kind* constants).
+func buildKindIDMap() map[string]uint8 {
+	m := make(map[string]uint8, len(T.TraceEventKinds))
+	for i, k := range T.TraceEventKinds {
+		m[k] = uint8(i)
+	}
+	return m
+}
 
 // KindID resolves a raw Trace kind string (T.Kind*) to its EVENT-block numeric id.
 func KindID(kind string) uint8 {

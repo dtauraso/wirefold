@@ -8,9 +8,10 @@
 
 import { describe, it, expect } from "vitest";
 import * as THREE from "three";
-import { decodeSnapshot } from "../src/webview/three/buffer-decode";
+import { decodeViewFrame } from "../src/webview/three/buffer-decode";
+import { BUF_VIEW_FRAME_HEADER_SIZE } from "../src/schema/frame-tags";
 import {
-  BUF_HEADER_SIZE, CAMERA_STRIDE, OVERLAY_STRIDE, SCENE_STRIDE,
+  CAMERA_STRIDE, OVERLAY_STRIDE, SCENE_STRIDE,
   CAMERA_COL_PX, CAMERA_COL_PY, CAMERA_COL_PZ, CAMERA_COL_R,
   CAMERA_COL_POS_THETA, CAMERA_COL_POS_PHI, CAMERA_COL_UP_THETA, CAMERA_COL_UP_PHI,
   readCameraPX, readCameraPY, readCameraPZ, readCameraR,
@@ -30,16 +31,19 @@ function anglesToWorldOffset(r: number, theta: number, phi: number): THREE.Vecto
   );
 }
 
-/** Build a snapshot with zero beads/nodes/edges and a single filled camera row. */
+/** Build a VIEW-stream frame (camera+overlay+scene) with a single filled camera row —
+ *  the live production shape (decodeViewFrame), replacing the deleted fd-3 SCENE frame
+ *  fixture (decodeSnapshot, removed with Buffer.SnapshotState — per-owner-buffer-rows.md's
+ *  final step). */
 function makeCameraSnapshot(cam: {
   px: number; py: number; pz: number; r: number;
   posTheta: number; posPhi: number; upTheta: number; upPhi: number;
 }): ArrayBuffer {
-  const total = BUF_HEADER_SIZE + CAMERA_STRIDE + OVERLAY_STRIDE + SCENE_STRIDE;
+  const total = BUF_VIEW_FRAME_HEADER_SIZE + CAMERA_STRIDE + OVERLAY_STRIDE + SCENE_STRIDE;
   const buf = new ArrayBuffer(total);
   const dv = new DataView(buf);
-  // header: tick=0, beadCount=0, nodeCount=0, edgeCount=0
-  const cameraOff = BUF_HEADER_SIZE;
+  // header: tick=0
+  const cameraOff = BUF_VIEW_FRAME_HEADER_SIZE;
   dv.setFloat32(cameraOff + CAMERA_COL_PX, cam.px, true);
   dv.setFloat32(cameraOff + CAMERA_COL_PY, cam.py, true);
   dv.setFloat32(cameraOff + CAMERA_COL_PZ, cam.pz, true);
@@ -58,7 +62,7 @@ describe("buffer-driven camera mapping", () => {
       posTheta: Math.PI / 3, posPhi: Math.PI / 4,
       upTheta: 0.1, upPhi: 1.2,
     };
-    const decoded = decodeSnapshot(makeCameraSnapshot(cam));
+    const decoded = decodeViewFrame(makeCameraSnapshot(cam));
     expect(decoded).not.toBeNull();
     const cv = decoded!.cameraView;
 
@@ -87,7 +91,7 @@ describe("buffer-driven camera mapping", () => {
   });
 
   it("treats r <= 0 as an uninitialized camera row (BufferCamera skips it)", () => {
-    const decoded = decodeSnapshot(makeCameraSnapshot({
+    const decoded = decodeViewFrame(makeCameraSnapshot({
       px: 0, py: 0, pz: 0, r: 0,
       posTheta: 0, posPhi: 0, upTheta: 0, upPhi: 0,
     }));

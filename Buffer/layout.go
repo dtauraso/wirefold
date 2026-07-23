@@ -21,7 +21,7 @@
 package Buffer
 
 // BufLayoutVersion is the schema version. Bump when any column changes.
-const BufLayoutVersion = 32
+const BufLayoutVersion = 33
 
 // BufInteriorSlotsPerNode is the fixed number of interior grid slots reserved per
 // node in the Interior block (a 2x2 held/interior-bead grid: slot = row*2 + col).
@@ -42,7 +42,7 @@ const BufInteriorSlotsPerNode = 4
 // files and a tautological test asserting the constants equal themselves.
 // The REAL per-tick event kind byte written into the buffer (EVENT block Kind
 // column, and the Node block's transient per-tick flags) is the INDEX into
-// T.TraceEventKinds (Buffer/snapshot.go buildKindIDMap: Recv=0, Fire=1,
+// T.TraceEventKinds (Buffer/stream_events.go buildKindIDMap: Recv=0, Fire=1,
 // Send=2, Position=3, Geometry=4, NodeGeometry=5, Arrive=6, NodeBead=7, …) —
 // an entirely different, already-correct numbering that has nothing to do
 // with the deleted enum. Do not reintroduce a parallel BufEvent* enum; if a
@@ -104,15 +104,15 @@ type bufLayoutNode struct {
 	Hovered uint8 `buf:"u8"` // 1 = node is pointer-hovered
 	// LatchedSel is Go-owned: 1 marks the LAST node that was click-selected, and stays 1
 	// through a deselect (clicking empty space clears Selected but NOT LatchedSel; selecting
-	// a DIFFERENT node moves LatchedSel to it). Set by setSelected alongside Selected — see
-	// nodeSnapState.latchedSel in Buffer/snapshot.go. Replaces the old TS-owned
+	// a DIFFERENT node moves LatchedSel to it). Set alongside Selected by the affected
+	// node's own nodeMover (nodes/Wiring/node_move.go). Replaces the old TS-owned
 	// `latchedSel` React state in NavGuides.tsx (that was a second, TS-invented selection
 	// concept unreachable from Go); the render path now just reads this column.
 	LatchedSel uint8 `buf:"u8"` // 1 = this is the last-selected node (persists through deselect)
 	// GotDragMsg is Go-owned and DRAG-SCOPED: 1 marks a node that has received a
-	// time.abc-drag message during the CURRENT drag (see SnapshotState.abcDragged in
-	// snapshot.go, set from the KindAbcDrag event's Node id via nodeIndex, and cleared
-	// at the start of each new drag via KindAbcDragReset). This is the recipient SET
+	// time.abc-drag message during the CURRENT drag (set on the recipient's own
+	// nodeMover goroutine by quantized_move.go's neighborSetCRequantize, and cleared
+	// at the start of each new drag via a moveMsgKindAbcReset broadcast). This is the recipient SET
 	// the AbcDragLabel overlay lists by name — it replaces the old single-recipient
 	// Overlay.LastAbcDragNodeRow column.
 	GotDragMsg uint8 `buf:"u8"` // 1 = this node has received at least one time.abc-drag message
@@ -145,14 +145,22 @@ type bufLayoutInterior struct {
 
 // bufLayoutEdge defines one row of the edges column block.
 // One row per edge (wire). Matched from KindGeometry trace events.
+//
+// The edge stores NO endpoint coordinates (the removed SX..EZ copy was a duplication
+// artifact — see docs/planning/visual-editor/per-owner-buffer-rows.md): it carries only
+// SrcPortRow/DstPortRow, the flattened buffer PORT-ROW indices (same resolution as
+// LookupPortRow / the Port block, Buffer/node_stream_frame.go's BuildNodeStreamFrame) of
+// the source (OUTPUT)
+// and dest (INPUT) ports this edge connects. The renderer reads the endpoint world
+// position from THOSE port rows (Port block's PX/PY/PZ, node-owned, emitted synchronously
+// with the node's own move) instead of a second, laggier copy on this block — so a fast
+// drag can never composite a fresh Node frame against a stale Edge-block endpoint (the
+// tear this replaces was exactly that: the old SX..EZ lagged a channel-hop behind the
+// node's own port geometry emit).
 type bufLayoutEdge struct {
-	SX       float32 `buf:"f32"` // start (source OUT-port) world x
-	SY       float32 `buf:"f32"` // start world y
-	SZ       float32 `buf:"f32"` // start world z
-	EX       float32 `buf:"f32"` // end (dest IN-port) world x
-	EY       float32 `buf:"f32"` // end world y
-	EZ       float32 `buf:"f32"` // end world z
-	Selected uint8   `buf:"u8"`  // persistent: 1 = this edge is the click-selected edge
+	SrcPortRow int32 `buf:"i32"` // source (output) port's buffer PORT-ROW index; -1 = unresolved
+	DstPortRow int32 `buf:"i32"` // dest (input) port's buffer PORT-ROW index; -1 = unresolved
+	Selected   uint8 `buf:"u8"`  // persistent: 1 = this edge is the click-selected edge
 	// EdgeLabelOff/EdgeLabelLen are this edge's slice into the snapshot's trailing EDGE-LABEL
 	// BYTES section (the label-section analogue for edges): EdgeLabelOff is the byte offset,
 	// EdgeLabelLen the UTF-8 byte length. Edge labels are carried ONLY for the .probe buffer-
@@ -172,15 +180,15 @@ type bufLayoutEdge struct {
 // re-drawing the Edge block" even on a topology where the layout-link pairs and the
 // bead-edge pairs diverge.
 //
-// SrcNodeRow/DstNodeRow are the buffer NODE-ROW indices (same resolution as bufLayoutEdge's).
-// EdgeRow is Go-resolved EVERY snapshot (buildSnapshot, not load-once) to the buffer EDGE-ROW
-// index of the bead edge connecting this same pair (either direction), or -1 when no such
-// edge exists. The renderer draws the overlay segment along THAT edge's already-streamed,
-// always-current SX..EZ (bufLayoutEdge) — the same port-anchored endpoints the bead wire
-// itself uses — instead of duplicating endpoint geometry here. Recomputing EdgeRow's
-// resolution every snapshot (not once at load) is what keeps the overlay attached to the
-// ports as a node is dragged: the Edge block is re-emitted on every node/port move, and the
-// overlay rides along.
+// SrcNodeRow/DstNodeRow are the buffer NODE-ROW indices (resolved against the Node block —
+// see nodeRowIndex). EdgeRow is Go-resolved EVERY snapshot (buildSnapshot, not load-once) to
+// the buffer EDGE-ROW index of the bead edge connecting this same pair (either direction), or
+// -1 when no such edge exists. The renderer draws the overlay segment along THAT edge's
+// SrcPortRow/DstPortRow (bufLayoutEdge), reading the endpoint from the Port block those rows
+// reference — the same port-anchored endpoints the bead wire itself uses — instead of
+// duplicating endpoint geometry here. Recomputing EdgeRow's resolution every snapshot (not
+// once at load) is what keeps the overlay attached to the ports as a node is dragged: the
+// Edge block is re-emitted on every node/port move, and the overlay rides along.
 //
 // Fallback (EdgeRow == -1, no bead edge for this layout-link pair): the renderer falls back
 // to the two nodes' CX/CY/CZ from the Node block. This is an honest degradation, not a

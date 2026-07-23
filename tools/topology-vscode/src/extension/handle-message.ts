@@ -14,7 +14,7 @@ import {
 } from "../messages";
 import { appendWebviewLog } from "./webview-log";
 import { PROBE_DIR, PROBE_FILES } from "../probe-files";
-import { BUF_BLOCK_TAG_EDGE_STREAM, BUF_BLOCK_TAG_NODE_STREAM, BUF_BLOCK_TAG_INTERIOR_STREAM } from "../schema/frame-tags";
+import { BUF_BLOCK_TAG_VIEW, BUF_BLOCK_TAG_EDGE_STREAM, BUF_BLOCK_TAG_NODE_STREAM, BUF_BLOCK_TAG_INTERIOR_STREAM } from "../schema/frame-tags";
 
 export type MessageCtx = {
   logUri: vscode.Uri | undefined;
@@ -79,15 +79,16 @@ async function dispatch(msg: WebviewToHostMsg, ctx: MessageCtx): Promise<void> {
       // draw until the next frame Go happens to emit, which may be a long wait while
       // paused/idle. run() is idempotent (no-op if already running).
       // If Go was ALREADY running before this run(), hand the remounted webview EVERY
-      // cached last frame per block tag (see BuildAndRunRunner.lastFrames — scene AND
-      // bead) so it renders instantly without round-tripping to Go. A just-spawned Go
-      // needs no cached frames — it emits its own startup geometry — so this also
-      // dodges any post-spawn stdin-readiness race.
+      // cached last frame (view, plus one per edge/node/interior row) so it renders
+      // instantly without round-tripping to Go. A just-spawned Go needs no cached frames —
+      // it emits its own startup geometry — so this also dodges any post-spawn
+      // stdin-readiness race.
       const wasRunning = runner.isRunning();
       runner.run();
       if (wasRunning) {
-        for (const { tag, buffer } of runner.getLastFrames()) {
-          ctx.post({ type: "buffer-snapshot", buffer, tag });
+        const viewFrame = runner.getLastViewFrame();
+        if (viewFrame) {
+          ctx.post({ type: "buffer-snapshot", buffer: viewFrame, tag: BUF_BLOCK_TAG_VIEW });
         }
         // Per-edge dedicated streams (see BuildAndRunRunner.getLastEdgeFrames): the
         // per-edge analogue of the loop above — one cached frame per edge row.

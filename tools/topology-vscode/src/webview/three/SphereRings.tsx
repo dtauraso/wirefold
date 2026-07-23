@@ -6,7 +6,7 @@
 import { useRef, useState, useMemo, useEffect } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
-import { getNodeFrameOrFallback } from "./node-stream-blocks";
+import { getNodeFrame } from "./node-stream-blocks";
 import {
   readNodeCX, readNodeCY, readNodeCZ, readNodeRadius, readNodeSelected, readNodeSphereR,
   readNodeVRX, readNodeVRY, readNodeVRZ, readNodeFRX, readNodeFRY, readNodeFRZ,
@@ -106,7 +106,7 @@ export function SphereRings() {
   const prevRef = useRef<OwnerRing[]>([]);
 
   useFrame(() => {
-    const decoded = getNodeFrameOrFallback();
+    const decoded = getNodeFrame();
     const next: OwnerRing[] = [];
     if (decoded) {
       const { nodeCount, nodeView } = decoded;

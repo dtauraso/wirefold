@@ -410,12 +410,11 @@ func (m *nodeMover) applyCenter(center vec3, reach float64) {
 // so a plain field read here can never race a concurrent writer.
 func (m *nodeMover) emitGeometry() {
 	emitNodeGeometryLocked(m.tr, m.id, m.geom, m.partnerCenter)
-	// Dedicated per-node stream (either/or with the shared fd-3 Node/Interior/Port/
-	// Label/PortName frame — see streamOut's doc comment): write this node's own
+	// Dedicated per-node stream (see streamOut's doc comment): write this node's own
 	// combined frame immediately on a geometry change, in addition to the tick-driven
 	// write in run()'s loop (mirrors edgeMover.recomputeGeometry's writeStreamFrame call).
-	// NodeGeometry now rides THIS frame's own EVENTS section (Buffer/pack.go's
-	// decentralizedEventKinds excludes it from the central VIEW-bucket) — this
+	// NodeGeometry rides THIS frame's own EVENTS section (fully decentralized — it
+	// never rides the VIEW stream's fallback bucket) — this
 	// nodeMover is the sole owner of its node's geometry, so it resolves its own
 	// NodeRow at the call site (owner_events.go) rather than routing through a
 	// shared accumulator. The tr.NodeGeometry call above still feeds the -trace
@@ -827,8 +826,8 @@ func (m *edgeMover) recomputeGeometry() {
 	// Emit this edge's own segment so the renderer redraws the wire from Go's endpoints.
 	// The tr.Geometry call still feeds the -trace JSONL sink (Trace.WriteJSONL)
 	// unchanged; it no longer also lands in the central VIEW frame's EVENTS bytes —
-	// Geometry now rides THIS edgeMover's own dedicated stream (Buffer/pack.go's
-	// decentralizedEventKinds excludes it from the VIEW bucket), since this goroutine
+	// Geometry now rides THIS edgeMover's own dedicated stream (fully decentralized —
+	// it never rides the VIEW stream's fallback bucket), since this goroutine
 	// is the sole owner of this edge's geometry.
 	if m.tr != nil {
 		m.tr.Geometry(m.edgeID, m.srcID, m.dstID, m.srcH, m.dstH,

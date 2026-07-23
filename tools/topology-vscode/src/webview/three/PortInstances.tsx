@@ -5,7 +5,7 @@
 import { useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
-import { getNodeFrameOrFallback } from "./node-stream-blocks";
+import { getNodeFrame } from "./node-stream-blocks";
 import { readPortNodeRow, readPortPX, readPortPY, readPortPZ, readPortHovered } from "../../schema/buffer-layout";
 import { BUFFER_PORT_TAG, PORT_SPHERE_R, PORT_HOVER_COLOR, PORT_HOVER_SCALE, nodeRowColors } from "./buffer-scene-shared";
 
@@ -28,7 +28,7 @@ export function PortInstances({ capacity }: { capacity: number }) {
     const mesh = meshRef.current;
     if (!mesh) return;
 
-    const decoded = getNodeFrameOrFallback();
+    const decoded = getNodeFrame();
     if (!decoded) { mesh.count = 0; return; }
     const { portCount, portView, nodeCount, nodeView } = decoded;
 

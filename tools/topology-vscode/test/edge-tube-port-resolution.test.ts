@@ -90,7 +90,7 @@ describe("EdgeTube tear-free port-row resolution", () => {
 
     const edgeAccessor = edgeStreamBlocks.getEdgeStreamAccessor()!;
     expect(edgeAccessor).not.toBeNull();
-    const decodedNode = nodeStreamBlocks.getNodeFrameOrFallback()!;
+    const decodedNode = nodeStreamBlocks.getNodeFrame()!;
     expect(decodedNode).not.toBeNull();
 
     const srcRow = edgeAccessor.srcPortRow(0);
@@ -112,14 +112,14 @@ describe("EdgeTube tear-free port-row resolution", () => {
     snapshotBuffer.setLatestEdgeStreamFrame(0, makeEdgeStreamFrame(0, 1));
 
     const edgeAccessor = edgeStreamBlocks.getEdgeStreamAccessor()!;
-    const before = nodeStreamBlocks.getNodeFrameOrFallback()!;
+    const before = nodeStreamBlocks.getNodeFrame()!;
     expect(readPortPX(before.portView, edgeAccessor.dstPortRow(0))).toBe(50);
 
     // Node 1's nodeMover re-emits a fresh frame after a drag — port 1 moves to (99,0,0).
     // The EDGE frame is untouched (edges carry no coordinates — see BuildEdgeStreamFrame).
     snapshotBuffer.setLatestNodeStreamFrame(1, makeNodeStreamFrame(1, 99, 0, 0));
 
-    const after = nodeStreamBlocks.getNodeFrameOrFallback()!;
+    const after = nodeStreamBlocks.getNodeFrame()!;
     expect(readPortPX(after.portView, edgeAccessor.dstPortRow(0))).toBe(99);
   });
 });

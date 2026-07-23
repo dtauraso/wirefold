@@ -1,8 +1,8 @@
 // headless_node_row_order_test.go — drives the REAL compiled binary headlessly against
-// the real topology/ dir SEVERAL times and asserts the Node block's row→id order (read
-// back via each row's Label bytes — the same one-representation label section the buffer
-// already carries, no sidecar; topology/nodes/*/meta.json have no data.label so each
-// node's label falls back to its id) is:
+// the real topology/ dir SEVERAL times and asserts the Node block's row→id order (read back
+// via each row's own inline Label bytes on its dedicated NODE stream frame — see
+// Buffer.BuildNodeStreamFrame; topology/nodes/*/meta.json have no data.label so each node's
+// label falls back to its id) is:
 //
 //  1. IDENTICAL across runs, and
 //  2. equal to spec order — the directory-sorted node id order LoadTopology reads the
@@ -10,159 +10,51 @@
 //
 // This is the end-to-end proof that row order is a deterministic PROJECTION OF THE
 // DIAGRAM (CLAUDE.md/MODEL.md), not a discovery log built by racing node goroutines to
-// their first geometry emit. See headless_clock_test.go for the spawn/fd3/cleanup
+// their first geometry emit. See headless_stream_helpers_test.go for the spawn/cleanup
 // pattern this reuses; NEVER run the sim in the foreground
 // (memory/feedback_no_foreground_sim_runs.md).
 
 package main
 
 import (
-	"bufio"
-	"context"
-	"encoding/binary"
-	"fmt"
-	"io"
 	"os"
-	"os/exec"
-	"path/filepath"
-	"sort"
 	"testing"
-	"time"
 
 	B "github.com/dtauraso/wirefold/Buffer"
 )
 
-// wantNodeRowOrder is the expected spec order for the repo's real topology/nodes dir:
-// lexicographic directory-name sort, per nodes/Wiring/loader_tree.go readDirNames +
-// sort.Strings. Recomputed from the actual directory listing (not hardcoded) so this
-// test does not silently go stale if a node is added/removed from topology/.
-func wantNodeRowOrder(t *testing.T, repoRoot string) []string {
-	t.Helper()
-	entries, err := os.ReadDir(filepath.Join(repoRoot, "topology", "nodes"))
-	if err != nil {
-		t.Fatalf("ReadDir topology/nodes: %v", err)
-	}
-	ids := make([]string, 0, len(entries))
-	for _, e := range entries {
-		if e.IsDir() {
-			ids = append(ids, e.Name())
-		}
-	}
-	sort.Strings(ids)
-	return ids
-}
-
-// nodeRowIDs decodes the Node block's row→id order out of one raw snapshot buffer via
-// the Label section (LabelOff/LabelLen columns) — the buffer's row identity is carried
-// by row index + this label, never a sidecar.
-func nodeRowIDs(snap []byte) []string {
-	readU32 := func(off int) uint32 { return binary.LittleEndian.Uint32(snap[off:]) }
-	beadCount := int(readU32(4))
-	nodeCount := int(readU32(8))
-	edgeCount := int(readU32(12))
-	portCount := int(readU32(16))
-	layoutLinkCount := int(readU32(36))
-
-	nodeOff := B.BufHeaderSize + beadCount*B.BufBeadStride
-	labelSecOff := nodeOff +
-		nodeCount*B.BufNodeStride +
-		nodeCount*B.BufInteriorSlotsPerNode*B.BufInteriorStride +
-		edgeCount*B.BufEdgeStride +
-		layoutLinkCount*B.BufLayoutLinkStride +
-		portCount*B.BufPortStride +
-		B.BufCameraStride +
-		B.BufOverlayStride +
-		B.BufSceneStride
-
-	ids := make([]string, nodeCount)
-	for i := 0; i < nodeCount; i++ {
-		off := int(readU32(nodeOffFieldOff(nodeOff, i, B.BufNodeColLabelOff)))
-		ln := int(readU32(nodeOffFieldOff(nodeOff, i, B.BufNodeColLabelLen)))
-		ids[i] = string(snap[labelSecOff+off : labelSecOff+off+ln])
-	}
-	return ids
-}
-
-func nodeOffFieldOff(nodeOff, row, col int) int { return nodeOff + row*B.BufNodeStride + col }
-
-func readU32(snap []byte, off int) uint32 { return binary.LittleEndian.Uint32(snap[off:]) }
-
-// runOnceAndReadFirstFrame builds (once, cached by the caller) and runs the real binary
-// headlessly against topology/, reads the FIRST fd-3 snapshot frame (which, once row
-// seeding lands, already carries every node's row from LoadTopology — before any node
-// goroutine's own emit), and returns its decoded node-row id order.
-func runOnceAndReadFirstFrame(t *testing.T, binPath, repoRoot string, wantNodeCount int) []string {
-	t.Helper()
-	runCtx, runCancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer runCancel()
-
-	cmd := exec.CommandContext(runCtx, binPath, "-topology", filepath.Join(repoRoot, "topology"))
-	cmd.Dir = repoRoot
-	cmd.Stderr = os.Stderr
-
-	fd3Read, fd3Write, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("Pipe: %v", err)
-	}
-	cmd.ExtraFiles = []*os.File{fd3Write}
-
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	fd3Write.Close()
-
-	t.Cleanup(func() {
-		runCancel()
-		_ = fd3Read.Close()
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
-		}
-		_ = cmd.Wait()
-	})
-
-	br := bufio.NewReader(fd3Read)
-	// The row pre-emit loop emits ONE frame PER node.NodeGeometry call (Update's
-	// KindNodeGeometry case always calls emitSnapshot), so nodeCount climbs 0,1,2,...
-	// across several frames before reaching the full set. Skip forward to the first frame
-	// that carries ALL of them (bounded).
-	const maxFrames = 200
-	for i := 0; i < maxFrames; i++ {
-		snap, err := readOneSnapshotFrame(br)
-		if err != nil {
-			t.Fatalf("frame %d: readOneSnapshotFrame: %v", i, err)
-		}
-		if int(readU32(snap, 8)) == wantNodeCount { // nodeCount
-			return nodeRowIDs(snap)
-		}
-	}
-	t.Fatalf("no frame with %d node rows seen within %d frames", wantNodeCount, maxFrames)
-	return nil
+// nodeStreamRowID decodes ONE dedicated NODE-stream frame's own inline Label bytes (see
+// Buffer.BuildNodeStreamFrame's header: [tick,portCount,labelLen,portNameBytesCount,
+// layoutLinkCount] = 5×u32, then the Node row, then this frame's own label bytes inline).
+func nodeStreamRowID(frame []byte) string {
+	const hdrSize = 20
+	labelLen := int(readU32(frame, 8))
+	labelOff := hdrSize + B.BufNodeStride
+	return string(frame[labelOff : labelOff+labelLen])
 }
 
 // TestHeadlessNodeRowOrderIsDeterministic runs the real binary 3+ times against the real
-// topology/ dir and asserts the first frame's node-row id order is IDENTICAL every run
-// AND equals directory/spec order.
+// topology/ dir and asserts the node-row id order (each node row's own dedicated NODE-fd,
+// keyed by fd position = row) is IDENTICAL every run AND equals directory/spec order.
 func TestHeadlessNodeRowOrderIsDeterministic(t *testing.T) {
 	repoRoot, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Getwd: %v", err)
 	}
-	binPath := filepath.Join(t.TempDir(), "wirefold-headless-row-order-test")
-
-	buildCtx, buildCancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer buildCancel()
-	buildCmd := exec.CommandContext(buildCtx, "go", "build", "-o", binPath, ".")
-	buildCmd.Dir = repoRoot
-	if out, err := buildCmd.CombinedOutput(); err != nil {
-		t.Fatalf("go build: %v\n%s", err, out)
-	}
+	binPath := buildHeadlessBinary(t, repoRoot, "wirefold-headless-row-order-test")
 
 	want := wantNodeRowOrder(t, repoRoot)
 
 	const runs = 5
 	var first []string
 	for i := 0; i < runs; i++ {
-		got := runOnceAndReadFirstFrame(t, binPath, repoRoot, len(want))
+		ds := spawnDedicatedAllStreams(t, binPath, repoRoot)
+		nodeFrames := readLastFrames(t, ds.nodeReads, "node", 200)
+		got := make([]string, len(nodeFrames))
+		for row, frame := range nodeFrames {
+			got[row] = nodeStreamRowID(frame)
+		}
+
 		if i == 0 {
 			first = got
 			if len(got) != len(want) {
@@ -184,29 +76,4 @@ func TestHeadlessNodeRowOrderIsDeterministic(t *testing.T) {
 			}
 		}
 	}
-}
-
-// readOneSnapshotFrame reads one length-prefixed fd3 frame ([len:u32-LE][bytes]) from r.
-// Shared by the headless snapshot tests (was in the deleted headless_clock_test.go).
-// readOneSnapshotFrame reads one fd-3 frame — [len:u32-LE][blockTag:u8][block bytes]
-// (len counts the tag byte plus the block bytes) — validates the tag is
-// Buffer.BufBlockTagScene (the only value today), and returns the block bytes alone
-// (tag stripped), matching what the ext host hands the webview.
-func readOneSnapshotFrame(r *bufio.Reader) ([]byte, error) {
-	var lenBuf [4]byte
-	if _, err := io.ReadFull(r, lenBuf[:]); err != nil {
-		return nil, err
-	}
-	n := binary.LittleEndian.Uint32(lenBuf[:])
-	buf := make([]byte, n)
-	if _, err := io.ReadFull(r, buf); err != nil {
-		return nil, err
-	}
-	if len(buf) < 1 {
-		return nil, fmt.Errorf("readOneSnapshotFrame: frame too short to carry a block tag")
-	}
-	if buf[0] != B.BufBlockTagScene {
-		return nil, fmt.Errorf("readOneSnapshotFrame: unexpected block tag %d", buf[0])
-	}
-	return buf[1:], nil
 }

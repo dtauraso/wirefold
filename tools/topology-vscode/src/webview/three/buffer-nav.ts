@@ -3,17 +3,17 @@
 // The binary snapshot's node block carries per-node cx/cy/cz/radius/sphereR/selected AND the
 // per-node label (LabelOff/LabelLen into the trailing label section — see buffer-decode
 // nodeLabel). Identity in this system is the buffer NODE-ROW INDEX: Go resolves a row back to
-// its node id (Buffer.SnapshotState.LookupNodeRow) for any topology edit, so the webview needs
-// no node-id strings at all. This module is the pure decode that turns the numeric node rows
-// (paired with their decoded labels) into NavNode records so NavGuides / label-pills
-// can run entirely off the buffer, keyed by row.
+// its node id (nodes/Wiring's MoveDispatch.LookupNodeRow) for any topology edit, so the
+// webview needs no node-id strings at all. This module is the pure decode that turns the
+// numeric node rows (paired with their decoded labels) into NavNode records so NavGuides /
+// label-pills can run entirely off the buffer, keyed by row.
 //
 // ── Ordering guarantee (row i ↔ buffer node row i) ─────────────────────────────
-// Go's Buffer.SnapshotState assigns each node its row on the FIRST KindNodeGeometry event it
-// sees for that id (insertion order; re-emits on a move do not reorder — see
-// Buffer/snapshot.go onNodeGeometry) and writes the Node block + label section in that same
-// order. decodeNavNodes walks the node block in row order, so NavNode i is buffer node row i
-// by construction — no id table, no sidecar.
+// Row order is a LOAD-TIME CONSTANT (nodes/Wiring's md.nodeSeeds, spec order — see
+// MoveDispatch's row-identity table doc comment): each node's own nodeMover writes the Node
+// block + label section into its own dedicated stream frame at that same row. decodeNavNodes
+// walks the aggregated node block in row order, so NavNode i is buffer node row i by
+// construction — no id table, no sidecar.
 //
 // This is a RENDERING RESOURCE keyed by row, NOT a domain store of positions or topology:
 // positions/radii/sphereR/selection/label all come from the buffer via decodeNavNodes.
@@ -39,7 +39,7 @@ export interface NavNode {
   sphereR: number | undefined;
   selected: boolean;
   /** Go-owned: 1 marks the LAST node that was click-selected, persisting through a
-   *  deselect (see LatchedSel in Buffer/layout.go / setSelected in Buffer/snapshot.go). */
+   *  deselect (see LatchedSel in Buffer/layout.go; set by that node's own nodeMover). */
   latchedSel: boolean;
 }
 

@@ -36,8 +36,9 @@ function makeFakeProc(): FakeProc {
   p.stdin = { write: vi.fn() };
   p.stdout = { on: vi.fn() };
   p.stderr = { on: vi.fn() };
-  // stdio[3] = fd3 binary side channel stub (null = not available).
-  p.stdio = [null, null, null, { on: vi.fn() }];
+  // stdio[3] = reserved, unused pipe slot (nothing reads it — see runCommand.ts's stdio
+  // comment). stdio[4] = VIEW_FD, the dedicated view-stream pipe.
+  p.stdio = [null, null, null, { on: vi.fn() }, { on: vi.fn() }];
   p.kill = vi.fn();
   return p;
 }
@@ -112,26 +113,31 @@ describe("pendingStdin drain", () => {
   });
 });
 
-describe("lastSnapshot cache (getLastSnapshot) — resend replacement", () => {
-  // The ext host caches the last fd3 buffer-snapshot frame so a webview "ready" (after a
-  // remount) can be served instantly instead of asking Go to manufacture a frame (resend,
-  // removed). THE TRAP: runCommand.ts hands onSnapshot the SAME ArrayBuffer it forwards to
+describe("lastViewFrame cache (getLastViewFrame) — resend replacement", () => {
+  // The ext host caches the last VIEW-stream frame so a webview "ready" (after a remount)
+  // can be served instantly instead of asking Go to manufacture a frame (resend, removed).
+  // THE TRAP: runCommand.ts hands onSnapshot the SAME ArrayBuffer it forwards to
   // postMessage, and VS Code's webview.postMessage TRANSFERS (not clones) ArrayBuffers on
-  // engines >=1.57 — a real transfer DETACHES the source (byteLength -> 0). This test proves
-  // the cache survives that by actually detaching the posted buffer via the real structured-
-  // clone transfer primitive (Node's structuredClone with a transfer list — the same
-  // detach semantics a MessagePort/Electron IPC transfer performs), then asserting
-  // getLastSnapshot() still returns the untouched bytes.
-  // Frames are now [len:u32-LE][blockTag:u8][block bytes] — this helper builds a
-  // BUF_BLOCK_TAG_SCENE-tagged frame so handleFd3 accepts it and strips the tag,
-  // leaving the caller's `bytes` as the cached/posted payload (unchanged from before
-  // the tag was introduced).
+  // engines >=1.57 — a real transfer DETACHES the source (byteLength -> 0). This test
+  // proves the cache survives that by actually detaching the posted buffer via the real
+  // structured-clone transfer primitive (Node's structuredClone with a transfer list — the
+  // same detach semantics a MessagePort/Electron IPC transfer performs), then asserting
+  // getLastViewFrame() still returns the untouched bytes.
+  // Frames on the dedicated VIEW fd are [len:u32-LE][payload] with NO tag byte (the fd
+  // position identifies the stream).
   function framed(bytes: number[]): Uint8Array {
-    const body = new Uint8Array([0, ...bytes]); // 0 = BUF_BLOCK_TAG_SCENE
-    const out = new Uint8Array(4 + body.length);
-    new DataView(out.buffer).setUint32(0, body.length, true);
-    out.set(body, 4);
+    const out = new Uint8Array(4 + bytes.length);
+    new DataView(out.buffer).setUint32(0, bytes.length, true);
+    out.set(bytes, 4);
     return out;
+  }
+
+  // The VIEW_FD "data" listener run() registered on this process's stdio[4] stub.
+  function viewDataCb(proc: FakeProc): (d: Buffer) => void {
+    const on = proc.stdio[4]!.on as ReturnType<typeof vi.fn>;
+    const call = on.mock.calls.find((c) => c[0] === "data");
+    if (!call) throw new Error("view fd 'data' handler was never registered");
+    return call[1] as (d: Buffer) => void;
   }
 
   it("cached buffer survives the posted buffer being TRANSFER-detached", () => {
@@ -144,75 +150,67 @@ describe("lastSnapshot cache (getLastSnapshot) — resend replacement", () => {
       },
     );
     r.run();
-    const proc = spawned[0];
-    const fd3 = proc.stdio[3] as { on: ReturnType<typeof vi.fn> };
-    const dataCall = fd3.on.mock.calls.find((c) => c[0] === "data");
-    if (!dataCall) throw new Error("fd3 'data' handler was never registered");
-    const onFd3Data = dataCall[1] as (d: Buffer) => void;
+    const onViewData = viewDataCb(spawned[0]);
 
-    onFd3Data(Buffer.from(framed([1, 2, 3]).buffer));
+    onViewData(Buffer.from(framed([1, 2, 3]).buffer));
 
     // The buffer handed to onSnapshot is now detached (byteLength 0) — proving the trap is
     // real and the test isn't vacuously passing.
     expect(posted[0].byteLength).toBe(0);
 
     // The CACHE, independent of that reference, must still hold the original 3 bytes.
-    const cached = r.getLastSnapshot();
+    const cached = r.getLastViewFrame();
     expect(cached).toBeDefined();
     expect(cached!.byteLength).toBe(3);
     expect(new Uint8Array(cached!)).toEqual(new Uint8Array([1, 2, 3]));
 
     // SERVING the cache must not detach it. The "ready" handler posts what
-    // getLastSnapshot returns, and postMessage TRANSFERS — so if we handed out the
+    // getLastViewFrame returns, and postMessage TRANSFERS — so if we handed out the
     // cached reference, the first remount would empty our own cache. That breaks the
     // exact case this cache exists for: while PAUSED no new frame arrives to
     // repopulate it, so the SECOND remount would be served zero bytes.
     structuredClone(cached!, { transfer: [cached!] }); // simulate the post transferring it
     expect(cached!.byteLength).toBe(0); // the served copy is detached, as postMessage would
 
-    const second = r.getLastSnapshot(); // a second remount, no new frame in between
+    const second = r.getLastViewFrame(); // a second remount, no new frame in between
     expect(second).toBeDefined();
     expect(second!.byteLength).toBe(3);
     expect(new Uint8Array(second!)).toEqual(new Uint8Array([1, 2, 3]));
   });
 
-  it("cache is overwritten by each new frame; getLastSnapshot reflects the LATEST one", () => {
+  it("cache is overwritten by each new frame; getLastViewFrame reflects the LATEST one", () => {
     const r = new BuildAndRunRunner(); // no onSnapshot — cache still populates
     r.run();
-    const proc = spawned[0];
-    const fd3 = proc.stdio[3] as { on: ReturnType<typeof vi.fn> };
-    const onFd3Data = fd3.on.mock.calls.find((c) => c[0] === "data")![1] as (d: Buffer) => void;
+    const onViewData = viewDataCb(spawned[0]);
 
-    expect(r.getLastSnapshot()).toBeUndefined();
+    expect(r.getLastViewFrame()).toBeUndefined();
 
-    onFd3Data(Buffer.from(framed([9]).buffer));
-    expect(new Uint8Array(r.getLastSnapshot()!)).toEqual(new Uint8Array([9]));
+    onViewData(Buffer.from(framed([9]).buffer));
+    expect(new Uint8Array(r.getLastViewFrame()!)).toEqual(new Uint8Array([9]));
 
-    onFd3Data(Buffer.from(framed([1, 2, 3, 4]).buffer));
-    expect(new Uint8Array(r.getLastSnapshot()!)).toEqual(new Uint8Array([1, 2, 3, 4]));
+    onViewData(Buffer.from(framed([1, 2, 3, 4]).buffer));
+    expect(new Uint8Array(r.getLastViewFrame()!)).toEqual(new Uint8Array([1, 2, 3, 4]));
   });
 });
 
-describe("fd3 partial-frame parse state does not survive a respawn", () => {
-  // Pins the fix: stdoutBuf/fd3Buf were runner-lifetime fields reset only at declaration,
+describe("view-stream partial-frame parse state does not survive a respawn", () => {
+  // Pins the fix: stdoutBuf/viewBuf were runner-lifetime fields reset only at declaration,
   // so a process killed mid-frame left a partial frame that concatenated with the NEXT
   // (respawned) process's first chunk — splitFrames then read a frame length from inside
   // the stale bytes and froze/starved the scene. run() now mints fresh parse state at every
   // spawn (freshStreamState), so a dead process's tail can never prefix the next stream.
 
-  // Build a length-prefixed, BUF_BLOCK_TAG_SCENE-tagged fd3 frame:
-  // [len:u32-LE][blockTag:u8=0][body].
+  // Build a length-prefixed, no-tag-byte VIEW-fd frame: [len:u32-LE][body].
   function frameBuf(body: number[]): Buffer {
-    const tagged = [0, ...body]; // 0 = BUF_BLOCK_TAG_SCENE
-    const out = Buffer.alloc(4 + tagged.length);
-    out.writeUInt32LE(tagged.length, 0);
-    Buffer.from(tagged).copy(out, 4);
+    const out = Buffer.alloc(4 + body.length);
+    out.writeUInt32LE(body.length, 0);
+    Buffer.from(body).copy(out, 4);
     return out;
   }
 
-  // The fd3 "data" listener run() registered on this process's stdio[3] stub.
-  function fd3DataCb(proc: FakeProc): (d: Buffer) => void {
-    const on = proc.stdio[3]!.on as ReturnType<typeof vi.fn>;
+  // The VIEW_FD "data" listener run() registered on this process's stdio[4] stub.
+  function viewDataCb(proc: FakeProc): (d: Buffer) => void {
+    const on = proc.stdio[4]!.on as ReturnType<typeof vi.fn>;
     const call = on.mock.calls.find((c) => c[0] === "data");
     return call![1] as (d: Buffer) => void;
   }
@@ -223,7 +221,7 @@ describe("fd3 partial-frame parse state does not survive a respawn", () => {
     r.run();
 
     // proc0 dies mid-frame: header claims an 8-byte body, only 2 body bytes arrive.
-    fd3DataCb(spawned[0])(frameBuf([1, 2, 3, 4, 5, 6, 7, 8]).slice(0, 6));
+    viewDataCb(spawned[0])(frameBuf([1, 2, 3, 4, 5, 6, 7, 8]).slice(0, 6));
     expect(snaps).toEqual([]); // incomplete — nothing decoded yet
 
     // Natural exit → respawn (proc1).
@@ -232,7 +230,7 @@ describe("fd3 partial-frame parse state does not survive a respawn", () => {
 
     // proc1 sends ONE complete, valid frame. With the leftover discarded it decodes cleanly;
     // if the stale 6 bytes had carried over, splitFrames would have mis-framed into garbage.
-    fd3DataCb(spawned[1])(frameBuf([0xaa, 0xbb]));
+    viewDataCb(spawned[1])(frameBuf([0xaa, 0xbb]));
     expect(snaps).toEqual([[0xaa, 0xbb]]);
   });
 });

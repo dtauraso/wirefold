@@ -166,27 +166,34 @@ when a bead has arrived. Go owns the clock.
 
 - **Go runtime** owns all node-local held state, firing rules, wire
   traversal timing, node positions, per-edge curve geometry, shading
-  parameters, camera pose, selection, and overlay visibility. It packs
-  the whole scene into a **binary content buffer** (`Buffer/`) and streams
-  it as TAGGED, length-prefixed frames on fd 3 every change: `[len:u32-LE]
-  [tag byte][block bytes]` (`len` counts the tag byte plus the block
-  bytes). Today there is exactly ONE tag value, `BufBlockTagScene` /
-  `BUF_BLOCK_TAG_SCENE` (`Buffer/frame_tags.go`, mirrored by hand in
-  `tools/topology-vscode/src/schema/frame-tags.ts`), carrying the whole
-  combined snapshot below — the tag is the discriminator this protocol
-  reserves for eventually splitting that one buffer into N per-block
-  buffers, each streamed as its own tagged frame; no such split exists yet.
-- **Go → TS is the binary content buffer** (`buffer-snapshot`) ALONE — no
+  parameters, camera pose, selection, and overlay visibility. There is no
+  single combined buffer or central packer: each emitting goroutine packs
+  and streams its OWN binary content buffer to its OWN dedicated inherited
+  stdio pipe (`Buffer/stream_fds.go`, memory/feedback_no_single_writer_bridge.md)
+  — one VIEW stream (camera/overlay/scene, the gesture/stdin-reader
+  goroutine), one stream per edge row (that edgeMover's own geometry + its
+  wire's live beads), and two streams per node row (that nodeMover's own
+  geometry+ports+label, and that node's own Update-goroutine's interior
+  beads). Frames on a dedicated fd are `[len:u32-LE][payload]` with NO tag
+  byte — the fd POSITION identifies the stream/row.
+  `WIREFOLD_STREAM_FDS` (the ext host's spawn env var,
+  `tools/topology-vscode/src/runCommand.ts`) is **mandatory**: there is no
+  central accumulator or fd-3 fallback left to fall back to.
+- **Go → TS is binary content buffers** (`buffer-snapshot`) ALONE — no
   sidecar. Each node's kind is a numeric `KindId` column (TS maps it to
-  `NODE_DEFS` colors), its label rides the buffer's self-sizing label section,
-  and its identity is the buffer ROW INDEX (Go resolves row → node for hits).
-  The webview decodes the latest snapshot (`buffer-decode.ts`) and renders it;
-  row-keyed reflect resources (`snapshot-buffer.ts`, `overlay-flags.ts`)
-  mirror Go — they author nothing. There is **no JSON-trace render path
-  and no `pump.ts`**; Go emits no trace-event JSON on stdout at all — the
-  `.probe` trace log (`go.jsonl`) is now the ext host's DECODE of the fd3
-  binary content buffer's EVENT block (`buffer-log.ts`), not a stdout
-  parse. Stdout carries only the DEBUG BREADCRUMB channel's sparse
+  `NODE_DEFS` colors), its label rides its own stream frame's inline label
+  bytes, and its identity is the buffer ROW INDEX (Go resolves row → node
+  for hits). The ext host relays each dedicated-fd frame to the webview
+  under a synthetic tag (`BUF_BLOCK_TAG_VIEW`/`_EDGE_STREAM`/`_NODE_STREAM`/
+  `_INTERIOR_STREAM`, `Buffer/frame_tags.go`) purely for cell routing —
+  never a wire byte. The webview decodes each stream (`buffer-decode.ts`)
+  and renders it; row-keyed reflect resources (`snapshot-buffer.ts`,
+  `overlay-flags.ts`) mirror Go — they author nothing. There is **no
+  JSON-trace render path and no `pump.ts`**; Go emits no trace-event JSON
+  on stdout at all — the `.probe` trace logs (`go.jsonl`/`go-node.jsonl`/
+  `go-edge.jsonl`/`go-interior.jsonl`) are the ext host's DECODE of each
+  per-owner stream's own trailing EVENTS section (`buffer-log.ts`), not a
+  stdout parse. Stdout carries only the DEBUG BREADCRUMB channel's sparse
   `{"kind":"breadcrumb",...}` control-event lines.
 - **`BufferScene`** (`tools/topology-vscode/src/webview/three/buffer-scene.tsx`)
   is the composition root of the render tree — it decodes the buffer and

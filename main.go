@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -57,85 +56,25 @@ func toStreamEvents(events []W.RowEvent) []B.StreamEvent {
 // (MODEL.md). Both callers (Run, RunTest) pass a real clock; it is always non-nil.
 // The clock is free-running (no play/pause gate).
 func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath string, topologyPath string, clk W.Clock) {
-	// Open the binary snapshot output channel (default fd 3; set WIREFOLD_BUF_OUT_FD=0
-	// to disable). Writes are fire-and-forget: if fd 3 is not connected nothing reads
-	// it and write errors are silently ignored. This is the SOLE framed output channel
-	// today — the JSON trace on stdout was already removed (see the sink=nil comment
-	// below); there is no pending migration.
-	var snapOut *os.File
-	{
-		fdNum := 3
-		if v := os.Getenv("WIREFOLD_BUF_OUT_FD"); v != "" {
-			if n, err := strconv.Atoi(v); err == nil {
-				fdNum = n
-			}
-		}
-		if fdNum > 0 {
-			snapOut = os.NewFile(uintptr(fdNum), fmt.Sprintf("fd%d", fdNum))
-		}
-	}
-	snapState := B.NewSnapshotState(snapOut)
-	// The VIEW stream (camera+overlay+scene, one singleton row) is the first stream
-	// migrated OFF fd 3 onto its own dedicated inherited pipe, per the no-single-writer-
-	// bridge rule (memory/feedback_no_single_writer_bridge.md) and the fd-allocation
-	// contract documented in Buffer/stream_fds.go. WIREFOLD_STREAM_FDS unset/empty
-	// (headless tests, non-extension launches) ⇒ ParseStreamFDs returns an empty map ⇒
-	// Open reports not-found ⇒ viewFile stays nil ⇒ neither SetViewStreamActive nor
-	// MoveDispatch.SetViewStream below ever runs ⇒ buildSnapshot's fallback packs camera/
-	// overlay/scene into the fd-3 scene frame exactly as before. This dual path is
-	// required, not optional (headless/test launches never set this env var).
-	//
-	// Step C (per-owner-buffer-rows.md): the gesture/stdin-reader goroutine (nodes/
-	// Wiring's MoveDispatch, wired below once it exists) is now the WRITER of this
-	// stream, not Buffer.SnapshotState — SetViewStreamActive only tells SnapshotState to
-	// EXCLUDE camera/overlay/scene from its own fd-3 scene frame while the dedicated
-	// stream is active (the either/or), never to write the stream itself.
+	// The VIEW stream (camera+overlay+scene, one singleton row) — per-owner buffer rows
+	// (per-owner-buffer-rows.md, memory/feedback_no_single_writer_bridge.md): WIREFOLD_STREAM_FDS
+	// is now MANDATORY (the fd-3 SnapshotState accumulator + fallback packer were deleted along
+	// with this migration's final step — see Buffer/stream_fds.go). The gesture/stdin-reader
+	// goroutine (nodes/Wiring's MoveDispatch, wired below once it exists) is the sole WRITER of
+	// this stream.
 	streamFDs := B.ParseStreamFDs(os.Getenv("WIREFOLD_STREAM_FDS"))
 	viewFile, viewStreamWired := streamFDs.Open(B.StreamKindView, 0)
-	if viewStreamWired {
-		snapState.SetViewStreamActive(true)
-	}
-	// Coalesce the high-volume KindPosition stream to at most one emit per tick (clock.go: "the
-	// tick IS the animation clock", not per-bead-event).
-	//
-	// DELIBERATE per-goroutine-clock.md item 6 decision (was previously an accidental default:
-	// `clk.Tick` read the ORIGIN clock directly, which nothing ever applies speed changes to
-	// post-demolition, so this cadence was silently pinned to speed 1 forever regardless of the
-	// slider). snapshot.go's own doc comment already claims "the tick IS the animation clock" —
-	// the SAME scaled, speed-aware notion of tick used everywhere else in the network (paced
-	// wires, node windows). A frozen stand-in silently redefines "tick" here to mean literal wall
-	// tick, contradicting that claim, so this is a correctness/consistency fix, not a cosmetic
-	// one (this file's justification is comprehension, never performance).
-	//
-	// The Trace DRAIN goroutine (Trace/drain.go) is the sole caller of snapState.Update, hence
-	// the sole caller of the tickSource func below, hence a legitimate SINGLE owner for its own
-	// clock copy plus its own speed channel — exactly the shape every other clock-holder in the
-	// network uses (per-goroutine-clock.md), not a second shared object. snapClk is Copy()'d ONCE
-	// here (never handed to a second goroutine) and snapSpeedCh is appended to speedSinks below
-	// so stdin_reader's speed broadcast reaches it exactly like every node/edge goroutine's own
-	// channel.
-	snapClk := clk.Copy()
-	snapSpeedCh := make(chan float64, 1)
-	snapState.SetTickSource(func() int64 {
-		W.ApplySpeedNonBlocking(snapClk, snapSpeedCh)
-		return snapClk.Tick()
-	})
-	// sink=nil: the JSON-trace-on-stdout emitter is REMOVED. Trace still assigns Step, buffers
-	// events (WriteJSONL -trace file), and drives snapState.Update (the onEvent hook) which packs
-	// the binary content buffer's EVENT block. The .probe log is now the ext-host DECODE of that
-	// buffer (buffer-log.ts) — the spec's "one representation including logs". Nothing writes
-	// trace-event JSON to stdout; the ext host no longer parses trace lines from stdout.
-	tr := T.NewWithSinkHook(0, nil, snapState.Update)
+	// sink=nil: the JSON-trace-on-stdout emitter is REMOVED. Trace still assigns Step and
+	// buffers events (WriteJSONL -trace file); it no longer drives any onEvent hook — the
+	// central Buffer.SnapshotState accumulator that hook fed is deleted (per-owner-buffer-
+	// rows.md's final step): every emitting goroutine now packs its own frame directly.
+	tr := T.NewWithSinkHook(0, nil, nil)
 	// DEBUG BREADCRUMB channel: production breadcrumbs ride stdout as {"kind":"breadcrumb",...}
 	// lines; the ext host routes them to .probe/go-debug.jsonl (see runCommand.ts). This is the
 	// Go analogue of the webview's postLog — a cheap, structured, one-call diagnostic that lands
 	// in .probe/ without scattering fmt.Fprintf(os.Stderr, ...). It is sparse (control events,
 	// not a per-tick firehose) and fire-and-forget.
 	tr.SetDebugSink(os.Stdout)
-	// Give the snapshot builder the same breadcrumb channel, so a layout link dropped for an
-	// unresolvable endpoint (resolvableLayoutLinks) surfaces on go-debug.jsonl instead of
-	// vanishing silently. Sparse: it fires only when the dropped count changes.
-	snapState.SetBreadcrumbSink(tr.Breadcrumb)
 
 	// The clock is free-running (no play/pause gate): it starts ticking at construction
 	// and never halts. Startup geometry is NOT emitted here — each node's own goroutine
@@ -147,57 +86,35 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 		fmt.Fprintf(os.Stderr, "load topology: %v\n", err)
 		os.Exit(1)
 	}
-	// Register the snapshot tick source's own speed channel alongside every other
-	// clock-holder's, so a speed change reaches it too (see the SetTickSource comment above).
-	speedSinks = append(speedSinks, snapSpeedCh)
-	// The VIEW frame's AbcDragCount is Buffer.SnapshotState's OWN plain counter
-	// (s.overlay.AbcDragCount), incremented by its KindAbcDrag handler on the single
-	// Trace-drain goroutine — no injected source, no shared/atomic counter in the
-	// Wiring package: tr.AbcDrag (quantized_move.go's neighborSetCRequantize) still
-	// fires on every abc-drag recipient exactly as before, which is what drives this.
 	// The per-edge dedicated stream (memory/feedback_no_single_writer_bridge.md): when
 	// WIREFOLD_STREAM_FDS carries an "edge" entry, wire every edgeMover to its OWN fd
 	// (fd = baseFd + edgeRow, edgeRow = the stable seed order — see
-	// MoveDispatch.SetEdgeStreams) and tell snapState to stop emitting the fd-3 Bead/Edge
-	// blocks (the required either/or). Unset (headless tests, non-extension launches)
-	// leaves both edgeStreamActive and every edgeMover's streamOut at their zero values
-	// (false/nil) — the fallback: fd 3 keeps carrying Bead/Edge exactly as before. MUST run
-	// BEFORE the node/edge row-seed loop below (tr.NodeGeometry/tr.Geometry): those seed
-	// events queue onto Trace's channel and are processed by the ALREADY-RUNNING drain
-	// goroutine (started at T.NewWithSinkHook above), so if SetEdgeStreamActive ran after
-	// the seed loop, the drain goroutine could process one or more seed events with
-	// edgeStreamActive still false and emit a stray fd-3 Bead/Edge frame before this flips —
-	// running it first means every event the drain goroutine ever sees (seed or live) is
-	// processed with the final edgeStreamActive value already in effect.
+	// MoveDispatch.SetEdgeStreams). No edges (edgeBase absent) leaves every edgeMover's
+	// streamOut at its zero value (nil) — there is nothing to stream.
 	if edgeBase, ok := streamFDs[B.StreamKindEdge]; ok {
 		// Edge selection is no longer an injected lookup: each edgeMover owns its OWN
 		// selected bit, set via a moveMsgKindSelect message the gesture goroutine sends
-		// on select/deselect (MoveDispatch.sendEdgeSelect). snapState.IsEdgeSelected
-		// keeps serving the fd-3 fallback only.
+		// on select/deselect (MoveDispatch.sendEdgeSelect).
 		md.SetEdgeStreams(edgeBase, md.PortRowFor, md.NodeRowFor,
 			func(tick uint32, srcPortRow, dstPortRow int32, selected uint8, label string, beadVal []int32, beadX, beadY, beadZ []float32, events []W.RowEvent) []byte {
 				return B.BuildEdgeStreamFrame(tick, srcPortRow, dstPortRow, selected, label, beadVal, beadX, beadY, beadZ, toStreamEvents(events))
 			})
-		snapState.SetEdgeStreamActive(true)
 	}
 	// The two per-node dedicated streams (memory/feedback_no_single_writer_bridge.md):
 	// NODE (geometry+ports+label, written by each nodeMover) and INTERIOR (interior
 	// beads, written by each node's OWN Update goroutine — the SECOND emitting goroutine
 	// per node). Both require the SAME "node" AND "interior" WIREFOLD_STREAM_FDS entries
 	// (a node stream with no interior counterpart, or vice versa, would leave one of the
-	// two goroutines with nowhere fresh to write while the other already skips fd 3 —
-	// so both are required together). MUST run BEFORE the node/edge row-seed loop below,
-	// same ordering reasoning as SetEdgeStreams above.
+	// two goroutines with nowhere fresh to write while the other has one — so both are
+	// required together).
 	if nodeBase, ok := streamFDs[B.StreamKindNode]; ok {
 		if interiorBase, ok2 := streamFDs[B.StreamKindInterior]; ok2 {
 			// Selection/hover/abc-drag/kind are no longer injected lookups: each
 			// nodeMover owns its OWN selected/hovered/latchedSel/gotDragMsg/dragDelta*
 			// bits, set via moveMsgKindSelect/Hover/Latched/AbcReset messages the gesture
 			// goroutine sends (or, for kindID, resolved once here at construction).
-			// snapState.NodeUIStateFor/PortHoveredFor keep serving the fd-3 fallback
-			// only. kindIDFor resolves a node's static load-time kind string to its
-			// NODE_DEFS index (Buffer.NodeKindID) — injected so Wiring stays
-			// Buffer-independent.
+			// kindIDFor resolves a node's static load-time kind string to its NODE_DEFS
+			// index (Buffer.NodeKindID) — injected so Wiring stays Buffer-independent.
 			md.SetNodeStreams(nodeBase, interiorBase,
 				md.NodeRowFor, md.EdgeRowForPair,
 				func(tick uint32, nodeRow int32, cx, cy, cz, radius, sphereR float32, vrx, vry, vrz, frx, fry, frz float32, selected, kindID, hovered, latchedSel, gotDragMsg uint8, dragDeltaA, dragDeltaB, dragDeltaC int32, label string, portNames []string, portDX, portDY, portDZ, portPX, portPY, portPZ []float32, portIsInput, portHovered []uint8, dstNodeRows, edgeRows []int32, events []W.RowEvent) []byte {
@@ -210,7 +127,6 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 					return B.BuildInteriorStreamFrame(tick, present, value, ox, oy, oz, toStreamEvents(events))
 				},
 				B.NodeKindID)
-			snapState.SetNodeStreamActive(true)
 		}
 	}
 	// The VIEW stream's write side (Step C, per-owner-buffer-rows.md): wire md as the
@@ -218,8 +134,8 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 	// selection/hover reaches it (SeedInitialViewpoint/LoadOverlays/LoadSceneSphere below,
 	// then the launched movers/stdin reader) — mirrors SetEdgeStreams/SetNodeStreams'
 	// "wire before it can fire" ordering above. Only when the dedicated fd is actually
-	// wired (viewStreamWired) — left uncalled otherwise (the fallback), matching
-	// SetEdgeStreams/SetNodeStreams' own gating.
+	// wired (viewStreamWired) — left uncalled otherwise (no WIREFOLD_STREAM_FDS "view"
+	// entry, e.g. a non-extension launch with no dedicated pipes at all).
 	if viewStreamWired {
 		md.SetViewStream(viewFile,
 			func(tick uint32,
@@ -239,12 +155,12 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 					sceneCX, sceneCY, sceneCZ, sceneRadius,
 					toStreamEvents(events))
 			})
-		// LayoutLink is load-time-once (see decentralizedEventKinds' doc comment,
-		// Buffer/pack.go) — emit each pair once, now that the view stream is wired, so the
-		// .probe log's per-kind count still matches the -trace reference. tr.LayoutLink
-		// itself (loader.go's emitLayoutLinks, already run inside LoadTopology above) is
-		// UNCHANGED and still populates Buffer.SnapshotState's own LayoutLink BLOCK — this
-		// is purely the EVENT-block/.probe-log representation.
+		// LayoutLink is load-time-once — emit each pair once, now that the view stream is
+		// wired, so the .probe log's per-kind count still matches the -trace reference.
+		// tr.LayoutLink itself (loader.go's emitLayoutLinks, already run inside
+		// LoadTopology above) is UNCHANGED — this is purely the EVENT-block/.probe-log
+		// representation; the render-path LayoutLink section is node_mover.go's own
+		// layoutLinkTos, carried on each node's own stream frame.
 		for _, pair := range md.LayoutLinkPairs() {
 			nodeRow := int32(-1)
 			if r, ok := md.NodeRowFor(pair[0]); ok {
@@ -261,53 +177,11 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 	// useful (which topology loaded, how many nodes). Sparse: once per run.
 	tr.Breadcrumb("topology-loaded", topologyPath, "", fmt.Sprintf("nodes=%d", len(nodes)))
 
-	// Seed the buffer's node/edge row tables from the diagram itself — SPEC ORDER,
-	// prefilled with the diagram's own load-time geometry — BEFORE any node goroutine
-	// starts (the launch loop below). This makes row order a deterministic projection of
-	// the diagram instead of a discovery log built by racing node goroutines to their
-	// first geometry emit (CLAUDE.md/MODEL.md); each node's own later EmitGeometry then
-	// just overwrites its own pre-assigned row, exactly as node_move.go's newNodeMover
-	// already seeds its own atomic snap from this same load-time geometry.
-	//
-	// This goes through the SAME tr.NodeGeometry/tr.Geometry event pipeline every node's
-	// own later startup emit uses — NOT a direct SnapshotState mutation. SnapshotState's
-	// own doc comment (Buffer/snapshot.go) requires every method call to come from the
-	// single Trace-drain goroutine; a first attempt at this feature called a bypass
-	// SnapshotState.SeedNodes/SeedEdges method directly from this (main) goroutine and hit
-	// a genuine data race with the drain goroutine — go test panicked inside
-	// writeEdgeBlock/SetEdgeRow with a corrupted slice. Routing through tr.NodeGeometry/
-	// tr.Geometry instead queues these onto Trace's channel, so the drain goroutine
-	// processes them in FIFO order exactly like any other event — single-writer
-	// preserved, and ordering (spec order, before any node goroutine can race in) still
-	// comes from THIS loop running synchronously before the node-goroutine launch loop
-	// below. Ports and edge endpoints are REAL, not placeholder: every node's center is
-	// already known at load (b.nodeGeoms), so md.NodeSeeds()/md.EdgeSeeds() compute the
-	// same aimed-port and edge-segment geometry the node/edge's own live emit would
-	// produce (node_move.go's newMoveDispatch, reusing builders.go's
-	// aimedPortPosDir/buildPortGeoms and port_geometry.go's edgeSegment) — the row is
-	// fully valid, not degenerate, the instant this loop returns. The node's real startup
-	// emit then just re-writes its own pre-assigned row with the identical values
-	// (onNodeGeometry's exists-check), which is a no-op in practice.
-	// SeedNodeGeometry/SeedGeometry (not NodeGeometry/Geometry): these two kinds are now
-	// fully decentralized (Buffer/pack.go's decentralizedEventKinds) — each node's/edge's
-	// own mover goroutine ALSO emits the identical one-time geometry once at its own
-	// startup (node_mover.go's nodeMover.run/edgeMover.run). Tracing this seed loop's
-	// emission under the plain (non-seed) call would double it in the -trace reference
-	// and every .probe log total, since both are the SAME logical one-time occurrence —
-	// this loop's job is ONLY to prefill the row tables before any mover goroutine
-	// exists, not to be an independent causal event. See Trace.Event's Seed field.
-	for _, sd := range md.NodeSeeds() {
-		tr.SeedNodeGeometry(sd.ID, sd.Label, sd.Kind, sd.CX, sd.CY, sd.CZ, sd.Radius, sd.SphereR, sd.Ports,
-			sd.VRX, sd.VRY, sd.VRZ, sd.FRX, sd.FRY, sd.FRZ)
-	}
-	for _, sd := range md.EdgeSeeds() {
-		tr.SeedGeometry(sd.Label, sd.SrcNode, sd.DstNode, sd.SrcPort, sd.DstPort, sd.SX, sd.SY, sd.SZ, sd.EX, sd.EY, sd.EZ)
-	}
 	// Sparse, one-time startup sanity check (CLAUDE.md DEBUG BREADCRUMB channel): every
-	// node LoadTopology returned should have gotten a row-seed entry above. A mismatch
-	// means md.NodeSeeds() (spec order) and LoadTopology's node list diverged — a real
-	// topology bug — and must be visible, not silently reconciled by a later node
-	// goroutine's own emit landing on whatever row it happens to get.
+	// node LoadTopology returned should have a row-seed entry (md.NodeSeeds(), the SAME
+	// spec-order row table nodes/Wiring's own move-dispatch/stream wiring above already
+	// uses). A mismatch means md.NodeSeeds() (spec order) and LoadTopology's node list
+	// diverged — a real topology bug — and must be visible.
 	if len(md.NodeSeeds()) != len(nodes) {
 		tr.Breadcrumb("row-seed-count-mismatch", "", "", fmt.Sprintf("NodeSeeds=%d nodes=%d", len(md.NodeSeeds()), len(nodes)))
 	}
@@ -401,10 +275,6 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, tracePath strin
 	<-done
 
 	tr.Close()
-	// Trace.Close drained every remaining event into snapState.Update; flush a final snapshot
-	// so trailing causal events (recv/fire/done/arrive not followed by a position emit) still
-	// reach the buffer-decoded .probe log.
-	snapState.FinalFlush()
 	if tracePath != "" {
 		f, err := os.Create(tracePath)
 		if err != nil {

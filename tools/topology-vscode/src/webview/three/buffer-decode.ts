@@ -1,27 +1,16 @@
-// buffer-decode.ts — pure snapshot + bead-frame + node-frame decoders.
+// buffer-decode.ts — pure bead/node/edge/view/stream-frame decoders.
 //
-// decodeSnapshot takes the SCENE-tagged ArrayBuffer produced by Go's Buffer.SnapshotState
-// (BUF_BLOCK_TAG_SCENE) and returns DataView slices over each column block — zero-copy, no
-// store writes. decodeBeadFrame takes the separate BEAD-tagged frame
-// (BUF_BLOCK_TAG_BEAD, see frame-tags.ts) and returns just its bead rows — beads no
-// longer ride the scene frame. decodeNodeFrame takes the separate NODE-tagged frame
+// decodeBeadFrame takes the BEAD-tagged frame (BUF_BLOCK_TAG_BEAD, see frame-tags.ts) and
+// returns just its bead rows. decodeNodeFrame takes the NODE-tagged frame
 // (BUF_BLOCK_TAG_NODE) and returns the Node/Interior/Port blocks + Label/PortName
-// bytes — those three blocks share one owner group (the node movers), so they no
-// longer ride the scene frame either. decodeEdgeFrame takes the separate EDGE-tagged
-// frame (BUF_BLOCK_TAG_EDGE) and returns the Edge block + EdgeLabel bytes — the Edge
-// block carries NO endpoint coordinates (it references its two port rows, resolved
-// against the NODE frame's Port block — see EdgeTube.tsx), so it no longer rides the
-// scene frame either.
-//
-// Scene layout (little-endian, packed):
-//   Header   12 bytes : [tick][eventCount][layoutLinkCount] (u32 each)
-//   LayoutLink layoutLinkCount × LAYOUT_LINK_STRIDE bytes (the LAYOUT double-link overlay
-//              pairs, from LocalPolars — NOT the Edge block; SrcNodeRow/DstNodeRow resolve
-//              against the NODE frame's Node block — see decodeNodeFrame)
-//   Camera   CAMERA_STRIDE bytes   (always 1 row)
-//   Overlay  OVERLAY_STRIDE bytes  (always 1 row)
-//   Scene    SCENE_STRIDE bytes    (always 1 row; persisted scene-sphere center+radius)
-//   Event    eventCount × EVENT_STRIDE bytes (per-tick causal trace events; .probe log only)
+// bytes — those three blocks share one owner group (the node movers). decodeEdgeFrame
+// takes the EDGE-tagged frame (BUF_BLOCK_TAG_EDGE) and returns the Edge block + EdgeLabel
+// bytes — the Edge block carries NO endpoint coordinates (it references its two port rows,
+// resolved against the NODE frame's Port block — see EdgeTube.tsx). decodeViewFrame takes
+// the dedicated VIEW-stream frame and returns the Camera/Overlay/Scene blocks. There is no
+// combined SCENE-frame decoder anymore: Buffer.SnapshotState (the central accumulator that
+// used to write that fd-3 fallback frame) was deleted entirely — per-owner-buffer-rows.md's
+// final step; WIREFOLD_STREAM_FDS is mandatory.
 //
 // Node frame layout (little-endian, packed; see frame-tags.ts BUF_BLOCK_TAG_NODE):
 //   Header   BUF_NODE_FRAME_HEADER_SIZE (20) bytes: [tick][nodeCount][portCount]
@@ -38,13 +27,11 @@
 //   EdgeLabel edgeLabelBytesCount bytes (edge labels' UTF-8 bytes, edge-row order)
 
 import {
-  BUF_HEADER_SIZE,
   BEAD_STRIDE,
   NODE_STRIDE,
   INTERIOR_STRIDE,
   INTERIOR_SLOTS_PER_NODE,
   EDGE_STRIDE,
-  LAYOUT_LINK_STRIDE,
   PORT_STRIDE,
   CAMERA_STRIDE,
   OVERLAY_STRIDE,
@@ -66,27 +53,6 @@ export { INTERIOR_SLOTS_PER_NODE } from "../../schema/buffer-layout";
 /** Shared UTF-8 decoder for the label / port-name / edge-label sections. */
 const STR_DECODER = new TextDecoder();
 
-export interface DecodedSnapshot {
-  tick: number;
-  /** Number of LAYOUT-link pairs (from LocalPolars, NOT the Edge block). */
-  layoutLinkCount: number;
-  /** DataView over the LayoutLink block; byteLength = layoutLinkCount × LAYOUT_LINK_STRIDE.
-   *  SrcNodeRow/DstNodeRow resolve against the NODE frame's Node block (decodeNodeFrame) —
-   *  both frames share the same stable node-row order. */
-  layoutLinkView: DataView;
-  /** DataView over the single camera row, or null when the dedicated VIEW fd is active
-   *  (camera/overlay/scene then arrive on their own frame instead — see decodeViewFrame
-   *  / three/view-blocks.ts's either/or read). Non-null in the fallback (no dedicated
-   *  view fd), exactly as before this migration. */
-  cameraView: DataView | null;
-  /** DataView over the single overlay row, or null — see cameraView's doc comment. */
-  overlayView: DataView | null;
-  /** DataView over the single scene-sphere row (persisted center + radius; established once
-   *  at load and never moved — see readSceneCX/readSceneRadius, KindSceneSphere), or null —
-   *  see cameraView's doc comment. */
-  sceneView: DataView | null;
-}
-
 /** Decodes a trailing EVENTS section ([count:u32] + count × EVENT_STRIDE rows) appended
  *  after `offset` bytes of already-known content in ANY per-owner frame (NODE/EDGE/
  *  INTERIOR/VIEW — memory/feedback_no_single_writer_bridge.md). The fd-3 SCENE frame no
@@ -99,76 +65,6 @@ export function decodeTrailingEvents(buf: ArrayBuffer, offset: number): { count:
   const bytes = count * EVENT_STRIDE;
   if (buf.byteLength < offset + 4 + bytes) return { count: 0, view: new DataView(buf, buf.byteLength, 0) };
   return { count, view: new DataView(buf, offset + 4, bytes) };
-}
-
-// Single-entry memo keyed on the ArrayBuffer's OBJECT IDENTITY (not its contents — the
-// buffer's bytes never mutate in place, a new ArrayBuffer arrives per snapshot). Every
-// per-block renderer (EdgeTube, SphereRings, BufferCamera — several call sites)
-// independently decodes the SAME snapshot every frame; without this cache each one builds
-// its own short-lived DataViews at 60fps under a ~430-700 snapshot/sec stream. This shares
-// one decode per frame across all consumers. It moves no ownership — the memo just skips
-// redoing pure arithmetic on unchanged input, exactly what memoization is for.
-let lastBuf: ArrayBuffer | null = null;
-let lastDecoded: DecodedSnapshot | null = null;
-
-/**
- * Decode a snapshot ArrayBuffer into typed block views.
- *
- * Returns null if the buffer is too small to be a valid snapshot
- * (guards against partial frames or empty buffers).
- *
- * This is a PURE function — no side effects, no store reads/writes.
- * All views alias the original buffer (zero-copy). Memoized on `buf`'s identity (see
- * lastBuf/lastDecoded above) so N consumers decoding the same snapshot in one frame share
- * a single decode.
- */
-export function decodeSnapshot(buf: ArrayBuffer): DecodedSnapshot | null {
-  if (buf === lastBuf) return lastDecoded;
-  const decoded = decodeSnapshotUncached(buf);
-  lastBuf = buf;
-  lastDecoded = decoded;
-  return decoded;
-}
-
-function decodeSnapshotUncached(buf: ArrayBuffer): DecodedSnapshot | null {
-  if (buf.byteLength < BUF_HEADER_SIZE) return null;
-
-  const hdr = new DataView(buf, 0, BUF_HEADER_SIZE);
-  const tick            = hdr.getUint32(0, true);
-  const layoutLinkCount = hdr.getUint32(4, true);
-
-  const layoutLinkBytes = layoutLinkCount * LAYOUT_LINK_STRIDE;
-  // Either/or (Go's buildSnapshot, Buffer/pack.go): camera/overlay/scene are embedded
-  // here ONLY in the fallback (no dedicated view fd). Distinguish the two shapes by
-  // exact byte length — layoutLinkCount is already known from the header, so there is
-  // no ambiguity between "no view blocks" and "view blocks present". The EVENT block was
-  // retired from this frame entirely (memory/feedback_no_single_writer_bridge.md).
-  const viewBlockBytes = CAMERA_STRIDE + OVERLAY_STRIDE + SCENE_STRIDE;
-  const withoutViewLen = BUF_HEADER_SIZE + layoutLinkBytes;
-  const withViewLen    = withoutViewLen + viewBlockBytes;
-
-  if (buf.byteLength !== withoutViewLen && buf.byteLength !== withViewLen) return null;
-
-  let off = BUF_HEADER_SIZE;
-  const layoutLinkView = new DataView(buf, off, layoutLinkBytes);
-  off += layoutLinkBytes;
-
-  let cameraView: DataView | null = null;
-  let overlayView: DataView | null = null;
-  let sceneView: DataView | null = null;
-
-  if (buf.byteLength === withViewLen) {
-    cameraView = new DataView(buf, off, CAMERA_STRIDE);
-    off += CAMERA_STRIDE;
-    overlayView = new DataView(buf, off, OVERLAY_STRIDE);
-    off += OVERLAY_STRIDE;
-    sceneView = new DataView(buf, off, SCENE_STRIDE);
-  }
-
-  return {
-    tick, layoutLinkCount, layoutLinkView, cameraView, overlayView,
-    sceneView,
-  };
 }
 
 /** Decoded view over a BUF_BLOCK_TAG_BEAD frame (see frame-tags.ts for its byte layout):
@@ -477,15 +373,14 @@ export interface DecodedViewFrame {
   cameraView: DataView;
   overlayView: DataView;
   sceneView: DataView;
-  /** The fallback bucket of events not yet decentralized to their own owner fd
-   *  (Fire/Recv/Send/Select/Hover/AbcDrag(Reset)/Camera/SceneSphere/overlay toggles/
-   *  LayoutLink — see Buffer/pack.go's viewEventsSection). */
+  /** This VIEW stream's own trailing EVENTS section (camera/overlay/scene events —
+   *  every other kind is decentralized to its own owner fd). */
   eventCount: number;
   eventView: DataView;
 }
 
-// Single-entry memo, mirroring decodeSnapshot's — the view frame arrives on its own
-// dedicated fd, independent of the scene frame's memo above.
+// Single-entry memo, mirroring the other per-frame decoders below — the view frame
+// arrives on its own dedicated fd, decoded independently of every other stream.
 let lastViewBuf: ArrayBuffer | null = null;
 let lastDecodedView: DecodedViewFrame | null = null;
 

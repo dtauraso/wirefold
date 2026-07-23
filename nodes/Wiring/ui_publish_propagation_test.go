@@ -6,8 +6,8 @@
 // on its OWN periodic every-cycle emit — no central trigger, no nudge mechanism needed
 // (nodeMover.run's writeStreamFrame call already runs every cycle regardless of geometry
 // change, same as edgeMover.run — see node_mover.go). The abc-drag COUNT is proven via
-// Buffer.SnapshotState's own single-goroutine counter (s.overlay.AbcDragCount, written on
-// the Trace-drain goroutine only) reflected in the VIEW frame.
+// MoveDispatch's own single-goroutine counter (md.abcDragCount, touched only by whichever
+// goroutine calls DrainAbcDragChan) reflected in the VIEW frame.
 
 package Wiring
 
@@ -126,8 +126,7 @@ func lastViewFrameAbcDragCount(raw []byte) (count uint32, ok bool) {
 func TestGesturePathPropagatesUIStateToMoverStream(t *testing.T) {
 	root := writeXTN(t) // x --Out--> t (chain), x --Out--> n (data)
 
-	snapState := B.NewSnapshotState(nil)
-	tr := T.NewWithSinkHook(0, nil, snapState.Update)
+	tr := T.NewWithSinkHook(0, nil, nil)
 
 	_, _, md, _, err := LoadTopology(context.Background(), root, tr, NewRealClock())
 	if err != nil {

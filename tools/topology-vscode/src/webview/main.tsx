@@ -12,8 +12,8 @@ import { AbcDragLabel } from "./three/AbcDragLabel";
 import { parseHostToWebview } from "../messages";
 import { ErrorBoundary } from "./log/ErrorBoundary";
 import { CrashListeners } from "./log/CrashListeners";
-import { setLatestSnapshot, setLatestBeadFrame, setLatestNodeFrame, setLatestEdgeFrame, setLatestViewFrame, setLatestEdgeStreamFrame, setLatestNodeStreamFrame, setLatestInteriorStreamFrame } from "./snapshot-buffer";
-import { BUF_BLOCK_TAG_SCENE, BUF_BLOCK_TAG_BEAD, BUF_BLOCK_TAG_NODE, BUF_BLOCK_TAG_EDGE, BUF_BLOCK_TAG_VIEW, BUF_BLOCK_TAG_EDGE_STREAM, BUF_BLOCK_TAG_NODE_STREAM, BUF_BLOCK_TAG_INTERIOR_STREAM } from "../schema/frame-tags";
+import { setLatestViewFrame, setLatestEdgeStreamFrame, setLatestNodeStreamFrame, setLatestInteriorStreamFrame } from "./snapshot-buffer";
+import { BUF_BLOCK_TAG_VIEW, BUF_BLOCK_TAG_EDGE_STREAM, BUF_BLOCK_TAG_NODE_STREAM, BUF_BLOCK_TAG_INTERIOR_STREAM } from "../schema/frame-tags";
 
 function Root() {
   return (
@@ -53,23 +53,13 @@ window.addEventListener("message", (e) => {
   // buffer-snapshot is the only host→webview message; it is the hot-path firehose and is
   // deliberately never per-message-logged (see the note above).
   if (msg.type === "buffer-snapshot") {
-    // Route by block tag (schema/frame-tags.ts): the SCENE frame updates the scene cell
-    // (buffer-scene rendering), the BEAD frame updates its own separate cell
-    // (BeadInstances.tsx), the NODE frame updates its own separate cell (the node/
-    // port/interior/label renderers), the EDGE frame updates its own separate cell
-    // (EdgeTube.tsx), and the VIEW frame (camera+overlay+scene, arriving on its own
-    // dedicated pipe when active — see runCommand.ts's VIEW_FD) updates its own separate
-    // cell (three/view-blocks.ts) — none of those four ride the scene frame anymore when
-    // the view fd is active. EVERY frame is applied — nothing dropped. The observability
-    // log is COALESCED to at most ~1/sec (with a running count) so it does not re-flood
-    // the webview->host bridge and re-starve raw-input.
-    if (msg.tag === BUF_BLOCK_TAG_BEAD) {
-      setLatestBeadFrame(msg.buffer);
-    } else if (msg.tag === BUF_BLOCK_TAG_NODE) {
-      setLatestNodeFrame(msg.buffer);
-    } else if (msg.tag === BUF_BLOCK_TAG_EDGE) {
-      setLatestEdgeFrame(msg.buffer);
-    } else if (msg.tag === BUF_BLOCK_TAG_VIEW) {
+    // Route by block tag (schema/frame-tags.ts): the VIEW frame (camera+overlay+scene,
+    // arriving on its own dedicated pipe — see runCommand.ts's VIEW_FD) updates its own
+    // cell (three/view-blocks.ts); the per-edge/per-node/per-interior dedicated streams
+    // update their own keyed maps. EVERY frame is applied — nothing dropped. The
+    // observability log is COALESCED to at most ~1/sec (with a running count) so it does
+    // not re-flood the webview->host bridge and re-starve raw-input.
+    if (msg.tag === BUF_BLOCK_TAG_VIEW) {
       setLatestViewFrame(msg.buffer);
     } else if (msg.tag === BUF_BLOCK_TAG_EDGE_STREAM) {
       // One of the per-edge dedicated streams (row names WHICH edge — see
@@ -89,8 +79,6 @@ window.addEventListener("message", (e) => {
       if (typeof msg.row === "number") {
         setLatestInteriorStreamFrame(msg.row, msg.buffer);
       }
-    } else if (msg.tag === BUF_BLOCK_TAG_SCENE) {
-      setLatestSnapshot(msg.buffer);
     }
     bufSnapCount += 1;
     const now = Date.now();

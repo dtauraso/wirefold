@@ -8,9 +8,9 @@
 export const PROBE_DIR = ".probe";
 
 export const PROBE_FILES = {
-  // go: the VIEW-bucket .probe log — trace kinds not yet decentralized to their own
-  // owner fd (Fire/Recv/Send/Select/Hover/AbcDrag(Reset)/Camera/SceneSphere/overlay
-  // toggles/LayoutLink — Buffer/pack.go's viewEventsSection). goNode/goEdge/goInterior are
+  // go: the VIEW stream's own .probe log (camera/overlay/scene events). Every trace kind
+  // is now decentralized to its own owner fd — this bucket carries none of the
+  // node/edge/interior kinds. goNode/goEdge/goInterior are
   // SEPARATE per-owner-KIND logs (memory/feedback_no_single_writer_bridge.md — N owners,
   // N logs, no merge into one file): each is the decode of every node/edge/interior
   // stream's OWN trailing EVENTS section (NodeGeometry, Geometry/Position/Arrive,

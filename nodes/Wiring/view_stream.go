@@ -81,9 +81,9 @@ func (md *MoveDispatch) DrainAbcDragChan() int {
 }
 
 // EmitLayoutLinkViewEvent writes one LayoutLink event onto this goroutine's own VIEW
-// frame (Step C, per-owner-buffer-rows.md — see decentralizedEventKinds' doc comment in
-// Buffer/pack.go for why LayoutLink, a load-time-once fact, is emitted this way rather
-// than from a live per-goroutine owner). Exported so main.go (package main, which already
+// frame (Step C, per-owner-buffer-rows.md): LayoutLink is a load-time-once topology fact
+// with no live per-goroutine owner to stream it from, so it is emitted once here rather
+// than from a per-tick owner. Exported so main.go (package main, which already
 // resolves nodeRow/targetRow via md.NodeRowFor) can call it directly after wiring
 // SetViewStream, mirroring the Seed* idiom Step A used for NodeGeometry/Geometry.
 func (md *MoveDispatch) EmitLayoutLinkViewEvent(nodeRow, targetRow int32) {

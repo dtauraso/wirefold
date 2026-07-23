@@ -5,7 +5,7 @@
 import { useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
-import { getNodeFrameOrFallback } from "./node-stream-blocks";
+import { getNodeFrame } from "./node-stream-blocks";
 import {
   readNodeCX, readNodeCY, readNodeCZ, readNodeRadius, readNodeSelected, readNodeHovered,
 } from "../../schema/buffer-layout";
@@ -32,7 +32,7 @@ export function SelectionHighlight() {
     const g = groupRef.current;
     if (!g) return;
 
-    const decoded = getNodeFrameOrFallback();
+    const decoded = getNodeFrame();
     let show = false;
     if (decoded) {
       const { nodeCount, nodeView } = decoded;
@@ -97,7 +97,7 @@ export function HoverHighlight() {
     const ring = ringRef.current;
     if (!ring) return;
 
-    const decoded = getNodeFrameOrFallback();
+    const decoded = getNodeFrame();
     let show = false;
     if (decoded) {
       const { nodeCount, nodeView } = decoded;

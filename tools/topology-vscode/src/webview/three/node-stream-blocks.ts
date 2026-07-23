@@ -1,19 +1,15 @@
-// node-stream-blocks.ts — the per-node dedicated-stream either/or, mirroring
+// node-stream-blocks.ts — the per-node dedicated-stream aggregator, mirroring
 // edge-stream-blocks.ts's role for the per-edge streams (memory/feedback_no_single_writer_bridge.md).
 //
-// Every render-tree consumer that used to read getLatestNodeFrame()+decodeNodeFrame() (the
-// fd-3 combined Node/Interior/Port + Label/PortName frame) now reads getNodeFrameOrFallback()
-// instead — ONE function returning the SAME DecodedNodeFrame shape, so no consumer's read
-// logic (row indexing, column readers) has to change. When the dedicated per-node NODE and
-// INTERIOR streams are active (WIREFOLD_STREAM_FDS carries "node"+"interior"), this
-// AGGREGATES every node row's own frame (Buffer.BuildNodeStreamFrame /
-// BuildInteriorStreamFrame — one goroutine's fd each) into one contiguous
-// DecodedNodeFrame-shaped view, rewriting only the two offset columns
-// (LabelOff/PortNameOff) that must point into the aggregated label/port-name byte
-// sections instead of each frame's own inline bytes. This IS a byte copy (the source
-// bytes live in N separate ArrayBuffers, one per node/interior fd) — but it happens once
-// per (nodeStreamVersion, interiorStreamVersion) change, not once per render-tree consumer
-// per frame (of which there are ~8), via the module-level memo below.
+// Every render-tree consumer reads getNodeFrame() — ONE function returning a
+// DecodedNodeFrame-shaped view aggregated from every node row's own dedicated NODE/INTERIOR
+// stream frame (Buffer.BuildNodeStreamFrame/BuildInteriorStreamFrame — one goroutine's fd
+// each), rewriting only the two offset columns (LabelOff/PortNameOff) that must point into
+// the aggregated label/port-name byte sections instead of each frame's own inline bytes.
+// This IS a byte copy (the source bytes live in N separate ArrayBuffers, one per node/
+// interior fd) — but it happens once per (nodeStreamVersion, interiorStreamVersion) change,
+// not once per render-tree consumer per frame (of which there are ~8), via the module-level
+// memo below.
 //
 // A node row with no NODE-stream frame yet (arrived out of order at startup) is treated as
 // an all-zero row (radius 0 falls back to NODE_SPHERE_RADIUS in the renderers via `|| `,
@@ -21,13 +17,13 @@
 // A node row with no INTERIOR-stream frame yet is treated as all-Present=0 (no interior
 // beads drawn for that node until its own Update goroutine's first frame arrives).
 //
-// Falls back to the fd-3 combined Node frame (decodeNodeFrame(getLatestNodeFrame())) when
-// no dedicated node-stream frame has arrived — the required dual-path (env unset, headless
-// tests, non-extension launches).
+// WIREFOLD_STREAM_FDS "node"+"interior" are now MANDATORY (the fd-3 fallback frame was
+// deleted, per-owner-buffer-rows.md's final step) — null means "no frame has arrived yet",
+// not "the dedicated path is off".
 
-import { getLatestNodeFrame, getLatestNodeStreamFrames, getLatestInteriorStreamFrames, getNodeStreamVersion, getInteriorStreamVersion, subscribeNodeFrame, subscribeNodeStreamFrame, subscribeInteriorStreamFrame } from "../snapshot-buffer";
+import { getLatestNodeStreamFrames, getLatestInteriorStreamFrames, getNodeStreamVersion, getInteriorStreamVersion, subscribeNodeStreamFrame, subscribeInteriorStreamFrame } from "../snapshot-buffer";
 import {
-  decodeNodeFrame, decodeNodeStreamFrame, decodeInteriorStreamFrame,
+  decodeNodeStreamFrame, decodeInteriorStreamFrame,
   readNodeStreamLayoutLinkDstNodeRow, readNodeStreamLayoutLinkEdgeRow,
   type DecodedNodeFrame,
 } from "./buffer-decode";
@@ -49,15 +45,14 @@ let lastInteriorVersion = -1;
 let lastAggregate: DecodedNodeFrame | null = null;
 
 /**
- * getNodeFrameOrFallback returns the current Node/Interior/Port(+Label/PortName) view,
- * from the aggregated per-node dedicated streams if active, else the fd-3 combined Node
- * frame — the required fallback. Pure read (aside from its own memo) — no store writes.
+ * getNodeFrame returns the current Node/Interior/Port(+Label/PortName) view, aggregated
+ * from every node row's own dedicated stream frame. null until at least one has arrived.
+ * Pure read (aside from its own memo) — no store writes.
  */
-export function getNodeFrameOrFallback(): DecodedNodeFrame | null {
+export function getNodeFrame(): DecodedNodeFrame | null {
   const nodeFrames = getLatestNodeStreamFrames();
   if (nodeFrames.size === 0) {
-    const fallback = getLatestNodeFrame();
-    return fallback ? decodeNodeFrame(fallback) : null;
+    return null;
   }
   const nv = getNodeStreamVersion();
   const iv = getInteriorStreamVersion();
@@ -83,19 +78,17 @@ let lastLayoutLinkVersion = -1;
 let lastLayoutLinkAgg: LayoutLinkAgg | null = null;
 
 /**
- * getLayoutLinksOrFallback returns the current LAYOUT-link overlay pairs: aggregated from
- * every per-node dedicated NODE stream's own outbound layout-links (each node streams the
- * pairs for which it is the SOURCE — see node_mover.go's layoutLinkTos) when those streams
- * are active, else the fd-3 scene frame's shared LayoutLink block (sceneLayoutLinkCount/
- * sceneLayoutLinkView, the required fallback — pass decodeSnapshot's own fields straight
- * through). Reconstructs full SrcNodeRow/DstNodeRow/EdgeRow rows (SrcNodeRow = the node
- * row whose own frame carried that entry) so the aggregate is BYTE-COMPATIBLE with the
- * pre-migration shared block.
+ * getLayoutLinks returns the current LAYOUT-link overlay pairs, aggregated from every
+ * per-node dedicated NODE stream's own outbound layout-links (each node streams the pairs
+ * for which it is the SOURCE — see node_mover.go's layoutLinkTos). Reconstructs full
+ * SrcNodeRow/DstNodeRow/EdgeRow rows (SrcNodeRow = the node row whose own frame carried
+ * that entry) so the aggregate is BYTE-COMPATIBLE with the pre-migration shared block.
+ * Empty (layoutLinkCount 0) until at least one node stream frame has arrived.
  */
-export function getLayoutLinksOrFallback(sceneLayoutLinkCount: number, sceneLayoutLinkView: DataView): LayoutLinkAgg {
+export function getLayoutLinks(): LayoutLinkAgg {
   const nodeFrames = getLatestNodeStreamFrames();
   if (nodeFrames.size === 0) {
-    return { layoutLinkCount: sceneLayoutLinkCount, layoutLinkView: sceneLayoutLinkView };
+    return { layoutLinkCount: 0, layoutLinkView: new DataView(new ArrayBuffer(0)) };
   }
   const nv = getNodeStreamVersion();
   if (nv === lastLayoutLinkVersion && lastLayoutLinkAgg) {
@@ -136,14 +129,12 @@ export function getLayoutLinksOrFallback(sceneLayoutLinkCount: number, sceneLayo
   return agg;
 }
 
-/** Subscribe to either source updating (subscribe-fn shape, e.g. for a React external-store
- *  hook) — the per-node analogue of view-blocks.ts's subscribeViewBlocks. */
+/** Subscribe to either dedicated stream updating (subscribe-fn shape, e.g. for a React
+ *  external-store hook) — the per-node analogue of view-blocks.ts's subscribeViewBlocks. */
 export function subscribeNodeStreamBlocks(fn: () => void): () => void {
-  const unsubFallback = subscribeNodeFrame(fn);
   const unsubNode = subscribeNodeStreamFrame(fn);
   const unsubInterior = subscribeInteriorStreamFrame(fn);
   return () => {
-    unsubFallback();
     unsubNode();
     unsubInterior();
   };

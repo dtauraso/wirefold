@@ -5,7 +5,7 @@
 import { useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
-import { getNodeFrameOrFallback } from "./node-stream-blocks";
+import { getNodeFrame } from "./node-stream-blocks";
 import { INTERIOR_SLOTS_PER_NODE } from "./buffer-decode";
 import { beadStyleForValue } from "./bead-style";
 import {
@@ -40,7 +40,7 @@ export function InteriorBeadInstances({ capacity }: { capacity: number }) {
     const ring = ringRef.current;
     if (!body || !ring) return;
 
-    const decoded = getNodeFrameOrFallback();
+    const decoded = getNodeFrame();
     if (!decoded) { body.count = 0; ring.count = 0; return; }
     const { nodeCount, nodeView, interiorView } = decoded;
 

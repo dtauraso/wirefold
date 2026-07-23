@@ -7,11 +7,9 @@
 import React, { useRef, useState, useMemo, useEffect } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
-import { getLatestSnapshot, getLatestEdgeFrame } from "../snapshot-buffer";
-import { decodeSnapshot, decodeEdgeFrame } from "./buffer-decode";
 import { getViewBlocks } from "./view-blocks";
 import { getEdgeStreamAccessor } from "./edge-stream-blocks";
-import { getNodeFrameOrFallback, getLayoutLinksOrFallback } from "./node-stream-blocks";
+import { getNodeFrame, getLayoutLinks } from "./node-stream-blocks";
 import {
   SHADING_PARAM_TUBE_COLOR,
   SHADING_PARAM_TUBE_EMISSIVE,
@@ -21,8 +19,6 @@ import {
   SHADING_PARAM_LAYOUT_LINK_EMISSIVE_INTENSITY,
 } from "../../schema/shading-params";
 import {
-  readEdgeSrcPortRow, readEdgeDstPortRow,
-  readEdgeSelected,
   readLayoutLinkSrcNodeRow, readLayoutLinkDstNodeRow, readLayoutLinkEdgeRow,
   readNodeCX, readNodeCY, readNodeCZ,
   readPortPX, readPortPY, readPortPZ,
@@ -235,42 +231,21 @@ export function EdgeTubes({ capacity, layoutLinkCapacity }: { capacity: number; 
   const linkPrevRef = useRef<{ dbl: boolean; segs: EdgeSeg[]; viaEdge: boolean[] }>({ dbl: false, segs: [], viaEdge: [] });
 
   useFrame(() => {
-    const snap = getLatestSnapshot();
     const blocks = getViewBlocks();
-    const decodedNode = getNodeFrameOrFallback();
-    if (!snap || !decodedNode || !blocks) return;
-    const decoded = decodeSnapshot(snap);
-    if (!decoded) return;
-    // Either/or (memory/feedback_no_single_writer_bridge.md): the dedicated per-edge
-    // streams, when active, are this edge data's ONLY source — the fd-3 Edge frame is
-    // never double-read alongside it. Falls back to the fd-3 Edge frame when no dedicated
-    // edge stream has arrived yet (env unset — headless tests, non-extension launches).
+    const decodedNode = getNodeFrame();
+    if (!decodedNode || !blocks) return;
+    // Every edge's own dedicated stream frame is this edge data's ONLY source (memory/
+    // feedback_no_single_writer_bridge.md) — null means no frame has arrived yet.
     const edgeStream = getEdgeStreamAccessor();
-    let edgeCount: number;
-    let srcPortRowAt: (row: number) => number;
-    let dstPortRowAt: (row: number) => number;
-    let selectedAt: (row: number) => boolean;
-    if (edgeStream) {
-      edgeCount = edgeStream.edgeCount;
-      srcPortRowAt = (row) => edgeStream.srcPortRow(row);
-      dstPortRowAt = (row) => edgeStream.dstPortRow(row);
-      selectedAt = (row) => edgeStream.selected(row);
-    } else {
-      const edgeFrame = getLatestEdgeFrame();
-      if (!edgeFrame) return;
-      const decodedEdge = decodeEdgeFrame(edgeFrame);
-      if (!decodedEdge) return;
-      const { edgeView } = decodedEdge;
-      edgeCount = decodedEdge.edgeCount;
-      srcPortRowAt = (row) => readEdgeSrcPortRow(edgeView, row);
-      dstPortRowAt = (row) => readEdgeDstPortRow(edgeView, row);
-      selectedAt = (row) => readEdgeSelected(edgeView, row) > 0;
-    }
+    if (!edgeStream) return;
+    const edgeCount = edgeStream.edgeCount;
+    const srcPortRowAt = (row: number) => edgeStream.srcPortRow(row);
+    const dstPortRowAt = (row: number) => edgeStream.dstPortRow(row);
+    const selectedAt = (row: number) => edgeStream.selected(row);
     // Layout-link overlay pairs: aggregated from the per-node dedicated streams' own
-    // outbound layout-links when active, else the fd-3 scene frame's shared LayoutLink
-    // block (decoded.layoutLinkCount/layoutLinkView, the required fallback) — see
-    // getLayoutLinksOrFallback's doc comment (memory/feedback_no_single_writer_bridge.md).
-    const { layoutLinkCount, layoutLinkView } = getLayoutLinksOrFallback(decoded.layoutLinkCount, decoded.layoutLinkView);
+    // outbound layout-links (see getLayoutLinks' doc comment,
+    // memory/feedback_no_single_writer_bridge.md).
+    const { layoutLinkCount, layoutLinkView } = getLayoutLinks();
     const { overlayView } = blocks;
     // LayoutLink's SrcNodeRow/DstNodeRow resolve against the NODE frame's Node block — both
     // frames are built from the same Go SnapshotState in the same emitSnapshot call, so they

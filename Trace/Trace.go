@@ -166,19 +166,6 @@ type PortGeom struct {
 	DX, DY, DZ float64
 }
 
-// PortRow is one row of the port-row table Buffer.SnapshotState hands off to the
-// stdin/gesture goroutine over a channel (Buffer/snapshot.go rebuildPortTable /
-// nodes/Wiring's MoveDispatch.portTbl): the (node, port, isInput) identity a numeric
-// buffer PORT-ROW index resolves to. Defined here (Trace) rather than in Buffer or
-// Wiring because both packages already depend on Trace and neither depends on the
-// other — this keeps the ownership-handoff channel's element type shared without
-// introducing a new inter-package dependency.
-type PortRow struct {
-	Node    string
-	Port    string
-	IsInput bool
-}
-
 type Event struct {
 	Step  int    `json:"step"`
 	Kind  string `json:"kind"`
@@ -220,20 +207,19 @@ type Event struct {
 	Edge string `json:"edge,omitempty"`
 	// SX/SY/SZ and EX/EY/EZ carry an edge's authoritative straight-segment endpoints
 	// on geometry events (KindGeometry): Start = source OUT-port world pos,
-	// End = dest IN-port world pos. Go owns these; the renderer draws the wire tube
-	// from them as a LineCurve3. Set on geometry events only (keyed by Edge).
+	// End = dest IN-port world pos. Go owns these; historically the renderer drew the
+	// wire tube from them directly. The buffer no longer stores these as a duplicate
+	// copy on the Edge block (see SrcPort/DstPort below) — the renderer now resolves
+	// the endpoint from the node-owned Port block instead, so a stale copy here can
+	// never cause a render-time tear. Still carried on the event/struct for now (no
+	// production consumer left; kept only as the geometry event's historical payload).
 	SX, SY, SZ float64
 	EX, EY, EZ float64
-	// SrcPort/DstPort carry this edge's endpoint PORT NAMES (source OUT-port, dest
-	// IN-port) on geometry events (KindGeometry). Buffer/snapshot.go uses these,
-	// together with Node/Target (the endpoint node ids), to look up the SAME
-	// per-node port world position the Port block was just written from, and
-	// derives the Edge block's SX..EZ from that lookup rather than from the
-	// stale SX..EZ this event carries — a node-geometry event and an edge-geometry
-	// event land on different goroutines and can straddle a buildSnapshot frame
-	// during a drag, so the emitted SX..EZ above can be one cycle stale; the port
-	// lookup is not. Not Port (singular; already used by send/recv events) because
-	// an edge names BOTH its endpoint ports.
+	// SrcPort/DstPort carry the edge's source (OUTPUT) and dest (INPUT) port NAMES on
+	// geometry events (KindGeometry) — the identity the edgeMover's own stream frame
+	// resolves to buffer PORT-ROW indices (via injected portRowFor) so the Edge block's
+	// SrcPortRow/DstPortRow reference the Port block rows that OWN the endpoint world
+	// position, instead of duplicating SX..EZ as a second, laggier copy.
 	SrcPort, DstPort string
 	// NX/NY/NZ carry the node's center world position on node-geometry events
 	// (KindNodeGeometry), and Ports carries that node's per-port world geometry.
@@ -452,16 +438,15 @@ func (t *Trace) Position(node, port string, value int, x, y, z, f float64, bead 
 
 // Geometry emits an edge's authoritative straight-segment endpoints (Phase 3),
 // keyed by edge label (== the TS edge id). (sx,sy,sz) is the source OUT-port world
-// pos (Start), (ex,ey,ez) is the dest IN-port world pos (End). Go emits this on load
-// and on each node-move; the renderer draws the wire tube as a LineCurve3 from these.
-// src/dst are the edge's source and destination NODE ids; the buffer snapshot maps
+// pos (Start), (ex,ey,ez) is the dest IN-port world pos (End) — still carried for now
+// (see the Event struct's SX..EZ comment) but no longer the buffer's endpoint source of
+// truth. srcPort/dstPort are the edge's source (output) and dest (input) port NAMES —
+// the edgeMover's own dedicated stream frame resolves these to buffer PORT-ROW indices so
+// the Edge block references the Port block row that OWNS the endpoint, instead of
+// duplicating it. src/dst are the edge's source and destination NODE ids; the buffer maps
 // them to node-row indices so the on-surface selection highlight has the edge-graph
 // adjacency (the JSON/pump path ignores them — it keys segments by Edge). Carried on
 // the existing Node (source) and Target (dest) fields; unused on geometry otherwise.
-// srcPort/dstPort are the edge's endpoint port names (source OUT-port, dest IN-port);
-// Buffer/snapshot.go uses them to derive the Edge block's endpoints from the Port
-// block instead of trusting sx..ez, which can be one clock cycle stale mid-drag
-// (see Event.SrcPort/DstPort doc comment).
 func (t *Trace) Geometry(edge, src, dst, srcPort, dstPort string, sx, sy, sz, ex, ey, ez float64) {
 	t.emit(Event{
 		Kind: KindGeometry, Edge: edge, Node: src, Target: dst,

@@ -1,7 +1,7 @@
-// Unit tests for the per-node dedicated-stream decode + aggregation + fallback path
+// Unit tests for the per-node dedicated-stream decode + aggregation path
 // (schema/frame-tags.ts's BUF_BLOCK_TAG_NODE_STREAM/BUF_BLOCK_TAG_INTERIOR_STREAM,
 // buffer-decode.ts's decodeNodeStreamFrame/decodeInteriorStreamFrame, and
-// three/node-stream-blocks.ts's getNodeFrameOrFallback aggregator).
+// three/node-stream-blocks.ts's getNodeFrame aggregator).
 //
 // Also proves the EdgeTube tear-free resolution: an edge's SrcPortRow/DstPortRow (from
 // the per-edge dedicated stream) resolve against the AGGREGATED per-node Port block's
@@ -10,12 +10,12 @@
 
 import { describe, it, expect, vi } from "vitest";
 import {
-  decodeNodeStreamFrame, decodeInteriorStreamFrame, decodeNodeFrame,
+  decodeNodeStreamFrame, decodeInteriorStreamFrame,
   readNodeStreamLayoutLinkDstNodeRow, readNodeStreamLayoutLinkEdgeRow,
 } from "../src/webview/three/buffer-decode";
 import {
   BUF_NODE_STREAM_FRAME_HEADER_SIZE, BUF_INTERIOR_STREAM_FRAME_HEADER_SIZE,
-  BUF_NODE_FRAME_HEADER_SIZE, NODE_STREAM_LAYOUT_LINK_STRIDE,
+  NODE_STREAM_LAYOUT_LINK_STRIDE,
 } from "../src/schema/frame-tags";
 import {
   NODE_STRIDE, PORT_STRIDE, INTERIOR_STRIDE, INTERIOR_SLOTS_PER_NODE,
@@ -190,9 +190,9 @@ describe("decodeInteriorStreamFrame", () => {
   });
 });
 
-// ── getNodeFrameOrFallback: aggregation across two nodes ───────────────────────
+// ── getNodeFrame: aggregation across two nodes ─────────────────────────────────
 
-describe("getNodeFrameOrFallback — aggregated dedicated streams", () => {
+describe("getNodeFrame — aggregated dedicated streams", () => {
   it("aggregates node/port/label across rows, rewriting Label/PortName offsets to point\n" +
      "     into the aggregated sections (not each node's own inline bytes)", async () => {
     const { snapshotBuffer, nodeStreamBlocks } = await freshNodeStreamModules();
@@ -209,7 +209,7 @@ describe("getNodeFrameOrFallback — aggregated dedicated streams", () => {
     snapshotBuffer.setLatestInteriorStreamFrame(0, makeInteriorStreamFrame(() => { /* all absent */ }));
     snapshotBuffer.setLatestInteriorStreamFrame(1, makeInteriorStreamFrame(() => { /* all absent */ }));
 
-    const agg = nodeStreamBlocks.getNodeFrameOrFallback()!;
+    const agg = nodeStreamBlocks.getNodeFrame()!;
     expect(agg).not.toBeNull();
     expect(agg.nodeCount).toBe(2);
     expectF32(readNodeCX(agg.nodeView, 0), 100);
@@ -239,7 +239,7 @@ describe("getNodeFrameOrFallback — aggregated dedicated streams", () => {
     snapshotBuffer.setLatestInteriorStreamFrame(0, makeInteriorStreamFrame(() => {}));
     snapshotBuffer.setLatestInteriorStreamFrame(2, makeInteriorStreamFrame(() => {}));
 
-    const agg = nodeStreamBlocks.getNodeFrameOrFallback()!;
+    const agg = nodeStreamBlocks.getNodeFrame()!;
     expect(agg.nodeCount).toBe(3); // one past the highest arrived row
     expectF32(readNodeCX(agg.nodeView, 0), 1);
     // Row 1 never arrived — zeroed, not garbage.
@@ -249,47 +249,16 @@ describe("getNodeFrameOrFallback — aggregated dedicated streams", () => {
   });
 });
 
-describe("getNodeFrameOrFallback — fallback to fd3 combined Node frame", () => {
-  it("falls back to decodeNodeFrame(getLatestNodeFrame()) when no per-node stream has arrived", async () => {
-    // Isolate this test from the module-level nodeStreamFrames map that the "aggregated
-    // dedicated streams" tests above populate (a plain module cell, shared across this
-    // test file's imports) by resetting modules and re-importing fresh instances — the
-    // dedicated-path map starts EMPTY in this fresh instance, so getNodeFrameOrFallback
-    // must take the fd3 fallback branch.
-    const { snapshotBuffer, nodeStreamBlocks } = await freshNodeStreamModules();
-
-    const nodeBytes = 1 * NODE_STRIDE;
-    const interiorBytes = 1 * INTERIOR_SLOTS_PER_NODE * INTERIOR_STRIDE;
-    const total = BUF_NODE_FRAME_HEADER_SIZE + nodeBytes + interiorBytes;
-    const buf = new ArrayBuffer(total);
-    const dv = new DataView(buf);
-    dv.setUint32(4, 1, true); // nodeCount = 1
-    dv.setFloat32(BUF_NODE_FRAME_HEADER_SIZE + NODE_COL_CX, 42, true);
-    snapshotBuffer.setLatestNodeFrame(buf);
-
-    const decoded = nodeStreamBlocks.getNodeFrameOrFallback();
-    expect(decoded).not.toBeNull();
-    expect(decoded!.nodeCount).toBe(1);
-    expectF32(readNodeCX(decoded!.nodeView, 0), 42);
-  });
-
-  it("decodeNodeFrame itself round-trips the fd3 bytes the fallback branch reads", () => {
-    const nodeBytes = 1 * NODE_STRIDE;
-    const interiorBytes = 1 * INTERIOR_SLOTS_PER_NODE * INTERIOR_STRIDE;
-    const total = BUF_NODE_FRAME_HEADER_SIZE + nodeBytes + interiorBytes;
-    const buf = new ArrayBuffer(total);
-    const dv = new DataView(buf);
-    dv.setUint32(4, 1, true);
-    dv.setFloat32(BUF_NODE_FRAME_HEADER_SIZE + NODE_COL_CX, 42, true);
-    const direct = decodeNodeFrame(buf)!;
-    expect(direct.nodeCount).toBe(1);
-    expectF32(readNodeCX(direct.nodeView, 0), 42);
+describe("getNodeFrame — no per-node stream frame has arrived yet", () => {
+  it("returns null (WIREFOLD_STREAM_FDS is mandatory — no fd-3 fallback)", async () => {
+    const { nodeStreamBlocks } = await freshNodeStreamModules();
+    expect(nodeStreamBlocks.getNodeFrame()).toBeNull();
   });
 });
 
-// ── getLayoutLinksOrFallback: aggregation + fallback ───────────────────────────
+// ── getLayoutLinks: aggregation ─────────────────────────────────────────────────
 
-describe("getLayoutLinksOrFallback", () => {
+describe("getLayoutLinks", () => {
   it("aggregates each per-node stream's own outbound layout-links into full Src/Dst/Edge rows", async () => {
     const { snapshotBuffer, nodeStreamBlocks } = await freshNodeStreamModules();
     const frame0 = makeNodeStreamFrame({
@@ -311,7 +280,7 @@ describe("getLayoutLinksOrFallback", () => {
     snapshotBuffer.setLatestNodeStreamFrame(1, frame1);
     snapshotBuffer.setLatestNodeStreamFrame(2, frame2);
 
-    const agg = nodeStreamBlocks.getLayoutLinksOrFallback(999, new DataView(new ArrayBuffer(0)));
+    const agg = nodeStreamBlocks.getLayoutLinks();
     expect(agg.layoutLinkCount).toBe(2);
     // Row order is source-node-row order (0 then 1) — SrcNodeRow is the reconstructed
     // implicit source, DstNodeRow/EdgeRow carried straight from that node's own frame.
@@ -323,17 +292,9 @@ describe("getLayoutLinksOrFallback", () => {
     expect(readLayoutLinkEdgeRow(agg.layoutLinkView, 1)).toBe(-1);
   });
 
-  it("falls back to the fd-3 scene frame's LayoutLink block when no per-node stream has arrived", async () => {
+  it("returns an empty aggregate when no per-node stream has arrived (WIREFOLD_STREAM_FDS is mandatory — no fd-3 fallback)", async () => {
     const { nodeStreamBlocks } = await freshNodeStreamModules();
-    const sceneView = new DataView(new ArrayBuffer(12));
-    sceneView.setInt32(0, 4, true); // SrcNodeRow
-    sceneView.setInt32(4, 5, true); // DstNodeRow
-    sceneView.setInt32(8, -1, true); // EdgeRow
-
-    const agg = nodeStreamBlocks.getLayoutLinksOrFallback(1, sceneView);
-    expect(agg.layoutLinkCount).toBe(1);
-    expect(agg.layoutLinkView).toBe(sceneView);
-    expect(readLayoutLinkSrcNodeRow(agg.layoutLinkView, 0)).toBe(4);
-    expect(readLayoutLinkDstNodeRow(agg.layoutLinkView, 0)).toBe(5);
+    const agg = nodeStreamBlocks.getLayoutLinks();
+    expect(agg.layoutLinkCount).toBe(0);
   });
 });

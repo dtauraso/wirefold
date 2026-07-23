@@ -30,9 +30,9 @@ const REPO_ROOT = path.resolve(__dirname, "../../..");
 // Mirrors runCommand.ts's own fd-allocation contract (memory/feedback_no_single_writer_bridge.md,
 // Buffer/stream_fds.go): VIEW_FD, then one fd per edge row, then one NODE + one INTERIOR fd
 // per node row. This test wires the SAME layout so every decentralized kind (NodeGeometry/
-// Geometry/Position/Arrive/NodeBead) actually has an owner fd to stream on — the fallback
-// (WIREFOLD_STREAM_FDS unset) drops the EVENT block ENTIRELY now (acceptable — the fallback
-// packer is headless-only and is being deleted next commit; see Buffer/pack.go).
+// Geometry/Position/Arrive/NodeBead) actually has an owner fd to stream on — WIREFOLD_STREAM_FDS
+// is now MANDATORY (Buffer.SnapshotState, the central accumulator + its fd-3 fallback
+// packer, was deleted entirely — per-owner-buffer-rows.md's final step).
 const VIEW_FD = 4;
 const EDGE_BASE_FD = 5;
 

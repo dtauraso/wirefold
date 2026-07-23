@@ -7,7 +7,7 @@ import React, { useMemo, useState, useEffect, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { useOverlayFlags } from "./overlay-flags";
-import { getNodeFrameOrFallback } from "./node-stream-blocks";
+import { getNodeFrame } from "./node-stream-blocks";
 import { getViewBlocks } from "./view-blocks";
 import {
   type NavNode, decodeNavNodes, sceneSphereFromSnapshot,
@@ -317,7 +317,7 @@ export function NavGuides() {
     // below gates on, read early instead of only at render time.
     if (!showTori && !showScenePoles && !showNodePoles && !showSelPoles && !showHandholds) return;
     const blocks = getViewBlocks();
-    const decodedNode = getNodeFrameOrFallback();
+    const decodedNode = getNodeFrame();
     if (!decodedNode || !blocks) return;
     bufNavRef.current = decodeNavNodes(decodedNode);
     sceneSphereRef.current = sceneSphereFromSnapshot(blocks);
@@ -336,8 +336,8 @@ export function NavGuides() {
     [navTick],
   );
 
-  // Latched selection: Go-owned LatchedSel column (see Buffer/layout.go / setSelected in
-  // Buffer/snapshot.go). Selection only DECIDES which sphere the sel-highlight frames; it
+  // Latched selection: Go-owned LatchedSel column (see Buffer/layout.go; set by the
+  // affected node's own nodeMover). Selection only DECIDES which sphere the sel-highlight frames; it
   // does not have to stay selected to keep the frame shown. So DEselecting the node
   // (clicking empty space) leaves the latched sphere framed — only selecting a different
   // node replaces it. The sel toggle still gates visibility. This is read-only reflection

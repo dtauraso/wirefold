@@ -12,24 +12,24 @@
 
 import { describe, it, expect, beforeEach } from "vitest";
 import { readOverlayFlags } from "../src/webview/three/overlay-flags";
-import { setLatestSnapshot } from "../src/webview/snapshot-buffer";
+import { setLatestViewFrame } from "../src/webview/snapshot-buffer";
+import { BUF_VIEW_FRAME_HEADER_SIZE } from "../src/schema/frame-tags";
 import {
-  BUF_HEADER_SIZE, NODE_STRIDE, INTERIOR_STRIDE, CAMERA_STRIDE, OVERLAY_STRIDE, SCENE_STRIDE,
+  CAMERA_STRIDE, OVERLAY_STRIDE, SCENE_STRIDE,
   OVERLAY_COL_SCENE_TORI, OVERLAY_COL_SCENE_POLES, OVERLAY_COL_NODE_POLES,
   OVERLAY_COL_SEL_SPHERE_POLES, OVERLAY_COL_HANDHOLDS,
   OVERLAY_COL_LABELS_GLOBAL, OVERLAY_COL_OVERLAYS_VIS,
 } from "../src/schema/buffer-layout";
 
-// Build a node-less snapshot (0 beads/nodes/edges) carrying only the Camera + Overlay
-// singletons. `set` writes an overlay column (u8) by offset.
+// Build a VIEW-stream frame (camera+overlay+scene) carrying only the Overlay columns of
+// interest — the live production shape (decodeViewFrame), replacing the deleted fd-3 SCENE
+// frame fixture (removed with Buffer.SnapshotState — per-owner-buffer-rows.md's final
+// step). `set` writes an overlay column (u8) by offset.
 function makeOverlaySnapshot(cols: Partial<Record<number, number>>): ArrayBuffer {
-  // 0 nodes → 0 node bytes, 0 interior bytes, 0 edge bytes, 0 bead bytes.
-  void NODE_STRIDE; void INTERIOR_STRIDE;
-  const total = BUF_HEADER_SIZE + CAMERA_STRIDE + OVERLAY_STRIDE + SCENE_STRIDE;
+  const total = BUF_VIEW_FRAME_HEADER_SIZE + CAMERA_STRIDE + OVERLAY_STRIDE + SCENE_STRIDE;
   const buf = new ArrayBuffer(total);
   const dv = new DataView(buf);
-  // header counts all zero (0 beads/nodes/edges) — default.
-  const overlayOff = BUF_HEADER_SIZE + CAMERA_STRIDE;
+  const overlayOff = BUF_VIEW_FRAME_HEADER_SIZE + CAMERA_STRIDE;
   for (const [col, val] of Object.entries(cols)) {
     dv.setUint8(overlayOff + Number(col), val ?? 0);
   }
@@ -40,7 +40,7 @@ describe("overlay-flags readOverlayFlags", () => {
   beforeEach(() => {
     // Reset the module cell to a known "all-visible" baseline between tests. (There is no
     // clear API — a fresh snapshot resets the cached bits.)
-    setLatestSnapshot(makeOverlaySnapshot({
+    setLatestViewFrame(makeOverlaySnapshot({
       [OVERLAY_COL_SCENE_TORI]: 1,
       [OVERLAY_COL_SCENE_POLES]: 1,
       [OVERLAY_COL_NODE_POLES]: 1,
@@ -67,7 +67,7 @@ describe("overlay-flags readOverlayFlags", () => {
 
   it("reflects a toggle round-trip: a new snapshot with a flipped column changes state", () => {
     // Master overlays off + tori off; labels become HIDDEN (col 0 → store true).
-    setLatestSnapshot(makeOverlaySnapshot({
+    setLatestViewFrame(makeOverlaySnapshot({
       [OVERLAY_COL_OVERLAYS_VIS]: 0,
       [OVERLAY_COL_SCENE_TORI]: 0,
       [OVERLAY_COL_LABELS_GLOBAL]: 0,
@@ -83,7 +83,7 @@ describe("overlay-flags readOverlayFlags", () => {
     const b = readOverlayFlags();
     expect(a).toBe(b);
     // A new snapshot with the SAME flag bits keeps identity (no needless re-render).
-    setLatestSnapshot(makeOverlaySnapshot({
+    setLatestViewFrame(makeOverlaySnapshot({
       [OVERLAY_COL_SCENE_TORI]: 1,
       [OVERLAY_COL_SCENE_POLES]: 1,
       [OVERLAY_COL_NODE_POLES]: 1,

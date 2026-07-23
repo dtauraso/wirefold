@@ -18,9 +18,8 @@
 import { useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import type * as THREE from "three";
-import { getLatestSnapshot, getLatestBeadFrame, getLatestEdgeFrame } from "../snapshot-buffer";
-import { decodeSnapshot, decodeBeadFrame, decodeEdgeFrame } from "./buffer-decode";
-import { getNodeFrameOrFallback } from "./node-stream-blocks";
+import { getEdgeStreamAccessor } from "./edge-stream-blocks";
+import { getNodeFrame, getLayoutLinks } from "./node-stream-blocks";
 import { INTERIOR_SLOTS_PER_NODE } from "./buffer-decode";
 import { BeadInstances } from "./BeadInstances";
 import { NodeInstances } from "./NodeInstances";
@@ -70,34 +69,27 @@ export function BufferScene({ cameraRef }: {
   useFrame(() => {
     const grow: { count: number; cap: number; set: (n: number) => void }[] = [];
 
-    const snap = getLatestSnapshot();
-    const decoded = snap ? decodeSnapshot(snap) : null;
-    if (decoded) {
-      grow.push(
-        { count: decoded.layoutLinkCount, cap: layoutLinkCap, set: setLayoutLinkCap },
-      );
+    // Layout links are aggregated from the per-node dedicated streams' own outbound
+    // layout-links (node-stream-blocks.ts's getLayoutLinks) — independent of edge/bead/node
+    // stream arrival.
+    const { layoutLinkCount } = getLayoutLinks();
+    grow.push({ count: layoutLinkCount, cap: layoutLinkCap, set: setLayoutLinkCap });
+
+    // Every edge's own dedicated stream frame reports its own geometry+beads
+    // (edge-stream-blocks.ts) — grow edgeCap off the edge-row count, and beadCap off the
+    // total bead count summed across every edge row.
+    const edgeStream = getEdgeStreamAccessor();
+    if (edgeStream) {
+      grow.push({ count: edgeStream.edgeCount, cap: edgeCap, set: setEdgeCap });
+      let beadCount = 0;
+      for (let row = 0; row < edgeStream.edgeCount; row++) beadCount += edgeStream.beads(row).length;
+      grow.push({ count: beadCount, cap: beadCap, set: setBeadCap });
     }
 
-    // The Edge block + EdgeLabel bytes are their own tagged frame now (BUF_BLOCK_TAG_EDGE) —
-    // grow edgeCap off that frame's count, independent of the scene frame's arrival.
-    const edgeFrame = getLatestEdgeFrame();
-    const decodedEdge = edgeFrame ? decodeEdgeFrame(edgeFrame) : null;
-    if (decodedEdge) {
-      grow.push({ count: decodedEdge.edgeCount, cap: edgeCap, set: setEdgeCap });
-    }
-
-    // Beads are their own tagged frame now (BUF_BLOCK_TAG_BEAD) — grow beadCap off that
-    // frame's count, independent of the scene frame's arrival.
-    const beadFrame = getLatestBeadFrame();
-    const decodedBead = beadFrame ? decodeBeadFrame(beadFrame) : null;
-    if (decodedBead) {
-      grow.push({ count: decodedBead.beadCount, cap: beadCap, set: setBeadCap });
-    }
-
-    // Node/Interior/Port + Label/PortName bytes are their own tagged frame now
-    // (BUF_BLOCK_TAG_NODE) — grow nodeCap/portCap off that frame's counts, independent of
-    // the scene frame's arrival.
-    const decodedNode = getNodeFrameOrFallback();
+    // Node/Interior/Port + Label/PortName bytes are aggregated from every node row's own
+    // dedicated stream frame (node-stream-blocks.ts) — grow nodeCap/portCap off that
+    // aggregate's counts, independent of edge/bead stream arrival.
+    const decodedNode = getNodeFrame();
     if (decodedNode) {
       grow.push(
         { count: decodedNode.nodeCount, cap: nodeCap, set: setNodeCap },

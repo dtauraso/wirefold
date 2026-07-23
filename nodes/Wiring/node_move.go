@@ -336,10 +336,10 @@ type MoveDispatch struct {
 	// OWN selected/hovered/latchedSel/gotDragMsg/dragDelta*/kindID fields (nodeMover) or
 	// selected field (edgeMover) and writes them into its own stream frame — no shared map,
 	// no mutex, no atomic. tr.Select/tr.Hover/tr.AbcDrag/tr.AbcDragReset still fire
-	// alongside this, but ONLY for the .probe EVENT LOG — Buffer.SnapshotState's OWN copy
-	// of this state (setSelected etc.) is kept, unchanged, purely to feed the fd-3
-	// FALLBACK packer (buildSnapshot), used only when no dedicated node/edge stream fd is
-	// active (headless tests, non-extension launches).
+	// alongside this, but ONLY for the -trace/.probe EVENT LOG (Buffer.SnapshotState, the
+	// central accumulator that used to also feed a fd-3 fallback packer, was deleted
+	// entirely — per-owner-buffer-rows.md's final step; WIREFOLD_STREAM_FDS is now
+	// mandatory, there is no fallback left).
 	//
 	// latchedNode is the node id whose LatchedSel bit stays set across a deselect (mirrors
 	// Buffer.SnapshotState.setSelected's latchedSel: moves to the newly-selected node, and
@@ -442,10 +442,10 @@ func (md *MoveDispatch) LayoutLinkPairs() [][2]string {
 }
 
 // EdgeRowForPair resolves the buffer edge-row index of the bead edge connecting node ids
-// a/b (in either direction) via the edge-endpoint table built at load — the cross-
-// goroutine-safe counterpart of edgeRowForPair (Buffer/pack.go, drain-goroutine-only).
-// Used by a dedicated nodeMover goroutine to resolve its own layout-link's edge row for
-// its per-node stream frame. ok=false when no such edge exists.
+// a/b (in either direction) via the edge-endpoint table built at load — safe to call from
+// any goroutine (the table is read-only after construction). Used by a dedicated nodeMover
+// goroutine to resolve its own layout-link's edge row for its per-node stream frame.
+// ok=false when no such edge exists.
 func (md *MoveDispatch) EdgeRowForPair(a, b string) (int32, bool) {
 	for i, e := range md.edgeEndpointRowTable {
 		if (e.srcNode == a && e.dstNode == b) || (e.srcNode == b && e.dstNode == a) {
@@ -592,7 +592,8 @@ type NodeGeomSeed struct {
 type EdgeGeomSeed struct {
 	Label, SrcNode, DstNode string
 	// SrcPort/DstPort are the edge's source (output) and dest (input) port NAMES —
-	// Buffer/snapshot.go resolves these to buffer PORT-ROW indices (see Trace.Geometry).
+	// the edgeMover's own dedicated stream frame resolves these to buffer PORT-ROW
+	// indices (see Trace.Geometry).
 	SrcPort, DstPort       string
 	SX, SY, SZ, EX, EY, EZ float64
 }

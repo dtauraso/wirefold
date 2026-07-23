@@ -2,7 +2,8 @@
 //
 // The overlay on/off state is Go-owned: Go flips it on the
 // `edit op=update kind=overlays` command and streams the updated flags into the
-// buffer's Overlay block (Buffer/snapshot.go). This module REFLECTS those Go-owned
+// dedicated VIEW stream's Overlay block (nodes/Wiring's MoveDispatch, Buffer/view_stream_frame.go).
+// This module REFLECTS those Go-owned
 // columns for widgets that must re-render when a flag flips (the overlay toggle
 // control, NavGuides gating). It is NOT a domain store — it authors nothing; it only
 // decodes the latest snapshot's Overlay row and subscribes to snapshot arrivals so a
@@ -10,7 +11,7 @@
 
 import { useSyncExternalStore } from "react";
 import type { OverlayFlag } from "../../messages";
-import { getNodeFrameOrFallback, subscribeNodeStreamBlocks } from "./node-stream-blocks";
+import { getNodeFrame, subscribeNodeStreamBlocks } from "./node-stream-blocks";
 import { getViewBlocks, subscribeViewBlocks } from "./view-blocks";
 import {
   readOverlaySceneTori,
@@ -116,7 +117,7 @@ let cachedRows: AbcDragRow[] = [];
  *  including a (0,0,0) delta row, which is real information ("got the message, didn't
  *  move"), not absence. */
 export function readAbcDragRows(): AbcDragRow[] {
-  const decoded = getNodeFrameOrFallback();
+  const decoded = getNodeFrame();
   if (!decoded) return cachedRows;
   const rows: AbcDragRow[] = [];
   for (let row = 0; row < decoded.nodeCount; row++) {

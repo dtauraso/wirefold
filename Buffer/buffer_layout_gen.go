@@ -7,8 +7,6 @@ package Buffer
 import (
 	"encoding/binary"
 	"math"
-
-	T "github.com/dtauraso/wirefold/Trace"
 )
 
 // BufLayoutVersionGenerated must equal BufLayoutVersion in layout.go.
@@ -253,34 +251,6 @@ func SetOverlayRow(buf []byte, row OverlayRow) {
 	buf[6] = row.OverlaysVis
 	buf[7] = row.DoubleLinks
 	binary.LittleEndian.PutUint32(buf[8:], row.AbcDragCount)
-}
-
-// overlayFlagFieldsOf returns the Trace-Kind -> field-pointer map used to apply an
-// incoming overlay-flag event to row. Mechanically generated from the Overlay
-// block's u8 columns in Buffer/layout.go — adding a flag column here requires no
-// separate hand-edit anywhere else.
-func overlayFlagFieldsOf(row *OverlayRow) map[string]*uint8 {
-	return map[string]*uint8{
-		T.KindSceneTori:      &row.SceneTori,
-		T.KindScenePoles:     &row.ScenePoles,
-		T.KindNodePoles:      &row.NodePoles,
-		T.KindSelSpherePoles: &row.SelSpherePoles,
-		T.KindHandholds:      &row.Handholds,
-		T.KindLabelsGlobal:   &row.LabelsGlobal,
-		T.KindOverlaysVis:    &row.OverlaysVis,
-		T.KindDoubleLinks:    &row.DoubleLinks,
-	}
-}
-
-// IsOverlayFlagKind reports whether kind is one of the Overlay block's u8
-// boolean-flag Trace Kinds (the keys overlayFlagFieldsOf returns) — used instead
-// of a hand-listed switch case in SnapshotState.Update.
-func IsOverlayFlagKind(kind string) bool {
-	switch kind {
-	case T.KindSceneTori, T.KindScenePoles, T.KindNodePoles, T.KindSelSpherePoles, T.KindHandholds, T.KindLabelsGlobal, T.KindOverlaysVis, T.KindDoubleLinks:
-		return true
-	}
-	return false
 }
 
 // ── Scene block ──────────────────────────────────────────────

@@ -5,10 +5,7 @@
 import { useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
-import { getLatestBeadFrame } from "../snapshot-buffer";
-import { decodeBeadFrame } from "./buffer-decode";
 import { beadStyleForValue } from "./bead-style";
-import { readBeadX, readBeadY, readBeadZ, readBeadLive, readBeadValue } from "../../schema/buffer-layout";
 import { getEdgeStreamAccessor } from "./edge-stream-blocks";
 
 const BEAD_SPHERE_RADIUS = 4;
@@ -34,11 +31,10 @@ export function BeadInstances({ capacity }: { capacity: number }) {
     const ring = ringRef.current;
     if (!body || !ring) return;
 
-    // Either/or (memory/feedback_no_single_writer_bridge.md): when the dedicated per-edge
-    // streams are active, EVERY edge's own bead rows are aggregated across ALL edge cells —
-    // there is no single shared Bead frame in that mode (each edge's wire carries only its
-    // own beads). Falls back to the single fd-3 Bead frame when no dedicated edge stream
-    // has arrived yet.
+    // Every edge's own bead rows are aggregated across ALL edge cells (memory/
+    // feedback_no_single_writer_bridge.md) — there is no single shared Bead frame; each
+    // edge's wire carries only its own beads. null (no per-edge stream frame has arrived
+    // yet — e.g. before Go's first emit) means zero beads to draw this frame.
     const edgeStream = getEdgeStreamAccessor();
     let slot = 0;
     if (edgeStream) {
@@ -54,28 +50,6 @@ export function BeadInstances({ capacity }: { capacity: number }) {
           ring.setColorAt(slot, colRef.current.set(style.ring));
           slot++;
         }
-      }
-    } else {
-      const frame = getLatestBeadFrame();
-      if (!frame) { body.count = 0; ring.count = 0; return; }
-      const decoded = decodeBeadFrame(frame);
-      if (!decoded) { body.count = 0; ring.count = 0; return; }
-      const { beadCount, beadView } = decoded;
-
-      for (let i = 0; i < beadCount && slot < capacity; i++) {
-        if (!readBeadLive(beadView, i)) continue;
-        const style = beadStyleForValue(readBeadValue(beadView, i));
-        if (!style) continue; // non-0/1 value → hide (never paint a fallback)
-        matRef.current.setPosition(
-          readBeadX(beadView, i),
-          readBeadY(beadView, i),
-          readBeadZ(beadView, i),
-        );
-        body.setMatrixAt(slot, matRef.current);
-        ring.setMatrixAt(slot, matRef.current);
-        body.setColorAt(slot, colRef.current.set(style.fill));
-        ring.setColorAt(slot, colRef.current.set(style.ring));
-        slot++;
       }
     }
     body.count = slot;

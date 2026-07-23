@@ -69,16 +69,23 @@ block (`Buffer/` + `buffer-layout.ts`) and read by `EdgeTube` in the same commit
 was tried and removed: it had no Edge-block column and could not affect a single pixel;
 its only consumer was a test importing the schema barrel, not production code.)
 
-**Bridge surface:** **Go → TS** is the binary content buffer (`buffer-snapshot`) and
-NOTHING ELSE — Go reporting the whole scene. It rides fd 3 as a tagged frame,
-`[len:u32-LE][tag byte][block bytes]` (len counts the tag byte plus the block
-bytes); today there is exactly one tag, `BufBlockTagScene`/`BUF_BLOCK_TAG_SCENE`
-(`Buffer/frame_tags.go`, mirrored in `tools/topology-vscode/src/schema/frame-tags.ts`),
-carrying the whole combined snapshot — the tag is the discriminator reserved for a
-future split into N per-block buffers; no split exists yet, and this is still one
-buffer, not a sidecar. There is **no id/label/kind sidecar**: node
-identity is the buffer's **row index**, kind is a numeric column, and the human label rides
-the buffer's Label section via off/len columns on the Node block. (A test asserts the
+**Bridge surface:** **Go → TS** is binary content buffers (`buffer-snapshot`) and NOTHING
+ELSE. There is no shared fd3/single-writer packer: each emitting goroutine writes its OWN
+frame to its OWN inherited stdio pipe (memory/feedback_no_single_writer_bridge.md,
+`Buffer/stream_fds.go`) — one VIEW stream (camera/overlay/scene, the gesture/stdin-reader
+goroutine), one stream per edge row (that edgeMover's own geometry + its wire's live beads),
+and two streams per node row (that nodeMover's own geometry+ports+label, and that node's own
+Update-goroutine's interior beads). `WIREFOLD_STREAM_FDS` (set by the ext host's spawn,
+`tools/topology-vscode/src/runCommand.ts`) is **mandatory** — `Buffer.SnapshotState`, the
+former central accumulator that packed one combined fd-3 frame with a fallback path, was
+deleted entirely (per-owner-buffer-rows.md). A dedicated-fd frame is
+`[len:u32-LE][payload]` with **no tag byte** — the fd POSITION identifies which
+stream/row it is; the ext host relays each to the webview under a synthetic tag
+(`BUF_BLOCK_TAG_VIEW`/`_EDGE_STREAM`/`_NODE_STREAM`/`_INTERIOR_STREAM`,
+`Buffer/frame_tags.go` / `tools/topology-vscode/src/schema/frame-tags.ts`) purely so the
+render tree can route by cell, never a wire byte. There is **no id/label/kind sidecar**:
+node identity is the buffer's **row index**, kind is a numeric column, and the human label
+rides the buffer's Label section via off/len columns on the Node block. (A test asserts the
 removed sidecar message is rejected; do not reintroduce one.)
 
 **TS → Go** is framed binary records on stdin. Two shapes, and the distinction is the model:
@@ -104,11 +111,13 @@ removed sidecar message is rejected; do not reintroduce one.)
   `ready` (respawning on exit), so the editor has no run/pause/stop affordance. The removed
   kind bytes (`resume:1`, `pause:2`) are left as GAPS in `input_codec.go`, never renumbered.
   There is no `resend`
-  command: the ext host caches the last fd3 buffer-snapshot frame and replays it to a
-  remounted webview on `ready` instead (`BuildAndRunRunner.lastSnapshot`/`getLastSnapshot`
-  in `tools/topology-vscode/src/runCommand.ts`) — Go only ever emits a frame when
-  something changes, and that stays true. There is no `fade-toggle` command: the fade/dimming
-  feature was deleted end-to-end (nodes/edges/beads always render at full opacity).
+  command: the ext host caches the last frame per dedicated stream (view, plus one per
+  edge/node/interior row) and replays all of them to a remounted webview on `ready` instead
+  (`BuildAndRunRunner.getLastViewFrame`/`getLastEdgeFrames`/`getLastNodeFrames`/
+  `getLastInteriorFrames` in `tools/topology-vscode/src/runCommand.ts`) — Go only ever emits
+  a frame when something changes, and that stays true. There is no `fade-toggle` command:
+  the fade/dimming feature was deleted end-to-end (nodes/edges/beads always render at full
+  opacity).
 - **`raw-input`** — raw pointer/wheel + stateless raycast hit → Go's gesture FSM. Camera
   orbit, node moves, and port-anchor moves are produced **in-process** by the FSM
   from raw-input; they do not cross this seam as edits.
@@ -154,16 +163,8 @@ docs, and the auto-memory dir, costing tokens and time.
 
 - **Commit and push freely on task branches.** Per-commit sign-off is no longer required (relaxed post-v0; editing or reverting committed code is cheap). Sign-off IS still required for: merging a task branch into `main`, force-pushes, branch deletion, dependency removal, and any other destructive or shared-state action called out in the system prompt's "Executing actions with care" section.
 - Build and run before reporting a change as ready; verify output matches previous run. If verification fails, fix forward or revert — don't leave broken state on the branch. To exercise a TS change in the LIVE editor, run `npm run build` — the Stop hook does this automatically, but manual subagent verifications do not (why `tsc --noEmit` isn't enough is in the verify recipe below; stated once, there).
-  - **Verify recipe (NEVER run the sim in the foreground):** run **`bash scripts/verify.sh`** from the repo root. It is the terminal/agent front door: **exit 0 = clean, nonzero = something failed** (the reason prints to stderr), so the reflexive `&& echo ok` / `$?` / `if …; then` habit is finally correct. It runs the SAME checks as the Stop hook — there is one copy, in `scripts/stop-checks.sh` (verify.sh is a thin `--cli` wrapper), so they cannot drift. Checks: go build+test, tsc `--noEmit`, the npm webview build, staticcheck, eslint, vitest, and the full guard suite (incl. message-kind-parity, polar-only-nav, no-camera-roundtrip) — gated so the expensive per-language steps run only when that language changed or the branch is ahead of origin/main. Do NOT run the old `go build && go test`, `tsc`, `npm run build` steps separately; that just duplicates what verify already does.
-    - The RAW `scripts/stop-checks.sh` (no `--cli`) is the **Stop-hook** entry point ONLY: it speaks the hook's JSON protocol — a failure is a `{"decision":"block","reason":…}` object on stdout while it **ALWAYS exits 0**. So `stop-checks.sh; echo $?` reads a constant and `stop-checks.sh && …` is green on a red tree. Use `verify.sh` at the terminal; if you must call stop-checks.sh directly, clean means *empty stdout* (`[ -z "$(bash scripts/stop-checks.sh 2>/dev/null)" ]`), never the exit code.
-    - Caveats verify does NOT cover: `tsc --noEmit` alone won't refresh `out/webview.js` (verify's npm build does), and an extension-host change still needs VS Code "Developer: Reload Window" (reopening a file only reloads the webview).
+  - **Verify recipe (NEVER run the sim in the foreground):** the single source of truth is `bash scripts/stop-checks.sh` run from the repo root. **Read its STDOUT, not `$?` — it ALWAYS exits 0**, by design: it speaks the Stop-hook JSON protocol, so a failure is a `{"decision":"block","reason":...}` object printed to stdout while the exit code stays 0. Clean means *empty stdout*. Therefore `stop-checks.sh >/dev/null; echo $?` is not a check — it discards the only failure signal and reads a constant. Verify with `bash scripts/stop-checks.sh` and look at the output, or gate on it with `[ -z "$(bash scripts/stop-checks.sh 2>/dev/null)" ]`. It runs go build+test, tsc `--noEmit`, the npm webview build, staticcheck, eslint, vitest, and the full guard suite (incl. message-kind-parity, polar-only-nav, no-camera-roundtrip) — gated so the expensive per-language steps run only when that language changed or the branch is ahead of origin/main. Do NOT run the old `go build && go test`, `tsc`, `npm run build` steps separately; that just duplicates what stop-checks already does. Caveats it does NOT cover: the early-exit was removed so it also runs on a clean tree, but `tsc --noEmit` alone still won't refresh `out/webview.js` (stop-checks' npm build does), and an extension-host change still needs VS Code "Developer: Reload Window" (reopening a file only reloads the webview).
 - One logical change per commit.
-- **Don't weaken tests to go green.** `tools/check-test-integrity.sh` (in the verify suite)
-  flags this branch's test changes when they SHED strength — net assertions removed, or a
-  newly added `t.Skip`/`.only`/`os.Exit`/`recover()` — because a passing suite and a
-  suite-edited-to-pass look identical to every other check. It is detection, not prohibition:
-  fix the code, don't loosen the test. A genuinely-wrong assertion or a retired test is fine,
-  but say so — put `[allow-test-weakening]` (with why) in a commit message on the branch.
 - Push each commit to the current task branch.
 - **Cost markers:** only record a `($N.NN)` cost marker on a commit (or bundle of commits) when the work was sized at **≥$5 expected** beforehand. Sub-$5 work lands without a marker. Bundle small commits into ≥$5 chunks for marker purposes. Pre-v0 sub-$5 markers stay as historical record but are no longer the convention.
 - **Branch hygiene:** task-named branches (`task/<short-kebab-description>`) that merge to `main` quickly. Avoid long-lived feature branches like the v0 `visual-editor` pattern.
