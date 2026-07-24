@@ -31,8 +31,8 @@ import (
 type PortDir int
 
 const (
-	PortIn       PortDir = iota
-	PortOut              // single output
+	PortIn        PortDir = iota
+	PortOut               // single output
 	PortBroadcast         // slice output ([]chan<- int)
 )
 
@@ -51,8 +51,8 @@ type PortBindings struct {
 	// broadcastPaced holds the per-element bindings for each Broadcast fan-out port.
 	// Consolidating the formerly-parallel per-edge maps into one struct keeps
 	// every field of a binding together and impossible to index-mismatch.
-	singlePaced map[string]singleBinding
-	broadcastPaced  map[string][]broadcastBinding
+	singlePaced    map[string]singleBinding
+	broadcastPaced map[string][]broadcastBinding
 	// outSink, when non-nil, collects every paced *Out built for this node keyed
 	// by "node.handle" so the loader can index Outs by edge for node-move
 	// travel-time updates. Render/run paths leave it nil.
@@ -113,8 +113,8 @@ type broadcastBinding struct {
 
 func newPortBindings() PortBindings {
 	return PortBindings{
-		singlePaced: map[string]singleBinding{},
-		broadcastPaced:  map[string][]broadcastBinding{},
+		singlePaced:    map[string]singleBinding{},
+		broadcastPaced: map[string][]broadcastBinding{},
 	}
 }
 
@@ -162,7 +162,7 @@ func (pb *PortBindings) deadEndOutSlice(name string) []chan<- int {
 var (
 	tInPtr              = reflect.TypeFor[*In]()
 	tOutPtr             = reflect.TypeFor[*Out]()
-	tBroadcast           = reflect.TypeFor[Broadcast]()
+	tBroadcast          = reflect.TypeFor[Broadcast]()
 	tFireFunc           = reflect.TypeFor[func()]()
 	tEmitBeadsFunc      = reflect.TypeFor[func(working, backup []int)]()
 	tEmitHeldFunc       = reflect.TypeFor[func(held int)]()

@@ -358,7 +358,7 @@ type buildCtx struct {
 	speedSinks []chan float64
 
 	// Phase 6: id→type map and per-kind Broadcast port set.
-	nodeType          map[string]string
+	nodeType           map[string]string
 	kindBroadcastPorts map[string]map[string]bool
 
 	// Phase 7: inbound/outbound edge maps.

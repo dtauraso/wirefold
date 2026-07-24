@@ -158,7 +158,7 @@ func ParseSendRule(s string) (SendRule, error) {
 
 // outGeom is an immutable snapshot of an Out's per-edge geometry, published by the
 // owning edgeMover goroutine (recomputeGeometry) and delivered to each reader
-// goroutine over its OWN buffered-1, latest-wins channel (geomEcho / geomSend
+// goroutine over its OWN buffered-1, latest-wins channel (geomSend
 // below) — never a shared field read by more than one goroutine. This mirrors
 // per-goroutine-clock.md's speedCh Delivery pattern (SendSpeedNonBlocking /
 // ApplySpeedNonBlocking): the producer sends, each consumer owns its own copy.
@@ -189,30 +189,20 @@ type Out struct {
 	node  string
 	port  string
 	trace *T.Trace
-	// geomEcho / geomSend are buffered-1, latest-wins channels fed the SAME
-	// outGeom snapshot by publishGeom on every LIVE update (edgeMover.recomputeGeometry
-	// on a drag tick). The load-time file geometry is NOT sent through them — sendCur /
-	// echoCur are initialized to it directly in NewOutPaced. TWO
-	// channels because up to two INDEPENDENT goroutines observe this Out's
-	// geometry over its lifetime, and each must own a private copy rather than
-	// share one field:
-	//   - geomEcho is drained exactly ONCE, by the EmitGeometry closure
-	//     (builders.go, via echoGeom) on the node's own startup goroutine, to
-	//     echo the seed geometry into the trace at construction time.
-	//   - geomSend is drained every cycle, via Geom() below, by whichever ONE
-	//     goroutine actually places beads on this Out — the node's own Update
-	//     goroutine for most kinds, or the dedicated DriveHeld goroutine for
-	//     Pulse/HoldFlip (see gatecommon/drive.go). Exactly one goroutine ever
-	//     calls PlaceDrivenAt/placement on a given Out, so exactly one
-	//     goroutine ever drains geomSend.
-	// sendCur is the owned local cache for geomSend, mutated only by that one
-	// goroutine inside Geom(); echoCur plays the same role for geomEcho inside
-	// echoGeom(). Nil channels (chan-mode test Outs, which never publish) are
-	// safe: a non-blocking receive on a nil channel simply never fires.
-	geomEcho chan outGeom
+	// geomSend is a buffered-1, latest-wins channel fed the fresh outGeom snapshot
+	// by publishGeom on every LIVE update (edgeMover.recomputeGeometry on a drag
+	// tick). The load-time file geometry is NOT sent through it — sendCur is
+	// initialized to it directly in NewOutPaced. geomSend is drained every cycle,
+	// via Geom() below, by whichever ONE goroutine actually places beads on this
+	// Out — the node's own Update goroutine for most kinds, or the dedicated
+	// DriveHeld goroutine for Pulse/HoldFlip (see gatecommon/drive.go). Exactly one
+	// goroutine ever calls PlaceDrivenAt/placement on a given Out, so exactly one
+	// goroutine ever drains geomSend. sendCur is the owned local cache for geomSend,
+	// mutated only by that one goroutine inside Geom(). A nil channel (chan-mode
+	// test Outs, which never publish) is safe: a non-blocking receive on a nil
+	// channel simply never fires.
 	geomSend chan outGeom
 	sendCur  outGeom
-	echoCur  outGeom
 	// EdgeLabel is the TS edge id for this output port's wire. Set by the loader
 	// so the node's EmitGeometry closure can stream the authoritative curve via
 	// tr.Geometry(EdgeLabel, Start..End) on startup.
@@ -247,28 +237,14 @@ func (o *Out) Geom() outGeom {
 	return o.sendCur
 }
 
-// echoGeom is Geom()'s counterpart for the OTHER reader: the EmitGeometry
-// closure (builders.go), which drains its own geomEcho channel into echoCur
-// exactly once, at node startup, to echo the seed geometry into the trace.
-// Must only ever be called from that one startup call site.
-func (o *Out) echoGeom() outGeom {
-	if o == nil {
-		return outGeom{}
-	}
-	drainGeomNonBlocking(o.geomEcho, &o.echoCur)
-	return o.echoCur
-}
-
-// publishGeom fans a fresh per-edge geometry snapshot out to both reader
-// channels, latest-wins (dropping any undrained stale value first). Called
-// only on the owning goroutine (edgeMover.recomputeGeometry) for LIVE updates;
-// the load-time file geometry is set directly on sendCur/echoCur in
-// NewOutPaced, not published here. Both channels are nil on a chan-mode Out
-// (test-only, never published to); sendGeomNonBlocking on a nil channel is a
-// silent no-op, matching Geom()/echoGeom()'s "never published" zero-value
-// return.
+// publishGeom hands a fresh per-edge geometry snapshot to geomSend's reader,
+// latest-wins (dropping any undrained stale value first). Called only on the
+// owning goroutine (edgeMover.recomputeGeometry) for LIVE updates; the load-time
+// file geometry is set directly on sendCur in NewOutPaced, not published here.
+// geomSend is nil on a chan-mode Out (test-only, never published to);
+// sendGeomNonBlocking on a nil channel is a silent no-op, matching Geom()'s
+// "never published" zero-value return.
 func (o *Out) publishGeom(g outGeom) {
-	sendGeomNonBlocking(o.geomEcho, g)
 	sendGeomNonBlocking(o.geomSend, g)
 }
 
@@ -560,18 +536,16 @@ func NewOutPaced(pw *PacedWire, ctx context.Context, node, port string, tr *T.Tr
 	}
 	// The initial geometry is the LOAD-TIME geometry the loader derived from the
 	// topology file (arcLength/simLatencyMs/seg) — not a synthetic seed. Initialize
-	// each reader's owned cache to it directly, before either reader goroutine starts
-	// (happens-before), so the first echo/placement reads valid file geometry with no
-	// channel bootstrap. The channels then carry ONLY live edgeMover updates (drags);
-	// until the first one arrives, a non-blocking drain finds them empty and leaves the
+	// the reader's owned cache to it directly, before the reader goroutine starts
+	// (happens-before), so the first placement reads valid file geometry with no
+	// channel bootstrap. geomSend then carries ONLY live edgeMover updates (drags);
+	// until the first one arrives, a non-blocking drain finds it empty and leaves the
 	// cache at this file value.
 	fileGeom := outGeom{ArcLength: arcLength, SimLatencyMs: simLatencyMs, Start: seg.Start, End: seg.End}
 	o := &Out{
 		pw: pw, ctx: ctx, node: node, port: port, trace: tr, Rule: rule, EdgeLabel: edgeLabel,
-		geomEcho: make(chan outGeom, 1),
 		geomSend: make(chan outGeom, 1),
 		sendCur:  fileGeom,
-		echoCur:  fileGeom,
 	}
 	return o
 }

@@ -49,7 +49,13 @@ base=$(git merge-base "$base_ref" HEAD 2>/dev/null || true)
 [ -z "$base" ] && exit 0
 
 # Escape hatch: a stated deliberate weakening anywhere in this branch's commit messages.
-if [ "$base" != "$(git rev-parse HEAD)" ] && git log --format='%B' "$base"..HEAD 2>/dev/null | grep -qF '[allow-test-weakening]'; then
+# NB: read the marker with grep -F (NOT grep -q). Under `set -o pipefail`, grep -q closes
+# the pipe on its first match — and the marker rides the newest commit, emitted FIRST — so
+# git log, still streaming the rest of the branch's messages, dies with SIGPIPE (141) and
+# pipefail turns the whole condition non-zero, silently skipping the hatch on any branch
+# whose log exceeds the pipe buffer. grep -F drains all input, so no early close, no SIGPIPE.
+if [ "$base" != "$(git rev-parse HEAD)" ] && \
+   [ -n "$(git log --format='%B' "$base"..HEAD 2>/dev/null | grep -F '[allow-test-weakening]' || true)" ]; then
   exit 0
 fi
 

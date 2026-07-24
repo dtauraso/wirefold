@@ -15,9 +15,7 @@ node, a channel out to its destination node. The wire goroutine owns its
 own beads (`inflight`/`delivered`) and its own geometry; nothing outside
 it locks or reaches into that state. The wire has its OWN goroutine
 (`PacedWire.run`, one per wire, launched by `Start`) — not stepped by
-another. The incident edge only POSTS geometry revisions to the wire over
-a channel (`reviseCh`) when an endpoint moves; the wire's own goroutine is
-the sole thing that touches `inflight`. **An input port is one wire fed by
+another. The wire's own goroutine is the sole thing that touches `inflight`. **An input port is one wire fed by
 exactly one edge** — fan-in (several edges into one port) is not part of
 the model; multiple sources into one node use distinct input ports (see
 §Node lifecycle). So a wire has exactly one incident edge, and its own

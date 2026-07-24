@@ -937,18 +937,6 @@ func (md *MoveDispatch) enqueueFor(nm *nodeMover) func(id string, msg moveMsg) {
 	}
 }
 
-// enqueueFuncFor resolves the send closure for nodeID's own retry queue (the SELF mover
-// whose handler is doing the sending), for use by MoveDispatch methods (fanEdgesAndPartners,
-// requantizeLocalPolars) that are not themselves nodeMover methods. Falls back to the
-// blocking md.sendMove only for the (practically unreached in production) case of a
-// nodeID with no live mover — there is no retry queue to append to in that case.
-func (md *MoveDispatch) enqueueFuncFor(nodeID string) func(id string, msg moveMsg) {
-	if nm, ok := md.nodeMovers[nodeID]; ok {
-		return nm.sendMove
-	}
-	return md.sendMove
-}
-
 // NOTE (neighborSetC drop history): moveMsgKindNeighborSetC (requantizeLocalPolars'
 // per-neighbor fan, quantized_move.go) used to route through a non-blocking
 // sendMoveLossy — "receiver is mid-cascade and will self-requantize on its own next
@@ -959,7 +947,7 @@ func (md *MoveDispatch) enqueueFuncFor(nodeID string) func(id string, msg moveMs
 // drives (TestNeighborSetCDropReachability) showed sendMoveLossy dropping ~98% of
 // NeighborSetC sends (9417/9600 in one run) — the drop path was not a rare backstop,
 // it was silently discarding almost every message. NeighborSetC is now routed through
-// the SENDING node's own retry queue (md.enqueueFuncFor(nodeID) in requantizeLocalPolars,
+// the SENDING node's own retry queue (nm.sendMove in requantizeLocalPolars,
 // see nodeMover.pending), the same decoupling every other per-commit fan in this file
 // already uses (fanEdgesAndPartners) — it gets the same deadlock-avoidance property (the
 // send never blocks the handler goroutine) without ever dropping: an item that can't be
