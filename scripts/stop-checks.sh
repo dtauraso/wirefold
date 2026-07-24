@@ -4,22 +4,41 @@
 #   --cli           — prints the failure reason to stderr and exits NONZERO (terminal use;
 #                     scripts/verify.sh is the front door). Run `bash scripts/verify.sh`.
 set -u
-# Resolve the repo root via an ASSIGNMENT, not `cd "$(...)" || ...`.
-#
-# The `cd "$(git rev-parse --show-toplevel)" || exit 0` this replaces looked like it
-# handled failure and did not: when git rev-parse fails it prints nothing, so the line
-# degrades to `cd ""` — which SUCCEEDS as a no-op. The `||` was unreachable, and the suite
-# ran on in whatever cwd it started in. It still failed loudly (every guard reports "No
-# such file or directory" and the Stop hook blocks), so this was never the silent-green it
-# resembles — but it failed for an accidental reason, and the guard clause was decoration.
-#
-# `ROOT=$(cmd)` propagates cmd's exit status, so this form actually fires.
-#
-# Resolve from the SCRIPT'S OWN location, not the caller's cwd. The Stop hook (and manual
-# runs) can fire while the shell cwd is outside the repo — e.g. parked in a scratchpad after
-# background work — and a bare `git rev-parse --show-toplevel` then fails MISCONFIGURED even
-# though the repo is fine. This script always lives at <repo>/scripts/stop-checks.sh, so
-# `git -C "$SCRIPT_DIR"` anchors to the repo regardless of where it was invoked from.
+
+# Output MODE — determined FIRST so the scratchpad guard below can signal per-mode. Two
+# callers, two failure-signalling contracts — ONE set of checks below so they can never
+# drift (the reason this is a flag, not a second script):
+#   - hook (default): the Stop hook wires this in .claude/settings.json. The hook protocol
+#     signals failure by printing {"decision":"block",...} JSON on stdout and MUST exit 0;
+#     a nonzero exit would be read as a hook error, not a blocked stop.
+#   - cli (--cli): for a human/agent at the terminal. Prints the failure reason plainly and
+#     EXITS NONZERO, so the reflexive `&& echo ok` / `$?` / `if ...; then` habit is correct
+#     here. scripts/verify.sh is the obvious front door to this mode.
+MODE="hook"
+if [ "${1:-}" = "--cli" ]; then
+  MODE="cli"
+fi
+
+# Caller's cwd, captured BEFORE any cd — the scratchpad guard compares it to the repo root.
+CALLER_CWD="$PWD"
+
+# emit_block REASON — signal a blocked stop per MODE, then exit. hook mode prints the
+# Stop-hook JSON on stdout and exits 0 (a nonzero exit would read as a hook error, not a
+# blocked stop); cli mode prints the reason to stderr and exits NONZERO.
+emit_block() {
+  if [ "$MODE" = "cli" ]; then
+    printf 'stop-checks: %s\n' "$1" >&2
+    exit 1
+  fi
+  python3 -c "import json,sys; print(json.dumps({'decision':'block','reason':sys.stdin.read()}))" <<< "$1"
+  exit 0
+}
+
+# Resolve the repo root from the SCRIPT'S OWN location, not the caller's cwd. This script
+# always lives at <repo>/scripts/stop-checks.sh, so `git -C "$SCRIPT_DIR"` finds the repo
+# regardless of where the shell was when the hook fired. (Assignment, not `cd "$(...)"`:
+# `ROOT=$(cmd)` propagates cmd's exit status, so the `|| { ... }` actually fires — the old
+# `cd "$(...)" || exit` degraded to `cd ""`, a no-op that never tripped the guard.)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || {
   echo "stop-checks: MISCONFIGURED — cannot resolve script directory." >&2
   exit 1
@@ -32,23 +51,20 @@ if [ -z "$ROOT" ]; then
   echo "stop-checks: MISCONFIGURED — repo root resolved to empty; refusing to run checks against the wrong tree." >&2
   exit 1
 fi
+
+# Scratchpad guard (chosen behavior: BLOCK, do NOT run). If the caller's cwd is not inside
+# THIS repo — a drifted shell parked in a scratchpad / tmp after background work — refuse to
+# run and say so plainly, rather than silently compensating. A subdir of the repo is fine
+# (git resolves the same root from anywhere inside); only a cwd OUTSIDE the repo trips this.
+caller_root="$(git -C "$CALLER_CWD" rev-parse --show-toplevel 2>/dev/null || true)"
+if [ "$caller_root" != "$ROOT" ]; then
+  emit_block "did NOT run — shell cwd is outside the repo: '$CALLER_CWD' (looks like a scratchpad). cd back to the repo root ('$ROOT') and stop again."
+fi
+
 cd "$ROOT" || {
   echo "stop-checks: MISCONFIGURED — cannot cd to repo root '$ROOT'." >&2
   exit 1
 }
-
-# Output MODE. Two callers, two failure-signalling contracts — ONE set of checks below so
-# they can never drift (the reason this is a flag, not a second script):
-#   - hook (default): the Stop hook wires this in .claude/settings.json. The hook protocol
-#     signals failure by printing {"decision":"block",...} JSON on stdout and MUST exit 0;
-#     a nonzero exit would be read as a hook error, not a blocked stop.
-#   - cli (--cli): for a human/agent at the terminal. Prints the failure reason plainly and
-#     EXITS NONZERO, so the reflexive `&& echo ok` / `$?` / `if ...; then` habit is correct
-#     here. scripts/verify.sh is the obvious front door to this mode.
-MODE="hook"
-if [ "${1:-}" = "--cli" ]; then
-  MODE="cli"
-fi
 
 # Files to consider for the EXPENSIVE language builds. This is the union of:
 #   - the working tree (uncommitted changes), and
