@@ -128,10 +128,8 @@ Keep all of it in parity across `messages.ts`, `stdin_reader.go`, and `handle-me
 TS → Go send is **fire-and-forget** — no `await`, no Promise chain, no request/response,
 no delivery signal (guard: `tools/check-no-await-on-bridge.sh`).
 
-**Drift rule:** if TS code starts accumulating traversal-timing, firing-rule, position,
-or geometry logic, starts authoring domain state (a store / stateful hook), or starts
-awaiting Go on the bridge — that is drift; those belong in Go and the bridge stays
-fire-and-forget (guards: `tools/check-no-webview-state.sh`, `tools/check-no-await-on-bridge.sh`).
+**Drift rule:** see MODEL.md's "Drift rule" section for the full statement (guards:
+`tools/check-no-webview-state.sh`, `tools/check-no-await-on-bridge.sh`).
 
 ## Node kinds
 
