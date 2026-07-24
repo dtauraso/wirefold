@@ -314,6 +314,15 @@ func (m *nodeMover) handle(msg moveMsg) {
 		}
 		if m.tr != nil {
 			m.tr.Breadcrumb("cascade.root", m.id, "", fmt.Sprintf("newPos=(%.4f,%.4f,%.4f)", newPos.X, newPos.Y, newPos.Z))
+			// Structured buffer counterpart, riding this node's own dedicated
+			// stream frame (emitGeometry's own next emit already fires from
+			// commitLocal above, so this rides as a distinct events-only-shaped
+			// write here rather than waiting on that one).
+			m.writeStreamFrame([]RowEvent{{
+				Kind: T.KindBreadcrumb, Label: T.BreadcrumbCascadeRoot, Debug: 1,
+				NodeRow: m.nodeRow, PortRow: -1, TargetRow: -1, TargetPortRow: -1, EdgeRow: -1, Slot: -1,
+				X: newPos.X, Y: newPos.Y, Z: newPos.Z,
+			}})
 		}
 		return
 	}
@@ -886,6 +895,16 @@ func (m *edgeMover) writeStreamFrame(tick int64, events []RowEvent) {
 				Value: int32(pe.value), Bead: pe.gen,
 				X: pe.x, Y: pe.y, Z: pe.z, F: pe.t,
 			})
+		}
+		// This wire's own "wire-send-buffer-full" breadcrumbs, buffered on
+		// breadcrumbCh from the source node's goroutine (PacedWire.Send) and
+		// resolved to rows here, on this edgeMover's own goroutine — mirrors
+		// drainPendingEvents just above.
+		for _, ev := range m.dest.drainBreadcrumbEvents() {
+			ev.NodeRow = nodeRow
+			ev.PortRow = srcRow
+			ev.TargetRow = dstRow
+			events = append(events, ev)
 		}
 	}
 	frame := m.buildFrame(uint32(tick), srcRow, dstRow, selected, m.edgeID, beadVal, beadX, beadY, beadZ, events)

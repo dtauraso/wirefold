@@ -94,9 +94,15 @@ func defaultOverlayState() overlayState {
 
 // Overlay-visibility API — thin delegators to the owned overlayState. The public
 // signatures are unchanged (overlayToggles binds these method expressions).
-func (md *MoveDispatch) ToggleSceneTori(tr *T.Trace)      { md.ov.ToggleSceneTori(tr) }
-func (md *MoveDispatch) ToggleScenePoles(tr *T.Trace)     { md.ov.ToggleScenePoles(tr) }
-func (md *MoveDispatch) ToggleNodePoles(tr *T.Trace)      { md.ov.ToggleNodePoles(tr) }
+func (md *MoveDispatch) ToggleSceneTori(tr *T.Trace) { md.ov.ToggleSceneTori(tr) }
+func (md *MoveDispatch) ToggleScenePoles(tr *T.Trace) {
+	md.ov.ToggleScenePoles(tr)
+	md.EmitBreadcrumb(RowEvent{Label: T.BreadcrumbPoleToggleGo, NodeRow: -1, PortRow: -1, TargetRow: -1, TargetPortRow: -1, EdgeRow: -1, Slot: -1, Value: int32(boolU8(md.ov.scenePolesVisible)), Text: "scene"})
+}
+func (md *MoveDispatch) ToggleNodePoles(tr *T.Trace) {
+	md.ov.ToggleNodePoles(tr)
+	md.EmitBreadcrumb(RowEvent{Label: T.BreadcrumbPoleToggleGo, NodeRow: -1, PortRow: -1, TargetRow: -1, TargetPortRow: -1, EdgeRow: -1, Slot: -1, Value: int32(boolU8(md.ov.nodePolesVisible)), Text: "nodes"})
+}
 func (md *MoveDispatch) ToggleSelSpherePoles(tr *T.Trace) { md.ov.ToggleSelSpherePoles(tr) }
 func (md *MoveDispatch) ToggleHandholds(tr *T.Trace)      { md.ov.ToggleHandholds(tr) }
 func (md *MoveDispatch) ToggleLabelsGlobal(tr *T.Trace)   { md.ov.ToggleLabelsGlobal(tr) }

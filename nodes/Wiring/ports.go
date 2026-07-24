@@ -123,6 +123,56 @@ func (i *In) Breadcrumb(event, detail string) {
 		node, port = i.pw.Target, i.pw.TargetHandle
 	}
 	i.trace.Breadcrumb(event, node, port, detail)
+	// Structured buffer counterpart: rides this port's owning node's own INTERIOR
+	// stream frame (the SAME stream KindRecv already resolves through — see
+	// flushRecvEvent above), resolved to that node's row + this port's row at the
+	// call site. label maps the free-form event string to its BreadcrumbLabel*
+	// index; unrecognized strings are dropped from the buffer path (still logged
+	// via i.trace.Breadcrumb above) rather than silently miscoded.
+	if i.stream == nil {
+		return
+	}
+	label, ok := breadcrumbLabelFor(event)
+	if !ok {
+		return
+	}
+	s := i.stream()
+	if s == nil {
+		return
+	}
+	s.writeEvents([]RowEvent{{
+		Kind: T.KindBreadcrumb, Label: label, Debug: 1,
+		NodeRow: s.nodeRow, PortRow: i.portRow,
+		TargetRow: -1, TargetPortRow: -1, EdgeRow: -1, Slot: -1,
+	}})
+}
+
+// breadcrumbLabelFor maps a free-form Breadcrumb event string to its
+// T.BreadcrumbLabel* index for the structured buffer path. Only the closed set of
+// 9 known breadcrumb sites resolve; an unrecognized string returns ok=false.
+func breadcrumbLabelFor(event string) (uint8, bool) {
+	switch event {
+	case "topology-loaded":
+		return T.BreadcrumbTopologyLoaded, true
+	case "row-seed-count-mismatch":
+		return T.BreadcrumbRowSeedCountMismatch, true
+	case "pole-toggle-go":
+		return T.BreadcrumbPoleToggleGo, true
+	case "window_clear":
+		return T.BreadcrumbWindowClear, true
+	case "window_open":
+		return T.BreadcrumbWindowOpen, true
+	case "dwell_start":
+		return T.BreadcrumbDwellStart, true
+	case "abc-drag":
+		return T.BreadcrumbAbcDrag, true
+	case "wire-send-buffer-full":
+		return T.BreadcrumbWireSendBufferFull, true
+	case "cascade.root":
+		return T.BreadcrumbCascadeRoot, true
+	default:
+		return 0, false
+	}
 }
 
 // SendRule names the per-edge send policy applied by the source node after a

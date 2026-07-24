@@ -178,6 +178,15 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, topologyPath st
 	// One example startup breadcrumb — proves the debug channel end-to-end and is genuinely
 	// useful (which topology loaded, how many nodes). Sparse: once per run.
 	tr.Breadcrumb("topology-loaded", topologyPath, "", fmt.Sprintf("nodes=%d", len(nodes)))
+	// Structured buffer counterpart: rides the VIEW stream (no per-node stream exists
+	// yet for a startup-only event, and this runs on the main goroutine before any
+	// per-node/edge/interior goroutine exists). topologyPath is genuinely free-form
+	// (a filesystem path), so it rides the sanctioned Text column; nodes count is
+	// the typed Value column.
+	md.EmitBreadcrumb(W.RowEvent{
+		Label: T.BreadcrumbTopologyLoaded, NodeRow: -1, PortRow: -1, TargetRow: -1, TargetPortRow: -1, EdgeRow: -1, Slot: -1,
+		Value: int32(len(nodes)), Text: topologyPath,
+	})
 
 	// Sparse, one-time startup sanity check (CLAUDE.md DEBUG BREADCRUMB channel): every
 	// node LoadTopology returned should have a row-seed entry (md.NodeSeeds(), the SAME
@@ -186,6 +195,13 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, topologyPath st
 	// diverged — a real topology bug — and must be visible.
 	if len(md.NodeSeeds()) != len(nodes) {
 		tr.Breadcrumb("row-seed-count-mismatch", "", "", fmt.Sprintf("NodeSeeds=%d nodes=%d", len(md.NodeSeeds()), len(nodes)))
+		// Structured buffer counterpart, VIEW stream (same reasoning as
+		// topology-loaded above). Value=NodeSeeds count, X=nodes count — both
+		// small typed ints, no free-form text needed.
+		md.EmitBreadcrumb(W.RowEvent{
+			Label: T.BreadcrumbRowSeedCountMismatch, NodeRow: -1, PortRow: -1, TargetRow: -1, TargetPortRow: -1, EdgeRow: -1, Slot: -1,
+			Value: int32(len(md.NodeSeeds())), X: float64(len(nodes)),
+		})
 	}
 
 	// Initial camera viewpoint = FILE DATA. Go reads the saved camera from

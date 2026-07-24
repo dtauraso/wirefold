@@ -165,6 +165,33 @@ type PacedWire struct {
 	// edgeMover.writeStreamFrame — the SAME goroutine on both ends (edgeMover.run calls
 	// DriveOneCycle then writeStreamFrame back to back, every cycle), so no lock.
 	pending []pendingWireEvent
+
+	// breadcrumbCh carries this wire's "wire-send-buffer-full" DEBUG BREADCRUMB
+	// (Send below) from the SOURCE node's own goroutine (a DIFFERENT goroutine than
+	// this wire's own — unlike pending above, which only the wire's own goroutine
+	// ever touches) over to this wire's own goroutine, which drains it in
+	// edgeMover.writeStreamFrame alongside drainPendingEvents. Non-blocking send,
+	// same "no delivery guarantee, may drop a diagnostic" shape as abcDragCh
+	// (view_stream.go) — this should never fire under realistic load anyway.
+	breadcrumbCh chan RowEvent
+}
+
+// drainBreadcrumbEvents returns every breadcrumb RowEvent buffered on breadcrumbCh
+// since the last call (non-blocking drain). Safe to call only from this wire's own
+// goroutine (edgeMover.writeStreamFrame), same contract as drainPendingEvents.
+func (pw *PacedWire) drainBreadcrumbEvents() []RowEvent {
+	if pw.breadcrumbCh == nil {
+		return nil
+	}
+	var out []RowEvent
+	for {
+		select {
+		case ev := <-pw.breadcrumbCh:
+			out = append(out, ev)
+		default:
+			return out
+		}
+	}
 }
 
 // pendingWireEvent is one raw Position/Arrive tuple recorded by stepAll, awaiting
@@ -203,9 +230,10 @@ func (pw *PacedWire) drainPendingEvents() []pendingWireEvent {
 // the tests express arc as ticks*PulseSpeedWuPerTick.
 func NewPacedWire(arcLength float64, pulseSpeed float64) *PacedWire {
 	return &PacedWire{
-		pulseSpeed: pulseSpeed,
-		inCh:       make(chan placeRequest, wireChanBufferSize),
-		outCh:      make(chan deliveredBead, wireChanBufferSize),
+		pulseSpeed:   pulseSpeed,
+		inCh:         make(chan placeRequest, wireChanBufferSize),
+		outCh:        make(chan deliveredBead, wireChanBufferSize),
+		breadcrumbCh: make(chan RowEvent, 4),
 	}
 }
 
@@ -254,6 +282,22 @@ func (pw *PacedWire) Send(v int, bp beadPlacement) SendOutcome {
 	default:
 		if pw.Trace != nil {
 			pw.Trace.Breadcrumb("wire-send-buffer-full", pw.Target, pw.TargetHandle, "")
+		}
+		// Structured buffer counterpart (memory/feedback_no_single_writer_bridge.md):
+		// non-blocking send of the dropped bead's value, drained by this wire's own
+		// goroutine (edgeMover.writeStreamFrame's drainBreadcrumbEvents call) — never
+		// blocks the source node, and drops the diagnostic (not the bead itself,
+		// which was never dropped either — SendBufferFull is transient/retryable) if
+		// breadcrumbCh is already full.
+		if pw.breadcrumbCh != nil {
+			select {
+			case pw.breadcrumbCh <- RowEvent{
+				Kind: T.KindBreadcrumb, Label: T.BreadcrumbWireSendBufferFull, Debug: 1,
+				NodeRow: -1, PortRow: -1, TargetRow: -1, TargetPortRow: -1, EdgeRow: -1, Slot: -1,
+				Value: int32(v),
+			}:
+			default:
+			}
 		}
 		return SendBufferFull
 	}

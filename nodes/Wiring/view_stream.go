@@ -90,6 +90,19 @@ func (md *MoveDispatch) EmitLayoutLinkViewEvent(nodeRow, targetRow int32) {
 	md.emitViewFrame([]RowEvent{{Kind: T.KindLayoutLink, NodeRow: nodeRow, PortRow: -1, TargetRow: targetRow, TargetPortRow: -1, EdgeRow: -1}})
 }
 
+// EmitBreadcrumb writes ev as a structured Breadcrumb event on the VIEW stream (Kind/
+// Debug are forced regardless of what the caller passed). Used for breadcrumbs with no
+// per-node/edge/interior owning stream of their own (main.go's startup breadcrumbs,
+// which run on the main goroutine before any node/edge/interior stream exists, and the
+// overlay pole-toggle breadcrumbs, which run on RunStdinReader's own dispatch goroutine
+// — the SAME goroutine that owns the VIEW stream). No-op (via emitViewFrame) when the
+// VIEW stream isn't wired.
+func (md *MoveDispatch) EmitBreadcrumb(ev RowEvent) {
+	ev.Kind = T.KindBreadcrumb
+	ev.Debug = 1
+	md.emitViewFrame([]RowEvent{ev})
+}
+
 // emitViewFrame packs and writes the current camera/overlay/scene-sphere state as this
 // goroutine's own VIEW frame, if the dedicated stream is active (nil viewBuildFrame — no
 // WIREFOLD_STREAM_FDS "view" entry — is the required no-op fallback). events carries
