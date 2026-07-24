@@ -27,6 +27,12 @@ The mutex-removal work: each `sync.Mutex`/`Cond` replaced by single-owner state.
 | [layout-holder-architecture.html](layout-holder-architecture.html) | `LayoutHolder.mu` resolved — every caller runs on the owning node's goroutine. |
 | [scene-persist-architecture.html](scene-persist-architecture.html) | `scene_persist` — the last unexamined locks; per-writer file ownership. |
 
+## Investigations
+
+| Doc | What it covers |
+|---|---|
+| [backpressure-investigation-order.md](backpressure-investigation-order.md) | Recommended order for the 7 backpressure/concurrency investigation branches (the branch docs themselves are branch-local). |
+
 ## Design specs & audits
 
 | Doc | What it covers |
