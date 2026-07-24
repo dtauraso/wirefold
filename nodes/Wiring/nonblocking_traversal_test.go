@@ -8,8 +8,6 @@ package Wiring_test
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -38,19 +36,13 @@ func TestInputToHoldNewSendOldTraversal(t *testing.T) {
 	  ]
 	}`
 
-	dir := t.TempDir()
-	path := filepath.Join(dir, "topo.json")
-	if err := os.WriteFile(path, []byte(topo), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
 	tr := T.New(0)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	nodes, _, nmr, _, err := W.LoadTopology(ctx, path, tr, W.NewRealClock())
+	nodes, _, nmr, _, err := W.LoadTopologyFromJSON(ctx, []byte(topo), tr, W.NewRealClock())
 	if err != nil {
-		t.Fatalf("LoadTopology: %v", err)
+		t.Fatalf("LoadTopologyFromJSON: %v", err)
 	}
 	live := wireLiveRowEvents(nmr)
 	nmr.Start(ctx)
