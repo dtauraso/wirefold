@@ -21,3 +21,4 @@
 {"step":25,"kind":"layout-link","node":"A","target":"B"}
 {"step":26,"kind":"abc-drag","node":"A","port":"B","value":0}
 {"step":27,"kind":"abc-drag-reset","node":"","port":"","value":0}
+{"step":28,"kind":"breadcrumb","label":"topology-loaded","debug":true,"node":"","port":"","value":3,"x":0,"y":0,"z":0,"nodeRow":-1,"portRow":-1,"targetRow":-1,"targetPortRow":-1,"edgeRow":-1,"slot":-1,"text":"/tmp/topo"}

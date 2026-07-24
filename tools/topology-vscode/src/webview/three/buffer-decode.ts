@@ -59,12 +59,23 @@ const STR_DECODER = new TextDecoder();
  *  longer carries an EVENT block at all — each per-owner stream carries its own instead.
  *  Returns {count:0, view: empty} when the buffer is too short to hold even the count
  *  (never null — callers can always safely iterate 0 times). */
-export function decodeTrailingEvents(buf: ArrayBuffer, offset: number): { count: number; view: DataView } {
-  if (buf.byteLength < offset + 4) return { count: 0, view: new DataView(buf, buf.byteLength, 0) };
+// decodeTrailingEvents decodes [count:u32] + count × EVENT_STRIDE event rows, plus the
+// single sanctioned free-form event-text-bytes section that follows immediately after
+// (see Buffer.BuildEventsSection — TextOff/TextLen on each event row address into
+// textView). textView spans whatever bytes remain to the end of the frame; a frame with
+// no breadcrumb events has an empty (but valid) textView.
+export function decodeTrailingEvents(buf: ArrayBuffer, offset: number): { count: number; view: DataView; textView: DataView } {
+  const empty = { count: 0, view: new DataView(buf, buf.byteLength, 0), textView: new DataView(buf, buf.byteLength, 0) };
+  if (buf.byteLength < offset + 4) return empty;
   const count = new DataView(buf, offset, 4).getUint32(0, true);
   const bytes = count * EVENT_STRIDE;
-  if (buf.byteLength < offset + 4 + bytes) return { count: 0, view: new DataView(buf, buf.byteLength, 0) };
-  return { count, view: new DataView(buf, offset + 4, bytes) };
+  if (buf.byteLength < offset + 4 + bytes) return empty;
+  const textStart = offset + 4 + bytes;
+  return {
+    count,
+    view: new DataView(buf, offset + 4, bytes),
+    textView: new DataView(buf, textStart, buf.byteLength - textStart),
+  };
 }
 
 /** Decoded view over a BUF_BLOCK_TAG_BEAD frame (see frame-tags.ts for its byte layout):
@@ -312,6 +323,7 @@ export interface DecodedEdgeStreamFrame {
   /** This edge's own trailing EVENTS section (.probe log only; see decodeTrailingEvents). */
   eventCount: number;
   eventView: DataView;
+  eventTextView: DataView;
 }
 
 // Per-edge-row memo (keyed by row, not a single lastBuf — many edge streams arrive
@@ -361,9 +373,9 @@ function decodeEdgeStreamFrameUncached(buf: ArrayBuffer): DecodedEdgeStreamFrame
   const beadView = new DataView(buf, off, beadBytes);
   off += beadBytes;
 
-  const { count: eventCount, view: eventView } = decodeTrailingEvents(buf, off);
+  const { count: eventCount, view: eventView, textView: eventTextView } = decodeTrailingEvents(buf, off);
 
-  return { tick, edgeView, label, beadCount, beadView, eventCount, eventView };
+  return { tick, edgeView, label, beadCount, beadView, eventCount, eventView, eventTextView };
 }
 
 /** Decoded view over a BUF_BLOCK_TAG_VIEW frame (see frame-tags.ts for its byte layout):
@@ -377,6 +389,7 @@ export interface DecodedViewFrame {
    *  every other kind is decentralized to its own owner fd). */
   eventCount: number;
   eventView: DataView;
+  eventTextView: DataView;
 }
 
 // Single-entry memo, mirroring the other per-frame decoders below — the view frame
@@ -414,9 +427,9 @@ function decodeViewFrameUncached(buf: ArrayBuffer): DecodedViewFrame | null {
   const sceneView = new DataView(buf, off, SCENE_STRIDE);
   off += SCENE_STRIDE;
 
-  const { count: eventCount, view: eventView } = decodeTrailingEvents(buf, off);
+  const { count: eventCount, view: eventView, textView: eventTextView } = decodeTrailingEvents(buf, off);
 
-  return { tick, cameraView, overlayView, sceneView, eventCount, eventView };
+  return { tick, cameraView, overlayView, sceneView, eventCount, eventView, eventTextView };
 }
 
 /**
@@ -463,6 +476,7 @@ export interface DecodedNodeStreamFrame {
   /** This node's own trailing EVENTS section (.probe log only; see decodeTrailingEvents). */
   eventCount: number;
   eventView: DataView;
+  eventTextView: DataView;
 }
 
 /** Reads DstNodeRow (i32) from row `row` of a node stream frame's LayoutLink section. */
@@ -525,9 +539,9 @@ function decodeNodeStreamFrameUncached(buf: ArrayBuffer): DecodedNodeStreamFrame
   const layoutLinkView = new DataView(buf, off, layoutLinkBytes);
   off += layoutLinkBytes;
 
-  const { count: eventCount, view: eventView } = decodeTrailingEvents(buf, off);
+  const { count: eventCount, view: eventView, textView: eventTextView } = decodeTrailingEvents(buf, off);
 
-  return { tick, nodeView, label, portCount, portView, portNameBytes, layoutLinkCount, layoutLinkView, eventCount, eventView };
+  return { tick, nodeView, label, portCount, portView, portNameBytes, layoutLinkCount, layoutLinkView, eventCount, eventView, eventTextView };
 }
 
 /** Decoded view over ONE node's dedicated per-fd INTERIOR-stream frame
@@ -540,6 +554,7 @@ export interface DecodedInteriorStreamFrame {
   /** This goroutine's own trailing EVENTS section (.probe log only; see decodeTrailingEvents). */
   eventCount: number;
   eventView: DataView;
+  eventTextView: DataView;
 }
 
 const lastInteriorStreamBufByRow = new Map<number, ArrayBuffer>();
@@ -565,6 +580,6 @@ function decodeInteriorStreamFrameUncached(buf: ArrayBuffer): DecodedInteriorStr
   if (buf.byteLength < expectedLen) return null;
   const tick = new DataView(buf, 0, BUF_INTERIOR_STREAM_FRAME_HEADER_SIZE).getUint32(0, true);
   const interiorView = new DataView(buf, BUF_INTERIOR_STREAM_FRAME_HEADER_SIZE, interiorBytes);
-  const { count: eventCount, view: eventView } = decodeTrailingEvents(buf, expectedLen);
-  return { tick, interiorView, eventCount, eventView };
+  const { count: eventCount, view: eventView, textView: eventTextView } = decodeTrailingEvents(buf, expectedLen);
+  return { tick, interiorView, eventCount, eventView, eventTextView };
 }

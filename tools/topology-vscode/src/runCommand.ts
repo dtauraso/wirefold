@@ -125,7 +125,6 @@ interface ProbePaths {
   probeEdgeFile: string;
   probeInteriorFile: string;
   goErrorsFile: string;
-  goDebugFile: string;
   tsFile: string;
   tsErrorsFile: string;
 }
@@ -143,7 +142,6 @@ function probePathsFor(folder: vscode.WorkspaceFolder): ProbePaths {
     probeEdgeFile: path.join(probeDir, PROBE_FILES.goEdge),
     probeInteriorFile: path.join(probeDir, PROBE_FILES.goInterior),
     goErrorsFile: path.join(probeDir, PROBE_FILES.goErrors),
-    goDebugFile: path.join(probeDir, PROBE_FILES.goDebug),
     tsFile: path.join(probeDir, PROBE_FILES.ts),
     tsErrorsFile: path.join(probeDir, PROBE_FILES.tsErrors),
   };
@@ -197,20 +195,6 @@ export function splitFrames(buf: Buffer, chunk: Buffer): { frames: ArrayBuffer[]
 // handleStdout below) — the .probe trace logs are now the DECODE of each per-owner
 // stream's own trailing EVENTS section (decodeBufferLog/decodeStreamFrameEvents, in
 // handleViewFd/handleNodeFd/handleEdgeFd/handleInteriorFd).
-
-// tryParseBreadcrumb recognizes the Go Trace.Breadcrumb line shape
-// ({"kind":"breadcrumb","label":...}). Breadcrumbs are logging-only, intercepted in
-// handleStdout before the line is appended to the output channel as plain process output.
-export function tryParseBreadcrumb(line: string): Record<string, unknown> | undefined {
-  if (!line.startsWith("{")) return undefined;
-  try {
-    const obj: unknown = JSON.parse(line);
-    if (typeof obj === "object" && obj !== null && (obj as Record<string, unknown>).kind === "breadcrumb") {
-      return obj as Record<string, unknown>;
-    }
-  } catch { /* not JSON */ }
-  return undefined;
-}
 
 // ensureBinaryBuilt builds the Go binary at binPath if it's missing or stale.
 // A rebuild is needed when binPath does not exist OR any *.go source under
@@ -325,7 +309,6 @@ export class BuildAndRunRunner {
   private probeEdgeFile: string | undefined;
   private probeInteriorFile: string | undefined;
   private goErrorsFile: string | undefined;
-  private goDebugFile: string | undefined;
   private tsFile: string | undefined;
   private tsErrorsFile: string | undefined;
   // Last VIEW-stream frame (camera+overlay+scene), kept so a REMOUNTED webview (which holds
@@ -418,7 +401,6 @@ export class BuildAndRunRunner {
     this.probeEdgeFile = probePaths.probeEdgeFile;
     this.probeInteriorFile = probePaths.probeInteriorFile;
     this.goErrorsFile = probePaths.goErrorsFile;
-    this.goDebugFile = probePaths.goDebugFile;
     this.tsFile = probePaths.tsFile;
     this.tsErrorsFile = probePaths.tsErrorsFile;
     if (killed > 0) {
@@ -569,26 +551,12 @@ export class BuildAndRunRunner {
     const { lines, rest } = splitJsonlLines(this.stream.stdoutBuf, chunk);
     this.stream.stdoutBuf = rest;
     for (const line of lines) {
-      // Breadcrumb lines are the Go-side DEBUG BREADCRUMB channel (Trace.Breadcrumb →
-      // stdout {"kind":"breadcrumb",...}). They are logging-only (no step ordinal, outside
-      // the closed trace vocabulary), so they are NEVER dispatched to the pump (its
-      // assertNever would throw). They land in a DEDICATED .probe/go-debug.jsonl with a
-      // distinct src="go-debug" so they are not conflated with buffer-decoded trace events
-      // (.probe/go.jsonl) or genuine stderr errors (.probe/go-errors.jsonl).
-      const crumb = tryParseBreadcrumb(line);
-      if (crumb) {
-        if (this.goDebugFile) {
-          try {
-            fs.appendFileSync(this.goDebugFile, JSON.stringify({ ts_ms: Date.now(), src: "go-debug", ...crumb }) + "\n", "utf8");
-          } catch { /* swallow */ }
-        }
-        continue;
-      }
-      // Trace events are NO LONGER emitted on stdout: Go's JSON-trace emitter was removed and
-      // the .probe log is now the DECODE of each per-owner stream's own trailing EVENTS
-      // section (see handleViewFd/handleNodeFd/handleEdgeFd/handleInteriorFd below). The ext
-      // host therefore no longer parses trace lines from stdout; any remaining stdout line is
-      // just process output.
+      // Trace events (and, since task/breadcrumbs-binary-buffer, DEBUG BREADCRUMBs too)
+      // are NO LONGER emitted on stdout: Go's JSON-trace emitter was removed and the
+      // .probe log is now the DECODE of each per-owner stream's own trailing EVENTS
+      // section (see handleViewFd/handleNodeFd/handleEdgeFd/handleInteriorFd below,
+      // and buffer-log.ts's "breadcrumb" case). The ext host therefore no longer parses
+      // any structured line from stdout; any stdout line here is just process output.
       this.channel!.appendLine(line);
     }
   }
@@ -641,7 +609,7 @@ export class BuildAndRunRunner {
       if (this.probeEdgeFile) {
         const decoded = decodeEdgeStreamFrame(row, ab);
         if (decoded && decoded.eventCount > 0) {
-          const lines = decodeStreamFrameEvents(decoded.eventCount, decoded.eventView);
+          const lines = decodeStreamFrameEvents(decoded.eventCount, decoded.eventView, decoded.eventTextView);
           if (lines.length > 0) {
             try {
               fs.appendFileSync(this.probeEdgeFile, lines, "utf8");
@@ -674,7 +642,7 @@ export class BuildAndRunRunner {
       if (this.probeNodeFile) {
         const decoded = decodeNodeStreamFrame(row, ab);
         if (decoded && decoded.eventCount > 0) {
-          const lines = decodeStreamFrameEvents(decoded.eventCount, decoded.eventView);
+          const lines = decodeStreamFrameEvents(decoded.eventCount, decoded.eventView, decoded.eventTextView);
           if (lines.length > 0) {
             try {
               fs.appendFileSync(this.probeNodeFile, lines, "utf8");
@@ -705,7 +673,7 @@ export class BuildAndRunRunner {
       if (this.probeInteriorFile) {
         const decoded = decodeInteriorStreamFrame(row, ab);
         if (decoded && decoded.eventCount > 0) {
-          const lines = decodeStreamFrameEvents(decoded.eventCount, decoded.eventView);
+          const lines = decodeStreamFrameEvents(decoded.eventCount, decoded.eventView, decoded.eventTextView);
           if (lines.length > 0) {
             try {
               fs.appendFileSync(this.probeInteriorFile, lines, "utf8");

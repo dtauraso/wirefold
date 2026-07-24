@@ -71,12 +71,13 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, topologyPath st
 	// -trace JSONL dump were deleted — memory/feedback_no_single_writer_bridge.md's final step: every
 	// emitting goroutine packs its own frame directly; see Trace/Trace.go's doc comment).
 	tr := T.New(0)
-	// DEBUG BREADCRUMB channel: production breadcrumbs ride stdout as {"kind":"breadcrumb",...}
-	// lines; the ext host routes them to .probe/go-debug.jsonl (see runCommand.ts). This is the
-	// Go analogue of the webview's postLog — a cheap, structured, one-call diagnostic that lands
-	// in .probe/ without scattering fmt.Fprintf(os.Stderr, ...). It is sparse (control events,
-	// not a per-tick firehose) and fire-and-forget.
-	tr.SetDebugSink(os.Stdout)
+	// DEBUG BREADCRUMB channel: each Breadcrumb() call site emits a structured
+	// Kind==KindBreadcrumb EVENT row on its own owning per-owner stream (node/edge/
+	// interior/VIEW) — see Trace.go's Breadcrumb/Trace-struct doc comments and each
+	// call site's writeStreamFrame/writeEvents/EmitBreadcrumb. There is no longer a
+	// separate production stdout sink here; probe-merge.sh --debug decodes these
+	// buffer-carried breadcrumb rows (filtered by the Debug flag) instead of parsing
+	// a JSON stdout line.
 
 	// The clock is free-running (no play/pause gate): it starts ticking at construction
 	// and never halts. Startup geometry is NOT emitted here — each node's own goroutine

@@ -75,7 +75,7 @@ func TestDragDeltaAnchoredAtDragStart(t *testing.T) {
 	// its own LocalPolar entry strictly before logging the breadcrumb, in the same call
 	// on src's own goroutine.
 	var dbg syncBuffer
-	md.tr.SetDebugSink(&dbg)
+	md.tr.SetSink(&dbg)
 
 	// Setup (untracked): a bare RootMove call, before any drag-start, that merely gets
 	// src's LocalPolar-to-dst entry into existence (a freshly-loaded LayoutHolder starts
@@ -138,7 +138,7 @@ func TestDragAnchorRearmsOnNewDrag(t *testing.T) {
 	// See TestDragDeltaAnchoredAtDragStart's comment: wire the debug sink before the
 	// setup move so the "abc-drag" breadcrumb trail for dst is complete from the start.
 	var dbg syncBuffer
-	md.tr.SetDebugSink(&dbg)
+	md.tr.SetSink(&dbg)
 
 	// Setup (untracked): establish src's LocalPolar-to-dst entry at the topology's
 	// starting distance before either tracked drag begins.

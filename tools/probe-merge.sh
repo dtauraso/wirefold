@@ -11,9 +11,14 @@ set -euo pipefail
 #   probe-merge.sh --errors     — go-errors.jsonl + ts-errors.jsonl sorted
 #   probe-merge.sh --step N     — lines with .step==N across all files sorted
 #   probe-merge.sh --go         — go.jsonl (VIEW-bucket) + go-node/go-edge/go-interior.jsonl
-#                                 (per-owner decentralized events) + go-errors.jsonl +
-#                                 go-debug.jsonl, sorted
-#   probe-merge.sh --debug      — go-debug.jsonl (DEBUG BREADCRUMB channel) only
+#                                 (per-owner decentralized events) + go-errors.jsonl, sorted
+#   probe-merge.sh --debug      — DEBUG BREADCRUMB channel only: buffer-decoded events
+#                                 (from go.jsonl/go-node/go-edge/go-interior.jsonl) whose
+#                                 .debug field is true (task/breadcrumbs-binary-buffer —
+#                                 breadcrumbs are no longer a separate go-debug.jsonl JSON
+#                                 stdout line; they ride the same buffer-decoded EVENT
+#                                 rows as every other trace kind, tagged kind="breadcrumb"
+#                                 + debug=true)
 #   probe-merge.sh --ts         — ts.jsonl + ts-errors.jsonl sorted
 #
 # Missing files are treated as empty; requires jq.
@@ -24,17 +29,15 @@ PROBE_DIR="$REPO_ROOT/.probe"
 
 # These names are the canonical .probe/ log files. The TS writers source them from
 # tools/topology-vscode/src/probe-files.ts (PROBE_FILES); shell can't import it, so they
-# are duplicated here — keep both in sync on any rename. go-debug.jsonl is the Go DEBUG
-# BREADCRUMB channel (Trace.Breadcrumb → stdout → ext host), distinct from trace events
-# and errors (go-errors.jsonl). go.jsonl is the VIEW-bucket (kinds not yet decentralized
-# to their own owner fd); go-node/go-edge/go-interior.jsonl are the genuinely
+# are duplicated here — keep both in sync on any rename. go.jsonl is the VIEW-bucket
+# (kinds not yet decentralized to their own owner fd, PLUS main.go's own breadcrumbs,
+# which have no per-node stream); go-node/go-edge/go-interior.jsonl are the genuinely
 # decentralized per-owner-KIND logs — each written independently, never merged on write.
 GO_FILE="$PROBE_DIR/go.jsonl"
 GO_NODE_FILE="$PROBE_DIR/go-node.jsonl"
 GO_EDGE_FILE="$PROBE_DIR/go-edge.jsonl"
 GO_INTERIOR_FILE="$PROBE_DIR/go-interior.jsonl"
 GO_ERR_FILE="$PROBE_DIR/go-errors.jsonl"
-GO_DEBUG_FILE="$PROBE_DIR/go-debug.jsonl"
 TS_FILE="$PROBE_DIR/ts.jsonl"
 TS_ERR_FILE="$PROBE_DIR/ts-errors.jsonl"
 
@@ -70,22 +73,29 @@ case "$MODE" in
       read_file "$GO_EDGE_FILE"
       read_file "$GO_INTERIOR_FILE"
       read_file "$GO_ERR_FILE"
-      read_file "$GO_DEBUG_FILE"
       read_file "$TS_FILE"
       read_file "$TS_ERR_FILE"
     } | jq -s --argjson step "$STEP" '[.[] | select(.step == $step)] | sort_by(.ts_ms) | .[]' -c
     ;;
   --go)
-    merge_and_sort "$GO_FILE" "$GO_NODE_FILE" "$GO_EDGE_FILE" "$GO_INTERIOR_FILE" "$GO_ERR_FILE" "$GO_DEBUG_FILE"
+    merge_and_sort "$GO_FILE" "$GO_NODE_FILE" "$GO_EDGE_FILE" "$GO_INTERIOR_FILE" "$GO_ERR_FILE"
     ;;
   --debug)
-    merge_and_sort "$GO_DEBUG_FILE"
+    # DEBUG BREADCRUMB channel: buffer-decoded events tagged kind="breadcrumb" with
+    # debug==true, across every per-owner log (a breadcrumb can ride any of them —
+    # VIEW/node/edge/interior — depending which goroutine emitted it).
+    {
+      read_file "$GO_FILE"
+      read_file "$GO_NODE_FILE"
+      read_file "$GO_EDGE_FILE"
+      read_file "$GO_INTERIOR_FILE"
+    } | jq -s '[.[] | select(.kind == "breadcrumb" and .debug == true)] | sort_by(.ts_ms) | .[]' -c
     ;;
   --ts)
     merge_and_sort "$TS_FILE" "$TS_ERR_FILE"
     ;;
   "")
-    merge_and_sort "$GO_FILE" "$GO_NODE_FILE" "$GO_EDGE_FILE" "$GO_INTERIOR_FILE" "$GO_ERR_FILE" "$GO_DEBUG_FILE" "$TS_FILE" "$TS_ERR_FILE"
+    merge_and_sort "$GO_FILE" "$GO_NODE_FILE" "$GO_EDGE_FILE" "$GO_INTERIOR_FILE" "$GO_ERR_FILE" "$TS_FILE" "$TS_ERR_FILE"
     ;;
   *)
     echo "Unknown option: $MODE" >&2

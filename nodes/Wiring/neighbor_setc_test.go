@@ -55,7 +55,7 @@ func TestNeighborSetCRequantizesEdgeNeighborStaysPut(t *testing.T) {
 	// polling lhSrc directly, a data race against src's own mover goroutine) establishes
 	// the happens-before edge. See time_node_abc_drag_breadcrumb_test.go.
 	var dbg syncBuffer
-	md.tr.SetDebugSink(&dbg)
+	md.tr.SetSink(&dbg)
 
 	// Drag dst off its prior bearing from src AND farther away, so both the angle and
 	// the distance src re-quantizes to dst demonstrably change (a purely radial drag
@@ -165,7 +165,7 @@ func TestNeighborSetCDeltaIsDraggedNodesOwnTripleChange(t *testing.T) {
 	// intercept in flight, and race-free (waitForAbcDrag establishes the happens-before
 	// edge for dstToSrcAfter below, same argument as neighbor_setc's other test).
 	var dbg syncBuffer
-	md.tr.SetDebugSink(&dbg)
+	md.tr.SetSink(&dbg)
 
 	dstBefore, ok := md.centerOfNode("dst")
 	if !ok {

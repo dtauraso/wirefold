@@ -156,7 +156,7 @@ func TestRotatingPoleClearsSingularityOnDrag(t *testing.T) {
 	// polling lhSrc directly, a data race against src's own mover goroutine) establishes
 	// the happens-before edge. See time_node_abc_drag_breadcrumb_test.go.
 	var dbg syncBuffer
-	md.tr.SetDebugSink(&dbg)
+	md.tr.SetSink(&dbg)
 
 	// Drag dst to a position 0.5 degrees off world +y (well inside the 1-degree kick
 	// threshold).
@@ -261,7 +261,7 @@ func TestRotatingPolePersistReload(t *testing.T) {
 	// polling lhSrc directly, a data race against src's own mover goroutine) establishes
 	// the happens-before edge. See time_node_abc_drag_breadcrumb_test.go.
 	var dbg syncBuffer
-	md.tr.SetDebugSink(&dbg)
+	md.tr.SetSink(&dbg)
 
 	home := dir{Theta: 0, Phi: 0}
 	near := fromAxisFrame(home, 5*math.Pi/180, 0)

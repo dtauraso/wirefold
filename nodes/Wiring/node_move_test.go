@@ -429,7 +429,7 @@ func TestRootMoveContinuousPositionLocalPolarRequantize(t *testing.T) {
 	//     receive) and lhDst's write (same mechanism time_node_abc_drag_breadcrumb_test.go
 	//     uses).
 	var dbg syncBuffer
-	tr.SetDebugSink(&dbg)
+	tr.SetSink(&dbg)
 
 	// A target deliberately off any scene-grid cell.
 	target := vec3{X: 37.3, Y: 12.1, Z: -5.7}

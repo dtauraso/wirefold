@@ -21,7 +21,6 @@ export const PROBE_FILES = {
   goEdge: "go-edge.jsonl",
   goInterior: "go-interior.jsonl",
   goErrors: "go-errors.jsonl",
-  goDebug: "go-debug.jsonl",
   ts: "ts.jsonl",
   tsErrors: "ts-errors.jsonl",
   handlerErrorLast: "handler-error-last.json",

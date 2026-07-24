@@ -11,7 +11,7 @@
 // float32 throughout, as the render path already is) — geometry/position coords therefore
 // carry float32 precision rather than the old float64 JSON, an inherent, expected nuance.
 
-import { TRACE_EVENT_KINDS } from "./schema/trace-kinds";
+import { TRACE_EVENT_KINDS, BREADCRUMB_LABELS } from "./schema/trace-kinds";
 import { NODE_KIND_NAMES } from "./schema/node-defs";
 import {
   decodeNodeFrame,
@@ -40,11 +40,16 @@ import {
   readEventKind, readEventNodeRow, readEventPortRow, readEventTargetRow, readEventTargetPortRow,
   readEventEdgeRow, readEventSlot, readEventValue, readEventBead,
   readEventArcLength, readEventSimLatencyMs, readEventX, readEventY, readEventZ, readEventF,
+  readEventLabel, readEventDebug, readEventTextOff, readEventTextLen,
   readSceneCX, readSceneCY, readSceneCZ, readSceneRadius,
   UNKNOWN_KIND_ID,
 } from "./schema/buffer-layout";
 
 type Line = Record<string, unknown>;
+
+/** Shared UTF-8 decoder for the event-text-bytes section (the sanctioned single
+ *  free-form string escape hatch on the EVENT row — see Buffer.BuildEventsSection). */
+const EVENT_TEXT_DECODER = new TextDecoder();
 
 // DecodedEventLine pins the field shape decodeEventLine (below) emits per Go event kind —
 // the SAME shape the removed JSON-on-stdout path used to emit. Kept as a typed contract
@@ -77,7 +82,18 @@ export type DecodedEventLine =
   // abc-drag: no dedicated payload, falls through decodeEventLine's default {node,port,value}
   // shape — same as recv/hover. The routed counterpart of the "time.abc-drag" breadcrumb;
   // the buffer's Overlay.AbcDragCount column is what the in-editor label actually reads.
-  | { step: number; kind: "abc-drag"; node: string; port?: string; value?: number };
+  | { step: number; kind: "abc-drag"; node: string; port?: string; value?: number }
+  // DEBUG BREADCRUMB channel (task/breadcrumbs-binary-buffer): a structured buffer
+  // EVENT row rather than a free-form JSON stdout line. label names which of the 9
+  // breadcrumb call sites fired; the remaining columns are REUSED per label (see
+  // Trace.go's BreadcrumbLabel* consts and each Go call site's own doc comment).
+  // target/text are present only when that label populated them.
+  | {
+      step: number; kind: "breadcrumb"; label: string; debug: boolean;
+      node: string; port?: string; value?: number; x: number; y: number; z: number;
+      nodeRow: number; portRow: number; targetRow: number; targetPortRow: number; edgeRow: number; slot: number;
+      target?: string; text?: string;
+    };
 
 /**
  * Decode a snapshot into `.probe/go.jsonl` lines (one JSON object per line, trailing \n each).
@@ -118,14 +134,14 @@ export function decodeBufferLog(viewFrameBuf: ArrayBuffer, nodeFrameBuf?: ArrayB
   const dn = nodeFrameBuf ? decodeNodeFrame(nodeFrameBuf) : null;
   const de = edgeFrameBuf ? decodeEdgeFrame(edgeFrameBuf) : null;
   const vb: ViewBlocksOrNull = { cameraView: dv.cameraView, overlayView: dv.overlayView, sceneView: dv.sceneView };
-  return decodeEventsFromView(dv.eventCount, dv.eventView, dn, de, vb);
+  return decodeEventsFromView(dv.eventCount, dv.eventView, dv.eventTextView, dn, de, vb);
 }
 
-function decodeEventsFromView(eventCount: number, eventView: DataView, dn: DecodedNodeFrame | null, de: DecodedEdgeFrame | null, vb: ViewBlocksOrNull): string {
+function decodeEventsFromView(eventCount: number, eventView: DataView, eventTextView: DataView, dn: DecodedNodeFrame | null, de: DecodedEdgeFrame | null, vb: ViewBlocksOrNull): string {
   const now = Date.now();
   let out = "";
   for (let i = 0; i < eventCount; i++) {
-    const line = decodeEventLine(eventView, dn, de, vb, i);
+    const line = decodeEventLine(eventView, eventTextView, dn, de, vb, i);
     if (line) out += JSON.stringify({ ts_ms: now, src: "go", ...line }) + "\n";
   }
   return out;
@@ -138,11 +154,11 @@ function decodeEventsFromView(eventCount: number, eventView: DataView, dn: Decod
 // row resolution is attempted here (that owner goroutine already resolved what it could);
 // node/port/edge identity strings are best-effort (dn/de optional) — the numeric rows the
 // event already carries are always present regardless.
-export function decodeStreamFrameEvents(eventCount: number, eventView: DataView, dn?: DecodedNodeFrame | null, de?: DecodedEdgeFrame | null): string {
+export function decodeStreamFrameEvents(eventCount: number, eventView: DataView, eventTextView: DataView, dn?: DecodedNodeFrame | null, de?: DecodedEdgeFrame | null): string {
   const now = Date.now();
   let out = "";
   for (let i = 0; i < eventCount; i++) {
-    const line = decodeEventLine(eventView, dn ?? null, de ?? null, { cameraView: null, overlayView: null, sceneView: null }, i);
+    const line = decodeEventLine(eventView, eventTextView, dn ?? null, de ?? null, { cameraView: null, overlayView: null, sceneView: null }, i);
     if (line) out += JSON.stringify({ ts_ms: now, src: "go", ...line }) + "\n";
   }
   return out;
@@ -169,7 +185,7 @@ const OVERLAY_KINDS = new Set([
   "handholds", "labels-global", "overlays-vis", "double-links",
 ]);
 
-function decodeEventLine(ev: DataView, dn: DecodedNodeFrame | null, de: DecodedEdgeFrame | null, vb: ViewBlocksOrNull, i: number): Line | null {
+function decodeEventLine(ev: DataView, eventTextView: DataView, dn: DecodedNodeFrame | null, de: DecodedEdgeFrame | null, vb: ViewBlocksOrNull, i: number): Line | null {
   const kindId = readEventKind(ev, i);
   const kind = TRACE_EVENT_KINDS[kindId];
   if (kind === undefined) return null;
@@ -182,6 +198,32 @@ function decodeEventLine(ev: DataView, dn: DecodedNodeFrame | null, de: DecodedE
   const bead = readEventBead(ev, i);
   const node = dn && nodeRow >= 0 ? nodeLabel(dn, nodeRow) : "";
   const port = dn ? portName(dn, portRow) : "";
+
+  if (kind === "breadcrumb") {
+    // DEBUG BREADCRUMB channel (task/breadcrumbs-binary-buffer): a structured EVENT
+    // row instead of the retired free-form JSON stdout line. Column meanings are
+    // REUSED per breadcrumb Label (see each Go call site's own comment) — this decode
+    // exposes every raw column plus the resolved label name and free-form text (if
+    // any), so probe-merge.sh --debug (filtering on debug===true) can display whatever
+    // a given label populated without this decoder needing per-label knowledge.
+    const labelId = readEventLabel(ev, i);
+    const label = BREADCRUMB_LABELS[labelId] ?? String(labelId);
+    const textOff = readEventTextOff(ev, i);
+    const textLen = readEventTextLen(ev, i);
+    const text = textLen > 0 && eventTextView.byteLength >= textOff + textLen
+      ? EVENT_TEXT_DECODER.decode(new Uint8Array(eventTextView.buffer, eventTextView.byteOffset + textOff, textLen))
+      : "";
+    const t = dn && targetRow >= 0 ? nodeLabel(dn, targetRow) : "";
+    const line: Line = {
+      kind, label, debug: readEventDebug(ev, i) === 1,
+      node, port, value,
+      x: readEventX(ev, i), y: readEventY(ev, i), z: readEventZ(ev, i),
+      nodeRow, portRow, targetRow, targetPortRow, edgeRow, slot: readEventSlot(ev, i),
+    };
+    if (t) line.target = t;
+    if (text) line.text = text;
+    return line;
+  }
 
   switch (kind) {
     case "recv":

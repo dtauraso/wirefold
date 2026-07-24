@@ -184,8 +184,12 @@ func main() {
 	if err != nil {
 		fatalf("parse trace kinds: %v", err)
 	}
+	breadcrumbLabels, err := parseBreadcrumbLabels(traceDir)
+	if err != nil {
+		fatalf("parse breadcrumb labels: %v", err)
+	}
 	traceKindsPath := filepath.Join(repoRoot, "tools", "topology-vscode", "src", "schema", "trace-kinds.ts")
-	if err := writeTraceKinds(traceKindsPath, traceKinds); err != nil {
+	if err := writeTraceKinds(traceKindsPath, traceKinds, breadcrumbLabels); err != nil {
 		fatalf("write %s: %v", traceKindsPath, err)
 	}
 	fmt.Fprintf(os.Stderr, "gen-node-defs: wrote %s (%d kinds)\n", traceKindsPath, len(traceKinds))

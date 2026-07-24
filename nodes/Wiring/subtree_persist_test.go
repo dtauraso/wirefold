@@ -93,7 +93,7 @@ func TestIndividualSnap_OnlyDraggedNodePersists(t *testing.T) {
 	// polling lhSrc directly, a data race against src's own mover goroutine) establishes
 	// the happens-before edge. See time_node_abc_drag_breadcrumb_test.go.
 	var dbg syncBuffer
-	md.tr.SetDebugSink(&dbg)
+	md.tr.SetSink(&dbg)
 
 	dstTarget := vec3{X: 60, Y: 20, Z: -10}
 	if !md.RootMove("dst", dstTarget) {
