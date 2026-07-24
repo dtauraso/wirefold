@@ -70,21 +70,12 @@ was tried and removed: it had no Edge-block column and could not affect a single
 its only consumer was a test importing the schema barrel, not production code.)
 
 **Bridge surface:** **Go → TS** is binary content buffers (`buffer-snapshot`) and NOTHING
-ELSE. There is no shared fd3/single-writer packer: each emitting goroutine writes its OWN
-frame to its OWN inherited stdio pipe (memory/feedback_no_single_writer_bridge.md,
-`Buffer/stream_fds.go`) — one VIEW stream (camera/overlay/scene, the gesture/stdin-reader
-goroutine), one stream per edge row (that edgeMover's own geometry + its wire's live beads),
-and two streams per node row (that nodeMover's own geometry+ports+label, and that node's own
-Update-goroutine's interior beads). `WIREFOLD_STREAM_FDS` (set by the ext host's spawn,
-`tools/topology-vscode/src/runCommand.ts`) is **mandatory** — `Buffer.SnapshotState`, the
-former central accumulator that packed one combined fd-3 frame with a fallback path, was
-deleted entirely (memory/feedback_no_single_writer_bridge.md). A dedicated-fd frame is
-`[len:u32-LE][payload]` with **no tag byte** — the fd POSITION identifies which
-stream/row it is; the ext host relays each to the webview under a synthetic tag
-(`BUF_BLOCK_TAG_VIEW`/`_EDGE_STREAM`/`_NODE_STREAM`/`_INTERIOR_STREAM`,
-`Buffer/frame_tags.go` / `tools/topology-vscode/src/schema/frame-tags.ts`) purely so the
-render tree can route by cell, never a wire byte. There is **no id/label/kind sidecar**:
-node identity is the buffer's **row index**, kind is a numeric column, and the human label
+ELSE — one dedicated inherited-stdio pipe per emitting goroutine (VIEW/edge/node/interior),
+no shared fd3/single-writer packer, `WIREFOLD_STREAM_FDS` mandatory. Full architecture
+(frame shape, stream inventory, synthetic frame tags) is canonical in MODEL.md's "Editor
+surface (TS)" section; see also memory/feedback_no_single_writer_bridge.md and
+memory/feedback_per_goroutine_bridge.md. There is **no id/label/kind sidecar**: node
+identity is the buffer's **row index**, kind is a numeric column, and the human label
 rides the buffer's Label section via off/len columns on the Node block. (A test asserts the
 removed sidecar message is rejected; do not reintroduce one.)
 
@@ -94,30 +85,22 @@ removed sidecar message is rejected; do not reintroduce one.)
   (see `nodes/Wiring/stdin_reader.go` `applyEdit`, fenced by `EDIT_OPS_START`/
   `EDIT_OPS_END`, and `tools/topology-vscode/src/messages.ts` `EditMsg`): **`update` sets
   an ATTRIBUTE on a typed entity** (`kind` = node / edge / camera / overlays / scene) —
-  there is no per-feature op. There was a `create` / `delete` op pair that named a
-  destination slot to add or remove an edge; both were **removed end-to-end** — no live TS
-  sender ever emitted them, and `create`'s only live trigger (a port-drop gesture) had
-  unconditionally torn down a live wire's in-flight beads via `PacedWire.Restore()`. The
-  removed kind bytes (`edit-create:20`, `edit-delete:21`) are left as GAPS in
-  `input_codec.go`, never renumbered. New *addressed* capability is a new entity kind or
+  there is no per-feature op. New *addressed* capability is a new entity kind or
   attribute, NOT a new op.
 - **Bare commands** — `save` is the only bare command. It is defined end-to-end (kind byte,
   Go decode + persist) but currently has **no live TS sender** — no UI affordance posts it
   yet; it stays in the vocabulary because Go's decode and the `INPUT_LAYOUT_FINGERPRINT` both
   carry it. It carries **no entity id on purpose**: it acts on state **Go already owns** (the
-  current selection / scene), so there is nothing for TS to address. There was a `play` /
-  `pause` clock-gate pair and a `run` / `stop` process control; both were **removed
-  end-to-end** — the clock is free-running (no pause) and Go auto-runs on the webview's
-  `ready` (respawning on exit), so the editor has no run/pause/stop affordance. The removed
-  kind bytes (`resume:1`, `pause:2`) are left as GAPS in `input_codec.go`, never renumbered.
-  There is no `resend`
+  current selection / scene), so there is nothing for TS to address. There is no `resend`
   command: the ext host caches the last frame per dedicated stream (view, plus one per
   edge/node/interior row) and replays all of them to a remounted webview on `ready` instead
   (`BuildAndRunRunner.getLastViewFrame`/`getLastEdgeFrames`/`getLastNodeFrames`/
   `getLastInteriorFrames` in `tools/topology-vscode/src/runCommand.ts`) — Go only ever emits
-  a frame when something changes, and that stays true. There is no `fade-toggle` command:
-  the fade/dimming feature was deleted end-to-end (nodes/edges/beads always render at full
-  opacity).
+  a frame when something changes, and that stays true.
+
+  (Several ops/commands were removed end-to-end with no live TS sender — `edit-create`/
+  `edit-delete`, `play`/`pause`, `run`/`stop`, `fade-toggle` — and their kind bytes are left
+  as GAPS in `input_codec.go`, never renumbered.)
 - **`raw-input`** — raw pointer/wheel + stateless raycast hit → Go's gesture FSM. Camera
   orbit, node moves, and port-anchor moves are produced **in-process** by the FSM
   from raw-input; they do not cross this seam as edits.
@@ -128,19 +111,14 @@ Keep all of it in parity across `messages.ts`, `stdin_reader.go`, and `handle-me
 TS → Go send is **fire-and-forget** — no `await`, no Promise chain, no request/response,
 no delivery signal (guard: `tools/check-no-await-on-bridge.sh`).
 
-**Drift rule:** if TS code starts accumulating traversal-timing, firing-rule, position,
-or geometry logic, starts authoring domain state (a store / stateful hook), or starts
-awaiting Go on the bridge — that is drift; those belong in Go and the bridge stays
-fire-and-forget (guards: `tools/check-no-webview-state.sh`, `tools/check-no-await-on-bridge.sh`).
+**Drift rule:** see MODEL.md's "Drift rule" section for the full statement (guards:
+`tools/check-no-webview-state.sh`, `tools/check-no-await-on-bridge.sh`).
 
 ## Node kinds
 
-Active node kinds are defined in `tools/topology-vscode/src/schema/node-defs.ts`
-(`NODE_DEFS`), generated by `tools/gen-node-defs` from each `nodes/<Kind>/SPEC.md`.
-All nodes are rendered generically by `tools/topology-vscode/src/webview/three/NodeInstances.tsx` from the buffer's Node
-block (sphere mesh + border ring), keyed off `node.data.fill`/`node.data.stroke` from
-`NODE_DEFS`. There are no per-kind render component files. The per-kind role is documented
-in the Go package and SPEC.md rather than duplicated here.
+See the "Primitive landing rule" section above for the full registration steps
+(`NODE_DEFS`, `NodeInstances.tsx` generic rendering, no per-kind component files).
+The per-kind role is documented in the Go package and SPEC.md rather than duplicated here.
 
 ## Memory
 
