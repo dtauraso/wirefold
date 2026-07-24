@@ -2,7 +2,8 @@
 
 Recommended order for turning the seven investigation-stub branches (each currently a single
 `docs/*.md` planning doc, no code yet) into implementation. Rooted in the A/B/C plan in
-`docs/backpressure-ceiling.md` (branch-local, on `task/backpressure-ceiling-investigation`).
+the backpressure-ceiling investigation doc, which lives branch-local on
+`task/backpressure-ceiling-investigation` (not on main).
 
 This is a coordination note, not a spec — re-check each branch's own doc before starting, and
 confirm no concurrent session is on a branch before touching it (these were spun up together
