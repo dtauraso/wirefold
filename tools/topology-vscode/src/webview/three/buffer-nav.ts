@@ -19,7 +19,8 @@
 // positions/radii/sphereR/selection/label all come from the buffer via decodeNavNodes.
 
 import * as THREE from "three";
-import { type DecodedSnapshot, nodeLabel } from "./buffer-decode";
+import { type DecodedNodeFrame, nodeLabel } from "./buffer-decode";
+import { type ViewBlocks } from "./view-blocks";
 import {
   readNodeCX, readNodeCY, readNodeCZ,
   readNodeRadius, readNodeSphereR, readNodeSelected, readNodeLatchedSel,
@@ -50,7 +51,7 @@ export interface NavNode {
  * ordering invariant above); its label is decoded from the buffer's label section. Pure — no
  * store reads/writes.
  */
-export function decodeNavNodes(decoded: DecodedSnapshot): NavNode[] {
+export function decodeNavNodes(decoded: DecodedNodeFrame): NavNode[] {
   const { nodeCount, nodeView } = decoded;
   const out: NavNode[] = [];
   for (let i = 0; i < nodeCount; i++) {
@@ -83,7 +84,7 @@ export function decodeNavNodes(decoded: DecodedSnapshot): NavNode[] {
  * Falls back to (0,0,0)/100 before the one-time startup event has landed (radius 0 in the
  * buffer, mirroring the sphereR "0 = not yet populated" convention).
  */
-export function sceneSphereFromSnapshot(decoded: DecodedSnapshot): { center: THREE.Vector3; radius: number } {
+export function sceneSphereFromSnapshot(decoded: ViewBlocks): { center: THREE.Vector3; radius: number } {
   const radius = readSceneRadius(decoded.sceneView);
   if (radius <= 0) return { center: new THREE.Vector3(), radius: 100 };
   return {

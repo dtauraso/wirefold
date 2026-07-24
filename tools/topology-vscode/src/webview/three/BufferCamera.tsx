@@ -16,8 +16,7 @@
 import { useRef } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
-import { getLatestSnapshot } from "../snapshot-buffer";
-import { decodeSnapshot } from "./buffer-decode";
+import { getViewBlocks } from "./view-blocks";
 import { anglesToWorldOffset } from "./viewpoint-bridge";
 import {
   readCameraPX, readCameraPY, readCameraPZ, readCameraR,
@@ -34,11 +33,9 @@ export function BufferCamera({ cameraRef }: {
     const cam = camera as THREE.PerspectiveCamera;
     if (cameraRef) cameraRef.current = cam; // keep the ref alive for raw-input / HomeButton
 
-    const snap = getLatestSnapshot();
-    if (!snap) return;
-    const decoded = decodeSnapshot(snap);
-    if (!decoded) return;
-    const cv = decoded.cameraView;
+    const blocks = getViewBlocks();
+    if (!blocks) return;
+    const cv = blocks.cameraView;
 
     const r = readCameraR(cv);
     // Guard the uninitialized camera row: Go emits a real viewpoint on load (SeedInitialViewpoint
