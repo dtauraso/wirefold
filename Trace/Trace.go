@@ -111,7 +111,48 @@ const (
 	// the gesture FSM's pending→dragging transition, BEFORE the dragged node's
 	// neighborSetC fan resolves any KindAbcDrag marks for that drag.
 	KindAbcDragReset = "abc-drag-reset"
+	// KindBreadcrumb carries a DEBUG BREADCRUMB (see CLAUDE.md's "Debugging the Go
+	// layer" section) as a structured buffer EVENT row instead of a free-form JSON
+	// stdout line. It rides the EMITTING goroutine's own per-owner stream (node/edge/
+	// interior/VIEW) — main.go's own breadcrumbs (no per-node stream) ride the VIEW
+	// stream. Label (a BreadcrumbLabel* index below) names which of the 9 breadcrumb
+	// sites emitted it; the row's other columns (Value/X/Y/Z/NodeRow/PortRow/
+	// TargetRow/TargetPortRow) are REUSED per label, with Label/TextOff/TextLen (the
+	// bufLayoutEvent.Debug flag is always 1 on this Kind) as the two dedicated
+	// breadcrumb-only columns.
+	KindBreadcrumb = "breadcrumb"
 )
+
+// BreadcrumbLabel* enumerate the 9 breadcrumb call sites (Buffer/layout.go's
+// bufLayoutEvent.Label column, Kind==KindBreadcrumb rows only). Order is the wire id —
+// append only; do not reorder or delete a label without a migration. BreadcrumbLabels
+// is the string lookup gen-node-defs mirrors into TS for the .probe decode/log.
+const (
+	BreadcrumbTopologyLoaded uint8 = iota
+	BreadcrumbRowSeedCountMismatch
+	BreadcrumbPoleToggleGo
+	BreadcrumbWindowClear
+	BreadcrumbWindowOpen
+	BreadcrumbDwellStart
+	BreadcrumbAbcDrag
+	BreadcrumbWireSendBufferFull
+	BreadcrumbCascadeRoot
+)
+
+// BreadcrumbLabels is the single source of truth for the BreadcrumbLabel* enum's
+// string names, indexed by the enum value — mirrored into TS by gen-node-defs for the
+// .probe buffer-decoded breadcrumb log.
+var BreadcrumbLabels = []string{
+	"topology-loaded",
+	"row-seed-count-mismatch",
+	"pole-toggle-go",
+	"window_clear",
+	"window_open",
+	"dwell_start",
+	"abc-drag",
+	"wire-send-buffer-full",
+	"cascade.root",
+}
 
 // TraceEventKinds is the single source of truth for the closed kind vocabulary.
 // gen-node-defs reads this slice to emit trace-kinds.ts (the TS decode side's kindId →
@@ -119,7 +160,7 @@ const (
 // numeric id for the wire encoding. There is no tsc exhaustiveness check derived from
 // it — adding a kind here does not force a TS branch anywhere; it only extends the
 // lookup table.
-var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindPosition, KindGeometry, KindNodeGeometry, KindArrive, KindNodeBead, KindCamera, KindSceneTori, KindScenePoles, KindNodePoles, KindSelSpherePoles, KindHandholds, KindLabelsGlobal, KindOverlaysVis, KindDoubleLinks, KindLayoutLink, KindSelect, KindHover, KindSceneSphere, KindAbcDrag, KindAbcDragReset}
+var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindPosition, KindGeometry, KindNodeGeometry, KindArrive, KindNodeBead, KindCamera, KindSceneTori, KindScenePoles, KindNodePoles, KindSelSpherePoles, KindHandholds, KindLabelsGlobal, KindOverlaysVis, KindDoubleLinks, KindLayoutLink, KindSelect, KindHover, KindSceneSphere, KindAbcDrag, KindAbcDragReset, KindBreadcrumb}
 
 // PortGeom is one port's authoritative world geometry: its name, whether it is an
 // input, its sphere-surface world position (PX/PY/PZ), and the unit direction from node

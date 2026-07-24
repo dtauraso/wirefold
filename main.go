@@ -44,6 +44,9 @@ func toStreamEvents(events []W.RowEvent) []B.StreamEvent {
 			Y:             float32(e.Y),
 			Z:             float32(e.Z),
 			F:             float32(e.F),
+			Label:         e.Label,
+			Debug:         e.Debug,
+			Text:          e.Text,
 		}
 	}
 	return out

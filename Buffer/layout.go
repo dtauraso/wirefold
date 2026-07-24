@@ -315,6 +315,22 @@ type bufLayoutEvent struct {
 	Y             float32 `buf:"f32"` // position/status world/marker y
 	Z             float32 `buf:"f32"` // position/status world/marker z
 	F             float32 `buf:"f32"` // position: fractional progress t
+	// Label is the Breadcrumb sub-label enum (T.BreadcrumbLabels index) — only
+	// meaningful when Kind == KindBreadcrumb; 0 otherwise (also a valid label id,
+	// but other-kind rows never read Label). See Trace.go's BreadcrumbLabel* consts.
+	Label uint8 `buf:"u8"` // breadcrumb sub-label index (Kind==breadcrumb only)
+	// Debug flags this row as a DEBUG BREADCRUMB (vs. a structured domain trace
+	// event) for the ext host's probe-merge.sh --debug filter. 1 = breadcrumb.
+	Debug uint8 `buf:"u8"` // 1 = this row is a debug breadcrumb
+	// TextOff/TextLen are this event's slice into the frame's trailing EVENT-TEXT
+	// BYTES section (the sanctioned SINGLE free-form string escape hatch for the
+	// event row — tools/check-event-string-section-singular.sh enforces at most
+	// one such Off/Len pair on this struct). Used only for genuinely free-form
+	// remainder text a breadcrumb payload doesn't fit into a typed column
+	// (Value/X/Y/Z/NodeRow/PortRow/TargetRow/TargetPortRow/EdgeRow/Slot). TextLen=0
+	// = no text.
+	TextOff uint32 `buf:"u32"` // byte offset into the event-text-bytes section
+	TextLen uint32 `buf:"u32"` // event text UTF-8 byte length
 }
 
 // schemaTypes prevents the bufLayout* types from being flagged as unused by

@@ -20,4 +20,13 @@ type RowEvent struct {
 	NodeRow, PortRow, TargetRow, TargetPortRow, EdgeRow, Slot, Value int32
 	Bead                                                             uint64
 	ArcLength, SimLatencyMs, X, Y, Z, F                              float64
+	// Label/Debug/Text carry a DEBUG BREADCRUMB (Kind == T.KindBreadcrumb) payload:
+	// Label is a T.BreadcrumbLabel* index, Debug is always 1 on a breadcrumb row, and
+	// Text is the sanctioned single free-form remainder string (packed into the
+	// frame's trailing event-text-bytes section by the Buffer-side conversion) for
+	// payload data that doesn't fit an existing typed column above. Unused (zero
+	// value) on every non-breadcrumb Kind.
+	Label uint8
+	Debug uint8
+	Text  string
 }
