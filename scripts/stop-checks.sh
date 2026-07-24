@@ -14,8 +14,18 @@ set -u
 # resembles — but it failed for an accidental reason, and the guard clause was decoration.
 #
 # `ROOT=$(cmd)` propagates cmd's exit status, so this form actually fires.
-ROOT="$(git rev-parse --show-toplevel)" || {
-  echo "stop-checks: MISCONFIGURED — 'git rev-parse --show-toplevel' failed; cannot locate repo root." >&2
+#
+# Resolve from the SCRIPT'S OWN location, not the caller's cwd. The Stop hook (and manual
+# runs) can fire while the shell cwd is outside the repo — e.g. parked in a scratchpad after
+# background work — and a bare `git rev-parse --show-toplevel` then fails MISCONFIGURED even
+# though the repo is fine. This script always lives at <repo>/scripts/stop-checks.sh, so
+# `git -C "$SCRIPT_DIR"` anchors to the repo regardless of where it was invoked from.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || {
+  echo "stop-checks: MISCONFIGURED — cannot resolve script directory." >&2
+  exit 1
+}
+ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)" || {
+  echo "stop-checks: MISCONFIGURED — 'git -C \"$SCRIPT_DIR\" rev-parse --show-toplevel' failed; cannot locate repo root." >&2
   exit 1
 }
 if [ -z "$ROOT" ]; then
