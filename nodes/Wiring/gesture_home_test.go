@@ -13,17 +13,16 @@ import (
 // the framed pose, so a subsequent orbit builds on it.
 
 // homeMD builds a MoveDispatch whose nodeMovers carry the given centers, all of kind Hold
-// (Width==Height==60 → body radius 60/CurveParamNodeRadiusDivisor). md.positions is seeded
-// directly (the gesture goroutine's own accumulated center cache — see MoveDispatch.positions
-// doc comment) so heldCenters() observes each center, mirroring a live post-layout dispatch
-// after SeedPositions/drainPositions.
+// (Width==Height==60 → body radius 60/CurveParamNodeRadiusDivisor). Each center is seeded
+// via a real nodeMover's atomic snap (newNodeMover + setNodeWorld) so heldCenters() observes
+// it, mirroring a live post-layout dispatch after nodeMovers are constructed.
 func homeMD(v viewpoint, centers map[string]vec3) *MoveDispatch {
-	md := &MoveDispatch{positions: map[string]vec3{}, kinds: map[string]string{}}
+	md := &MoveDispatch{nodeMovers: map[string]*nodeMover{}, edgeMovers: map[string]*edgeMover{}}
 	md.vp.viewpoint = v
 	for id, c := range centers {
-		cc := c
-		md.positions[id] = cc
-		md.kinds[id] = "Hold"
+		g := nodeGeom{nodeIdentity: nodeIdentity{Kind: "Hold"}}
+		setNodeWorld(&g, c)
+		md.nodeMovers[id] = newNodeMover(id, g, nil, NewRealClock())
 	}
 	return md
 }
@@ -80,7 +79,7 @@ func TestGestureHomeFramesUnknownKindAtRenderRadius(t *testing.T) {
 	// the mover's kind to an unrecognized one so nodeBodyRadius takes the (110,60) fallback.
 	centers := map[string]vec3{"x": {X: 0, Y: 0, Z: 0}}
 	md := homeMD(stale, centers)
-	md.kinds["x"] = "NotAKind"
+	md.nodeMovers["x"].geom.Kind = "NotAKind"
 
 	const fov, aspect = 50.0, 800.0 / 600.0
 	md.HandleRawInput(rawInputMsg{Kind: "home", Fov: fov, RectWidth: aspect, RectHeight: 1}, nil, nil)

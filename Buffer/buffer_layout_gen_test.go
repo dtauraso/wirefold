@@ -111,23 +111,23 @@ func TestSetNodeRow(t *testing.T) {
 }
 
 func TestSetEdgeRow(t *testing.T) {
+	// Edge SX..EZ endpoint-coordinate columns were REMOVED: edges now reference their
+	// node/port geometry rather than caching endpoint cartesian coordinates (per-owner
+	// buffer streaming work, memory decision "N per-block buffers, no packer"). The Edge
+	// row now carries SrcPortRow/DstPortRow instead.
 	buf := make([]byte, BufEdgeStride*2)
-	SetEdgeRow(buf, 0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 1, 11, 22)
-	SetEdgeRow(buf, 1, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 0, 0, 0)
+	SetEdgeRow(buf, 0, 1, 2, 1, 11, 22)
+	SetEdgeRow(buf, 1, 3, 4, 0, 0, 0)
 
-	assertF32At(t, buf, BufEdgeColSX, 1.0, "row0.SX")
-	assertF32At(t, buf, BufEdgeColSY, 2.0, "row0.SY")
-	assertF32At(t, buf, BufEdgeColSZ, 3.0, "row0.SZ")
-	assertF32At(t, buf, BufEdgeColEX, 4.0, "row0.EX")
-	assertF32At(t, buf, BufEdgeColEY, 5.0, "row0.EY")
-	assertF32At(t, buf, BufEdgeColEZ, 6.0, "row0.EZ")
+	assertI32At(t, buf, BufEdgeColSrcPortRow, 1, "row0.SrcPortRow")
+	assertI32At(t, buf, BufEdgeColDstPortRow, 2, "row0.DstPortRow")
 	assertU8At(t, buf, BufEdgeColSelected, 1, "row0.Selected")
 	assertU32At(t, buf, BufEdgeColEdgeLabelOff, 11, "row0.EdgeLabelOff")
 	assertU32At(t, buf, BufEdgeColEdgeLabelLen, 22, "row0.EdgeLabelLen")
 
 	base := BufEdgeStride
-	assertF32At(t, buf, base+BufEdgeColSX, 7.0, "row1.SX")
-	assertF32At(t, buf, base+BufEdgeColEZ, 12.0, "row1.EZ")
+	assertI32At(t, buf, base+BufEdgeColSrcPortRow, 3, "row1.SrcPortRow")
+	assertI32At(t, buf, base+BufEdgeColDstPortRow, 4, "row1.DstPortRow")
 }
 
 func TestSetCameraRow(t *testing.T) {
@@ -187,8 +187,11 @@ func TestNodeStrideIsPackedSize(t *testing.T) {
 }
 
 func TestEdgeStrideIsPackedSize(t *testing.T) {
-	// Edge block: 6×f32 + 1×u8 (selected) + 2×u32 (edge-label off/len) = 33
-	want := 6*4 + 1 + 2*4
+	// Edge block: 2×i32 (src/dst port row) + 1×u8 (selected) + 2×u32 (edge-label off/len)
+	// = 17. The 6×f32 SX..EZ endpoint-coordinate columns were REMOVED — edges now
+	// reference node/port geometry (SrcPortRow/DstPortRow) instead of caching endpoint
+	// cartesian coordinates (per-owner buffer streaming work).
+	want := 2*4 + 1 + 2*4
 	if BufEdgeStride != want {
 		t.Errorf("BufEdgeStride = %d, want %d (packed size)", BufEdgeStride, want)
 	}

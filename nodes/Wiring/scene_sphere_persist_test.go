@@ -37,16 +37,27 @@ func TestSceneSphereRoundTrip(t *testing.T) {
 	}
 }
 
+// seedsFromCenters builds a nodeSeeds slice (the frozen load-time set loadTimeCenters
+// rebuilds from) directly from world centers, for tests that don't go through a real
+// newMoveDispatch/LoadTopology pass.
+func seedsFromCenters(centers map[string]vec3) []NodeGeomSeed {
+	out := make([]NodeGeomSeed, 0, len(centers))
+	for id, c := range centers {
+		out = append(out, NodeGeomSeed{ID: id, CX: c.X, CY: c.Y, CZ: c.Z})
+	}
+	return out
+}
+
 // TestSceneSphereDefaultsFromContentFit: with no persisted sphere, LoadSceneSphere falls
 // back to a content-fit of the node centers rather than a zero sphere.
 func TestSceneSphereDefaultsFromContentFit(t *testing.T) {
 	md := &MoveDispatch{}
-	md.loadCenters = map[string]vec3{
+	md.nodeSeeds = seedsFromCenters(map[string]vec3{
 		"a": {X: 0, Y: 0, Z: 0},
 		"b": {X: 100, Y: 0, Z: 0},
-	}
-	// LoadSceneSphere's content-fit path now reads loadTimeCenters() (the frozen
-	// md.loadCenters snapshot), not an atomic snap — the map set above is enough.
+	})
+	// LoadSceneSphere's content-fit path now reads loadTimeCenters() (rebuilt from the
+	// frozen md.nodeSeeds set above), not an atomic snap.
 	md.LoadSceneSphere(t.TempDir()) // no scene.json → content-fit
 	if md.sceneSphere.Radius <= 0 {
 		t.Fatalf("content-fit sphere has non-positive radius: %+v", md.sceneSphere)
@@ -72,10 +83,10 @@ func TestSceneSphereContentFitSurvivesReloadAfterMove(t *testing.T) {
 
 	newMD := func(bx float64) *MoveDispatch {
 		md := &MoveDispatch{}
-		md.loadCenters = map[string]vec3{
+		md.nodeSeeds = seedsFromCenters(map[string]vec3{
 			"a": {X: 0, Y: 0, Z: 0},
 			"b": {X: bx, Y: 0, Z: 0},
-		}
+		})
 		return md
 	}
 

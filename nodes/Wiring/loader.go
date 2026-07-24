@@ -1,13 +1,14 @@
 // loader.go — runtime topology loader.
 //
 // LoadTopology reads topology.json, allocates one PacedWire per destination
-// port (fan-in safe), and returns ([]Node, SlotRegistry, *MoveDispatch).
+// port, and returns ([]Node, SlotRegistry, *MoveDispatch).
 // An edge-label-keyed WireRegistry is built internally to bind each source Out to
 // its wire, but it is not returned: no caller consumed the map.
 //
 // Key behaviors:
-//   - One *PacedWire per (destNode, destPort); multiple edges sharing a
-//     destination port reuse the same wire (fan-in support).
+//   - One *PacedWire per (destNode, destPort), fed by exactly one edge — fan-in
+//     (two edges into one port) is rejected at parse (validateNoFanIn), so a
+//     destination port maps 1:1 to a wire and a single incident edge.
 //   - SlotRegistry maps "target.targetHandle" → wire for create/delete ops.
 //   - Input nodes: data.init values pre-seeded via pw.Send in a goroutine.
 //   - HoldNewSendOld: data.state["held"] → Held via wire:"data.state" tag.
@@ -250,6 +251,22 @@ func LoadTopology(ctx context.Context, jsonPath string, tr *T.Trace, clk Clock) 
 // (loadTree) or a monolithic topology.json — into a topoSpec, WITHOUT validating
 // or building. LoadTopology validates + builds from the result.
 func parseSpec(path string) (topoSpec, error) {
+	spec, err := readSpec(path)
+	if err != nil {
+		return topoSpec{}, err
+	}
+	// Fan-in is not part of the model: reject a spec where two edges target the same
+	// input port, at parse time, so it fails cleanly at load rather than silently sharing
+	// one wire deeper in the build.
+	if err := validateNoFanIn(spec); err != nil {
+		return topoSpec{}, fmt.Errorf("LoadTopology: %s: %w", path, err)
+	}
+	return spec, nil
+}
+
+// readSpec loads the raw topoSpec from either a directory tree or a single JSON file,
+// without semantic validation (that is parseSpec's job).
+func readSpec(path string) (topoSpec, error) {
 	if info, err := os.Stat(path); err == nil && info.IsDir() { // path-resolution-ok: loader dispatch, not scene path resolution
 		return loadTree(path)
 	}
@@ -262,6 +279,24 @@ func parseSpec(path string) (topoSpec, error) {
 		return topoSpec{}, fmt.Errorf("LoadTopology: parse %s: %w", path, err)
 	}
 	return spec, nil
+}
+
+// validateNoFanIn rejects a topology where two edges target the SAME destination input
+// port (target + targetHandle). Fan-in was removed from the model: an input port accepts
+// exactly ONE incident edge; multiple sources into one node use DISTINCT input ports — as
+// every production node already does (e.g. a gate's FromLeft/FromRight, each fed by one
+// edge). Enforced at parse so edge:wire:input-port is strictly 1:1 from load onward.
+func validateNoFanIn(spec topoSpec) error {
+	seen := make(map[string]string, len(spec.Edges))
+	for _, e := range spec.Edges {
+		key := e.Target + "." + e.TargetHandle
+		if prev, dup := seen[key]; dup {
+			return fmt.Errorf("fan-in not allowed: edges %q and %q both target input port %s.%s — an input port takes exactly one edge; use distinct input ports for multiple sources",
+				prev, e.Label, e.Target, e.TargetHandle)
+		}
+		seen[key] = e.Label
+	}
+	return nil
 }
 
 // buildCtx carries the shared state threaded through the buildFromSpec phase
@@ -385,7 +420,8 @@ func (b *buildCtx) computeNodeGeometry() {
 
 // computeQuantizedLayout makes the quantized flat absolute scene-polar layout
 // (quantized_layout.go) AUTHORITATIVE for every node's world center. It resolves each
-// allocateWires allocates one *PacedWire per destination port (fan-in safe) and
+// allocateWires allocates one *PacedWire per destination port (one edge per port —
+// fan-in is rejected at parse) and
 // computes each edge's own travel-time (arc length / sim latency) and
 // straight-segment endpoints.
 //   - destWire: "destNode.destPort" → *PacedWire (owned by the destination).
@@ -416,14 +452,18 @@ func (b *buildCtx) allocateWires() {
 		edgeArc[e.Label] = arcLength
 		edgeLatency[e.Label] = simLatencyMs
 		edgeSegments[e.Label] = seg
-		pw, exists := destWire[destKey]
-		if !exists {
-			pw = NewPacedWire(arcLength, PulseSpeedWuPerTick)
-			pw.Target = e.Target
-			pw.TargetHandle = e.TargetHandle
-			pw.Trace = b.tr
-			destWire[destKey] = pw
+		// One wire per destination input port, and — since fan-in is removed
+		// (validateNoFanIn) — exactly one edge per port, so this is strictly one wire per
+		// edge. A destKey already present means a fan-in spec slipped past the parser: that
+		// is a build-invariant violation, not a topology to silently share a wire for.
+		if _, exists := destWire[destKey]; exists {
+			panic("allocateWires: two edges target " + destKey + " — validateNoFanIn should have rejected this fan-in at parse")
 		}
+		pw := NewPacedWire(arcLength, PulseSpeedWuPerTick)
+		pw.Target = e.Target
+		pw.TargetHandle = e.TargetHandle
+		pw.Trace = b.tr
+		destWire[destKey] = pw
 		edgeWire[e.Label] = pw
 		edgeEndpoints[e.Label] = EdgeEndpoints{
 			Source: e.Source, Target: e.Target,
