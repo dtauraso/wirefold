@@ -153,13 +153,17 @@ docs, and the auto-memory dir, costing tokens and time.
 
 Go-side runtime debugging goes through the **DEBUG BREADCRUMB channel** — the Go analogue
 of the webview's `postLog`. Call `tr.Breadcrumb(label, node, port, value string)` at a debug
-site: it emits ONE structured `{"kind":"breadcrumb",...}` line on stdout (production wires
-`tr.SetDebugSink(os.Stdout)` in `main.go`), and the ext host (`runCommand.ts` `tryParseBreadcrumb`)
-routes it to `.probe/go-debug.jsonl` with `src:"go-debug"` — kept separate from buffer-decoded
-trace events (`go.jsonl`) and genuine stderr errors (`go-errors.jsonl`). Read it with
-`tools/probe-merge.sh --debug`. Do NOT scatter `fmt.Fprintf(os.Stderr, ...)` for diagnosis;
-use a breadcrumb. Keep it SPARSE — it is a debug tool for control events, not a per-tick
-firehose (see the log-flood lesson). It is a cheap no-op when the sink is unwired (headless tests).
+site: it is a structured `Kind==KindBreadcrumb` row on the EMITTING goroutine's own
+per-owner content-buffer stream (node/edge/interior/VIEW — no per-node stream emits
+onto the VIEW stream instead), decoded by the ext host exactly like every other
+buffer-carried trace event (`buffer-log.ts`'s `"breadcrumb"` case) — there is no
+separate JSON-on-stdout debug sink. Read it with `tools/probe-merge.sh --debug`, which
+filters the buffer-decoded `.probe` logs (`go.jsonl`/`go-node.jsonl`/`go-edge.jsonl`/
+`go-interior.jsonl`) to `kind=="breadcrumb" && debug==true` — separate from genuine
+stderr errors (`go-errors.jsonl`). Do NOT scatter `fmt.Fprintf(os.Stderr, ...)` for
+diagnosis; use a breadcrumb. Keep it SPARSE — it is a debug tool for control events, not
+a per-tick firehose (see the log-flood lesson). It is a cheap no-op when no stream is
+wired (headless tests).
 
 ## Planning docs are branch-local
 

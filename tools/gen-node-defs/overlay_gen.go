@@ -217,7 +217,20 @@ func writeOverlayGen(outPath string, flags []overlayFlag) error {
 	fmt.Fprintln(w, `// Overlay-visibility API — thin delegators to the owned overlayState. The public`)
 	fmt.Fprintln(w, `// signatures are unchanged (overlayToggles binds these method expressions).`)
 	for _, f := range flags {
-		fmt.Fprintf(w, "func (md *MoveDispatch) Toggle%s(tr *T.Trace) { md.ov.Toggle%s(tr) }\n", f.method, f.method)
+		if f.breadcrumb != "" {
+			// Structured buffer counterpart of the "pole-toggle-go" breadcrumb
+			// overlayState.Toggle* emits above: runs on THIS same goroutine
+			// (RunStdinReader's dispatch loop, the VIEW stream's owner), so
+			// md.EmitBreadcrumb here is safe with no lock. Value=visible(0/1);
+			// the scope ("scene"/"nodes") rides the sanctioned free-form Text
+			// column since it names which pole-flag fired, not a typed row ref.
+			fmt.Fprintf(w, "func (md *MoveDispatch) Toggle%s(tr *T.Trace) {\n", f.method)
+			fmt.Fprintf(w, "\tmd.ov.Toggle%s(tr)\n", f.method)
+			fmt.Fprintf(w, "\tmd.EmitBreadcrumb(RowEvent{Label: T.BreadcrumbPoleToggleGo, NodeRow: -1, PortRow: -1, TargetRow: -1, TargetPortRow: -1, EdgeRow: -1, Slot: -1, Value: int32(boolU8(md.ov.%s)), Text: %q})\n", f.field, f.breadcrumb)
+			fmt.Fprintln(w, `}`)
+		} else {
+			fmt.Fprintf(w, "func (md *MoveDispatch) Toggle%s(tr *T.Trace) { md.ov.Toggle%s(tr) }\n", f.method, f.method)
+		}
 		if f.accessor {
 			fmt.Fprintf(w, "func (md *MoveDispatch) %s() bool { return md.ov.%s() }\n", f.method, f.method)
 		}

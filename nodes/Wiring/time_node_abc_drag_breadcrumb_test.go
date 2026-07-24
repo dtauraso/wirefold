@@ -176,7 +176,7 @@ func TestEveryDragRecipientLogsAbcDragBreadcrumb(t *testing.T) {
 	md.EnableEditPersist(root)
 
 	var dbg syncBuffer
-	md.tr.SetDebugSink(&dbg)
+	md.tr.SetSink(&dbg)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

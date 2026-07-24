@@ -111,7 +111,48 @@ const (
 	// the gesture FSM's pending→dragging transition, BEFORE the dragged node's
 	// neighborSetC fan resolves any KindAbcDrag marks for that drag.
 	KindAbcDragReset = "abc-drag-reset"
+	// KindBreadcrumb carries a DEBUG BREADCRUMB (see CLAUDE.md's "Debugging the Go
+	// layer" section) as a structured buffer EVENT row instead of a free-form JSON
+	// stdout line. It rides the EMITTING goroutine's own per-owner stream (node/edge/
+	// interior/VIEW) — main.go's own breadcrumbs (no per-node stream) ride the VIEW
+	// stream. Label (a BreadcrumbLabel* index below) names which of the 9 breadcrumb
+	// sites emitted it; the row's other columns (Value/X/Y/Z/NodeRow/PortRow/
+	// TargetRow/TargetPortRow) are REUSED per label, with Label/TextOff/TextLen (the
+	// bufLayoutEvent.Debug flag is always 1 on this Kind) as the two dedicated
+	// breadcrumb-only columns.
+	KindBreadcrumb = "breadcrumb"
 )
+
+// BreadcrumbLabel* enumerate the 9 breadcrumb call sites (Buffer/layout.go's
+// bufLayoutEvent.Label column, Kind==KindBreadcrumb rows only). Order is the wire id —
+// append only; do not reorder or delete a label without a migration. BreadcrumbLabels
+// is the string lookup gen-node-defs mirrors into TS for the .probe decode/log.
+const (
+	BreadcrumbTopologyLoaded uint8 = iota
+	BreadcrumbRowSeedCountMismatch
+	BreadcrumbPoleToggleGo
+	BreadcrumbWindowClear
+	BreadcrumbWindowOpen
+	BreadcrumbDwellStart
+	BreadcrumbAbcDrag
+	BreadcrumbWireSendBufferFull
+	BreadcrumbCascadeRoot
+)
+
+// BreadcrumbLabels is the single source of truth for the BreadcrumbLabel* enum's
+// string names, indexed by the enum value — mirrored into TS by gen-node-defs for the
+// .probe buffer-decoded breadcrumb log.
+var BreadcrumbLabels = []string{
+	"topology-loaded",
+	"row-seed-count-mismatch",
+	"pole-toggle-go",
+	"window_clear",
+	"window_open",
+	"dwell_start",
+	"abc-drag",
+	"wire-send-buffer-full",
+	"cascade.root",
+}
 
 // TraceEventKinds is the single source of truth for the closed kind vocabulary.
 // gen-node-defs reads this slice to emit trace-kinds.ts (the TS decode side's kindId →
@@ -119,7 +160,7 @@ const (
 // numeric id for the wire encoding. There is no tsc exhaustiveness check derived from
 // it — adding a kind here does not force a TS branch anywhere; it only extends the
 // lookup table.
-var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindPosition, KindGeometry, KindNodeGeometry, KindArrive, KindNodeBead, KindCamera, KindSceneTori, KindScenePoles, KindNodePoles, KindSelSpherePoles, KindHandholds, KindLabelsGlobal, KindOverlaysVis, KindDoubleLinks, KindLayoutLink, KindSelect, KindHover, KindSceneSphere, KindAbcDrag, KindAbcDragReset}
+var TraceEventKinds = []string{KindRecv, KindFire, KindSend, KindPosition, KindGeometry, KindNodeGeometry, KindArrive, KindNodeBead, KindCamera, KindSceneTori, KindScenePoles, KindNodePoles, KindSelSpherePoles, KindHandholds, KindLabelsGlobal, KindOverlaysVis, KindDoubleLinks, KindLayoutLink, KindSelect, KindHover, KindSceneSphere, KindAbcDrag, KindAbcDragReset, KindBreadcrumb}
 
 // PortGeom is one port's authoritative world geometry: its name, whether it is an
 // input, its sphere-surface world position (PX/PY/PZ), and the unit direction from node
@@ -152,16 +193,25 @@ type Event struct {
 }
 
 // Trace holds the optional in-process test sink (headless tests only — never wired in
-// production) and the production DEBUG BREADCRUMB sink (main.go's os.Stdout). Both
-// fields are set ONCE at startup (New*/SetDebugSink), before any producer goroutine
-// exists, and never mutated again — read-only for the rest of the process, so every
-// later caller (running in a goroutine spawned after startup) sees the write via the
+// production). It is set ONCE at startup (New*) before any producer goroutine exists,
+// and never mutated again — read-only for the rest of the process, so every later
+// caller (running in a goroutine spawned after startup) sees the write via the
 // ordinary happens-before edge from goroutine creation. No lock needed: there is no
-// second writer of either field, and NodeBead/Breadcrumb only ever READ them.
+// second writer of the field, and NodeBead/Breadcrumb only ever READ it.
+//
+// There used to be a second, PRODUCTION debug sink here (os.Stdout, wired by
+// SetDebugSink) that gave every Breadcrumb() call a free-form JSON stdout line, routed
+// by the ext host to .probe/go-debug.jsonl. That production JSON path is RETIRED
+// (task/breadcrumbs-binary-buffer): breadcrumbs now ride each emitting goroutine's own
+// per-owner buffer stream as a structured Kind==KindBreadcrumb EVENT row (see
+// owner_events.go's RowEvent.Label/Debug/Text and each call site's writeStreamFrame/
+// writeEvents/EmitBreadcrumb call) — the ext host decodes them off that stream like any
+// other event and probe-merge.sh --debug filters on the Debug flag. Breadcrumb below
+// keeps writing the in-process sink ONLY — that path is unrelated to the removed
+// production one and still backs headless tests (BreadcrumbLabel/BreadcrumbValue).
 type Trace struct {
-	sink      io.Writer
-	debugSink io.Writer
-	onEvent   func(Event) // optional in-process observation hook (headless tests only)
+	sink    io.Writer
+	onEvent func(Event) // optional in-process observation hook (headless tests only)
 }
 
 // New allocates a Trace with no sinks wired. buf is accepted only for call-site
@@ -184,43 +234,36 @@ func NewWithSinkHook(buf int, sink io.Writer, onEvent func(Event)) *Trace {
 	return &Trace{sink: sink, onEvent: onEvent}
 }
 
-// SetDebugSink wires the production DEBUG BREADCRUMB channel: after this call every
-// Breadcrumb() line is ALSO written to w in real time (in addition to the optional
-// in-process test sink). main passes os.Stdout so breadcrumbs ride stdout as
-// {"kind":"breadcrumb",...} lines; the ext host routes those to .probe/go-debug.jsonl
-// (distinct from RowEvents, which ride the per-owner stream fds, and from errors on
-// stderr). Diagnostic-only and fire-and-forget — never blocks a node loop and is safe
-// to leave unset (Breadcrumb stays a no-op on that sink). Set once at startup before
-// nodes run — no lock: the happens-before edge from goroutine creation is what makes
-// every later Breadcrumb() caller (running in a goroutine spawned after this call
-// returns) see the write.
-func (t *Trace) SetDebugSink(w io.Writer) {
-	if t == nil {
-		return
-	}
-	t.debugSink = w
-}
-
 // Close is a no-op kept for call-site compatibility (there is no channel/goroutine to
 // drain anymore — every producer writes its own RowEvent/breadcrumb directly and
 // synchronously).
 func (t *Trace) Close() {}
 
-// Breadcrumb writes a free-form diagnostic line DIRECTLY — one `sink.Write` call per
-// sink, on the CALLING goroutine. No channel, no lock, no ordinal: breadcrumbs are
-// outside the closed Kind vocabulary (RowEvents carry the closed vocabulary; this is a
-// control-event log line). A single small write to a pipe is atomic per POSIX
-// PIPE_BUF, so concurrent breadcrumb lines from many goroutines never interleave into
-// one fused line — breadcrumbs are short, sparse control events (see CLAUDE.md's
-// "Debugging the Go layer" section), never a per-tick firehose, so line length never
-// approaches that limit in practice.
-//
-// sink = the in-process test observation buffer (headless model/gate tests poll it).
-// debugSink = the PRODUCTION debug channel (os.Stdout, wired via SetDebugSink), which
-// the ext host recognises by the "breadcrumb" kind and routes to .probe/go-debug.jsonl.
-// A breadcrumb with neither sink wired is a cheap no-op.
+// SetSink wires (or replaces) the in-process TEST-OBSERVATION sink after construction —
+// for tests that build a *Trace via a helper (e.g. LoadTopology) that doesn't take a
+// sink at New time, rather than the (removed) production stdout path. Never wired in
+// production. Set once, before any producer goroutine exists (same ordering
+// requirement the old SetDebugSink had) — no lock, relying on the happens-before edge
+// from goroutine creation.
+func (t *Trace) SetSink(w io.Writer) {
+	if t == nil {
+		return
+	}
+	t.sink = w
+}
+
+// Breadcrumb writes a free-form diagnostic line DIRECTLY to the in-process test sink —
+// one `sink.Write` call, on the CALLING goroutine. No channel, no lock, no ordinal:
+// breadcrumbs are outside the closed Kind vocabulary (RowEvents carry the closed
+// vocabulary; this is a control-event log line). Production no longer has a stdout
+// sink here (see this file's header + Trace struct doc comments) — the PRODUCTION
+// observation path for a breadcrumb is now the structured Kind==KindBreadcrumb buffer
+// EVENT each call site emits on its own owning stream, not this method. This method's
+// only remaining reader is the in-process test sink (headless model/gate tests poll
+// it via BreadcrumbLabel/BreadcrumbValue). A breadcrumb with no sink wired is a cheap
+// no-op.
 func (t *Trace) Breadcrumb(label, node, port, value string) {
-	if t == nil || (t.sink == nil && t.debugSink == nil) {
+	if t == nil || t.sink == nil {
 		return
 	}
 	b, err := marshalBreadcrumb(label, node, port, value)
@@ -228,12 +271,7 @@ func (t *Trace) Breadcrumb(label, node, port, value string) {
 		return
 	}
 	b = append(b, '\n')
-	if t.sink != nil {
-		_, _ = t.sink.Write(b)
-	}
-	if t.debugSink != nil {
-		_, _ = t.debugSink.Write(b)
-	}
+	_, _ = t.sink.Write(b)
 }
 
 // NodeBead is the one surviving Trace EVENT (see this file's header doc comment):

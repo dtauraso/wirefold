@@ -44,6 +44,9 @@ func toStreamEvents(events []W.RowEvent) []B.StreamEvent {
 			Y:             float32(e.Y),
 			Z:             float32(e.Z),
 			F:             float32(e.F),
+			Label:         e.Label,
+			Debug:         e.Debug,
+			Text:          e.Text,
 		}
 	}
 	return out
@@ -68,12 +71,13 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, topologyPath st
 	// -trace JSONL dump were deleted — memory/feedback_no_single_writer_bridge.md's final step: every
 	// emitting goroutine packs its own frame directly; see Trace/Trace.go's doc comment).
 	tr := T.New(0)
-	// DEBUG BREADCRUMB channel: production breadcrumbs ride stdout as {"kind":"breadcrumb",...}
-	// lines; the ext host routes them to .probe/go-debug.jsonl (see runCommand.ts). This is the
-	// Go analogue of the webview's postLog — a cheap, structured, one-call diagnostic that lands
-	// in .probe/ without scattering fmt.Fprintf(os.Stderr, ...). It is sparse (control events,
-	// not a per-tick firehose) and fire-and-forget.
-	tr.SetDebugSink(os.Stdout)
+	// DEBUG BREADCRUMB channel: each Breadcrumb() call site emits a structured
+	// Kind==KindBreadcrumb EVENT row on its own owning per-owner stream (node/edge/
+	// interior/VIEW) — see Trace.go's Breadcrumb/Trace-struct doc comments and each
+	// call site's writeStreamFrame/writeEvents/EmitBreadcrumb. There is no longer a
+	// separate production stdout sink here; probe-merge.sh --debug decodes these
+	// buffer-carried breadcrumb rows (filtered by the Debug flag) instead of parsing
+	// a JSON stdout line.
 
 	// The clock is free-running (no play/pause gate): it starts ticking at construction
 	// and never halts. Startup geometry is NOT emitted here — each node's own goroutine
@@ -175,6 +179,15 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, topologyPath st
 	// One example startup breadcrumb — proves the debug channel end-to-end and is genuinely
 	// useful (which topology loaded, how many nodes). Sparse: once per run.
 	tr.Breadcrumb("topology-loaded", topologyPath, "", fmt.Sprintf("nodes=%d", len(nodes)))
+	// Structured buffer counterpart: rides the VIEW stream (no per-node stream exists
+	// yet for a startup-only event, and this runs on the main goroutine before any
+	// per-node/edge/interior goroutine exists). topologyPath is genuinely free-form
+	// (a filesystem path), so it rides the sanctioned Text column; nodes count is
+	// the typed Value column.
+	md.EmitBreadcrumb(W.RowEvent{
+		Label: T.BreadcrumbTopologyLoaded, NodeRow: -1, PortRow: -1, TargetRow: -1, TargetPortRow: -1, EdgeRow: -1, Slot: -1,
+		Value: int32(len(nodes)), Text: topologyPath,
+	})
 
 	// Sparse, one-time startup sanity check (CLAUDE.md DEBUG BREADCRUMB channel): every
 	// node LoadTopology returned should have a row-seed entry (md.NodeSeeds(), the SAME
@@ -183,6 +196,13 @@ func runTopology(ctx context.Context, cancel context.CancelFunc, topologyPath st
 	// diverged — a real topology bug — and must be visible.
 	if len(md.NodeSeeds()) != len(nodes) {
 		tr.Breadcrumb("row-seed-count-mismatch", "", "", fmt.Sprintf("NodeSeeds=%d nodes=%d", len(md.NodeSeeds()), len(nodes)))
+		// Structured buffer counterpart, VIEW stream (same reasoning as
+		// topology-loaded above). Value=NodeSeeds count, X=nodes count — both
+		// small typed ints, no free-form text needed.
+		md.EmitBreadcrumb(W.RowEvent{
+			Label: T.BreadcrumbRowSeedCountMismatch, NodeRow: -1, PortRow: -1, TargetRow: -1, TargetPortRow: -1, EdgeRow: -1, Slot: -1,
+			Value: int32(len(md.NodeSeeds())), X: float64(len(nodes)),
+		})
 	}
 
 	// Initial camera viewpoint = FILE DATA. Go reads the saved camera from

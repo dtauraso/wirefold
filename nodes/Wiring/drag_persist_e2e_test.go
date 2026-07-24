@@ -193,7 +193,7 @@ func TestDragPersistsOnlyDraggedNodeAndRequantizesNeighborsOnDisk(t *testing.T) 
 	// lhB/lhC directly, a data race against B's/C's own mover goroutines) establishes
 	// the happens-before edge. See time_node_abc_drag_breadcrumb_test.go.
 	var dbg syncBuffer
-	md.tr.SetDebugSink(&dbg)
+	md.tr.SetSink(&dbg)
 
 	// Drag A far enough, off both leaves' prior bearings, that quantization actually
 	// changes the neighbor indices for BOTH B and C (a purely radial move along an

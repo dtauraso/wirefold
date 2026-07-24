@@ -73,7 +73,7 @@ func TestOverlayToggleFlips(t *testing.T) {
 			var o overlayState
 			var dbg strings.Builder
 			tr := T.New(0)
-			tr.SetDebugSink(&dbg)
+			tr.SetSink(&dbg)
 			c.toggle(&o, tr)
 
 			if !c.get(&o) {

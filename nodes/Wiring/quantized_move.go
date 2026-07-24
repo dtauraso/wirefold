@@ -12,6 +12,8 @@ package Wiring
 import (
 	"fmt"
 	"math"
+
+	T "github.com/dtauraso/wirefold/Trace"
 )
 
 // heldCenters returns a fresh snapshot of every node's current world center, read from
@@ -258,6 +260,32 @@ func (md *MoveDispatch) neighborSetCRequantize(selfID, fromID string, selfCenter
 	if nm, ok := md.nodeMovers[selfID]; ok {
 		nm.gotDragMsg = 1
 		nm.dragDeltaA, nm.dragDeltaB, nm.dragDeltaC = int32(deltaA), int32(deltaB), int32(deltaC)
+		// Structured buffer counterpart of the "abc-drag" breadcrumb above, riding
+		// THIS node's (selfID's) own dedicated stream — this runs on selfID's own
+		// nodeMover goroutine, so writeStreamFrame here needs no lock, mirroring
+		// gotDragMsg/dragDelta* just above. it/ip/ir (selfID's re-quantized abc to
+		// fromID) reuse Value/EdgeRow/Slot; deltaA/B/C (fromID's own change) reuse
+		// X/Y/Z — none of those columns carry their ordinary meaning on a
+		// Breadcrumb-kind row (see bufLayoutEvent's doc comment: columns are REUSED
+		// per Kind).
+		if md.tr != nil {
+			var it, ip, ir int
+			for _, lp := range lh.LocalPolarsSnapshot() {
+				if lp.To == fromID {
+					it, ip, ir = lp.QuantITheta, lp.QuantIPhi, lp.QuantIR
+					break
+				}
+			}
+			targetRow := int32(-1)
+			if r, ok := md.NodeRowFor(fromID); ok {
+				targetRow = r
+			}
+			nm.writeStreamFrame([]RowEvent{{
+				Kind: T.KindBreadcrumb, Label: T.BreadcrumbAbcDrag, Debug: 1,
+				NodeRow: nm.nodeRow, PortRow: -1, TargetRow: targetRow, TargetPortRow: -1, EdgeRow: int32(ip), Slot: int32(ir),
+				Value: int32(it), X: float64(deltaA), Y: float64(deltaB), Z: float64(deltaC),
+			}})
+		}
 	}
 
 	if md.persist.quantOffset != nil {

@@ -20,6 +20,14 @@ type StreamEvent struct {
 	NodeRow, PortRow, TargetRow, TargetPortRow, EdgeRow, Slot, Value int32
 	Bead                                                             uint32
 	ArcLength, SimLatencyMs, X, Y, Z, F                              float32
+	// Label/Debug/Text mirror Wiring.RowEvent's breadcrumb fields (Kind ==
+	// KindBreadcrumb only). Text is packed by BuildEventsSection into this frame's
+	// own trailing event-text-bytes section, immediately after the fixed-stride
+	// event rows — the single sanctioned free-form string escape hatch on this row
+	// (tools/check-event-string-section-singular.sh).
+	Label uint8
+	Debug uint8
+	Text  string
 }
 
 // kindIDByName is built once at package init from the closed T.TraceEventKinds
@@ -44,14 +52,32 @@ func KindID(kind string) uint8 {
 }
 
 // BuildEventsSection packs events into one trailing EVENTS section: [count:u32] +
-// count × BufEventStride bytes.
+// count × BufEventStride bytes, followed by the event-text-bytes section (every
+// event's Text, concatenated in event order) — the single free-form string section
+// this row type carries (TextOff/TextLen on bufLayoutEvent). This section is always
+// the LAST thing in a per-owner stream frame (every BuildXStreamFrame appends it
+// last), so appending the text bytes here needs no frame-level size bookkeeping.
 func BuildEventsSection(events []StreamEvent) []byte {
-	buf := make([]byte, 4+len(events)*BufEventStride)
-	binary.LittleEndian.PutUint32(buf[0:], uint32(len(events)))
+	textBytes := make([][]byte, len(events))
+	textLen := 0
 	for i, e := range events {
-		SetEventRow(buf[4:], i,
+		textBytes[i] = []byte(e.Text)
+		textLen += len(textBytes[i])
+	}
+	buf := make([]byte, 4+len(events)*BufEventStride+textLen)
+	binary.LittleEndian.PutUint32(buf[0:], uint32(len(events)))
+	rows := buf[4 : 4+len(events)*BufEventStride]
+	textOff := uint32(0)
+	off := 4 + len(events)*BufEventStride
+	for i, e := range events {
+		tb := textBytes[i]
+		SetEventRow(rows, i,
 			e.Kind, e.NodeRow, e.PortRow, e.TargetRow, e.TargetPortRow, e.EdgeRow,
-			e.Slot, e.Value, e.Bead, e.ArcLength, e.SimLatencyMs, e.X, e.Y, e.Z, e.F)
+			e.Slot, e.Value, e.Bead, e.ArcLength, e.SimLatencyMs, e.X, e.Y, e.Z, e.F,
+			e.Label, e.Debug, textOff, uint32(len(tb)))
+		copy(buf[off:], tb)
+		off += len(tb)
+		textOff += uint32(len(tb))
 	}
 	return buf
 }
