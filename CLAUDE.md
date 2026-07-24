@@ -70,21 +70,12 @@ was tried and removed: it had no Edge-block column and could not affect a single
 its only consumer was a test importing the schema barrel, not production code.)
 
 **Bridge surface:** **Go → TS** is binary content buffers (`buffer-snapshot`) and NOTHING
-ELSE. There is no shared fd3/single-writer packer: each emitting goroutine writes its OWN
-frame to its OWN inherited stdio pipe (memory/feedback_no_single_writer_bridge.md,
-`Buffer/stream_fds.go`) — one VIEW stream (camera/overlay/scene, the gesture/stdin-reader
-goroutine), one stream per edge row (that edgeMover's own geometry + its wire's live beads),
-and two streams per node row (that nodeMover's own geometry+ports+label, and that node's own
-Update-goroutine's interior beads). `WIREFOLD_STREAM_FDS` (set by the ext host's spawn,
-`tools/topology-vscode/src/runCommand.ts`) is **mandatory** — `Buffer.SnapshotState`, the
-former central accumulator that packed one combined fd-3 frame with a fallback path, was
-deleted entirely (memory/feedback_no_single_writer_bridge.md). A dedicated-fd frame is
-`[len:u32-LE][payload]` with **no tag byte** — the fd POSITION identifies which
-stream/row it is; the ext host relays each to the webview under a synthetic tag
-(`BUF_BLOCK_TAG_VIEW`/`_EDGE_STREAM`/`_NODE_STREAM`/`_INTERIOR_STREAM`,
-`Buffer/frame_tags.go` / `tools/topology-vscode/src/schema/frame-tags.ts`) purely so the
-render tree can route by cell, never a wire byte. There is **no id/label/kind sidecar**:
-node identity is the buffer's **row index**, kind is a numeric column, and the human label
+ELSE — one dedicated inherited-stdio pipe per emitting goroutine (VIEW/edge/node/interior),
+no shared fd3/single-writer packer, `WIREFOLD_STREAM_FDS` mandatory. Full architecture
+(frame shape, stream inventory, synthetic frame tags) is canonical in MODEL.md's "Editor
+surface (TS)" section; see also memory/feedback_no_single_writer_bridge.md and
+memory/feedback_per_goroutine_bridge.md. There is **no id/label/kind sidecar**: node
+identity is the buffer's **row index**, kind is a numeric column, and the human label
 rides the buffer's Label section via off/len columns on the Node block. (A test asserts the
 removed sidecar message is rejected; do not reintroduce one.)
 
