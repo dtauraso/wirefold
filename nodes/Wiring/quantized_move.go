@@ -14,12 +14,19 @@ import (
 	"math"
 )
 
-// heldCenters returns the gesture goroutine's own accumulated node-center map
-// (md.positions — see its doc comment). GESTURE-GOROUTINE ONLY: every live caller
-// (gesture.go) runs on the stdin/gesture dispatch loop, the same goroutine
-// drainPositions fills md.positions from.
+// heldCenters returns a fresh snapshot of every node's current world center, read from
+// each nodeMover's own atomically-published snap (centerOfNode) — safe to call from any
+// goroutine (every live caller runs on the stdin/gesture dispatch loop). There is no
+// separate accumulated positions map to drain: each mover publishes its own snapshot
+// directly.
 func (md *MoveDispatch) heldCenters() map[string]vec3 {
-	return md.positions
+	out := make(map[string]vec3, len(md.nodeMovers))
+	for id := range md.nodeMovers {
+		if c, ok := md.centerOfNode(id); ok {
+			out[id] = c
+		}
+	}
+	return out
 }
 
 func (md *MoveDispatch) heldEdges() []sphereEdge {
@@ -67,16 +74,15 @@ func (md *MoveDispatch) broadcastToEdgesAndPartners(newCenters map[string]vec3, 
 	// Aimed-port re-emit (see doc comment above): find every partner node — the OTHER
 	// end of any edge incident to a moved node — and ask it to re-emit its OWN geometry
 	// with its OWN (unchanged) center, mirroring reemitPortTorusGeometry's "same center"
-	// trick. emitGeometry reads m.partnerCenter at emit time, which reads the partner's
-	// OWN neighborCenters cache for the moved node — kept fresh by the PartnerCenter
-	// field below, carried on this SAME message (updated before the re-emit, in
-	// nodeMover.handle) — so the partner's aimed port marker picks up the new target
-	// direction. This does NOT run for torus-locked ports only — it runs for every
-	// aimed connected port unconditionally, even if that breaks a port∈torus lock;
-	// that is intended. partners maps partnerID → the ONE moved node it should cache
-	// (only ever one moved id per call in production; a hypothetical multi-id batch
-	// would have the last-seen moved neighbor win, matching newCenters' own map
-	// iteration order having no other consumer of this ambiguity today).
+	// trick. emitGeometry reads m.partnerCenter at emit time, which reads the moved
+	// partner's own atomically-published snap directly (buildPartnerCenterFn,
+	// node_move.go) — there is no per-node neighborCenters cache to keep fresh, so this
+	// re-emit message carries no partner-center payload, only the bare re-emit signal.
+	// This does NOT run for torus-locked ports only — it runs for every aimed connected
+	// port unconditionally, even if that breaks a port∈torus lock; that is intended.
+	// partners maps partnerID → the ONE moved node (kept for clarity/observability
+	// parity with the prior shape; movedID itself is otherwise unused now that the
+	// re-emit carries no cache payload).
 	partners := map[string]string{}
 	for _, em := range md.edgeMovers {
 		if _, moved := newCenters[em.srcID]; moved {
@@ -91,24 +97,21 @@ func (md *MoveDispatch) broadcastToEdgesAndPartners(newCenters map[string]vec3, 
 		}
 	}
 	for partnerID, movedID := range partners {
-		if _, ok := md.extRoute[partnerID]; !ok {
+		if _, ok := md.nodeMovers[partnerID]; !ok {
 			continue
 		}
 		// Center is deliberately nil (see the doc comment above): this is a PURE
 		// re-emit, not a position write for partnerID itself — a non-nil Center here
 		// would be read by nodeMover.handle as "this is YOUR OWN new center" and
-		// wrongly move partnerID. PartnerCenter/SenderID instead carry movedID's own
-		// fresh center purely to update partnerID's neighborCenters[movedID] cache
-		// (moveMsg.PartnerCenter's doc comment) before the re-emit — never applied as
-		// partnerID's own position. nodeMover.handle's nil-Center branch re-emits from
-		// the mover's own live geom, so it can never race or clobber a pending
-		// position write. Per-target FIFO order (each sender's own retry queue drains
-		// in append order onto that target's one directed channel) preserves ordering
-		// now that delivery goes through the sender's own nm.pending/flushPending
-		// instead of a shared outbox.
-		movedCenter := newCenters[movedID]
+		// wrongly move partnerID. nodeMover.handle's nil-Center branch re-emits from
+		// the mover's own live geom (reading movedID's fresh center live off its own
+		// snap via m.partnerCenter at emit time), so it can never race or clobber a
+		// pending position write. Per-target FIFO order (each sender's own retry queue
+		// drains in append order onto that target's one directed channel) preserves
+		// ordering now that delivery goes through the sender's own
+		// nm.pending/flushPending instead of a shared outbox.
 		enqueue(partnerID, moveMsg{Kind: moveMsgKindCenter, NodeID: partnerID, Center: nil,
-			SenderID: movedID, PartnerCenter: &movedCenter})
+			SenderID: movedID})
 	}
 }
 
@@ -281,14 +284,25 @@ func (md *MoveDispatch) commitNodeMoveLocal(nm *nodeMover, newPos vec3) {
 	edges := md.heldEdges()
 	// reach[nodeID] only ever needs nodeID's own fresh polar plus its DIRECT
 	// neighbors' polar (reachRFromPolar only accumulates reach for an edge's
-	// SOURCE, from that edge's Target) — nm.neighborCenters (this node's own
-	// goroutine-local cache, no cross-goroutine read) already holds every direct
-	// neighbor's last-reported CARTESIAN center; scene polar is a pure re-derive off
-	// the fixed, write-once md.sceneSphere.Center (never mutated after load), so this
-	// stays race-free without the old all-nodes atomic-snapshot read (heldPolar).
+	// SOURCE, from that edge's Target) — each direct neighbor's last-reported
+	// CARTESIAN center is read live off that neighbor's OWN atomically-published snap
+	// (md.centerOfNode), resolved via nm.edgeIDs (this node's own incident edges,
+	// fixed at construction); scene polar is a pure re-derive off the fixed,
+	// write-once md.sceneSphere.Center (never mutated after load), so this stays
+	// race-free without the old all-nodes atomic-snapshot read (heldPolar).
 	polars := map[string]polar{}
-	for id, c := range nm.neighborCenters {
-		polars[id] = cart2polar(c.sub(md.sceneSphere.Center))
+	for _, edgeID := range nm.edgeIDs {
+		em, ok := md.edgeMovers[edgeID]
+		if !ok {
+			continue
+		}
+		neighborID := em.srcID
+		if neighborID == nodeID {
+			neighborID = em.dstID
+		}
+		if c, ok := md.centerOfNode(neighborID); ok {
+			polars[neighborID] = cart2polar(c.sub(md.sceneSphere.Center))
+		}
 	}
 	// Single cart2polar boundary conversion for this drag target — newPos is mouse-
 	// derived cartesian (gesture.go ray/plane unproject); everything downstream
@@ -337,7 +351,7 @@ func (md *MoveDispatch) commitNodeMoveLocal(nm *nodeMover, newPos vec3) {
 // here for that reason: the reset belongs at the real drag-start edge (the
 // pending→dragging transition in gesture.go), not on every move tick RootMove sees.
 func (md *MoveDispatch) RootMove(nodeID string, target vec3) bool {
-	if _, ok := md.extRoute[nodeID]; !ok {
+	if _, ok := md.nodeMovers[nodeID]; !ok {
 		return false
 	}
 	// Route the drag itself to the dragged node's OWN inbox instead of committing on
@@ -398,13 +412,12 @@ func (md *MoveDispatch) requantizeLocalPolars(nm *nodeMover, newPos vec3) {
 
 	// X's local polars TO every reachable neighbor, resolved about X's rotating local
 	// pole (rotating_pole.go) in ONE pass — the pole must see the WHOLE neighbor set, not
-	// just one at a time, so a kick from one offset is checked against every other. cM
-	// comes off X's OWN nodeMover.neighborCenters cache (this node's own goroutine,
-	// updated only by this same goroutine's handle — no cross-goroutine read), not a
-	// cross-goroutine atomic snap read of M's mover.
+	// just one at a time, so a kick from one offset is checked against every other. cM is
+	// read live off M's OWN atomically-published snap (md.centerOfNode) — the standard
+	// cross-goroutine center read every other call site in this file uses.
 	updatesX := map[string]vec3{}
 	for m := range neighbors {
-		cM, ok := nm.neighborCenters[m]
+		cM, ok := md.centerOfNode(m)
 		if !ok {
 			continue
 		}

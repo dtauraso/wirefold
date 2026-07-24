@@ -151,7 +151,7 @@ type nodeMover struct {
 	// md.neighborSetCReposition. Dispatched from moveMsgKindNeighborSetC so a domain
 	// neighbor's holder AND world position are written only by that neighbor's OWN
 	// goroutine. nil in tests that build a bare nodeMover directly.
-	neighborSetC func(selfID, fromID string, fromCenter vec3, deltaA, deltaB, deltaC int)
+	neighborSetC func(selfID, fromID string, selfCenter, fromCenter vec3, deltaA, deltaB, deltaC int)
 	// pending is THIS node's own outbound retry queue: sendMove appends here and attempts an immediate
 	// non-blocking send; an item that can't be delivered right now (the target's
 	// inbox is momentarily full) stays here and is retried — before any newer item to
@@ -360,7 +360,7 @@ func (m *nodeMover) handle(msg moveMsg) {
 		// its OWN edge to SenderID from the live offset — theta, phi AND r all fresh —
 		// so both the angle and the distance to SenderID change (neighborSetCRequantize).
 		if m.neighborSetC != nil {
-			m.neighborSetC(m.id, msg.SenderID, msg.FromCenter, msg.DeltaA, msg.DeltaB, msg.DeltaC)
+			m.neighborSetC(m.id, msg.SenderID, nodeWorldPos(m.geom), msg.FromCenter, msg.DeltaA, msg.DeltaB, msg.DeltaC)
 		}
 		return
 	}

@@ -140,7 +140,7 @@ func (n specNode) toNodeGeom(sceneCenter vec3) nodeGeom {
 			}
 			if len(g.Outputs) == 0 {
 				for _, p := range bind.Ports {
-					if p.Dir == PortOut || p.Dir == PortOutMulti {
+					if p.Dir == PortOut || p.Dir == PortBroadcast {
 						g.Outputs = append(g.Outputs, portGeom{Name: p.Name})
 					}
 				}
@@ -150,12 +150,12 @@ func (n specNode) toNodeGeom(sceneCenter vec3) nodeGeom {
 	return g
 }
 
-// outMultiBaseName strips a trailing digit suffix from a sourceHandle when the
-// base name is an OutMulti port on the given kind, per kindOutMultiPorts (kind →
-// set of OutMulti port names). e.g. "ToNext0" → "ToNext" for a kind with OutMulti
+// broadcastBaseName strips a trailing digit suffix from a sourceHandle when the
+// base name is an Broadcast port on the given kind, per kindBroadcastPorts (kind →
+// set of Broadcast port names). e.g. "ToNext0" → "ToNext" for a kind with Broadcast
 // port "ToNext". Returns the canonical port name and whether it resolved. Shared
 // by buildFromSpec and validateSpec so the two normalizations can never drift.
-func outMultiBaseName(handle, kind string, kindOutMultiPorts map[string]map[string]bool) (string, bool) {
+func broadcastBaseName(handle, kind string, kindBroadcastPorts map[string]map[string]bool) (string, bool) {
 	if len(handle) == 0 {
 		return handle, false
 	}
@@ -164,7 +164,7 @@ func outMultiBaseName(handle, kind string, kindOutMultiPorts map[string]map[stri
 		return handle, false
 	}
 	base := handle[:len(handle)-1]
-	if kindOutMultiPorts[kind][base] {
+	if kindBroadcastPorts[kind][base] {
 		return base, true
 	}
 	return handle, false
@@ -322,9 +322,9 @@ type buildCtx struct {
 	// buildFromSpec/LoadTopology (per-goroutine-clock.md "Delivery").
 	speedSinks []chan float64
 
-	// Phase 6: id→type map and per-kind OutMulti port set.
+	// Phase 6: id→type map and per-kind Broadcast port set.
 	nodeType          map[string]string
-	kindOutMultiPorts map[string]map[string]bool
+	kindBroadcastPorts map[string]map[string]bool
 
 	// Phase 7: inbound/outbound edge maps.
 	inbound        map[string]map[string]string
@@ -506,25 +506,25 @@ func (b *buildCtx) buildMoveDispatch() {
 	b.md = md
 }
 
-// buildTypeMaps builds the id→type map and per-kind OutMulti port set (needed
+// buildTypeMaps builds the id→type map and per-kind Broadcast port set (needed
 // for sourceHandle normalization in buildEdgeMaps).
 func (b *buildCtx) buildTypeMaps() {
 	nodeType := map[string]string{}
 	for _, n := range b.spec.Nodes {
 		nodeType[n.ID] = n.Type
 	}
-	kindOutMultiPorts := map[string]map[string]bool{}
+	kindBroadcastPorts := map[string]map[string]bool{}
 	for kind, bind := range Registry {
 		outMultis := map[string]bool{}
 		for _, p := range bind.Ports {
-			if p.Dir == PortOutMulti {
+			if p.Dir == PortBroadcast {
 				outMultis[p.Name] = true
 			}
 		}
-		kindOutMultiPorts[kind] = outMultis
+		kindBroadcastPorts[kind] = outMultis
 	}
 	b.nodeType = nodeType
-	b.kindOutMultiPorts = kindOutMultiPorts
+	b.kindBroadcastPorts = kindBroadcastPorts
 }
 
 // buildEdgeMaps builds the inbound and outbound edge maps.
@@ -532,7 +532,7 @@ func (b *buildCtx) buildTypeMaps() {
 //   - outbound: source node id → port name → []edge label
 //   - outboundHandle: source node id → port name → []sourceHandle (indexed, same order as outbound)
 //
-// For OutMulti ports, sourceHandle may be "<portName><index>" — normalize to portName.
+// For Broadcast ports, sourceHandle may be "<portName><index>" — normalize to portName.
 func (b *buildCtx) buildEdgeMaps() {
 	inbound := map[string]map[string]string{}
 	outbound := map[string]map[string][]string{}
@@ -549,7 +549,7 @@ func (b *buildCtx) buildEdgeMaps() {
 		}
 		inbound[e.Target][e.TargetHandle] = e.Target + "." + e.TargetHandle
 		srcKey := e.SourceHandle
-		if base, isMulti := outMultiBaseName(e.SourceHandle, b.nodeType[e.Source], b.kindOutMultiPorts); isMulti {
+		if base, isMulti := broadcastBaseName(e.SourceHandle, b.nodeType[e.Source], b.kindBroadcastPorts); isMulti {
 			srcKey = base
 		}
 		outbound[e.Source][srcKey] = append(outbound[e.Source][srcKey], e.Label)
@@ -621,7 +621,7 @@ func (b *buildCtx) buildNodes() error {
 				}
 				// If no outbound edge, reflectBuild falls back to dead-end chan.
 
-			case PortOutMulti:
+			case PortBroadcast:
 				labels := b.outbound[n.ID][port.Name]
 				handles := b.outboundHandle[n.ID][port.Name]
 				for i, lbl := range labels {
@@ -632,7 +632,7 @@ func (b *buildCtx) buildNodes() error {
 					// Per-port (per fan-out element): the rule is keyed by the
 					// concrete output port name (sourceHandle, e.g. "ToNext0").
 					rule := nodeSendRule(n, handle)
-					pb.AppendMultiPacedWithHandle(port.Name, handle, b.edgeWire[lbl], rule, b.edgeArc[lbl], b.edgeLatency[lbl], b.edgeSegments[lbl], lbl)
+					pb.AppendBroadcastWithHandle(port.Name, handle, b.edgeWire[lbl], rule, b.edgeArc[lbl], b.edgeLatency[lbl], b.edgeSegments[lbl], lbl)
 				}
 				// If no outbound edges, builder falls back to a dead-end slice.
 			}

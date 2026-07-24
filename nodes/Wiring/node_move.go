@@ -603,6 +603,19 @@ type EdgeGeomSeed struct {
 // goroutine, and stream each entry via tr.NodeGeometry (main.go).
 func (md *MoveDispatch) NodeSeeds() []NodeGeomSeed { return md.nodeSeeds }
 
+// loadTimeCenters returns the node-id → LOAD-TIME world center map, rebuilt from
+// md.nodeSeeds (frozen at construction, in newMoveDispatch, and never mutated
+// afterward). Used only by LoadSceneSphere's content-fit fallback, which runs on the
+// main goroutine before Start launches any mover goroutine — nodeSeeds is already
+// fully populated by then, so this is a safe, lock-free read.
+func (md *MoveDispatch) loadTimeCenters() map[string]vec3 {
+	out := make(map[string]vec3, len(md.nodeSeeds))
+	for _, sd := range md.nodeSeeds {
+		out[sd.ID] = vec3{X: sd.CX, Y: sd.CY, Z: sd.CZ}
+	}
+	return out
+}
+
 // EdgeSeeds returns every edge's load-time seed topology (with real endpoint geometry) in
 // SPEC ORDER. Call alongside NodeSeeds; stream each entry via tr.Geometry (main.go).
 func (md *MoveDispatch) EdgeSeeds() []EdgeGeomSeed { return md.edgeSeeds }
@@ -741,7 +754,8 @@ func newMoveDispatch(geoms map[string]nodeGeom, edgeEndpoints map[string]EdgeEnd
 		}
 		nm.sendMove = md.enqueueFor(nm)
 		nm.centerOf = md.centerOfNode
-		nm.commitLocal = md.commitNodeMoveLocal
+		ownMover := nm
+		nm.commitLocal = func(_ string, newPos vec3) { md.commitNodeMoveLocal(ownMover, newPos) }
 		nm.neighborSetC = md.neighborSetCRequantize
 		// Go 1.22+ loop semantics give each iteration its own id, so this closure safely
 		// captures THIS iteration's id (no shared-variable capture bug).

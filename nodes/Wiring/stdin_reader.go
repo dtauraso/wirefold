@@ -254,21 +254,15 @@ func RunStdinReader(ctx context.Context, r io.Reader, slotReg SlotRegistry, md *
 			if !ok {
 				return
 			}
-			// Drain the latest port/edge/node row tables the Trace-drain goroutine has
-			// published since our last iteration BEFORE any hit resolution below (a
-			// "raw-input" record's rawHit carries only numeric rows; portFromHit/
-			// edgeFromHit/nodeFromHit in gesture.go resolve them against md.portTbl/
-			// edgeTbl/nodeTbl) — this is the ownership-handoff replacement for the old
-			// atomic.Load-on-demand: same "always resolve against the newest table"
-			// guarantee, now via a depth-1 replace-latest channel this goroutine alone
-			// drains. Once per dispatch iteration is the right cadence: a single record
-			// carries at most one hit to resolve, so draining any more often would be
-			// wasted work and draining less often would resolve against a stale table.
-			md.drainRowTables()
-			// Drain every mover's pending position report (movers → gesture, see
-			// posReport/drainPositions doc comments) into md.positions BEFORE hit
-			// resolution/heldCenters below, same cadence as drainRowTables above.
-			md.drainPositions()
+			// Row-identity resolution (a "raw-input" record's rawHit carries only numeric
+			// rows; portFromHit/edgeFromHit/nodeFromHit in gesture.go resolve them) reads
+			// md.portRowTable/edgeRowTable/nodeRowTable directly — those are a LOAD-TIME
+			// CONSTANT built once in newMoveDispatch (node_move.go buildRowTables), not a
+			// per-iteration drain: node/edge/port row order never changes after load (a
+			// new node/edge only ever arrives via a full respawn), so there is nothing to
+			// drain here anymore. Likewise heldCenters/centerOfNode read each mover's own
+			// atomically-published snap directly — there is no accumulated positions map
+			// to drain either.
 			msg, decoded := decodeInputRecord(rec)
 			if !decoded {
 				continue
